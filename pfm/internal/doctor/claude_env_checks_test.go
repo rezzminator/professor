@@ -200,13 +200,9 @@ func TestClaudeEnvPluginLogMissingHasOneRepair(t *testing.T) {
 			printClaudeEnvDoctor(&out, managed, settings, env, build, tally)
 			printPluginLogsDoctor(&out, []string{fixture.store}, build,
 				func(string, uint32) error { return nil }, tally)
-			if tally.failures+tally.warnings != 1 ||
-				strings.Count(out.String(), " — set ")+strings.Count(out.String(), " — run pfm install") != 1 {
-				t.Fatalf("one missing PLUGIN_LOG_DIR has multiple findings/repairs: failures=%d warnings=%d\n%s",
-					tally.failures, tally.warnings, out.String())
-			}
-			if !strings.Contains(out.String(), "sets no env.PLUGIN_LOG_DIR — set it to the shared log folder") {
-				t.Fatalf("missing actionable log repair: %s", out.String())
+			want := map[bool]string{false: "doctor: claude_env ok — PLUGIN_LOG_DIR readiness is checked by plugin_logs\ndoctor: plugin_logs PLUGIN_LOG_DIR is missing for config dir {root}/.claude: {root}/.claude/settings.json sets no env.PLUGIN_LOG_DIR — set it to the shared log folder\n", true: "doctor: claude_env ok — PLUGIN_LOG_DIR readiness is checked by plugin_logs\ndoctor: plugin_logs PLUGIN_LOG_DIR is missing for config dir {root}/.claude: {root}/.claude/settings.json sets no env.PLUGIN_LOG_DIR — set it to the shared log folder\n"}[explicit]
+			if got := rooted(out.String(), fixture.home); tally.failures+tally.warnings != 1 || got != want {
+				t.Errorf("findings=%d output = %q, want %q", tally.failures+tally.warnings, got, want)
 			}
 		})
 	}

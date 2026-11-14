@@ -2,9 +2,7 @@ package kill
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -49,18 +47,15 @@ func (tmux TmuxKiller) KillServerIfSolePane(ctx context.Context, socketPath, pan
 	condition := "#{==:#{S:#{W:#{P:#{pane_id}}}}," + paneID + "}"
 	_, err = tmux.command(ctx, socketPath, "if-shell", "-F", "-t", paneID, condition, "kill-server").Output()
 	if err != nil {
-		return fmt.Errorf("kill exclusive server for pane %s on %s: %w: %s", paneID, socketPath, err, exitStderr(err))
+		return fmt.Errorf("kill exclusive server for pane %s on %s: %w: %s", paneID, socketPath, err, tmuxReason(err))
 	}
 	return nil
 }
 
-// exitStderr is what a failed tmux wrote to stderr, for the error text.
-func exitStderr(err error) string {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return strings.TrimSpace(string(exitErr.Stderr))
-	}
-	return ""
+// tmuxReason is what a failed tmux wrote to stderr, trimmed, for the error text.
+func tmuxReason(err error) string {
+	stderr, _ := pfmtmux.ExitStderr(err)
+	return strings.TrimSpace(string(stderr))
 }
 
 func (tmux TmuxKiller) KillPane(
@@ -69,7 +64,7 @@ func (tmux TmuxKiller) KillPane(
 ) error {
 	_, err := tmux.command(ctx, socketPath, "kill-pane", "-t", paneID).Output()
 	if err != nil {
-		return fmt.Errorf("kill pane %s on %s: %w: %s", paneID, socketPath, err, exitStderr(err))
+		return fmt.Errorf("kill pane %s on %s: %w: %s", paneID, socketPath, err, tmuxReason(err))
 	}
 	return nil
 }
@@ -123,7 +118,7 @@ func (tmux TmuxKiller) KillServer(
 ) error {
 	_, err := tmux.command(ctx, socketPath, "kill-server").Output()
 	if err != nil {
-		return fmt.Errorf("kill server on %s: %w: %s", socketPath, err, exitStderr(err))
+		return fmt.Errorf("kill server on %s: %w: %s", socketPath, err, tmuxReason(err))
 	}
 	return nil
 }
@@ -141,4 +136,65 @@ func (tmux TmuxKiller) command(
 	arguments ...string,
 ) *pfmtmux.Cmd {
 	return tmux.socket().Command(ctx, socketPath, arguments...)
+}
+
+// Client is one `tmux attach` process on the server: its pid, and the name
+// tmux addresses it by (its tty, or client-{pid} for a client with none).
+type Client struct {
+	PID  int
+	Name string
+}
+
+// ViewportTmux names the two tmux calls the closer makes: list the attached
+// clients, and detach one.
+type ViewportTmux interface {
+	Clients(ctx context.Context, socketPath string) (clients []Client, skipped []string, err error)
+	DetachClient(ctx context.Context, socketPath, name string) error
+}
+
+// Clients lists the `tmux attach` processes currently attached to this
+// server — one per terminal the chat is being watched through.
+func (tmux TmuxKiller) Clients(
+	ctx context.Context,
+	socketPath string,
+) (clients []Client, skipped []string, err error) {
+	output, err := tmux.command(
+		ctx, socketPath, "list-clients", "-F", "#{client_pid} #{client_name}",
+	).Output()
+	if err != nil {
+		return nil, nil, fmt.Errorf("list clients on %s: %w", socketPath, err)
+	}
+	clients, skipped = parseClients(string(output))
+	return clients, skipped, nil
+}
+
+// DetachClient detaches the client tmux names name: the client restores the
+// screen it drew on and exits.
+func (tmux TmuxKiller) DetachClient(ctx context.Context, socketPath, name string) error {
+	if _, err := tmux.command(ctx, socketPath, "detach-client", "-t", name).Output(); err != nil {
+		return fmt.Errorf("detach client %s on %s: %w: %s", name, socketPath, err, tmuxReason(err))
+	}
+	return nil
+}
+
+// parseClients reads one `{pid} {name}` client per line; a line that is not
+// one is named in skipped and costs only that client, never its siblings.
+func parseClients(output string) (clients []Client, skipped []string) {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pidText, name, _ := strings.Cut(line, " ")
+		pid, convErr := strconv.Atoi(pidText)
+		switch {
+		case convErr != nil:
+			skipped = append(skipped, fmt.Sprintf("client pid %q unreadable: %v", pidText, convErr))
+		case name == "":
+			skipped = append(skipped, fmt.Sprintf("client %d: tmux listed it with no name to detach it by", pid))
+		default:
+			clients = append(clients, Client{PID: pid, Name: name})
+		}
+	}
+	return clients, skipped
 }

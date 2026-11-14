@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -43,11 +44,8 @@ func TestReportLineIsExactlyHerdrsRequest(t *testing.T) {
 }
 
 func TestSessionReportLineIsExactlyHerdrsRequest(t *testing.T) {
-	line, err := (SessionReport{
-		Pane: "w1:p1", Agent: "claude", SessionID: "s1", SessionPath: "/fixture/session.jsonl",
-		StartSource: "compact", ResumeArgv: []string{"pfm", "chat", "open", "--restored", "s1"}, Seq: 43,
-	}).Line()
-	want := `{"id":"pfm-43","method":"pane.report_agent_session","params":{"pane_id":"w1:p1","source":"pfm","agent":"claude","agent_session_id":"s1","agent_session_path":"/fixture/session.jsonl","session_start_source":"compact","resume_argv":["pfm","chat","open","--restored","s1"],"seq":43}}`
+	line, err := (SessionReport{Pane: "w1:p1", Source: "herdr:claude", Agent: "claude", SessionID: "s1", Seq: 43}).Line()
+	want := `{"id":"pfm-43","method":"pane.report_agent_session","params":{"pane_id":"w1:p1","source":"herdr:claude","agent":"claude","agent_session_id":"s1","seq":43}}`
 	if err != nil || string(line) != want {
 		t.Fatalf("session wire=%s err=%v want=%s", line, err, want)
 	}
@@ -81,8 +79,10 @@ func TestReleaseLineIsExactlyHerdrsRequest(t *testing.T) {
 
 func TestMessageIsCappedAtTwoHundredFortyRunes(t *testing.T) {
 	line, err := Report{Pane: "p", Agent: "a", State: StateBlocked, Message: strings.Repeat("é", 500), Seq: 1}.Line()
-	if err != nil || !strings.Contains(string(line), strings.Repeat("é", 239)+"…") ||
-		strings.Contains(string(line), strings.Repeat("é", 240)) {
+	if err != nil ||
+		string(
+			line,
+		) != "{\"id\":\"pfm-1\",\"method\":\"pane.report_agent\",\"params\":{\"pane_id\":\"p\",\"source\":\"pfm\",\"agent\":\"a\",\"state\":\"blocked\",\"message\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé…\",\"seq\":1}}" {
 		t.Fatalf("Line = %s, %v, want 239 runes and an ellipsis", line, err)
 	}
 }
@@ -211,22 +211,13 @@ func TestSendNamesAHerdrRefusal(t *testing.T) {
 }
 
 func TestSendReportsEveryTransportFailure(t *testing.T) {
-	if err := Send(
-		context.Background(),
-		filepath.Join(t.TempDir(), "missing.sock"),
-		[]byte("x"),
-	); err == nil ||
-		!strings.Contains(err.Error(), "dial") {
-		t.Errorf("Send to a missing socket = %v, want a dial error naming the socket", err)
-	}
+	missing := filepath.Join(t.TempDir(), "missing.sock")
 	garbage := serve(t, func(string) string { return "not json" })
-	if err := Send(
-		context.Background(),
-		garbage,
-		[]byte("x"),
-	); err == nil ||
-		!strings.Contains(err.Error(), "decode response") {
-		t.Errorf("Send with an unparseable response = %v, want a decode error", err)
+	for socket, want := range map[string]string{missing: "herdr socket {socket}: dial for a request of 1 bytes pfm cannot decode (invalid character 'x' looking for beginning of value): dial unix {socket}: connect: no such file or directory", garbage: "herdr socket {socket}: decode response \"not json\" to a request of 1 bytes pfm cannot decode (invalid character 'x' looking for beginning of value): invalid character 'o' in literal null (expecting 'u')"} {
+		err := Send(context.Background(), socket, []byte("x"))
+		if got := strings.ReplaceAll(fmt.Sprint(err), socket, "{socket}"); got != want {
+			t.Errorf("Send = %q, want %q", got, want)
+		}
 	}
 }
 
@@ -301,6 +292,7 @@ func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
 		{"tab.get", TabGet{Tab: "w6:t3", Seq: 10}.Line, `{"id":"pfm-10","method":"tab.get","params":{"tab_id":"w6:t3"}}`},
 		{"tab.rename", TabRename{Tab: "w6:t3", Label: " XC\tAWS\n", Seq: 11}.Line, `{"id":"pfm-11","method":"tab.rename","params":{"tab_id":"w6:t3","label":"XC AWS"}}`},
 		{"tab label capped on a rune boundary", TabRename{Tab: "t", Label: long, Seq: 12}.Line, `{"id":"pfm-12","method":"tab.rename","params":{"tab_id":"t","label":"` + strings.Repeat("é", 80) + `"}}`},
+		{"workspace.rename", WorkspaceRename{Workspace: "w1", Label: "lantern", Seq: 13}.Line, `{"id":"pfm-13","method":"workspace.rename","params":{"workspace_id":"w1","label":"lantern"}}`},
 	} {
 		if line, err := test.line(); err != nil || string(line) != test.want {
 			t.Errorf("%s: Line = %s, %v\nwant %s", test.name, line, err, test.want)
@@ -314,6 +306,8 @@ func TestAgentAndTitleLinesAreExactlyHerdrsRequests(t *testing.T) {
 		"tab.get without a tab":   TabGet{}.Line,
 		"tab label of controls":   TabRename{Tab: "t", Label: " \n\t "}.Line,
 		"tab.rename without tab":  TabRename{Label: "x"}.Line,
+		"workspace without label": WorkspaceRename{Workspace: "w1"}.Line,
+		"label without workspace": WorkspaceRename{Label: "lantern"}.Line,
 	} {
 		if got, err := line(); err == nil {
 			t.Errorf("%s: Line = %s, want an error", name, got)
@@ -373,6 +367,14 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 	if err != nil || tab != (Tab{TabID: "w6:t3", Label: "1", PaneCount: 1}) {
 		t.Errorf("ParseTab = %+v, %v, want w6:t3 labelled 1 holding one pane", tab, err)
 	}
+	// The shape a live Herdr 0.9.5 answered for workspace.rename.
+	workspace, err := ParseWorkspace(json.RawMessage(
+		`{"type":"workspace_info","workspace":{"active_tab_id":"w1:t1","agent_status":"unknown","focused":true,` +
+			`"label":"gamma","number":1,"pane_count":1,"tab_count":1,"workspace_id":"w1"}}`,
+	))
+	if err != nil || workspace != (Workspace{WorkspaceID: "w1", Label: "gamma"}) {
+		t.Errorf("ParseWorkspace = %+v, %v, want w1 labelled gamma", workspace, err)
+	}
 	foregroundPIDs := func(body string) error {
 		processes, err := ParsePaneProcesses(json.RawMessage(body))
 		if err != nil {
@@ -386,7 +388,16 @@ func TestResultParsersReadHerdrsShapesAndRefuseOthers(t *testing.T) {
 			_, err := ParseTab(json.RawMessage(`{"type":"ok","tab":{"tab_id":"w6:t3","label":"1","pane_count":1}}`))
 			return err
 		},
-		"tab garbage":            func() error { _, err := ParseTab(json.RawMessage(`[1]`)); return err },
+		"tab garbage": func() error { _, err := ParseTab(json.RawMessage(`[1]`)); return err },
+		"workspace of another type": func() error {
+			_, err := ParseWorkspace(json.RawMessage(`{"type":"ok","workspace":{"workspace_id":"w1","label":"x"}}`))
+			return err
+		},
+		"workspace garbage": func() error { _, err := ParseWorkspace(json.RawMessage(`[1]`)); return err },
+		"workspace without its id": func() error {
+			_, err := ParseWorkspace(json.RawMessage(`{"type":"workspace_info","workspace":{"label":"x"}}`))
+			return err
+		},
 		"tab without its id":     func() error { _, err := ParseTab(json.RawMessage(`{"type":"tab_info","tab":{}}`)); return err },
 		"agents of another type": func() error { _, err := ParseAgentList(json.RawMessage(`{"type":"ok"}`)); return err },
 		"panes of another type":  func() error { _, err := ParsePanes(json.RawMessage(`{"type":"agent_list"}`)); return err },
@@ -450,8 +461,8 @@ func TestCallReturnsEachResultInRequestOrder(t *testing.T) {
 		func(request string) string { return `{"id":"x","result":{"type":"echo","line":"` + request + `"}}` },
 	)
 	results, err := Call(context.Background(), path, []byte("one"), []byte("two"))
-	if err != nil || len(results) != 2 || !strings.Contains(string(results[0]), `"one"`) ||
-		!strings.Contains(string(results[1]), `"two"`) {
+	if err != nil || len(results) != 2 || string(results[0]) != "{\"type\":\"echo\",\"line\":\"one\"}" ||
+		string(results[1]) != "{\"type\":\"echo\",\"line\":\"two\"}" {
 		t.Fatalf("Call = %s, %v, want the results of one then two", results, err)
 	}
 	big := serve(t, func(string) string { return `{"id":"x","result":{"pad":"` + strings.Repeat("p", 200<<10) + `"}}` })

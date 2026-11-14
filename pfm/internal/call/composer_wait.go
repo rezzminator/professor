@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -137,12 +138,47 @@ func (engine *Engine) awaitInputScreen(
 	case err != nil && ctx.Err() != nil:
 		return capture, fmt.Errorf("call into %q: %w", target.Pane, err)
 	case err != nil:
-		base.Code = CodeDead
-		base.Message = fmt.Sprintf("target pane died while waiting for its Codex composer: %v", err)
+		base.Code, base.Message = paneUnreadable(target.Pane, " while waiting for its Codex composer", err)
 		return capture, nil
 	}
 	if refused, held := refuseTrustDialog(*base, target.Pane, ready); held {
 		*base = refused
 	}
 	return ready, nil
+}
+
+// composerEcho is the part of a capture a typed message can be echoed in: the
+// composer row and every row beneath it. Rows above are transcript, where an
+// earlier message's text (every call from one sender ends in the same
+// signature) would read as this one's echo. A capture with no composer row is
+// returned whole only for a pane that draws none (composerPane false); on a
+// pane that does, it is a frame caught mid-repaint and holds no echo.
+func composerEcho(capture string, composerPane bool) string {
+	lines := strings.Split(capture, "\n")
+	if row := lastComposerRow(lines); row >= 0 {
+		return strings.Join(lines[row:], "\n")
+	}
+	if composerPane {
+		return ""
+	}
+	return capture
+}
+
+// proofComposer is the composer row the delivery proof judges, with the
+// capture it was read from. A capture taken while the pane repaints holds no
+// composer row; that frame is read once more before the scrollback is asked,
+// whose older frames still show the composer holding the message just
+// submitted.
+func (engine *Engine) proofComposer(ctx context.Context, target Target, proof string) (string, string) {
+	if line := composerLastLine(proof); line != "" {
+		return line, proof
+	}
+	engine.sleepContext(ctx, engine.options.Poll)
+	if again, err := engine.capturePane(ctx, target, 0); err == nil {
+		if line := composerLastLine(again); line != "" {
+			return line, again
+		}
+	}
+	scrollback, _ := engine.capturePane(ctx, target, engine.options.Scrollback)
+	return composerLastLine(scrollback), proof
 }

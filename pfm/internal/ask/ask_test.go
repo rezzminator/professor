@@ -1,8 +1,11 @@
 package ask
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +13,7 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -113,21 +117,9 @@ func TestEvidenceStaysContentAgnosticForTranscriptAndDocumentAdapters(t *testing
 
 func TestProcessEnginesUseRosterHomesConfigAndPrompt(t *testing.T) {
 	directory := t.TempDir()
-	capture := filepath.Join(directory, "capture")
-	writeAskStub(t, directory, "codex", `
-printf 'home=%s\nargs=%s\n' "$CODEX_HOME" "$*" > "$ASK_CAPTURE"
-IFS= read -r first
-printf 'prompt=%s\n' "$first" >> "$ASK_CAPTURE"
-printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}'
-printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"codex answer"}}'
-printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":11,"cached_input_tokens":3,"output_tokens":5}}'`)
-	writeAskStub(t, directory, "claude", `
-printf 'home=%s\nargs=%s\n' "$CLAUDE_CONFIG_DIR" "$*" > "$ASK_CAPTURE"
-IFS= read -r first
-printf 'prompt=%s\n' "$first" >> "$ASK_CAPTURE"
-printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input_tokens":2,"cache_creation_input_tokens":6,"output_tokens":4}}'`)
+	writeAskBinary(t, directory, "codex")
+	writeAskBinary(t, directory, "claude")
 	t.Setenv("PATH", directory)
-	t.Setenv("ASK_CAPTURE", capture)
 
 	configDir := filepath.Join(directory, "claude-2")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
@@ -144,20 +136,28 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 	machine := pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 2, ConfigDir: configDir}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 4, Home: codexHome}},
-		Claude:        pfmconfig.Claude{Binary: "claude"},
-		Codex:         pfmconfig.Codex{Binary: "codex"},
+		Claude:        pfmconfig.Claude{Binary: filepath.Join(directory, "claude")},
+		Codex:         pfmconfig.Codex{Binary: filepath.Join(directory, "codex")},
 	}
 	tests := []struct {
 		name       string
 		input      AskInput
+		homeEnv    string
+		stdout     string
 		wantHome   string
 		wantArgs   []string
 		wantAnswer string
 		wantUsage  TokenUsage
 	}{
 		{
-			name:     "codex",
-			input:    AskInput{Engine: pfmengine.Codex, Model: "cx-model", Effort: "high"},
+			name:    "codex",
+			input:   AskInput{Engine: pfmengine.Codex, Model: "cx-model", Effort: "high"},
+			homeEnv: "CODEX_HOME",
+			stdout: `{"type":"thread.started"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"agent_message","text":"codex answer"}}
+{"type":"turn.completed","usage":{"input_tokens":11,"cached_input_tokens":3,"output_tokens":5}}
+`,
 			wantHome: codexHome,
 			wantArgs: []string{
 				"exec",
@@ -174,6 +174,8 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 		{
 			name:       "claude",
 			input:      AskInput{Engine: pfmengine.Claude, Model: "cc-model", Effort: "medium"},
+			homeEnv:    "CLAUDE_CONFIG_DIR",
+			stdout:     `{"result":"claude answer","usage":{"input_tokens":7,"cached_input_tokens":2,"cache_creation_input_tokens":6,"output_tokens":4}}` + "\n",
 			wantHome:   configDir,
 			wantArgs:   []string{"-p", "--model cc-model", "--effort medium", "--output-format json"},
 			wantAnswer: "claude answer",
@@ -190,6 +192,13 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 			if err != nil {
 				t.Fatalf("ResolveEngine(): %v", err)
 			}
+			var capture string
+			runner := &deps.FakeRunner{}
+			runner.ScriptStartOutput(
+				nil,
+				deps.StartOutput{AtStart: recordAsk(&capture, test.homeEnv), Stdout: test.stdout},
+			)
+			engine = WithRunner(engine, runner)
 			input := test.input
 			input.ContentFiles = validAskInput(t, test.name).ContentFiles
 			input.SourceLabels = []string{"last exchange"}
@@ -198,10 +207,7 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 			if err != nil {
 				t.Fatalf("Run(): %v", err)
 			}
-			raw, err := os.ReadFile(capture)
-			if err != nil {
-				t.Fatal(err)
-			}
+			raw := capture
 			for _, want := range append([]string{"home=" + test.wantHome, "prompt=Read the prepared content files"}, test.wantArgs...) {
 				if !strings.Contains(string(raw), want) {
 					t.Errorf("capture %q does not contain %q", raw, want)
@@ -219,41 +225,47 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 
 func TestProcessEngineLeavesDocumentContentOnDisk(t *testing.T) {
 	directory := t.TempDir()
-	capture := filepath.Join(directory, "stdin")
-	writeAskStub(t, directory, "codex", `/bin/cat > "$ASK_CAPTURE"
-printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"answer"}}' '{"type":"turn.completed"}'`)
+	writeAskBinary(t, directory, "codex")
 	t.Setenv("PATH", directory)
-	t.Setenv("ASK_CAPTURE", capture)
 	engine, err := ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	var raw []byte
+	runner := &deps.FakeRunner{}
+	runner.ScriptStartOutput(nil, deps.StartOutput{
+		AtStart: func(_ []string, opts deps.StartOptions) { raw, _ = io.ReadAll(opts.Stdin) },
+		Stdout: `{"type":"item.completed","item":{"type":"agent_message","text":"answer"}}
+{"type":"turn.completed"}
+`,
+	})
+	engine = WithRunner(engine, runner)
 	input := validAskInput(t, "codex")
 	if _, err := engine.Run(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(capture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), input.ContentFiles[0]) || strings.Contains(string(raw), "prepared exchange") {
-		t.Fatalf("document ask must reference files without preloading their unbounded contents: %s", raw)
+	if got, want := strings.ReplaceAll(
+		string(raw),
+		filepath.Dir(input.ContentFiles[0]),
+		"{dir}",
+	), "Read the prepared content files listed below. Work ONLY from them; no network access, no other files.\n1. {dir}/exchange.md — source: last exchange\nTASK: summarize\nRules: if a file is truncated or unusable, say so explicitly for that file instead of guessing.\nAfter your answer, append a section titled exactly \"EVIDENCE\" listing one line per load-bearing claim:\n  [file N] <location: line range, turn number, or chunk id> — \"<short verbatim quote>\""; got != want {
+		t.Fatalf("document ask stdin = %q, want %q", got, want)
 	}
 }
 
 func TestProcessEngineUsageIsNilWhenAbsent(t *testing.T) {
 	directory := t.TempDir()
-	writeAskStub(
-		t,
-		directory,
-		"codex",
-		`printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"item.completed","item":{"type":"agent_message","text":"answer only"}}' '{"type":"turn.completed"}'`,
-	)
+	writeAskBinary(t, directory, "codex")
 	t.Setenv("PATH", directory)
 	engine, err := ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	engine = WithRunner(engine, askChild(deps.StartOutput{Stdout: `{"type":"thread.started"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"agent_message","text":"answer only"}}
+{"type":"turn.completed"}
+`}))
 	result, err := engine.Run(context.Background(), validAskInput(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
@@ -273,7 +285,7 @@ func TestProcessEngineTakesAnswerAndErrorsFromJSON(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
-			writeAskStub(t, directory, test.engine, "printf '%s\\n' '"+test.output+"'")
+			writeAskBinary(t, directory, test.engine)
 			t.Setenv("PATH", directory)
 			id, err := pfmengine.Parse(test.engine)
 			if err != nil {
@@ -283,6 +295,7 @@ func TestProcessEngineTakesAnswerAndErrorsFromJSON(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			engine = WithRunner(engine, askChild(deps.StartOutput{Stdout: test.output + "\n"}))
 			result, err := engine.Run(context.Background(), validAskInput(t, test.engine))
 			if test.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantError) {
@@ -304,32 +317,46 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	machine.Codex.Binary = "missing-codex"
 	_, err := ResolveEngine(pfmengine.Codex, machine)
 	var missing *BinaryMissingError
-	if !errors.As(err, &missing) || !strings.Contains(err.Error(), "codex binary MISSING") {
-		t.Fatalf("missing error = %v", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		directory,
+		"{dir}",
+	), "codex binary MISSING (missing-codex)"; !errors.As(err, &missing) ||
+		got != want {
+		t.Fatalf("missing error = %q, want %q", got, want)
 	}
 
-	writeAskStub(t, directory, "codex", "printf 'first error\\nfatal tail\\n' >&2\nexit 7")
+	writeAskBinary(t, directory, "codex")
 	engine, err := ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	engine = WithRunner(engine, askChild(deps.StartOutput{Stderr: "first error\nfatal tail\n", ExitCode: 7}))
 	_, err = engine.Run(context.Background(), validAskInput(t, "codex"))
-	if err == nil || !strings.Contains(err.Error(), "exit status 7") ||
-		!strings.Contains(err.Error(), `"first error\nfatal tail"`) {
-		t.Fatalf("crash error = %v", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		directory,
+		"{dir}",
+	), "codex ask failed: cx headless run failed: exit status 7; stderr tail \"first error\\nfatal tail\"; stdout tail \"\""; got != want {
+		t.Fatalf("crash error = %q, want %q", got, want)
 	}
 
-	writeAskStub(t, directory, "codex", "/bin/sleep 5")
 	engine, err = ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	engine = WithRunner(engine, askChild(deps.StartOutput{}))
+	// The deadline has passed when the child "starts": the fake child plays no time of its own.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 	started := time.Now()
 	_, err = engine.Run(ctx, validAskInput(t, "codex"))
-	if err == nil || !strings.Contains(err.Error(), "codex ask timed out") {
-		t.Fatalf("timeout error = %v", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		directory,
+		"{dir}",
+	), "codex ask timed out: context deadline exceeded"; got != want {
+		t.Fatalf("timeout error = %q, want %q", got, want)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("timeout returned after %s, want under 1s", elapsed)
@@ -354,11 +381,21 @@ func askMachine(t *testing.T, engineName string) pfmconfig.Config {
 	if err != nil {
 		panic(err)
 	}
+	binaries := t.TempDir()
+	for _, name := range []string{"claude", "codex"} {
+		if err := testjail.WriteExecutableNeverRun(
+			filepath.Join(binaries, name),
+			[]byte("#!/bin/sh\n"),
+			0o700,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: configDir}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
-		Claude:        pfmconfig.Claude{Binary: "claude"},
-		Codex:         pfmconfig.Codex{Binary: "codex"},
+		Claude:        pfmconfig.Claude{Binary: filepath.Join(binaries, "claude")},
+		Codex:         pfmconfig.Codex{Binary: filepath.Join(binaries, "codex")},
 		Ask:           pfmconfig.AskConfig{Engine: id},
 	}
 }
@@ -379,14 +416,43 @@ func validAskInput(t *testing.T, engineName string) AskInput {
 	}
 }
 
-func writeAskStub(t *testing.T, directory, name, body string) {
+// writeAskBinary writes an engine binary the code resolves and never runs: the
+// child starts through the WithRunner fake.
+func writeAskBinary(t *testing.T, directory, name string) {
 	t.Helper()
-	if err := testjail.WriteExecutable(
+	if err := testjail.WriteExecutableNeverRun(
 		filepath.Join(directory, name),
-		[]byte("#!/bin/sh\n"+body+"\n"),
+		[]byte("#!/bin/sh\n"),
 		0o700,
 	); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// askChild is the runner of a test: the engine child plays output and starts nowhere.
+func askChild(output deps.StartOutput) *deps.FakeRunner {
+	runner := &deps.FakeRunner{}
+	runner.ScriptStartOutput(nil, output)
+	return runner
+}
+
+// recordAsk captures what the engine child was given: the value of its home
+// variable, its arguments and the first line of its stdin.
+func recordAsk(capture *string, homeVariable string) func([]string, deps.StartOptions) {
+	return func(argv []string, opts deps.StartOptions) {
+		first, _ := bufio.NewReader(opts.Stdin).ReadString('\n')
+		home := ""
+		for _, entry := range opts.Env {
+			if value, found := strings.CutPrefix(entry, homeVariable+"="); found {
+				home = value
+			}
+		}
+		*capture = fmt.Sprintf(
+			"home=%s\nargs=%s\nprompt=%s\n",
+			home,
+			strings.Join(argv[1:], " "),
+			strings.TrimSuffix(first, "\n"),
+		)
 	}
 }
 

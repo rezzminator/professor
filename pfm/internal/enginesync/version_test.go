@@ -9,13 +9,24 @@ import (
 )
 
 func TestMinimumVersionDoesNotExceedEngineSyncSource(t *testing.T) {
-	source := os.Getenv("ENGINE_SYNC_FENCE_SRC")
-	if source == "" {
-		source = "/engine-sync"
+	// The fence mounts the source it builds at /engine-sync; CI builds the
+	// checkout's own plugins/engine-sync submodule, three levels up.
+	sources := []string{"/engine-sync", filepath.Join("..", "..", "..", "plugins", "engine-sync")}
+	if source := os.Getenv("ENGINE_SYNC_FENCE_SRC"); source != "" {
+		sources = []string{source}
 	}
-	data, err := os.ReadFile(filepath.Join(source, "internal", "cli", "main.go"))
-	if err != nil {
-		t.Fatalf("read engine-sync cli.Version from %s: %v", source, err)
+	var data []byte
+	var failures []string
+	for _, source := range sources {
+		read, err := os.ReadFile(filepath.Join(source, "internal", "cli", "main.go"))
+		if err == nil {
+			data = read
+			break
+		}
+		failures = append(failures, err.Error())
+	}
+	if data == nil {
+		t.Fatalf("read engine-sync cli.Version: %s", strings.Join(failures, "; "))
 	}
 	match := regexp.MustCompile(`(?m)^var Version = "([^"\n]+)"`).FindSubmatch(data)
 	if len(match) != 2 {

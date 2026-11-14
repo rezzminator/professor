@@ -26,6 +26,17 @@ func WriteExecutable(path string, body []byte, mode os.FileMode) error {
 	return os.WriteFile(path, body, mode)
 }
 
+// WriteExecutableNeverRun writes a file the code under test resolves, stats or
+// hashes as an executable and never runs: a configured engine binary, a bash
+// on a jailed PATH, a pfm candidate whose hash is compared. Its mode keeps the
+// exec bit the code under test checks for. Nothing in the test starts it, so a
+// unit test writing one touches its temp directory only; a test that runs the
+// file writes it with WriteExecutable instead, in a _jail_test.go file. It still writes through
+// WriteExecutable, so a file run by mistake cannot race a fork either.
+func WriteExecutableNeverRun(path string, body []byte, mode os.FileMode) error {
+	return WriteExecutable(path, body, mode)
+}
+
 // WriteLoggedOutClaude writes a fake `claude` at path that writes to disk the
 // way a logged-out real binary does. Each run first appends its config dir
 // (the registry's Claude home variable, or UNSET) as one line to record, then

@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -115,7 +116,9 @@ type Report struct {
 	// Unresolved are killed ids whose transcript lookup could not run — a
 	// directory that could not be read or scanned, never "nothing found
 	// there." They are reported and their kill row is left standing: a
-	// lookup that failed to look is not proof the chat is gone.
+	// lookup that failed to look is not proof the chat is gone. A kill the
+	// store would not retire is unresolved too. In subagent mode they are
+	// the paths the sidechain scan could not read, left where they are.
 	Unresolved       []string
 	UnresolvedErrors map[string]string
 	// Unclassified records sidecar lines retained because ownership could not be decoded.
@@ -203,12 +206,12 @@ func (runner *Runner) Run(
 	} else {
 		report, err = runner.runKilled(ctx, options, live)
 	}
-	if err != nil {
-		return report, err
-	}
-	trail.Reach("planned", "moves classified")
-	if options.Apply {
-		trail.Reach("applied", "moves applied")
+	// A failed sidecar cleanup still returns the moves it made: each is recorded.
+	if err == nil {
+		trail.Reach("planned", "moves classified")
+		if options.Apply {
+			trail.Reach("applied", "moves applied")
+		}
 	}
 	for _, move := range report.Moves {
 		state, cause := "planned", "archive move planned"
@@ -222,7 +225,7 @@ func (runner *Runner) Run(
 		}
 		obs.Transition(ctx, "archive", "chat", state, cause)(failed)
 	}
-	return report, nil
+	return report, err
 }
 
 func (runner *Runner) runKilled(
@@ -325,32 +328,48 @@ func (runner *Runner) runKilled(
 			decided = append(decided, move.ID)
 		}
 	}
-	pruned, unclassified, err := runner.pruneLines(
-		filepath.Join(runner.paths.Home, ".claude", "history.jsonl"),
-		archived,
-	)
-	if err != nil {
-		return report, err
+	// A sidecar that cannot be pruned costs only the moved chats' retirement:
+	// their kill rows stay so the next run replays the cleanup, while orphans
+	// and live chats are decided as ever and the other sidecar is still pruned.
+	var cleanupErr error
+	history := filepath.Join(runner.paths.Home, ".claude", "history.jsonl")
+	index := filepath.Join(firstEngineRoot(runner.paths.Roots[pfmengine.Codex]), "session_index.jsonl")
+	for _, sidecar := range []struct {
+		path   string
+		pruned *int
+	}{
+		{history, &report.HistoryPruned},
+		{index, &report.IndexPruned},
+	} {
+		pruned, unclassified, err := runner.pruneLines(sidecar.path, archived)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			continue
+		}
+		*sidecar.pruned = pruned
+		report.Unclassified = append(report.Unclassified, unclassified...)
 	}
-	report.HistoryPruned = pruned
-	report.Unclassified = append(report.Unclassified, unclassified...)
-	pruned, unclassified, err = runner.pruneLines(
-		filepath.Join(firstEngineRoot(runner.paths.Roots[pfmengine.Codex]), "session_index.jsonl"),
-		archived,
-	)
-	if err != nil {
-		return report, err
+	pendingCleanup := make(map[string]struct{})
+	if cleanupErr != nil {
+		for _, id := range archived {
+			pendingCleanup[id] = struct{}{}
+		}
 	}
-	report.IndexPruned = pruned
-	report.Unclassified = append(report.Unclassified, unclassified...)
 
 	for _, id := range decided {
+		if _, pending := pendingCleanup[id]; pending {
+			report.unresolve(id, fmt.Sprintf("sidecar cleanup failed; kill retained: %v", cleanupErr))
+			continue
+		}
+		// One kill the store would not retire stays standing and is reported;
+		// it never keeps the rest of the decided set killed.
 		if err := runner.kills.Unkill(ctx, id); err != nil {
-			return report, fmt.Errorf("retire the kill for %s: %w", id, err)
+			report.unresolve(id, fmt.Sprintf("retire the kill: %v", err))
+			continue
 		}
 		report.Unkilled++
 	}
-	return report, nil
+	return report, cleanupErr
 }
 
 func (runner *Runner) runSubagents(
@@ -359,6 +378,13 @@ func (runner *Runner) runSubagents(
 ) (Report, error) {
 	var report Report
 	cutoff := runner.now().Add(-options.OlderThan)
+	// One path the scan could not read costs only itself: it is reported
+	// unresolved, unless it vanished, and the scan goes on.
+	unreadable := func(path string, err error) {
+		if !errors.Is(err, fs.ErrNotExist) {
+			report.unresolve(path, err.Error())
+		}
+	}
 	for _, root := range runner.paths.Roots[pfmengine.Claude] {
 		err := filepath.WalkDir(root, func(
 			path string,
@@ -366,23 +392,27 @@ func (runner *Runner) runSubagents(
 			err error,
 		) error {
 			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					return nil
-				}
-				return err
+				unreadable(path, err)
+				return nil
 			}
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 				return nil
 			}
 			info, err := entry.Info()
 			if err != nil {
+				unreadable(path, err)
 				return nil
 			}
 			if info.ModTime().After(cutoff) {
 				report.Young++
 				return nil
 			}
-			if !isSidechain(path) {
+			sidechain, err := isSidechain(path)
+			if err != nil {
+				unreadable(path, err)
+				return nil
+			}
+			if !sidechain {
 				return nil
 			}
 			id := strings.TrimSuffix(entry.Name(), ".jsonl")
@@ -606,11 +636,12 @@ func (runner *Runner) backupSidecars() ([]string, error) {
 	return backups, nil
 }
 
-// isSidechain classifies a transcript from its head alone.
-func isSidechain(path string) bool {
+// isSidechain classifies a transcript from its head alone. An error means the
+// head could not be read, never "not a sidechain".
+func isSidechain(path string) (bool, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer func() {
 		if err := file.Close(); err != nil {
@@ -619,10 +650,10 @@ func isSidechain(path string) bool {
 	}()
 	head := make([]byte, headBytes)
 	read, err := file.Read(head)
-	if read <= 0 && err != nil {
-		return false
+	if read <= 0 && err != nil && !errors.Is(err, io.EOF) {
+		return false, err
 	}
-	return strings.Contains(string(head[:read]), sidechainMarker)
+	return strings.Contains(string(head[:read]), sidechainMarker), nil
 }
 
 // FormatBytes renders a size for the report.

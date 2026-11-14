@@ -1,0 +1,6 @@
+│›   ● P:BUILDER                              🥇 ⚡        ◉◐◓    ◆🚄  214p  2.3M ◖▶ open◗        4s
+│›   ● P:BUILDER                              🥇 ⚡        ◉◐◓    ◆🚄  214p  2.3M ◖⚡ reboot◗     4s
+│›   ● P:BUILDER                              🥇 ⚡        ◉◐◓    ◆🚄  214p  2.3M ◖✖ kill◗        4s
+│›   ● P:BUILDER                                                🥇 ⚡          ◉◐◓    ◆🚄  214p  2.3M ◖▶ open◗        4s                                        
+│›   ● P:BUILDER                                                🥇 ⚡          ◉◐◓    ◆🚄  214p  2.3M ◖⚡ reboot◗     4s                                        
+│›   ● P:BUILDER                                                🥇 ⚡          ◉◐◓    ◆🚄  214p  2.3M ◖✖ kill◗        4s                                        

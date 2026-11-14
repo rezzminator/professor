@@ -218,7 +218,7 @@ assert max(done) < first_test, lines
 assert [line for line in lines if line.startswith('child-env ')], lines
 assert all(line == 'child-env ' + binary for line in lines if line.startswith('child-env ')), lines
 assert all(line == 'mock-env ' + mock_binary for line in lines if line.startswith('mock-env ')), lines
-# No --bin-dir: the prebuilt binaries lived in a temp dir the run removed.
+# The prebuilt binaries lived in a temp dir the run removed.
 assert not os.path.exists(binary) and not os.path.exists(mock_binary), (binary, mock_binary)
 PY
 then ok prebuilt-before-tests; else bad "prebuilt-before-tests: rc=$rc" "$(cat "$STUB_LOG")"; fi
@@ -239,40 +239,6 @@ assert any(line.startswith('child-env ') and line != 'child-env <unset>' for lin
 assert [line for line in lines if line.startswith('mock-env ')] and all(line == 'mock-env <unset>' for line in lines if line.startswith('mock-env ')), lines
 PY
 then ok mock-prebuild-failure-kept; else bad "mock-prebuild-failure-kept: rc=$rc" "$(cat "$T/run.log")"; fi
-
-# --bin-dir: the prebuilt pfm and mock-engine are written there and left there.
-: >"$STUB_LOG"
-rc=0; bash "$SUT" run --out "$T/kept.json" --bin-dir "$T/kept-bin/nested" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
-if [ "$rc" -eq 1 ] && [ -x "$T/kept-bin/nested/pfm" ] && [ -x "$T/kept-bin/nested/mock-engine" ] &&
-  grep -Fxq "child-env $T/kept-bin/nested/pfm" "$STUB_LOG" && grep -Fxq "mock-env $T/kept-bin/nested/mock-engine" "$STUB_LOG" &&
-  ! grep -q '^child-env <unset>$' "$STUB_LOG" && ! grep -q '^mock-env <unset>$' "$STUB_LOG"; then
-  ok bin-dir-kept
-else bad "bin-dir-kept: rc=$rc" "$(cat "$T/run.log")" "$(cat "$STUB_LOG")"; fi
-# A relative --bin-dir means the caller's directory: the builds and the tests run in other ones.
-: >"$STUB_LOG"
-mkdir "$T/rel"
-rc=0; (cd "$T/rel" && bash "$SUT" run --out "$T/rel.json" --bin-dir rel-bin -- -p 4) >"$T/run.log" 2>&1 || rc=$?
-if [ "$rc" -eq 1 ] && [ -x "$T/rel/rel-bin/pfm" ] && grep -Fxq "child-env $T/rel/rel-bin/pfm" "$STUB_LOG"; then
-  ok bin-dir-relative
-else bad "bin-dir-relative: rc=$rc" "$(cat "$T/run.log")" "$(cat "$STUB_LOG")"; fi
-# A binary an earlier run left there is not this run's when its build fails.
-mkdir "$T/stale-bin"
-printf '#!/bin/sh\nexit 0\n' >"$T/stale-bin/pfm"; chmod +x "$T/stale-bin/pfm"
-: >"$STUB_LOG"
-rc=0; STUB_PREBUILD_FAIL=1 bash "$SUT" run --out "$T/stale.json" --bin-dir "$T/stale-bin" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
-if [ "$rc" -eq 1 ] && [ ! -e "$T/stale-bin/pfm" ] && [ -x "$T/stale-bin/mock-engine" ] && grep -q 'test-shard: prebuilt pfm build failed' "$T/run.log"; then
-  ok bin-dir-failed-build-leaves-none
-else bad "bin-dir-failed-build-leaves-none: rc=$rc" "$(cat "$T/run.log")"; fi
-# A --bin-dir that cannot be made is exit 2 before any go call.
-: >"$T/a-file"
-for dir in "$T/a-file" "$T/a-file/sub"; do
-  : >"$STUB_LOG"
-  rc=0; bash "$SUT" run --out "$T/run.json" --bin-dir "$dir" -- -p 4 >"$T/error.log" 2>&1 || rc=$?
-  if [ "$rc" -eq 2 ] && [ ! -s "$STUB_LOG" ] && grep -q "^test-shard: --bin-dir $dir: " "$T/error.log"; then ok "bin-dir-uncreatable-before-go ($dir)"; else bad "bin-dir-uncreatable-before-go ($dir): rc=$rc" "$(cat "$T/error.log")" "$(cat "$STUB_LOG")"; fi
-done
-: >"$STUB_LOG"
-rc=0; bash "$SUT" plan --out "$T/plan.json" --bin-dir "$T/plan-bin" >"$T/error.log" 2>&1 || rc=$?
-if [ "$rc" -eq 2 ] && [ ! -s "$STUB_LOG" ] && [ ! -e "$T/plan-bin" ] && grep -q 'unrecognized arguments' "$T/error.log"; then ok bin-dir-run-only; else bad "bin-dir-run-only: rc=$rc" "$(cat "$T/error.log")"; fi
 
 # The unsharded packages start longest first by the package terminal events of --history; a package the history
 # does not hold comes first, in go list order, and ties keep go list order.

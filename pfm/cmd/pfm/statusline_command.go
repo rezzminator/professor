@@ -9,12 +9,11 @@ import (
 	"path/filepath"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
@@ -31,15 +30,14 @@ func runStatuslineWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
-	flags := cli.NewFlagSet("statusline", "usage: pfm statusline [--refresh-gpt | --subagents]", stderr)
+	flags := cli.NewFlagSet("statusline", "usage: pfm statusline [--refresh-gpt]", stderr)
 	refreshCodex := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
-	subagents := flags.Bool("subagents", false, "render agent-panel row bodies from subagentStatusLine JSON")
 	pacedKey := flags.String("paced", "", "internal: run the paced render worker of one chat key")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	modes := 0
-	for _, set := range []bool{*refreshCodex, *subagents, *pacedKey != ""} {
+	for _, set := range []bool{*refreshCodex, *pacedKey != ""} {
 		if set {
 			modes++
 		}
@@ -47,9 +45,6 @@ func runStatuslineWithRuntime(
 	if flags.NArg() != 0 || modes > 1 {
 		flags.Usage()
 		return 2
-	}
-	if *subagents {
-		return statusline.ServeSubagents(stdin, stdout, stderr, machine.Paths, env, machine.Config.Path)
 	}
 
 	ctx := context.Background()
@@ -85,7 +80,8 @@ func runStatuslineWithRuntime(
 		return 0
 	}
 	statusline.RecordSession(raw, machine.Paths.SIDDir, stderr)
-	paced.Key = statusline.PacedKey(raw, env.Get("COLUMNS"))
+	paced.Key = statusline.PacedKey(raw, env.Get("COLUMNS"), env.Get(pfmengine.MustLookup(pfmengine.Claude).HomeEnv),
+		resolve.EnvironmentOf(env.Get))
 	paced.Front(raw, stdout)
 	return 0
 }
@@ -93,7 +89,7 @@ func runStatuslineWithRuntime(
 // statuslinePacedSpawn starts a chat's paced render worker detached; tests
 // replace it, since the test binary is no pfm to start.
 var statuslinePacedSpawn = func(key string) error {
-	return statusline.SpawnDetached(statusline.RefreshKindPaced, obs.Runner(deps.RealRunner{}), key)
+	return statusline.SpawnDetached(statusline.RefreshKindPaced, commandRunner, key)
 }
 
 // runPacedStatuslineWorker is `pfm statusline --paced KEY`, started detached by
@@ -148,7 +144,7 @@ func statuslineRuntime(machine commandRuntime, env paths.Env, stderr io.Writer) 
 		}
 	}
 	runtime.Spawn = func(kind statusline.RefreshKind) error {
-		return statusline.SpawnDetached(kind, obs.Runner(deps.RealRunner{}))
+		return statusline.SpawnDetached(kind, commandRunner)
 	}
 	return runtime, nil
 }
@@ -190,5 +186,6 @@ func runUsageHookWithRuntime(
 		AccountDirs:  accountDirs,
 		Version:      runtime.Version,
 		ClaudeBinary: runtime.Config.Claude.Binary,
+		Offline:      paths.UsageOffline(),
 	})
 }

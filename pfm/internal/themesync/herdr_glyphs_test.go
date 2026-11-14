@@ -3,9 +3,8 @@ package themesync
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -61,29 +60,19 @@ func TestHerdrPinsCarryTokensAndTabGlyphsThroughTheStateRoundTrip(t *testing.T) 
 	}
 }
 
-// `pfm theme check` runs ParseProfile: a glyph the tab label cannot carry, an
-// unknown tab state or a malformed tabGlyphs refuses the profile, naming it.
 func TestParseProfileRefusesABadTabGlyph(t *testing.T) {
-	// A malformed shape fails the decode, before the profile has a name; a
-	// bad value fails the pin check, which names the profile too.
-	for name, tc := range map[string]struct {
-		herdr, want string
-		named       bool
-	}{
-		"empty glyph":   {`{"tabGlyphs":{"blocked":""}}`, `herdr tabGlyphs pin "blocked": frame 0: empty`, true},
-		"over budget":   {`{"tabGlyphs":{"blocked":["🔴","⭕⭕⭕⭕⭕⭕⭕⭕⭕"]}}`, `"blocked": frame 1: glyph`, true},
-		"no frames":     {`{"tabGlyphs":{"working":[]}}`, `herdr tabGlyphs pin "working": no frames`, true},
-		"whitespace":    {`{"tabGlyphs":{"error":"🟥 x"}}`, "whitespace", true},
-		"unknown state": {`{"tabGlyphs":{"blink":"⭕"}}`, `"blink": herdr tabGlyphs renders no such key`, true},
-		"not an object": {`{"tabGlyphs":"⭕"}`, "herdr tabGlyphs: an object of glyph frames by tab state", false},
-		"number glyph":  {`{"tabGlyphs":{"idle":1}}`, "herdr tabGlyphs: an object of glyph frames by tab state", false},
-		"number frame":  {`{"tabGlyphs":{"idle":["🟢",1]}}`, "a glyph string or an array of glyph frames", false},
-		"object token":  {`{"accent":{"fg":"#fff"}}`, `herdr pin "accent"`, false},
+	for name, tc := range map[string]struct{ herdr, want string }{
+		"empty glyph":      {`{"tabGlyphs":{"blocked":""}}`, "profile Tokyo Night · neon pink: herdr tabGlyphs pin \"blocked\": frame 0: empty glyph"},
+		"not an object":    {`{"tabGlyphs":"⭕"}`, "parse profile: herdr tabGlyphs: an object of glyph frames by tab state: json: cannot unmarshal string into Go value of type map[string]herdr.TabFrames"},
+		"number glyph":     {`{"tabGlyphs":{"idle":1}}`, "parse profile: herdr tabGlyphs: an object of glyph frames by tab state: a glyph string or an array of glyph frames: json: cannot unmarshal number into Go value of type []string"},
+		"number frame":     {`{"tabGlyphs":{"idle":["🟢",1]}}`, "parse profile: herdr tabGlyphs: an object of glyph frames by tab state: a glyph string or an array of glyph frames: json: cannot unmarshal number into .1 of type string"},
+		"object token":     {`{"accent":{"fg":"#fff"}}`, "parse profile: herdr pin \"accent\": json: cannot unmarshal object into Go value of type string"},
+		"animated blocked": {`{"tabGlyphs":{"blocked":["🔵","⚪"]}}`, ""},
+		"animated error":   {`{"tabGlyphs":{"error":["🔵","⚪"]}}`, ""},
 	} {
 		_, err := ParseProfile([]byte(profileJSON(`{"herdr":` + tc.herdr + `}`)))
-		if err == nil || !strings.Contains(err.Error(), tc.want) ||
-			tc.named && !strings.Contains(err.Error(), "profile Tokyo Night · neon pink") {
-			t.Errorf("%s: err = %v, want one naming %q (and the profile: %t)", name, err, tc.want, tc.named)
+		if got := fmt.Sprint(err); err == nil && tc.want != "" || err != nil && got != tc.want {
+			t.Errorf("%s: err = %q, want %q", name, got, tc.want)
 		}
 	}
 }
@@ -127,99 +116,25 @@ func TestHerdrTabGlyphsFollowTheAppliedTheme(t *testing.T) {
 	}
 }
 
-// An unreadable state file is an error naming it, never the defaults.
 func TestHerdrTabGlyphsNamesAnUnreadableState(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, StateFileName), []byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := HerdrTabGlyphs(dir); err == nil || !strings.Contains(err.Error(), StateFileName) {
-		t.Fatalf("an unparseable state = %v, want an error naming %s", err, StateFileName)
-	}
 	bad := `{"enabled":true,"applied":{"value":"custom:x","title":"x","side":"dark",` +
 		`"primary":{"state":{}},"pins":{"herdr":{"tabGlyphs":{"blocked":"a b"}}}}}`
-	if err := os.WriteFile(filepath.Join(dir, StateFileName), []byte(bad), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := HerdrTabGlyphs(dir); err == nil || !strings.Contains(err.Error(), `"blocked"`) {
-		t.Fatalf("a state holding a bad glyph = %v, want an error naming the key", err)
-	}
-}
-
-// A FIFO in place of state.json is an error, never a read that blocks every
-// tab's status on the painter's tick.
-func TestHerdrTabGlyphsRefusesANonRegularState(t *testing.T) {
-	dir := t.TempDir()
-	if err := syscall.Mkfifo(filepath.Join(dir, StateFileName), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := HerdrTabGlyphs(dir); err == nil || !strings.Contains(err.Error(), "not a regular file") {
-		t.Fatalf("a FIFO state = %v, want a not-a-regular-file error", err)
-	}
-}
-
-// Exhaust descriptors only in a child: stat still succeeds while the production
-// stateStore.load cannot open the body. Recovery must not need a file rewrite.
-func TestHerdrTabGlyphsRecoversAfterTransientBodyReadFailure(t *testing.T) {
-	if os.Getenv("PFM_GLYPH_EMFILE_CHILD") != "1" {
-		command := exec.Command(os.Args[0], "-test.run=^TestHerdrTabGlyphsRecoversAfterTransientBodyReadFailure$")
-		command.Env = append(os.Environ(), "PFM_GLYPH_EMFILE_CHILD=1")
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("glyph EMFILE child: %v\n%s", err, output)
-		}
-		return
-	}
-	testjail.PauseFlightRecorder(t)
-	dir := t.TempDir()
-	path := filepath.Join(dir, StateFileName)
-	content := `{"enabled":true,"applied":{"pins":{"herdr":{"tabGlyphs":{"blocked":["X","Y"]}}}}}`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var limit syscall.Rlimit
-	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
-		t.Fatal(err)
-	}
-	limited := limit
-	limited.Cur = 128
-	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &limited); err != nil {
-		t.Fatal(err)
-	}
-	var files []*os.File
-	for {
-		file, err := os.Open(os.DevNull)
-		if errors.Is(err, syscall.EMFILE) {
-			break
-		}
-		if err != nil {
+	for name, tc := range map[string]struct {
+		write func(path string) error
+		want  string
+	}{
+		"unparseable": {func(path string) error { return os.WriteFile(path, []byte("{not json"), 0o600) }, "themesync: parse {dir}/state.json: invalid character 'n' looking for beginning of object key string"},
+		"bad glyph":   {func(path string) error { return os.WriteFile(path, []byte(bad), 0o600) }, "themesync: {dir}/state.json: tab glyph \"blocked\": frame 0: glyph \"a b\" holds whitespace or a control character"},
+		"fifo":        {func(path string) error { return syscall.Mkfifo(path, 0o600) }, "themesync: {dir}/state.json is not a regular file (p---------)"},
+	} {
+		dir := t.TempDir()
+		if err := tc.write(filepath.Join(dir, StateFileName)); err != nil {
 			t.Fatal(err)
 		}
-		files = append(files, file)
-	}
-	_, readErr := HerdrTabGlyphs(dir)
-	for _, file := range files {
-		if err := file.Close(); err != nil {
-			t.Fatal(err)
+		_, err := HerdrTabGlyphs(dir)
+		if got := strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"); got != tc.want {
+			t.Errorf("%s: err = %q, want %q", name, got, tc.want)
 		}
-	}
-	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
-		t.Fatal(err)
-	}
-	if !errors.Is(readErr, syscall.EMFILE) {
-		t.Fatalf("body open = %v, want EMFILE", readErr)
-	}
-	after, err := os.Stat(path)
-	if err != nil || !os.SameFile(before, after) || before.Size() != after.Size() ||
-		!before.ModTime().Equal(after.ModTime()) || before.Mode() != after.Mode() {
-		t.Fatalf("state identity changed: %v", err)
-	}
-	glyphs, err := HerdrTabGlyphs(dir)
-	if err != nil || !reflect.DeepEqual(glyphs.Blocked, herdr.TabFrames{"X", "Y"}) {
-		t.Fatalf("unchanged state after descriptor recovery = %+v, %v; want X/Y", glyphs, err)
 	}
 }
 

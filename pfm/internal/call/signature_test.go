@@ -390,7 +390,7 @@ func TestSignatureCodexLabelFallsBackToTheWindowName(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(lastLiteral(fake), `to reply: call "Fleet Porter" <message>`) {
+	if lastLiteral(fake) != "labelled by window name  — to reply: call \"Fleet Porter\" <message>" {
 		t.Fatalf("typed text %q lacks the codex window-name label", lastLiteral(fake))
 	}
 
@@ -414,8 +414,7 @@ func TestSignatureCodexLabelFallsBackToTheWindowName(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(lastLiteral(labelled), "to reply: call Operator <message>") ||
-		strings.Contains(lastLiteral(labelled), "Fleet Porter") {
+	if lastLiteral(labelled) != "labelled by statusline  — to reply: call Operator <message>" {
 		t.Fatalf("statusline label lost to the window name: %q", lastLiteral(labelled))
 	}
 }

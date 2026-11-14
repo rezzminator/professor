@@ -16,9 +16,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing/modelcost"
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -51,20 +51,12 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		false,
 		"skip the rumdl install (uv tool install); every other step, plugin and engine installs included, still runs",
 	)
-	// A v0.82 updater passes --skip-harvest to the new binary's install --yes.
-	skipHarvest := flags.Bool("skip-harvest", false, "retired no-op: harvest moved to the harvester plugin")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
 	skipThemes := flags.Bool("skip-themes", false, "skip the Professor themes")
 	adoptAgents := flags.Bool("adopt-agents", false, "adopt an unowned file at a declared agent's path")
 	configDir := flags.String("config-dir", "", "target config directory instead of ~/.claude")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
-	}
-	if *skipHarvest {
-		fmt.Fprintln(
-			stderr,
-			"pfm install: --skip-harvest is retired and ignored; harvest moved to the harvester plugin",
-		)
 	}
 	if *plan && !*check {
 		fmt.Fprintln(stderr, "pfm install: --plan needs --check: run pfm install --check --plan")
@@ -143,14 +135,10 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	// printDependencies is the required dependency preflight: it prints the
 	// table and returns its failure count; every probe is read-only.
 	printDependencies := func(w io.Writer, runtime commandRuntime) int {
-		entries := deps.Registry(deps.Options{
-			Home:         runtime.Paths.Home,
-			ClaudeBinary: runtime.Config.Claude.Binary,
-			CodexBinary:  runtime.Config.Codex.Binary,
-		})
+		entries := deps.Registry(runtime.DepsOptions())
 		probe := deps.ProbeOptions{
 			SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
-			Runner:      obs.Runner(deps.RealRunner{}),
+			Runner:      commandRunner,
 		}
 		_, failures, _ := doctor.PrintDependencies(context.Background(), w, runtime.Paths.Home, entries, probe)
 		return failures
@@ -162,7 +150,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 	}
 	if *check {
-		unprobed, err := installer.CheckScheduler(context.Background(), nil)
+		unprobed, err := installer.CheckScheduler(context.Background(), installer.NewCommandRunner(commandRunner))
 		if err != nil {
 			fmt.Fprintln(stderr, installer.SchedulerRefusal(installCommand, err))
 			return 4
@@ -241,12 +229,14 @@ func newInstallerOptions(
 	runtimes ...commandRuntime,
 ) installer.Options {
 	options := installer.Options{
-		Mode:                mode,
-		Offline:             offline,
-		ConfigDir:           configDir,
-		Stdout:              stdout,
-		SkillSourcesOffline: paths.SkillSourcesOffline(),
-		ThemesOffline:       paths.ThemesOffline(),
+		Mode:                       mode,
+		Offline:                    offline,
+		ConfigDir:                  configDir,
+		Stdout:                     stdout,
+		SkillSourcesOffline:        paths.SkillSourcesOffline(),
+		ThemesOffline:              paths.ThemesOffline(),
+		ReleaseNativeClaudeReports: hookentry.ReleaseNativeClaudeReports,
+		ProcessRunner:              commandRunner,
 	}
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]
@@ -266,7 +256,7 @@ func newInstallerOptions(
 		options.ClaudeBinary, options.GptAgents = runtime.Config.Claude.Binary, runtime.Config.Claude.GptAgents
 		options.Version = runtime.Version
 		options.ClaudePluginCheckoutRoot = runtime.Config.Claude.PluginCheckoutRoot
-		installer.ConfigureExtensions(&options, runtime.Config)
+		installer.ConfigureClaudePlugins(&options, runtime.Config)
 		options.CodexBinary = runtime.Config.Codex.Binary
 		if options.CodexBinary == "" {
 			options.CodexBinary = pfmengine.MustLookup(pfmengine.Codex).Binary
@@ -280,9 +270,8 @@ func newInstallerOptions(
 		if configDir == "" {
 			options.ClaudeAccounts = runtime.Config.Accounts
 			if len(runtime.Config.Accounts) > 0 {
-				id, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+				id, err := fleet.PrimaryAccountOrImplicit(runtime.Paths, runtime.Config)
 				if err != nil {
-					id = runtime.Config.ImplicitAccount()
 					fmt.Fprintf(stdout, "  skip    primary account unreadable (%v); using account %d\n", err, id)
 				}
 				account, _ := runtime.Config.AccountByID(id)

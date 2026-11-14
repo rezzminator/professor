@@ -129,6 +129,7 @@ func LauncherLaunchAs(
 		SessionID:         id,
 		Name:              name,
 		PromptFile:        persona.Prompt,
+		Envs:              persona.Envs,
 		Effort:            persona.Effort,
 		Model:             persona.Model,
 		Machine:           pfmconfig.Config{Claude: claude, MCPServers: machine.MCPServers, MCP: machine.MCP},
@@ -286,7 +287,7 @@ func Synthesize(request Request) (Plan, error) {
 			Purpose: PurposeInteractive, Home: request.Home,
 			Account: request.PrimaryAccount, Cache1H: &request.Cache1H,
 			SessionID: id, Args: arguments, Machine: machine,
-			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
+			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort, Envs: request.Persona.Envs,
 			Model: request.Persona.Model, Name: request.LaunchName,
 		}
 		run, err := spawn.ShellCommand()
@@ -323,7 +324,7 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Prompt != "" {
 			args = append(args, request.Prompt)
 		}
-		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, args...)
+		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Persona.Envs, request.Row.CWD, args...)
 		plan.Line = "(cd -- " + cmdparse.Quote(request.Row.CWD) + " && CODEX_HOME=" +
 			cmdparse.Quote(account.Home) + " cx"
 		if request.Prompt != "" {
@@ -336,7 +337,6 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
-		command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.OpenCode).LongName))
 		personaEnv, err := openCodePersonaEnv(request)
 		if err != nil {
 			return Plan{}, err
@@ -369,7 +369,6 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
-		command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.OpenCode).LongName))
 		personaEnv, err := openCodePersonaEnv(request)
 		if err != nil {
 			return Plan{}, err
@@ -395,7 +394,7 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Row.Socket == "" {
 			return Plan{}, errors.New("live action requires a socket")
 		}
-		plan.Line = attachLine(
+		plan.Line = AttachLine(
 			request.Row.Socket,
 			liveTarget(request.Row),
 			request.Bunker,
@@ -506,8 +505,11 @@ func Synthesize(request Request) (Plan, error) {
 		if err != nil {
 			return Plan{}, err
 		}
-		plan.SeatRun = codexSeatRun(machine, request.PrimaryAccount, request.Row.CWD, arguments...)
-		plan.Run = continuityBanner(request.Row) + codexCommandFor(machine, request.PrimaryAccount, arguments...)
+		plan.SeatRun = codexSeatRun(
+			machine, request.PrimaryAccount, request.Persona.Envs, request.Row.CWD, arguments...,
+		)
+		plan.Run = continuityBanner(request.Row) +
+			codexCommandWithAccount(hygiene, machine, request.PrimaryAccount, request.Persona.Envs, arguments...)
 		plan = onChatServer(plan, request, machine, pfmengine.Codex)
 	}
 	return plan, nil
@@ -648,24 +650,21 @@ func opencodeContinuityBanner(row compose.Row) string {
 	return banner.String()
 }
 
-func codexCommandFor(machine pfmconfig.Config, account int, args ...string) string {
-	return codexCommandWithAccount(hygiene, machine, account, args...)
-}
-
 func codexCommandWithAccount(
 	environmentStrip string,
 	machine pfmconfig.Config,
 	account int,
+	envs map[string]string,
 	args ...string,
 ) string {
 	var command strings.Builder
 	policy := machine.EffectiveCodex(account)
 	command.WriteString(environmentStrip)
-	command.WriteString(ExtensionShellEnv(machine, pfmengine.MustLookup(pfmengine.Codex).LongName))
+	var own []string
 	if selected, found := machine.CodexAccountByID(account); found {
-		command.WriteString(" CODEX_HOME=")
-		command.WriteString(cmdparse.Quote(selected.Home))
+		own = append(own, "CODEX_HOME="+selected.Home)
 	}
+	writeAssignments(&command, claudelaunch.WithEnvs(envs, own))
 	command.WriteByte(' ')
 	command.WriteString(binaryWord(
 		policy.Binary,
@@ -756,11 +755,12 @@ func onChatServer(plan Plan, request Request, machine pfmconfig.Config, engine p
 		Run:    plan.Run,
 		Titles: &titles,
 	}
-	plan.Line = attachLine(request.FreshSocket, request.FreshSocket, request.Bunker)
+	plan.Line = AttachLine(request.FreshSocket, request.FreshSocket, request.Bunker)
 	return plan
 }
 
-func attachLine(socket, target string, bunker bool) string {
+// AttachLine is the one shell line that attaches a terminal to a tmux session.
+func AttachLine(socket, target string, bunker bool) string {
 	prefix := "TMUX= "
 	if bunker {
 		prefix += "exec "

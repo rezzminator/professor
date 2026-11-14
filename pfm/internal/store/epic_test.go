@@ -10,8 +10,7 @@ import (
 )
 
 func TestEpicInjectionDedupeIsKeyedBySessionAndSlug(t *testing.T) {
-	setStoreTestJail(t)
-	database, err := Open()
+	database, err := OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,9 +44,8 @@ func TestEpicInjectionDedupeIsKeyedBySessionAndSlug(t *testing.T) {
 }
 
 func TestRecordEpicInjectionUsesInjectedClock(t *testing.T) {
-	setStoreTestJail(t)
 	when := time.Date(2026, 9, 18, 10, 55, 0, 123456789, time.UTC)
-	database, err := Open(WithClock(clock.NewFake(when)))
+	database, err := OpenMemory(WithClock(clock.NewFake(when)))
 	if err != nil {
 		t.Fatal(err)
 	}

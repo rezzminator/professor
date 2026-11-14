@@ -1,6 +1,7 @@
 package agentrole
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,9 +180,21 @@ func TestSeatPromptTraversalRefusesBeforeWriting(t *testing.T) {
 	root := t.TempDir()
 	sidDir := filepath.Join(root, "sid")
 	outside := filepath.Join(root, "x.md")
-	if err := WriteSeatPrompt(sidDir, "cc-10", "../../x", "secret"); err == nil ||
-		!strings.Contains(err.Error(), "agent role: seat prompt path escapes SIDDir") {
-		t.Fatalf("traversal write error = %v", err)
+	if err := WriteSeatPrompt(
+		sidDir,
+		"cc-10",
+		"../../x",
+		"secret",
+	); strings.ReplaceAll(
+		fmt.Sprint(err),
+		root,
+		"{root}",
+	) != "agent role: seat prompt path escapes SIDDir: {root}/sid/x.md" {
+		t.Fatalf(
+			"traversal write error = %q, want %q",
+			strings.ReplaceAll(fmt.Sprint(err), root, "{root}"),
+			"agent role: seat prompt path escapes SIDDir: {root}/sid/x.md",
+		)
 	}
 	if _, err := os.Stat(outside); !os.IsNotExist(err) {
 		t.Fatalf("traversal wrote %s: %v", outside, err)

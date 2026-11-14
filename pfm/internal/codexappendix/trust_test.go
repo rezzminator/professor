@@ -1,14 +1,20 @@
 package codexappendix
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -17,20 +23,85 @@ const (
 	trustHash    = "sha256:deadbeef"
 )
 
-// fakeAppServer answers `codex app-server` over stdio: initialize, then
-// hooks/list with the given status, then config/value/write; every request line
-// is appended to the log.
-const fakeAppServer = `#!/bin/sh
-LOG='@LOG@'
-while IFS= read -r line; do
-  printf '%s\n' "$line" >> "$LOG"
-  case "$line" in
-    *'"method":"initialize"'*) printf '%s\n' '{"id":0,"result":{}}' ;;
-    *'"method":"hooks/list"'*) printf '%s\n' '@LIST@' ;;
-    *'"method":"config/value/write"'*) printf '%s\n' '{"id":1,"result":{}}' ;;
-  esac
-done
-`
+// fakeAppServer plays `codex app-server` over stdio for every start: initialize,
+// then hooks/list with the staged list, then config/value/write; every request
+// line is appended to the log. Each start is scripted on its own FakeRunner, so
+// every exchange gets fresh pipes, and is kept on Starts.
+type fakeAppServer struct {
+	*deps.FakeRunner
+	list, requestLog string
+	// writeReply answers config/value/write; exits makes the app-server exit
+	// at start, reading and answering nothing.
+	writeReply string
+	exits      bool
+	mu         sync.Mutex
+	starts     []deps.StartCall
+}
+
+func (fake *fakeAppServer) Start(ctx context.Context, argv []string, opts deps.StartOptions) (deps.Process, error) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	if fake.exits {
+		_ = stdinReader.Close()
+		_ = stdoutWriter.Close()
+	} else {
+		go fake.serve(stdinReader, stdoutWriter)
+	}
+	child := &deps.FakeRunner{}
+	child.ScriptInteractive(
+		[]string{argv[0], "app-server"},
+		deps.InteractiveScript{Pid: 4242, Stdin: stdinWriter, Stdout: stdoutReader},
+	)
+	process, err := child.Start(ctx, argv, opts)
+	fake.mu.Lock()
+	fake.starts = append(fake.starts, child.Starts()...)
+	fake.mu.Unlock()
+	return process, err
+}
+
+// Starts returns every app-server start, in order.
+func (fake *fakeAppServer) Starts() []deps.StartCall {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return append([]deps.StartCall(nil), fake.starts...)
+}
+
+func (fake *fakeAppServer) serve(stdin *io.PipeReader, stdout *io.PipeWriter) {
+	// Replies queue apart from the reads: rpc sends every request before it
+	// reads a reply, as a real pipe's buffer lets it.
+	replies := make(chan string, 8)
+	var serveErr error
+	go func() {
+		for reply := range replies {
+			_, _ = stdout.Write([]byte(reply + "\n"))
+		}
+		_ = stdout.CloseWithError(serveErr)
+	}()
+	defer close(replies)
+	scanner := bufio.NewScanner(stdin)
+	scanner.Buffer(make([]byte, 65536), 1<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		log, err := os.OpenFile(fake.requestLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, err = log.WriteString(line + "\n")
+			err = errors.Join(err, log.Close())
+		}
+		if err != nil {
+			serveErr = fmt.Errorf("log the app-server request in %s: %w", fake.requestLog, err)
+			return
+		}
+		switch {
+		case strings.Contains(line, `"method":"initialize"`):
+			replies <- `{"id":0,"result":{}}`
+		case strings.Contains(line, `"method":"hooks/list"`):
+			replies <- fake.list
+		case strings.Contains(line, `"method":"config/value/write"`):
+			replies <- fake.writeReply
+		}
+	}
+	serveErr = scanner.Err()
+}
 
 type listedHook struct {
 	Key         string `json:"key"`
@@ -59,8 +130,9 @@ func ownHook(account, status string) listedHook {
 	}
 }
 
-// stageTrustAccount writes the account's hooks.json and a fake codex binary that
-// lists the given hooks; it returns the physical account, the binary and the log.
+// stageTrustAccount writes the account's hooks.json and points the app-server
+// start at a fakeAppServer listing the given hooks; it returns the physical
+// account, the codex binary it is started as and the log.
 func stageTrustAccount(t *testing.T, build func(account string) []listedHook) (account, binary, requestLog string) {
 	t.Helper()
 	root := t.TempDir()
@@ -83,10 +155,11 @@ func stageTrustAccount(t *testing.T, build func(account string) []listedHook) (a
 	}
 	requestLog = filepath.Join(root, "requests.log")
 	binary = filepath.Join(root, "fake-codex")
-	script := strings.NewReplacer("@LOG@", requestLog, "@LIST@", string(list)).Replace(fakeAppServer)
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
+	processRunner = &fakeAppServer{
+		FakeRunner: &deps.FakeRunner{}, list: string(list), requestLog: requestLog,
+		writeReply: `{"id":1,"result":{}}`,
 	}
+	t.Cleanup(func() { processRunner = nil })
 	return account, binary, requestLog
 }
 
@@ -113,26 +186,23 @@ func TestRegisterHookTrustAppServerDropsTheHerdrPane(t *testing.T) {
 	t.Setenv("HERDR_PANE_ID", "w1:p1")
 	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
 	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
-	t.Setenv("CODEX_HOME", "/elsewhere")
+	t.Setenv("CODEX_HOME", testjail.Place("/elsewhere"))
 	account, binary, _ := stageTrustAccount(t, func(account string) []listedHook {
 		return []listedHook{ownHook(account, "untrusted")}
 	})
-	envLog := filepath.Join(t.TempDir(), "env.log")
-	raw, err := os.ReadFile(binary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrapped := strings.Replace(string(raw), "#!/bin/sh\n", "#!/bin/sh\n/usr/bin/env > '"+envLog+"'\n", 1)
-	if err := testjail.WriteExecutable(binary, []byte(wrapped), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	if err := registerOwn(binary, account); err != nil {
 		t.Fatalf("RegisterHookTrust: %v", err)
 	}
-	seen, err := os.ReadFile(envLog)
-	if err != nil {
-		t.Fatal(err)
+	starts := processRunner.(*fakeAppServer).Starts()
+	for _, start := range starts {
+		if want := []string{binary, "app-server"}; !reflect.DeepEqual(start.Argv, want) {
+			t.Fatalf("app-server start argv = %q, want %q", start.Argv, want)
+		}
 	}
+	if len(starts) == 0 {
+		t.Fatal("RegisterHookTrust started no app-server")
+	}
+	seen := []byte(strings.Join(starts[len(starts)-1].Opts.Env, "\n") + "\n")
 	if !strings.Contains(string(seen), "CODEX_HOME="+account+"\n") {
 		t.Errorf("CODEX_HOME not pointed at %s: %s", account, seen)
 	}
@@ -151,7 +221,11 @@ func TestRegisterHookTrustPicksOnlyItsOwnHandlerAmongPersonalOnes(t *testing.T) 
 		otherMatcher := ownHook(account, "untrusted")
 		otherMatcher.Key, otherMatcher.Matcher = account+"/hooks.json:session_start:1:0", "startup"
 		foreignFile := ownHook(account, "untrusted")
-		foreignFile.Key, foreignFile.SourcePath = "/elsewhere/hooks.json:session_start:0:0", "/elsewhere/hooks.json"
+		foreignFile.Key, foreignFile.SourcePath = testjail.Place(
+			"/elsewhere/hooks.json:session_start:0:0",
+		), testjail.Place(
+			"/elsewhere/hooks.json",
+		)
 		return []listedHook{personal, otherMatcher, foreignFile, ownHook(account, "untrusted")}
 	})
 	if err := registerOwn(binary, account); err != nil {
@@ -178,9 +252,6 @@ func TestRegisterHookTrustPicksOnlyItsOwnHandlerAmongPersonalOnes(t *testing.T) 
 	if !HookTrustRecorded(account) {
 		t.Fatal("HookTrustRecorded=false after a registration")
 	}
-	if TrustRecorded(account) {
-		t.Fatal("the hook receipt answered the retired appendix's question")
-	}
 }
 
 func TestRegisterHookTrustErrorsWithTheCountWhenTheHandlerIsNotListed(t *testing.T) {
@@ -190,8 +261,12 @@ func TestRegisterHookTrustErrorsWithTheCountWhenTheHandlerIsNotListed(t *testing
 		return []listedHook{personal}
 	})
 	err := registerOwn(binary, account)
-	if err == nil || !strings.Contains(err.Error(), "found 0") {
-		t.Fatalf("err=%v, want one naming found 0", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		account,
+		"{account}",
+	), "hook \"/home/x/.local/bin/pfm internal resume-unkill\" (sessionStart/resume) unavailable in {account}/hooks.json (found 0): check hooks feature, managed policy and hooks.json"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 	if HookTrustRecorded(account) {
 		t.Fatal("a failed registration left a receipt")
@@ -202,11 +277,11 @@ func TestRegisterHookTrustIsANoopWhenTrustedAndReceiptMatches(t *testing.T) {
 	for _, test := range []struct {
 		name             string
 		enabled, receipt bool
-		writes           int
+		writes           string
 	}{
-		{"trusted enabled recorded", true, true, 0},
-		{"trusted disabled recorded", false, true, 0},
-		{"trusted enabled unrecorded", true, false, 1},
+		{"trusted enabled recorded", true, true, ""},
+		{"trusted disabled recorded", false, true, ""},
+		{"trusted enabled unrecorded", true, false, "{\"id\":1,\"method\":\"config/value/write\",\"params\":{\"keyPath\":\"hooks.state.\\\"{account}/hooks.json:session_start:0:0\\\"\",\"mergeStrategy\":\"replace\",\"value\":{\"enabled\":true,\"trusted_hash\":\"sha256:deadbeef\"}}}"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
@@ -221,12 +296,12 @@ func TestRegisterHookTrustIsANoopWhenTrustedAndReceiptMatches(t *testing.T) {
 			if err := registerOwn(binary, account); err != nil {
 				t.Fatal(err)
 			}
-			writes := writeRequests(t, requestLog)
-			if len(writes) != test.writes {
-				t.Fatalf("writes=%v, want %d", writes, test.writes)
-			}
-			if test.writes != 0 && !strings.Contains(writes[0], `"enabled":true`) {
-				t.Fatalf("owned handler not enabled by registration: %v", writes)
+			if got := strings.ReplaceAll(
+				strings.Join(writeRequests(t, requestLog), "\n"),
+				account,
+				"{account}",
+			); got != test.writes {
+				t.Fatalf("writes = %q, want %q", got, test.writes)
 			}
 			if !HookTrustRecorded(account) {
 				t.Fatal("registration did not preserve hook receipt")
@@ -243,10 +318,6 @@ func TestUnregisterHookTrustRemovesOnlyItsOwnTablesAndReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeReceiptFile(t, account, `{"owned:key":"sha256:owned"}`)
-	appendixReceipt := filepath.Join(account, ".professor-appendix-trust.json")
-	if err := os.WriteFile(appendixReceipt, []byte(`{"foreign:key":"sha256:foreign"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatal(err)
 	}
@@ -254,15 +325,13 @@ func TestUnregisterHookTrustRemovesOnlyItsOwnTablesAndReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(got), "sha256:owned") || !strings.Contains(string(got), "sha256:foreign") ||
-		!strings.Contains(string(got), "model='personal'") {
-		t.Fatalf("config.toml after cleanup:\n%s", got)
+	if want := "model='personal'\n[hooks.state.\"foreign:key\"]\nenabled=true\ntrusted_hash='sha256:foreign'\n"; string(
+		got,
+	) != want {
+		t.Fatalf("config.toml after cleanup = %q, want %q", got, want)
 	}
 	if HookTrustRecorded(account) {
 		t.Fatal("hook receipt survived")
-	}
-	if _, err := os.Stat(appendixReceipt); err != nil {
-		t.Fatalf("the appendix receipt was touched: %v", err)
 	}
 	if err := UnregisterHookTrust(account); err != nil {
 		t.Fatalf("repeated cleanup: %v", err)
@@ -280,18 +349,14 @@ func TestRegisterHookTrustRecordsReceiptOnlyAfterAcceptedWrite(t *testing.T) {
 	account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
 		return []listedHook{ownHook(account, "untrusted")}
 	})
-	script, err := os.ReadFile(binary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	script = []byte(strings.ReplaceAll(string(script), `{"id":1,"result":{}}`,
-		`{"id":1,"error":{"code":-1,"message":"denied"}}`))
-	if err := testjail.WriteExecutable(binary, script, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	err = registerOwn(binary, account)
-	if err == nil || !strings.HasPrefix(err.Error(), "write hook trust ") || !strings.Contains(err.Error(), "denied") {
-		t.Fatalf("registration error=%v, want write hook trust denial", err)
+	processRunner.(*fakeAppServer).writeReply = `{"id":1,"error":{"code":-1,"message":"denied"}}`
+	err := registerOwn(binary, account)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		account,
+		"{account}",
+	), "write hook trust {account}/hooks.json:session_start:0:0 for Codex account {account}: native hook API: {\"code\":-1,\"message\":\"denied\"}"; got != want {
+		t.Fatalf("registration error = %q, want %q", got, want)
 	}
 	if len(writeRequests(t, requestLog)) != 1 || HookTrustRecorded(account) {
 		t.Fatal("a denied write was recorded as trusted")
@@ -372,14 +437,11 @@ func TestNativeHookTrustState(t *testing.T) {
 			}
 			key := account + "/hooks.json:session_start:0:0"
 			writeReceiptFile(t, account, `{"`+key+`":"`+trustHash+`"}`)
-			if variant == "malformed" || variant == "failed" {
-				script := "#!/bin/sh\nexit 1\n"
-				if variant == "malformed" {
-					script = "#!/bin/sh\nwhile IFS= read -r line; do\ncase \"$line\" in\n*'\"method\":\"initialize\"'*) echo '{\"id\":0,\"result\":{}}';;\n*'\"method\":\"hooks/list\"'*) echo '{\"id\":1,\"result\":{\"data\":null}}';;\nesac\ndone\n"
-				}
-				if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-					t.Fatal(err)
-				}
+			switch variant {
+			case "malformed":
+				processRunner.(*fakeAppServer).list = `{"id":1,"result":{"data":null}}`
+			case "failed":
+				processRunner.(*fakeAppServer).exits = true
 			}
 			trusted, err := NativeHookTrustState(t.Context(), binary, account, ownHandler)
 			if variant == "disabled" && !errors.Is(err, ErrNativeHookDisabled) {
@@ -495,8 +557,12 @@ func TestRegisterHookTrustsTrustsTheRestWhenOneHandlerIsNotListed(t *testing.T) 
 	})
 	writeOwnedHooksFile(t, account)
 	err := RegisterHookTrusts(t.Context(), binary, account, []Handler{ownHandler, promptHandler, permitHandler})
-	if err == nil || !strings.Contains(err.Error(), promptHandler.Command) {
-		t.Fatalf("err=%v, want one naming the unlisted prompt handler", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		account,
+		"{account}",
+	), "hook \"/home/x/.local/bin/pfm internal herdr-state --engine codex working\" (userPromptSubmit/) unavailable in {account}/hooks.json (found 0): check hooks feature, managed policy and hooks.json"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 	if writes := writeRequests(t, requestLog); len(writes) != 2 {
 		t.Fatalf("writes=%v, want the two listed handlers trusted", writes)
@@ -538,9 +604,19 @@ func TestNativeHookTrustStatesNameAReceiptThatRecordsNoOwnedHandler(t *testing.T
 	account, binary, _ := stageTrustAccount(t, func(string) []listedHook { return nil })
 	writeOwnedHooksFile(t, account)
 	writeReceiptFile(t, account, `{"`+account+`/hooks.json:stop:0:0":"sha256:stop"}`)
+	var states []string
 	for _, state := range NativeHookTrustStates(t.Context(), binary, account, []Handler{ownHandler, promptHandler}) {
-		if state.Trusted || state.Err == nil || !strings.Contains(state.Err.Error(), "no valid handler fingerprint") {
-			t.Fatalf("state=%+v, want the receipt named unreadable for every handler", state)
-		}
+		states = append(states, fmt.Sprintf("trusted %t: %v", state.Trusted, state.Err))
+	}
+	if got, want := strings.ReplaceAll(
+		strings.Join(states, "\n"),
+		account,
+		"{account}",
+	), "trusted false: hook trust receipt {account}/.professor-hook-trust.json has no valid handler fingerprint\ntrusted false: hook trust receipt {account}/.professor-hook-trust.json has no valid handler fingerprint"; got != want {
+		t.Fatalf("states = %q, want %q", got, want)
 	}
 }
+
+// A cancelled exchange kills the helper's whole process group: the app-server
+// and a descendant it started are both gone once rpc returns, within the
+// 250 ms pipe bound plus a second of polling.

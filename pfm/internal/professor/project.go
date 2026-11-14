@@ -1,8 +1,6 @@
-// Package professor is the blueprint's template store: it scaffolds a project once, pins its baseline, reports drift against the store, and prints the project-side doctor row.
 package professor
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -57,6 +55,11 @@ type projectReportItem struct {
 	DiffError   string        `json:"diffError,omitempty"`
 	DiffSkipped string        `json:"diffSkipped,omitempty"`
 	Commits     []string      `json:"commits,omitempty"`
+	// HistoryError names the pin history (pinned bytes, commit log) that
+	// could not be read while the diff itself was; the diff is still shown.
+	HistoryError string `json:"historyError,omitempty"`
+	// Error is why an UNREADABLE item could not be read.
+	Error string `json:"error,omitempty"`
 	projectMove
 }
 type projectReport struct {
@@ -79,123 +82,6 @@ func (r projectReport) reviewRequired() int {
 		review += len(r.Retired.Hits)
 	}
 	return review
-}
-
-func buildProjectReportWithContext(ctx context.Context, root, home string) (projectReport, error) {
-	baseline, err := Load(root)
-	if err != nil {
-		return projectReport{}, err
-	}
-	store, err := resolveStoreWithContext(ctx, root, home)
-	if err != nil {
-		return projectReport{}, err
-	}
-	report := projectReport{
-		Root:     root,
-		Store:    store,
-		Baseline: baseline,
-		Counts:   make(map[projectStatus]int, len(projectStatusOrder)),
-	}
-	for _, s := range projectStatusOrder {
-		report.Counts[s] = 0
-	}
-	pinned := make(map[string]bool, len(baseline.Files))
-	ignored := make(map[string]bool, len(baseline.Ignored))
-	for _, v := range baseline.Ignored {
-		ignored[v] = true
-	}
-	locals := make([]string, 0, len(baseline.Files))
-	for local := range baseline.Files {
-		locals = append(locals, local)
-	}
-	sort.Strings(locals)
-	for _, rawLocal := range locals {
-		pin := baseline.Files[rawLocal]
-		local, err := safeProjectRelative(rawLocal)
-		if err != nil {
-			return projectReport{}, fmt.Errorf("baseline local %q: %w", rawLocal, err)
-		}
-		template, err := safeTemplateRelative(pin.Template)
-		if err != nil {
-			return projectReport{}, fmt.Errorf("baseline template %q: %w", pin.Template, err)
-		}
-		pinned[template] = true
-		templatePath := filepath.Join(store.Templates, filepath.FromSlash(template))
-		status := projectCurrent
-		var move projectMove
-		if _, err := os.Stat(templatePath); errors.Is(err, fs.ErrNotExist) {
-			if status, move, err = goneOrMoved(store.Templates, template, pinned); err != nil {
-				return projectReport{}, err
-			}
-		} else if err != nil {
-			return projectReport{}, fmt.Errorf("UNREADABLE %s: %w", templatePath, err)
-		} else {
-			localPath := filepath.Join(root, filepath.FromSlash(local))
-			if _, err := os.Stat(localPath); errors.Is(err, fs.ErrNotExist) {
-				status = projectLocalDeleted
-			} else if err != nil {
-				return projectReport{}, fmt.Errorf("UNREADABLE %s: %w", localPath, err)
-			} else {
-				hash, err := HashTemplate(templatePath)
-				if err != nil {
-					return projectReport{}, err
-				}
-				if hash != pin.TemplateHash {
-					status = projectUpdated
-				}
-			}
-		}
-		report.addKept(status, local, template, pin)
-		report.Counts[status]++
-		if status != projectCurrent {
-			report.Items = append(
-				report.Items,
-				projectReportItem{Status: status, Local: local, Template: template, Pin: pin, projectMove: move},
-			)
-		}
-	}
-	projectTemplates := filepath.Join(store.Templates, "project")
-	if err := filepath.WalkDir(projectTemplates, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return fmt.Errorf("UNREADABLE %s: %w", path, walkErr)
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("UNREADABLE %s: symlink templates are unsupported", path)
-		}
-		relative, err := filepath.Rel(store.Templates, path)
-		if err != nil {
-			return err
-		}
-		template := filepath.ToSlash(relative)
-		if pinned[template] {
-			return nil
-		}
-		if ignored[template] {
-			report.Counts[projectIgnored]++
-			return nil
-		}
-		if _, err := HashTemplate(path); err != nil {
-			return err
-		}
-		report.Counts[projectNew]++
-		report.Items = append(report.Items, projectReportItem{Status: projectNew, Template: template})
-		return nil
-	}); err != nil {
-		return projectReport{}, err
-	}
-	sort.Slice(report.Items, func(i, j int) bool {
-		if report.Items[i].Status != report.Items[j].Status {
-			return statusIndex(report.Items[i].Status) < statusIndex(report.Items[j].Status)
-		}
-		if report.Items[i].Local != report.Items[j].Local {
-			return report.Items[i].Local < report.Items[j].Local
-		}
-		return report.Items[i].Template < report.Items[j].Template
-	})
-	return report, nil
 }
 
 func statusIndex(status projectStatus) int {
@@ -290,6 +176,7 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 		}
 	}
 	writeKeptHuman(stdout, r)
+	writeUnreadableHuman(stdout, r)
 	writeRetiredNamesHuman(stdout, r.Retired)
 	writeAcceptedHuman(stdout, r.Retired)
 	if r.reviewRequired() != 0 {
@@ -361,6 +248,7 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 		return 1
 	}
 	selected := locals
+	skipped := 0
 	if keepReason != "" {
 		return runProjectKeep(&report, root, locals, keepReason, stdout, stderr)
 	}
@@ -405,7 +293,9 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 		report.Baseline.Ignored = removeIgnored(report.Baseline.Ignored, template)
 		selected[0] = local
 	} else {
-		for i, value := range selected {
+		named := selected
+		selected = make([]string, 0, len(named))
+		for _, value := range named {
 			local, err := safeProjectRelative(value)
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update pin: %v\n", err)
@@ -416,14 +306,17 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 				fmt.Fprintf(stderr, "pfm update pin: %s has no pin; use --template for a new adoption\n", local)
 				return 1
 			}
+			// An unreadable file costs its own pin only; the rest still save.
 			if err := requireReadableLocal(root, local); err != nil {
-				fmt.Fprintf(stderr, "pfm update pin: %v\n", err)
-				return 1
+				fmt.Fprintf(stderr, "pfm update pin: skipped %s: %v\n", local, err)
+				skipped++
+				continue
 			}
 			hash, err := HashTemplate(filepath.Join(report.Store.Templates, filepath.FromSlash(pin.Template)))
 			if err != nil {
-				fmt.Fprintf(stderr, "pfm update pin: %v\n", err)
-				return 1
+				fmt.Fprintf(stderr, "pfm update pin: skipped %s: %v\n", local, err)
+				skipped++
+				continue
 			}
 			if *unkeep {
 				if err := dropKeep(&pin, local); err != nil {
@@ -435,7 +328,7 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 			pin.PinnedSHA = report.Store.SHA
 			pin.PinnedAt = clock.Real.Now().Format(time.DateOnly)
 			report.Baseline.Files[local] = pin
-			selected[i] = local
+			selected = append(selected, local)
 		}
 	}
 	if len(selected) != 0 {
@@ -446,6 +339,10 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 		}
 	}
 	fmt.Fprintf(stdout, "pinned %d file(s) at %s\n", len(selected), report.Store.SHA)
+	if skipped != 0 {
+		fmt.Fprintf(stderr, "pfm update pin: %d file(s) skipped unreadable; nothing was written for them\n", skipped)
+		return 1
+	}
 	return 0
 }
 
@@ -576,7 +473,7 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 		sha = store.SHA
 		version = store.Version
 	}
-	kept, absent, absentAtRef, pinned := 0, 0, 0, 0
+	kept, absent, absentAtRef, pinned, skipped := 0, 0, 0, 0, 0
 	pinnedAt := clock.Real.Now().Format(time.DateOnly)
 	for _, entry := range plan {
 		if _, exists := baseline.Files[entry.local]; exists {
@@ -588,16 +485,20 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 			absent++
 			continue
 		}
+		// An unreadable file costs its own pin only (it reads NEW until
+		// adopted); every other entry still pins and saves.
 		if err := requireReadableLocal(root, entry.local); err != nil {
-			fmt.Fprintf(stderr, "pfm update adopt: %v\n", err)
-			return 1
+			fmt.Fprintf(stderr, "pfm update adopt: skipped %s: %v\n", entry.local, err)
+			skipped++
+			continue
 		}
 		var hash string
 		if usingAt {
 			raw, missing, gitErr := adoptGitShowTemplate(store.runner, store.Root, ref, entry.template)
 			if gitErr != nil {
-				fmt.Fprintf(stderr, "pfm update adopt: %v\n", gitErr)
-				return 1
+				fmt.Fprintf(stderr, "pfm update adopt: skipped %s: %v\n", entry.local, gitErr)
+				skipped++
+				continue
 			}
 			if missing {
 				absentAtRef++
@@ -607,8 +508,9 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 		} else {
 			hash, err = HashTemplate(entry.source)
 			if err != nil {
-				fmt.Fprintf(stderr, "pfm update adopt: %v\n", err)
-				return 1
+				fmt.Fprintf(stderr, "pfm update adopt: skipped %s: %v\n", entry.local, err)
+				skipped++
+				continue
 			}
 		}
 		baseline.Files[entry.local] = FilePin{
@@ -648,7 +550,19 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 			ref,
 		)
 	}
+	if skipped != 0 {
+		fmt.Fprintf(
+			stdout,
+			"  %-13s %-3d (%s)\n",
+			"unreadable",
+			skipped,
+			"named above, not pinned — check reports NEW",
+		)
+	}
 	fmt.Fprintln(stdout, "next: pfm doctor --project-updates")
+	if skipped != 0 {
+		return 1
+	}
 	return 0
 }
 
@@ -806,13 +720,18 @@ func PrintDoctor(stdout io.Writer, start, home string) int {
 		return 1
 	}
 	reviewRequired := report.reviewRequired()
+	unreadable := ""
+	if count := report.Counts[projectUnreadable]; count != 0 {
+		unreadable = fmt.Sprintf(" · UNREADABLE %d", count)
+	}
 	fmt.Fprintf(
 		stdout,
-		"professor: current %d · review-required %d\n",
+		"professor: current %d · review-required %d%s\n",
 		report.Counts[projectCurrent],
 		reviewRequired,
+		unreadable,
 	)
-	return reviewRequired
+	return reviewRequired + report.Counts[projectUnreadable]
 }
 
 func ResolveProjectRoot(rootFlag string) (string, bool, error) {

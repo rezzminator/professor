@@ -52,15 +52,19 @@ func TestLoadFullManifest(t *testing.T) {
 	}
 }
 
+// TestLoadDefaults: an absent or empty "title" is the directory's name — a
+// display label never refuses the manifest.
 func TestLoadDefaults(t *testing.T) {
-	root, _ := benchFixture(t)
-	dir := filepath.Join(root, "tools", "lab")
-	seedBench(t, dir, `{"prompt":"p.md"}`)
-	writeBenchFile(t, filepath.Join(dir, ".professor", "p.md"), "Lab prompt.")
-	got := LoadBench(dir, root)
-	if got.Err != nil || got.Title != "lab" || got.Prefix != "LAB" ||
-		got.Key != "acme › lab" || !reflect.DeepEqual(got.Engines, []pfmengine.ID{pfmengine.Claude}) {
-		t.Fatalf("defaults = %#v", got)
+	for _, manifest := range []string{`{"prompt":"p.md"}`, `{"prompt":"p.md","title":""}`} {
+		root, _ := benchFixture(t)
+		dir := filepath.Join(root, "tools", "lab")
+		seedBench(t, dir, manifest)
+		writeBenchFile(t, filepath.Join(dir, ".professor", "p.md"), "Lab prompt.")
+		got := LoadBench(dir, root)
+		if got.Err != nil || got.Title != "lab" || got.Prefix != "LAB" ||
+			got.Key != "acme › lab" || !reflect.DeepEqual(got.Engines, []pfmengine.ID{pfmengine.Claude}) {
+			t.Fatalf("defaults of %s = %#v", manifest, got)
+		}
 	}
 }
 
@@ -77,7 +81,6 @@ func TestLoadFaults(t *testing.T) {
 		{"unknown engine", `{"prompt":"scribe.md","engines":["other"]}`, `"engines" names unknown engine "other"; allowed: claude, codex, opencode`},
 		{"engine alias", `{"prompt":"scribe.md","engines":["cc"]}`, `"engines" names unknown engine "cc"; allowed: claude, codex, opencode`},
 		{"repeated engine", `{"prompt":"scribe.md","engines":["claude","claude"]}`, `"engines" lists "claude" twice`},
-		{"empty title", `{"prompt":"scribe.md","title":""}`, `"title" is empty`},
 		{"space in name", `{"prompt":"scribe.md","name":"two words"}`, `"name" must be one word without ":" (got "two words")`},
 		{"colon in name", `{"prompt":"scribe.md","name":"ONE:2"}`, `"name" must be one word without ":" (got "ONE:2")`},
 		{"empty name", `{"prompt":"scribe.md","name":""}`, `"name" must be one word without ":" (got "")`},

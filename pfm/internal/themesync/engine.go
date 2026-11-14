@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -345,6 +346,9 @@ type sourceState struct {
 	applied Applied
 	memory  map[string]string
 	origin  *flipOrigin
+	// notes are what the run set aside to go on (an account whose settings.json
+	// would not read, an override or pin it dropped): the claude row prints them.
+	notes []string
 }
 
 // shortHome writes a path under home as ~/…
@@ -356,12 +360,17 @@ func shortHome(home, path string) string {
 }
 
 // resolveSource reads the accounts, picks the governing one (D9), derives its
-// theme and lays the pins of its profile over it. Any failure names the file;
+// theme and lays the pins of its profile over it. An account that cannot be
+// read is skipped and named in the notes; any other failure names the file and
 // the run then writes no surface.
 func resolveSource(env Env, state themeState) (sourceState, error) {
-	accounts, err := readAccounts(env.Home)
+	accounts, failed, err := readAccounts(env.Home)
 	if err != nil {
 		return sourceState{}, err
+	}
+	var notes []string
+	for _, failure := range failed {
+		notes = append(notes, "account skipped: "+failure.Error())
 	}
 	previous := ""
 	if state.Source != nil {
@@ -376,6 +385,8 @@ func resolveSource(env Env, state themeState) (sourceState, error) {
 	if err != nil {
 		return sourceState{}, fmt.Errorf("%s: %w", governing.Path, err)
 	}
+	notes = append(notes, theme.Notes...)
+	notes = append(notes, profile.notes...)
 	theme.Applied.Pins = profile.pins
 	origin := &flipOrigin{path: governing.Path, at: governing.ModTime}
 	if theme.ThemeFile != "" && theme.ThemeTime.After(origin.at) {
@@ -391,19 +402,21 @@ func resolveSource(env Env, state themeState) (sourceState, error) {
 			Account: shortHome(env.Home, governing.dir()), Path: governing.Path,
 			Value: theme.Applied.Value, Title: theme.Applied.Title, Side: theme.Applied.Side,
 		},
-		applied: theme.Applied, memory: memory, origin: origin,
+		applied: theme.Applied, memory: memory, origin: origin, notes: notes,
 	}, nil
 }
 
-// sourceResult is the claude row of a resolved source, or of its failure.
-func sourceResult(info *SourceInfo, err error) SurfaceResult {
+// sourceResult is the claude row of a resolved source, or of its failure; the
+// notes of what the run set aside follow the source in its detail.
+func sourceResult(info *SourceInfo, notes []string, err error) SurfaceResult {
 	if err != nil {
 		return SurfaceResult{Surface: surfaceClaude, Verdict: VerdictError, Detail: err.Error()}
 	}
-	return SurfaceResult{
-		Surface: surfaceClaude, Verdict: VerdictSource, Path: info.Path,
-		Detail: info.Account + " · " + info.Value + " · " + info.Title,
+	detail := info.Account + " · " + info.Value + " · " + info.Title
+	for _, note := range notes {
+		detail += " · " + note
 	}
+	return SurfaceResult{Surface: surfaceClaude, Verdict: VerdictSource, Path: info.Path, Detail: detail}
 }
 
 // appearanceFor is the side the single-variant surfaces draw: the system's for
@@ -436,18 +449,23 @@ func converge(ctx context.Context, env Env, store stateStore, state themeState, 
 	source, srcErr := resolveSource(env, state)
 	sess := newSession(env, store, state)
 	if srcErr != nil {
-		sess.source = sourceResult(nil, srcErr)
+		sess.source = sourceResult(nil, nil, srcErr)
 		return sess.report([]SurfaceResult{sess.source}), nil
 	}
 	appearance, err := appearanceFor(ctx, env, source.applied)
 	if err != nil {
-		return Report{}, err
+		// An auto theme whose system side cannot be read keeps the side last
+		// applied (dark before any): the surfaces still follow the theme, and the
+		// claude row names why the side was not re-read.
+		appearance = cmp.Or(state.Appearance, Dark)
+		source.notes = append(source.notes,
+			fmt.Sprintf("system appearance unreadable, drawing %s: %v", appearance, err))
 	}
 	known := state.Enabled && state.Applied != nil
 	sourceMoved := !known || !reflect.DeepEqual(*state.Applied, source.applied)
 	changed := sourceMoved || state.Appearance != appearance
 	sess.state.Enabled, sess.state.Source, sess.state.Accounts = true, &source.info, source.memory
-	sess.source = sourceResult(&source.info, nil)
+	sess.source = sourceResult(&source.info, source.notes, nil)
 	if changed {
 		sess.state.Generation++
 		sess.state.Appearance, sess.state.Applied = appearance, &source.applied
@@ -535,13 +553,17 @@ func ReadBack(ctx context.Context, env Env) (Report, error) {
 	sess := newSession(env, store, state)
 	source, srcErr := resolveSource(env, state)
 	if srcErr != nil {
-		sess.source = sourceResult(nil, srcErr)
+		sess.source = sourceResult(nil, nil, srcErr)
 	} else {
-		sess.source = sourceResult(&source.info, nil)
+		sess.source = sourceResult(&source.info, source.notes, nil)
 		sess.state.Source = &source.info
 		appearance, err := appearanceFor(ctx, env, source.applied)
 		if err != nil {
-			return Report{}, err
+			// A read-back writes nothing: it compares every surface against the
+			// appearance last applied and marks the claude row as unable to look.
+			appearance = state.Appearance
+			sess.source.Verdict = VerdictError
+			sess.source.Detail += " · " + err.Error()
 		}
 		if state.Applied == nil || !reflect.DeepEqual(*state.Applied, source.applied) ||
 			state.Appearance != appearance {
@@ -555,14 +577,16 @@ func ReadBack(ctx context.Context, env Env) (Report, error) {
 }
 
 // flipWithAck is the stored last flip plus the extension's ack offset when it
-// has acknowledged the generation in force.
+// has acknowledged the generation in force. A failure record it could not
+// read may be this generation's, so it withholds the offset (the VS Code row
+// names the record).
 func (s *session) flipWithAck() *Flip {
 	if s.state.LastFlip == nil {
 		return nil
 	}
 	flip := *s.state.LastFlip
-	ack, haveAck, err := s.readAck()
-	if err != nil || !haveAck || ack.Error != "" || ack.Generation != s.state.Generation {
+	ack, haveAck, notes, err := s.readAck()
+	if err != nil || len(notes) != 0 || !haveAck || ack.Error != "" || ack.Generation != s.state.Generation {
 		return &flip
 	}
 	appliedAt, appliedErr := time.Parse(time.RFC3339Nano, ack.AppliedAt)

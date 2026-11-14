@@ -3,6 +3,8 @@
 # failing `go test -json` stream must reach its closing `log:` line. A filter
 # that matches nothing (grep exits 1) or a `head` that closes its pipe early
 # (SIGPIPE) inside the report used to abort the whole gate with no verdict.
+# Also node_test_suite: the exact verdict line of an unsharded and a sharded run, each test
+# run once across the shards, and each state that proves nothing named.
 #   bash scripts/test-dev-report.sh [path/to/dev.sh]
 set -uo pipefail
 DEV=${1:-"$(cd "$(dirname "$0")/.." && pwd)/.claude/scripts/dev.sh"}
@@ -145,6 +147,75 @@ else
     ok "an uncreatable timing base fails, names the base on stderr and prints no path"
   else
     bad "an uncreatable timing base did not fail cleanly (rc $rc)" "stdout: ${out:-<none>}" "stderr: ${err:-<none>}"
+  fi
+fi
+
+# node_test_suite: a three-test fixture through the real runner and scripts/node-test-helpers.mjs.
+# Each test appends its name to $RAN, so a test run twice or never shows in the sorted list.
+NTS="$T/node-test-suite.sh"
+HELPERS="$(cd "$(dirname "$0")" && pwd)/node-test-helpers.mjs"
+awk '/^node_test_suite\(\) \{/,/^\}/ { print }' "$DEV" > "$NTS"
+if ! grep -q '^node_test_suite() {' "$NTS"; then
+  bad "node_test_suite not found in $DEV — the node suite runner cannot be checked"
+elif ! command -v node >/dev/null 2>&1; then
+  bad "node is not on PATH — the node suite runner cannot be checked"
+else
+  mkdir -p "$T/node"
+  node_fixture() { # node_fixture <file> <name of the test that fails, or none>
+    cat > "$1" <<FIXTURE
+import { appendFileSync } from "node:fs";
+import { test, assert } from "$HELPERS";
+for (const name of ["alpha", "beta", "gamma"]) {
+  test(name, () => { appendFileSync(process.env.RAN, name + "\\n"); assert.notEqual(name, "$2"); });
+}
+FIXTURE
+  }
+  node_fixture "$T/node/green.test.mjs" none
+  node_fixture "$T/node/red.test.mjs" beta
+  suite() { # suite <NODE_TEST_SHARDS or ''> <file>: the extracted runner under dev.sh's shell options
+    : > "$T/node/ran"
+    RAN="$T/node/ran" NODE_TEST_SHARDS="$1" bash -c 'set -euo pipefail
+      ok() { printf "ok: %s\n" "$*"; }; fail_step() { printf "fail_step: %s\n" "$*"; }
+      source "$1"; node_test_suite three "$2" "$3"' _ "$NTS" "$T/node/tap" "$2" 2>&1
+  }
+  failed='fail_step: three tests FAILED — a test regressed, or node could not run the suite (see output)'
+  # shards | fixture | the runner's last line | the tests that ran, sorted (a fourth shard holds no test)
+  while IFS='|' read -r shards fixture want_last want_ran; do
+    out=$(suite "$shards" "$T/node/$fixture.test.mjs"); rc=$?
+    last=$(printf '%s\n' "$out" | tail -n 1); ran=$(sort "$T/node/ran" | paste -sd' ' -)
+    if [[ $rc -eq 0 && "$last" == "$want_last" && "$ran" == "$want_ran" ]]; then
+      ok "node_test_suite, ${shards:-no} shard(s), $fixture fixture: $want_last"
+    else
+      bad "node_test_suite, ${shards:-no} shard(s), $fixture fixture (rc $rc)" "expected: $want_last | ran: $want_ran" "actual:   $last | ran: $ran" "tap: $T/node/tap"
+    fi
+  done <<CASES
+|green|ok: three tests hold (3 passing)|alpha beta gamma
+2|green|ok: three tests hold (3 passing)|alpha beta gamma
+3|green|ok: three tests hold (3 passing)|alpha beta gamma
+4|green|$failed|alpha beta gamma
+|red|$failed|alpha beta gamma
+2|red|$failed|alpha beta gamma
+0|green|fail_step: three tests NOT RUN — NODE_TEST_SHARDS must be a positive integer: 0|
+CASES
+  # Two shards split the three tests round-robin, each stream under its own heading.
+  suite 2 "$T/node/green.test.mjs" >/dev/null
+  split=$(grep -E '^(# shard |ok [0-9]+ - )' "$T/node/tap")
+  want_split=$'# shard 1/2\nok 1 - alpha\nok 2 - gamma\n# shard 2/2\nok 1 - beta'
+  if [[ "$split" == "$want_split" ]]; then
+    ok "two shards take every second test in registration order, each stream under its heading"
+  else
+    bad "two shards split the suite differently" "$(diff <(printf '%s\n' "$want_split") <(printf '%s\n' "$split"))" "tap: $T/node/tap"
+  fi
+  if grep -qx '# NODE_TEST_SHARD 4/4 holds no test: the suite registers 3' <(suite 4 "$T/node/green.test.mjs"); then
+    ok "a shard left with no test names itself in the output"
+  else
+    bad "a shard left with no test did not name itself" "tap: $T/node/tap"
+  fi
+  err=$(RAN="$T/node/ran" NODE_TEST_SHARD=3/2 node "$T/node/green.test.mjs" 2>&1); rc=$?
+  if [[ $rc -ne 0 && "$err" == *'NODE_TEST_SHARD must be {i}/{n} with 1 <= i <= n: 3/2'* ]]; then
+    ok "a shard index past its count is refused by name before any test registers"
+  else
+    bad "a shard index past its count was not refused (rc $rc)" "$(printf '%s\n' "$err" | tail -3)"
   fi
 fi
 

@@ -61,6 +61,10 @@ func TestSpawnAuditHookDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reasons := map[int64]string{
+		50:  "hook set differs from the registry (born 50s before the current spawn door)",
+		200: "hook set differs from the registry — some spawn site bypassed the door",
+	}
 	for name, change := range map[string]func([]claudelaunch.Hook) []claudelaunch.Hook{
 		"missing": func(hooks []claudelaunch.Hook) []claudelaunch.Hook { return hooks[1:] },
 		"extra":   func(hooks []claudelaunch.Hook) []claudelaunch.Hook { return append(hooks, hooks[0]) },
@@ -86,8 +90,8 @@ func TestSpawnAuditHookDrift(t *testing.T) {
 				if started < 100 {
 					want = spawnPredatesLayer
 				}
-				if verdict != want || !strings.Contains(reason, "hook set differs from the registry") {
-					t.Fatalf("%s: %s", verdict, reason)
+				if verdict != want || reason != reasons[started] {
+					t.Errorf("%s: reason = %q, want %q", verdict, reason, reasons[started])
 				}
 			})
 		}
@@ -131,7 +135,11 @@ func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
 	machine := config.Config{
 		Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
 		Accounts: []config.Account{
-			{ID: 1, ConfigDir: "/accounts/1", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor}},
+			{
+				ID:        1,
+				ConfigDir: testjail.Place("/accounts/1"),
+				Claude:    &config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+			},
 			{ID: 2, ConfigDir: accountDir, Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
 		},
 	}
@@ -143,8 +151,8 @@ func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
 		{accountDir, 2, ""},
 		{accountDir + "/", 2, ""},
 		{link, 2, ""},
-		{"/accounts/1/", 1, ""},
-		{"/unknown", 0, "account unmatched; policy unverified"},
+		{testjail.Place("/accounts/1/"), 1, ""},
+		{testjail.Place("/unknown"), 0, "account unmatched; policy unverified"},
 		{"", 0, "account unmatched; policy unverified"},
 	} {
 		t.Run(test.dir, func(t *testing.T) {
@@ -218,6 +226,7 @@ func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
 }
 
 func TestPrintSpawnAuditCountsUndecodableSeats(t *testing.T) {
+	pinSpawnDoor(t)
 	home := t.TempDir()
 	machine := config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}}
 	launch, err := claudelaunch.Render(claudelaunch.Request{Home: home}, machine)
@@ -229,10 +238,10 @@ func TestPrintSpawnAuditCountsUndecodableSeats(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		unread []string
-		row    string
+		want   string
 	}{
-		{name: "undecodable seat", row: "1 seat(s) could NOT be audited: cc-a pid=1: argv undecodable"},
-		{name: "other probe warning", unread: []string{"cc-c pid=3: environment unreadable"}, row: "2 seat(s) could NOT be audited: cc-a pid=1: argv undecodable"},
+		{name: "undecodable seat", want: "doctor: spawn-audit: INJECTED cc-b pid=2 — production payload and registry hooks\ndoctor: spawn-audit: policy=production chats=2 injected=1 predates-layer=0 violations=0 undecodable=1 unverified=0 (age signal: 2023-11-14T22:13:20Z, the later of mtime of {root}/001/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/002/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/002/.local/share/pfm/install/source-repo: no such file or directory))\ndoctor: spawn-audit: 1 seat(s) could NOT be audited: cc-a pid=1: argv undecodable: --settings: unexpected end of JSON input; left to Claude as written\n"},
+		{name: "other probe warning", unread: []string{"cc-c pid=3: environment unreadable"}, want: "doctor: spawn-audit: INJECTED cc-b pid=2 — production payload and registry hooks\ndoctor: spawn-audit: policy=production chats=2 injected=1 predates-layer=0 violations=0 undecodable=1 unverified=0 (age signal: 2023-11-14T22:13:20Z, the later of mtime of {root}/001/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/002/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/002/.local/share/pfm/install/source-repo: no such file or directory))\ndoctor: spawn-audit: 2 seat(s) could NOT be audited: cc-a pid=1: argv undecodable: --settings: unexpected end of JSON input; left to Claude as written; cc-c pid=3: environment unreadable\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			spawnObservationsProbe = func(context.Context, paths.Values, config.Config, clock.Clock) ([]spawnObservation, []string, error) {
@@ -255,10 +264,8 @@ func TestPrintSpawnAuditCountsUndecodableSeats(t *testing.T) {
 				1,
 				clock.Real,
 			)
-			if warnings != 1 ||
-				!strings.Contains(out.String(), "chats=2 injected=1 predates-layer=0 violations=0 undecodable=1") ||
-				!strings.Contains(out.String(), test.row) {
-				t.Fatalf("warnings=%d output=%s", warnings, out.String())
+			if got := rooted(out.String(), filepath.Dir(home)); warnings != 1 || got != test.want {
+				t.Errorf("warnings=%d output = %q, want %q", warnings, got, test.want)
 			}
 		})
 	}
@@ -465,15 +472,13 @@ func TestSpawnAuditRunsUnderProductionPolicy(t *testing.T) {
 	if err := os.WriteFile(resolved.TmuxDir, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if warnings := printSpawnAuditDoctor(
-		context.Background(),
-		&stdout,
-		resolved,
-		machine,
-		1,
-	); warnings == 0 ||
-		!strings.Contains(stdout.String(), "CHECK FAILED to run") {
-		t.Fatalf("production audit did not probe: %q", stdout.String())
+	warnings := printSpawnAuditDoctor(context.Background(), &stdout, resolved, machine, 1)
+	if got, want := fmt.Sprintf(
+		"%d %s",
+		warnings,
+		rooted(stdout.String(), filepath.Dir(resolved.Home)),
+	), "1 doctor: spawn-audit: CHECK FAILED to run (probe tmux sockets under {root}/002/not-a-directory: read tmux socket directory: open {root}/002/not-a-directory: not a directory) — live chats unaudited\n"; got != want {
+		t.Errorf("production audit = %q, want %q", got, want)
 	}
 }
 
@@ -642,7 +647,7 @@ func TestSpawnDoorStampUsesBinaryWhenComposedPromptUnreadable(t *testing.T) {
 	home := t.TempDir()
 	prompt := doctorProfessorPromptPath(t, home)
 	binary := filepath.Join(t.TempDir(), "pfm")
-	if err := testjail.WriteExecutable(binary, []byte("fixture"), 0o700); err != nil {
+	if err := os.WriteFile(binary, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Unix(1_700_000_000, 0)
@@ -657,9 +662,9 @@ func TestSpawnDoorStampUsesBinaryWhenComposedPromptUnreadable(t *testing.T) {
 		home string
 		want string
 	}{
-		{name: "missing prompt", home: home, want: "no such file or directory"},
-		{name: "prompt directory", home: home, want: "not a regular file"},
-		{name: "no source repository", home: t.TempDir(), want: "no source repository recorded"},
+		{name: "missing prompt", home: home, want: "stat {root}/002/pfm/harness-prompts/generated/claude.md: no such file or directory\n2023-11-14T22:13:20Z, the later of mtime of {root}/003/pfm (unreadable: prompt layer: stat {root}/002/pfm/harness-prompts/generated/claude.md: no such file or directory)"},
+		{name: "prompt directory", home: home, want: "{root}/002/pfm/harness-prompts/generated/claude.md is not a regular file\n2023-11-14T22:13:20Z, the later of mtime of {root}/003/pfm (unreadable: prompt layer: {root}/002/pfm/harness-prompts/generated/claude.md is not a regular file)"},
+		{name: "no source repository", home: t.TempDir(), want: "resolve generated harness prompt: read source repository marker {root}/004/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/004/.local/share/pfm/install/source-repo: no such file or directory\n2023-11-14T22:13:20Z, the later of mtime of {root}/003/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/004/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/004/.local/share/pfm/install/source-repo: no such file or directory)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if test.name == "prompt directory" {
@@ -668,9 +673,12 @@ func TestSpawnDoorStampUsesBinaryWhenComposedPromptUnreadable(t *testing.T) {
 				}
 			}
 			stamp, signal, promptErr := spawnDoorStamp(test.home)
-			if promptErr == nil || !strings.Contains(promptErr.Error(), test.want) || stamp != at.Unix() ||
-				!strings.Contains(signal, "prompt layer") || !strings.Contains(signal, binary) {
-				t.Fatalf("stamp=%d signal=%q error=%v; want binary stamp and %s", stamp, signal, promptErr, test.want)
+			if got := rooted(
+				fmt.Sprintf("%v\n%s", promptErr, signal),
+				filepath.Dir(home),
+			); stamp != at.Unix() ||
+				got != test.want {
+				t.Errorf("stamp=%d error and signal = %q, want %q", stamp, got, test.want)
 			}
 		})
 	}
@@ -692,9 +700,9 @@ func TestSpawnAuditUnverifiablePayload(t *testing.T) {
 		want   spawnVerdict
 		reason string
 	}{
-		{"file settings", []string{"claude", "--settings", "/srv/settings.json"}, spawnVerdict("UNVERIFIED"), "file-backed settings"},
-		{"bare resume", []string{"claude", "--resume"}, spawnVerdict("UNVERIFIED"), "resumed argv"},
-		{"historical bare resume", []string{"claude", "--resume"}, spawnPredatesLayer, "before the current spawn door"},
+		{"file settings", []string{"claude", "--settings", "/srv/settings.json"}, spawnVerdict("UNVERIFIED"), "file-backed settings payload unverified; live process settings are unavailable"},
+		{"bare resume", []string{"claude", "--resume"}, spawnVerdict("UNVERIFIED"), "resumed argv with no registry payload — original launch payload unverified"},
+		{"historical bare resume", []string{"claude", "--resume"}, spawnPredatesLayer, "resumed argv with no registry payload (born 50s before the current spawn door)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed := mustParseSpawn(t, tc.argv)
@@ -710,20 +718,29 @@ func TestSpawnAuditUnverifiablePayload(t *testing.T) {
 				100,
 				nil,
 			)
-			if got != tc.want || !strings.Contains(reason, tc.reason) {
-				t.Fatalf("%s: %s", got, reason)
+			if got != tc.want || reason != tc.reason {
+				t.Errorf("%s: reason = %q, want %q", got, reason, tc.reason)
 			}
 		})
 	}
 }
 
 func TestPrintSpawnAuditUnknownAccountStaysUnverified(t *testing.T) {
+	pinSpawnDoor(t)
 	home := t.TempDir()
 	machine := config.Config{
 		Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
 		Accounts: []config.Account{
-			{ID: 1, ConfigDir: "/accounts/1", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor}},
-			{ID: 2, ConfigDir: "/accounts/2", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
+			{
+				ID:        1,
+				ConfigDir: testjail.Place("/accounts/1"),
+				Claude:    &config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+			},
+			{
+				ID:        2,
+				ConfigDir: testjail.Place("/accounts/2"),
+				Claude:    &config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction},
+			},
 		},
 	}
 	launch, err := claudelaunch.Render(claudelaunch.Request{Home: home}, config.Config{})
@@ -732,7 +749,8 @@ func TestPrintSpawnAuditUnknownAccountStaysUnverified(t *testing.T) {
 	}
 	previous := spawnObservationsProbe
 	t.Cleanup(func() { spawnObservationsProbe = previous })
-	for _, environ := range []map[string]string{nil, {}, {"CLAUDE_CONFIG_DIR": "/unknown"}} {
+	var got strings.Builder
+	for _, environ := range []map[string]string{nil, {}, {"CLAUDE_CONFIG_DIR": testjail.Place("/unknown")}} {
 		spawnObservationsProbe = func(context.Context, paths.Values, config.Config, clock.Clock) ([]spawnObservation, []string, error) {
 			return []spawnObservation{
 				{
@@ -745,9 +763,26 @@ func TestPrintSpawnAuditUnknownAccountStaysUnverified(t *testing.T) {
 		}
 		var out bytes.Buffer
 		warnings := printSpawnAuditDoctorWithClock(t.Context(), &out, paths.Values{Home: home}, machine, 1, clock.Real)
-		if warnings != 1 || !strings.Contains(out.String(), "UNVERIFIED cc-unknown") ||
-			!strings.Contains(out.String(), "violations=0 undecodable=0 unverified=1") {
-			t.Fatalf("warnings=%d output=%s", warnings, out.String())
-		}
+		fmt.Fprintf(&got, "%d %s", warnings, rooted(out.String(), filepath.Dir(home)))
 	}
+	if got, want := got.String(), "1 doctor: spawn-audit: UNVERIFIED cc-unknown pid=22 — account environment unreadable; policy unverified\ndoctor: spawn-audit: policy=per-account chats=1 injected=0 predates-layer=0 violations=0 undecodable=0 unverified=1 (age signal: 2023-11-14T22:13:20Z, the later of mtime of {root}/001/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/002/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/002/.local/share/pfm/install/source-repo: no such file or directory))\n1 doctor: spawn-audit: UNVERIFIED cc-unknown pid=22 — account unmatched; policy unverified\ndoctor: spawn-audit: policy=per-account chats=1 injected=0 predates-layer=0 violations=0 undecodable=0 unverified=1 (age signal: 2023-11-14T22:13:20Z, the later of mtime of {root}/001/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/002/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/002/.local/share/pfm/install/source-repo: no such file or directory))\n1 doctor: spawn-audit: UNVERIFIED cc-unknown pid=22 — account unmatched; policy unverified\ndoctor: spawn-audit: policy=per-account chats=1 injected=0 predates-layer=0 violations=0 undecodable=0 unverified=1 (age signal: 2023-11-14T22:13:20Z, the later of mtime of {root}/001/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/002/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/002/.local/share/pfm/install/source-repo: no such file or directory))\n"; got != want {
+		t.Errorf("unknown-account audits = %q, want %q", got, want)
+	}
+}
+
+// pinSpawnDoor points the spawn door's age signal at a fixture binary with a
+// fixed mtime, so audit rows naming it compare exactly.
+func pinSpawnDoor(t *testing.T) {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "pfm")
+	if err := os.WriteFile(binary, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(binary, at, at); err != nil {
+		t.Fatal(err)
+	}
+	previous := spawnDoorExecutable
+	t.Cleanup(func() { spawnDoorExecutable = previous })
+	spawnDoorExecutable = func() (string, error) { return binary, nil }
 }

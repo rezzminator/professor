@@ -46,6 +46,11 @@ func TestAgentPanelFocused(t *testing.T) {
 	}{
 		{"the panel holds the keyboard", agentPanelFocusedCapture, true},
 		{"the composer holds the keyboard", agentPanelReleasedCapture, false},
+		{
+			"a pane drawn at its top holds the panel above its blank rows",
+			agentPanelFocusedCapture + strings.Repeat("\n", 30),
+			true,
+		},
 		{"an agent row with no panel hint is older activity, not focus", "❯ \n❯ ● qa-cortex  Verifying results", false},
 		{
 			"the hint quoted far up the scrollback is not the footer",
@@ -84,7 +89,8 @@ func TestCallRefusesByNameWhenTheAgentsPanelKeepsFocus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Code != CodeUndelivered || !strings.Contains(result.Message, "agents panel") {
+	if result.Code != CodeUndelivered ||
+		result.Message != "ABORT: \"%1\" has its agents panel focused and Escape did not return focus to the composer; nothing was typed" {
 		t.Fatalf("a panel that keeps focus must be refused by name: result=%+v", result)
 	}
 	if len(fake.literals) != 0 || contains(fake.keys, "Enter") {

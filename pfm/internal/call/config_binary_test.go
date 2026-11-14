@@ -3,7 +3,6 @@ package call
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +73,8 @@ func TestCallUsesConfiguredBinaryToDescribeBusyPane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	if result.Code != 0 || result.Status != "queued" || !strings.Contains(result.Message, "busy Codex") {
+	if result.Code != 0 || result.Status != "queued" ||
+		result.Message != "queued into \"%1\" — busy Codex accepted the turn without interruption (Enter confirmed, input cleared)" {
 		t.Fatalf("configured Codex call = %+v", result)
 	}
 }

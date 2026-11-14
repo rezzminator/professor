@@ -1,6 +1,7 @@
 package professor
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -70,6 +71,60 @@ func TestOpenProjectRowsNamesEveryRowNoVerbClosed(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("OpenProjectRows() = %+v, want %+v", rows, want)
+	}
+
+	// A pinned template and a NEW template the store cannot read are one
+	// UNREADABLE row each; every other row still shows and the report fails.
+	raw, err := os.ReadFile(filepath.Join(project, ".professor", "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest projectManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	store := manifest.Interview.BlueprintClonePath
+	pinnedTemplate := filepath.Join(store, "templates", "project", "rumdl-policy.toml")
+	newTemplate := filepath.Join(store, "templates", "project", "commands", "locked.md")
+	if err := os.WriteFile(newTemplate, []byte("# locked\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{pinnedTemplate, newTemplate} {
+		if err := os.Chmod(path, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err = OpenProjectRows(project, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("OpenProjectRows() with unreadable templates err = %v, want the rows", err)
+	}
+	wantUnreadable := []OpenRow{
+		{Status: "UPDATED", Name: ".claude/settings.json"},
+		{Status: "NEW", Name: "project/commands/added.md"},
+		{Status: "UNREADABLE", Name: "project/commands/locked.md"},
+		{Status: "UNREADABLE", Name: ".rumdl.toml"},
+	}
+	if !reflect.DeepEqual(rows, wantUnreadable) {
+		t.Fatalf("OpenProjectRows() with unreadable templates = %+v, want %+v", rows, wantUnreadable)
+	}
+	var report bytes.Buffer
+	if code := RunProjectUpdates(project, t.TempDir(), false, &report, nil); code != 3 {
+		t.Fatalf("RunProjectUpdates() code=%d, want 3:\n%s", code, report.String())
+	}
+	for _, line := range []string{
+		"  UNREADABLE    2\n",
+		"    project/commands/locked.md — UNREADABLE " + newTemplate + ": read " + newTemplate + ": permission denied\n",
+		"    .rumdl.toml — UNREADABLE " + pinnedTemplate + ": read " + pinnedTemplate + ": permission denied\n",
+		"FAILED — 2 item(s) could not be read; nothing was written.\n",
+	} {
+		if !strings.Contains(report.String(), line) {
+			t.Fatalf("report lacks %q:\n%s", line, report.String())
+		}
+	}
+	var doctor bytes.Buffer
+	if warnings := PrintDoctor(&doctor, project, t.TempDir()); warnings != 4 ||
+		doctor.String() != "professor: current 0 · review-required 2 · UNREADABLE 2\n" {
+		t.Fatalf("PrintDoctor() warnings=%d output=%q, want 4 and the UNREADABLE count", warnings, doctor.String())
 	}
 
 	if err := os.WriteFile(

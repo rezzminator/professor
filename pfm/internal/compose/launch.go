@@ -2,7 +2,6 @@ package compose
 
 import (
 	"context"
-	"errors"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
@@ -17,18 +16,28 @@ func (current *composer) launchFor(id string) (fleetdb.Launch, bool, bool) {
 	if current.input.Launches == nil {
 		return fleetdb.Launch{}, false, false
 	}
-	ctx := current.input.Context
-	if ctx == nil {
-		ctx = context.Background()
+	cache := &current.launches
+	if !cache.read {
+		ctx := current.input.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		cache.rows, cache.err = current.input.Launches.All(ctx)
+		cache.read = true
 	}
-	launch, err := current.input.Launches.LaunchFor(ctx, id)
-	if errors.Is(err, fleetdb.ErrNoLaunch) {
-		return fleetdb.Launch{}, false, false
-	}
-	if err != nil {
+	if cache.err != nil {
 		return fleetdb.Launch{}, false, true
 	}
-	return launch, true, false
+	launch, found := cache.rows[id]
+	return launch, found, false
+}
+
+// launchCache is the launch table as one compose read it: one read for the
+// whole fleet, never a query per row.
+type launchCache struct {
+	rows map[string]fleetdb.Launch
+	err  error
+	read bool
 }
 
 func (current *composer) applyLaunch(row *Row, id string) {

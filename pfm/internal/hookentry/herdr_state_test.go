@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestHerdrStateOutsideHerdrIsASilentNoOp(t *testing.T) {
@@ -252,7 +253,7 @@ func TestHerdrStateNeverFailsATurn(t *testing.T) {
 	clock := int64(1_000_000)
 	t.Run("socket gone", func(t *testing.T) {
 		env := herdrPaneEnv(server, "w1:p1")
-		env["HERDR_SOCKET_PATH"] = filepath.Join(os.TempDir(), "pfm-no-such-herdr.sock")
+		env["HERDR_SOCKET_PATH"] = filepath.Join(paths.TempRoot(), "pfm-no-such-herdr.sock")
 		got := runHerdr(t, env, nil, &clock, []string{"--engine", "opencode", "working"}, `{"session_id":"s1"}`)
 		if got.rc != 0 || !strings.Contains(got.stderr, "pfm-no-such-herdr.sock") ||
 			!strings.Contains(got.stderr, "herdr-state") {
@@ -666,12 +667,16 @@ func TestHerdrStateReportsOnlyForThePanesOwnEngine(t *testing.T) {
 func TestPayloadHookRoutesEachVerbToItsEntry(t *testing.T) {
 	var stderr bytes.Buffer
 	if rc := PayloadHook([]string{"herdr-state", "bogus"}, strings.NewReader(""), &stderr); rc != 1 ||
-		!strings.Contains(stderr.String(), "herdr-state") {
+		stderr.String() != `pfm internal herdr-state: unknown event "bogus"
+usage: pfm internal herdr-state [--engine claude|codex|opencode] start|working|blocked|idle|end|notification|title|agent-start|agent-stop < hook-payload.json
+       pfm internal herdr-state attach|sync|detach --socket {tmux socket} --session {tmux session} [--client {tmux client pid}]
+       pfm internal herdr-state name --socket {tmux socket} --session {tmux session}
+` {
 		t.Fatalf("herdr-state: rc=%d stderr=%q, want its usage error", rc, stderr.String())
 	}
 	stderr.Reset()
 	if rc := PayloadHook([]string{"herdr-shell", "bogus"}, strings.NewReader(""), &stderr); rc != 2 ||
-		!strings.Contains(stderr.String(), "herdr-shell") {
+		stderr.String() != "pfm internal herdr-shell: verb \"bogus\", want done or release\n" {
 		t.Fatalf("herdr-shell: rc=%d stderr=%q, want its usage error", rc, stderr.String())
 	}
 }
@@ -745,53 +750,6 @@ func TestHerdrStateBridgeLockDoesNotAliasAUserSession(t *testing.T) {
 	rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
 	rig.wantQuiet(rig.engine("idle", `{"session_id":"s1"}`))
 	rig.wantCalls(listCall, reportCall("w1:p1", "idle", ""))
-}
-
-// A watcher is ordered by the blocked event, not the later reannouncement's
-// wall clock. Rebinding and reannouncing must not strand its pane as blocked.
-func TestHerdrStateWatcherSurvivesBridgeReconciliation(t *testing.T) {
-	for _, operation := range []string{"reannounce", "move", "adopt"} {
-		t.Run(operation, func(t *testing.T) {
-			rig := newChatRig(t)
-			clients := map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}
-			if operation == "adopt" {
-				clients = nil
-			}
-			state := rig.registered("blocked", clients)
-			state.Seq = 700
-			rig.seed(state)
-			rig.tmux.clients = []string{"4242"}
-			rig.clientEnv(4242, "w1:p1")
-			deps := rig.jail.deps(rig.env, &rig.clock)
-			deps.tmux, deps.listPanes = rig.tmux.run, rig.tmux.listPanes
-			pane := "w1:p1"
-			switch operation {
-			case "reannounce":
-				if _, err := reannounceOn(context.Background(), rigSocket, deps); err != nil {
-					t.Fatal(err)
-				}
-			case "move":
-				rig.herdr.move(pane, "w2:p3")
-				pane = "w2:p3"
-				rig.wantQuiet(rig.hook("sync", "--client", "4242"))
-			}
-			reporter := &herdrReporter{
-				deps: deps, session: "cc-1", stderr: io.Discard,
-				options: herdrOptions{engine: pfmengine.Claude, event: "idle", socket: rigSocket},
-			}
-			watch := &herdrWatch{reporter: reporter, seq: 700}
-			before := len(rig.herdr.calls())
-			if err := watch.report(); err != nil {
-				t.Fatal(err)
-			}
-			if calls := rig.herdr.calls()[before:]; !slices.Contains(calls, reportCall(pane, "idle", "")) {
-				t.Fatalf("watch after %s: wire=%q, want idle in %s", operation, calls, pane)
-			}
-			if got := rig.tmux.storedState(t); got.State != "idle" || got.Seq != 701 {
-				t.Fatalf("watch stored=%+v, want idle at 701", got)
-			}
-		})
-	}
 }
 
 func TestHerdrStateSteadyReportKeepsOwnershipGeneration(t *testing.T) {
@@ -957,18 +915,22 @@ func TestHerdrStateEndAfterTmuxServerGone(t *testing.T) {
 				getenv: func(k string) string {
 					return map[string]string{"TMUX": socket + ",1,0", "TMUX_PANE": "%0", "HERDR_BIN_PATH": "herdr"}[k]
 				},
-				tmux:      runTmuxForHerdr,
+				// the error runTmuxForHerdr returns once the chat's tmux server is gone
+				tmux: func(_ context.Context, socket string, args ...string) (string, error) {
+					return "", fmt.Errorf(
+						"tmux %s: exit status 1: no server running on %s",
+						strings.Join(args, " "),
+						socket,
+					)
+				},
 				listPanes: listTmuxPanesForHerdr,
 				now:       time.Now,
 				logError:  func(_ string, _ time.Time, message string) error { logged = append(logged, message); return nil },
 			}
 			rc := reportToHerdr([]string{event}, strings.NewReader(`{"session_id":"s1"}`), &stderr, deps)
-			if event == "end" {
-				if rc != 0 || len(logged) != 0 || !strings.Contains(stderr.String(), "INFO") {
-					t.Fatalf("ended server: rc=%d errors=%v stderr=%s", rc, logged, &stderr)
-				}
-			} else if len(logged) != 1 {
-				t.Fatalf("live event lost its fault: %v stderr=%s", logged, &stderr)
+			got := strings.ReplaceAll(fmt.Sprintf("%d %q %s", rc, logged, &stderr), socket, "{socket}")
+			if want := map[string]string{"end": "0 [] INFO pfm internal herdr-state end: tmux server {socket} already gone; foreground client exited: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\t#{pane_pid}: exit status 1: no server running on {socket}\n", "working": "0 [\"pfm internal herdr-state working: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\\t#{pane_pid}: exit status 1: no server running on {socket} (fail-open)\"] pfm internal herdr-state working: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\t#{pane_pid}: exit status 1: no server running on {socket} (fail-open)\n"}[event]; got != want {
+				t.Errorf("rc errors stderr = %q, want %q", got, want)
 			}
 		})
 	}

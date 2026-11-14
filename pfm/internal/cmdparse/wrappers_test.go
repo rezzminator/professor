@@ -94,6 +94,39 @@ func TestWrappersUnwrap(t *testing.T) {
 			args:     [][]string{{"x"}},
 		},
 		{
+			name:     "find -exec runs its command up to the semicolon",
+			command:  `find . -name x -exec git commit -m x \;`,
+			programs: []string{"find", "git"},
+			args:     [][]string{{".", "-name", "x", "-exec", "git", "commit", "-m", "x", ";"}, {"commit", "-m", "x"}},
+		},
+		{
+			name:     "find -execdir, -ok and -okdir, and a plus after {}",
+			command:  `find . -execdir grep -n f {} + -ok rm {} \; -okdir cat {} ';'`,
+			programs: []string{"find", "grep", "rm", "cat"},
+			args: [][]string{
+				{".", "-execdir", "grep", "-n", "f", "{}", "+", "-ok", "rm", "{}", ";", "-okdir", "cat", "{}", ";"},
+				{"-n", "f", "{}"},
+				{"{}"},
+				{"{}"},
+			},
+		},
+		{
+			name:     "find -exec: a plus not after {} is an argument",
+			command:  `find . -exec echo + {} +`,
+			programs: []string{"find", "echo"},
+			args:     [][]string{{".", "-exec", "echo", "+", "{}", "+"}, {"+", "{}"}},
+		},
+		{
+			name:     "find -exec unwraps and reads a shell string",
+			command:  `find . -exec env X=1 bash -c 'git push' \;`,
+			programs: []string{"find", "bash", "git"},
+			args: [][]string{
+				{".", "-exec", "env", "X=1", "bash", "-c", "git push", ";"},
+				{"-c", "git push"},
+				{"push"},
+			},
+		},
+		{
 			name:     "a script path is its own program",
 			command:  `./run.sh x; scripts/s.sh; timeout 5 ./run.sh`,
 			programs: []string{"./run.sh", "scripts/s.sh", "./run.sh"},

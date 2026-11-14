@@ -1,127 +1,19 @@
 // Package gather probes live tmux and process state without indexing files.
+// A native Herdr seat's pane is the one holding its saved terminal (herdrpanes.go).
+// A seat is judged dead, its supervisor exited or its Herdr socket file gone, in herdrgone.go.
+// The Gatherer, its Dependencies and New, which builds it from the caller's paths, live in gatherer.go.
 package gather
 
 import (
 	"context"
-	"fmt"
 	"maps"
+	"slices"
 	"sort"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
-
-// CodexNameResolver resolves the indexed display name for a rollout path.
-type CodexNameResolver func(rolloutPath string) naming.CodexName
-
-// CodexIDNameResolver resolves the indexed display name for a Codex thread id.
-// It is the only naming rung a session that writes no rollout file has, and
-// the index behind it owns the precedence: the thread's own name, then the
-// session_index name, then its first prompt.
-type CodexIDNameResolver func(threadID string) naming.CodexName
-
-// Dependencies supplies probe interfaces and process-local policy.
-type Dependencies struct {
-	ProcFS      ProcFS
-	Tmux        TmuxClient
-	TmuxBinary  string
-	TmuxTmpDir  string
-	Now         func() time.Time
-	CodexName   CodexNameResolver
-	CodexIDName CodexIDNameResolver
-	CodexThread CodexThreadResolver
-	// CodexHomes is the config-owned roster. Nil preserves the historical
-	// paths.CodexHome singleton for direct callers; an empty non-nil slice
-	// means no configured Codex engine.
-	CodexHomes   []string
-	ClaudeBinary string
-	CodexBinary  string
-	// OpenCodeBinary is the configured OpenCode launch command, used to
-	// recognise an OpenCode process whose executable is not the default name.
-	OpenCodeBinary string
-	// OpenCodeSessions is the indexed OpenCode session set DetectOpenCode
-	// names a live pane from. gather never opens opencode.db itself — the
-	// rows arrive already read (fleet.Gather).
-	OpenCodeSessions []OpenCodeSession
-	LabelEmojis      []string
-	ReadOnly         bool
-}
-
-// Gatherer creates immutable live-state snapshots.
-type Gatherer struct {
-	paths            paths.Values
-	proc             ProcFS
-	tmux             TmuxClient
-	now              func() time.Time
-	codexName        CodexNameResolver
-	codexIDName      CodexIDNameResolver
-	codexThread      CodexThreadResolver
-	codexHomes       []string
-	claudeBinary     string
-	codexBinary      string
-	openCodeBinary   string
-	openCodeSessions []OpenCodeSession
-	labelEmojis      []string
-	readOnly         bool
-}
-
-// New resolves paths and fills real implementations for omitted interfaces.
-func New(dependencies Dependencies) (*Gatherer, error) {
-	resolved, err := paths.Resolve()
-	if err != nil {
-		return nil, fmt.Errorf("resolve gather paths: %w", err)
-	}
-	proc := dependencies.ProcFS
-	if proc == nil {
-		proc = NewProcFS(resolved.ProcRoot)
-	}
-	now := dependencies.Now
-	if now == nil {
-		now = clock.Real.Now
-	}
-	tmux := dependencies.Tmux
-	if tmux == nil {
-		tmuxTmpDir := dependencies.TmuxTmpDir
-		if tmuxTmpDir == "" {
-			tmuxTmpDir = paths.OSEnv{}.Get("TMUX_TMPDIR")
-			if tmuxTmpDir == "" {
-				tmuxTmpDir = "/tmp"
-			}
-		}
-		tmux = TmuxProbe{
-			Binary:     dependencies.TmuxBinary,
-			TmuxTmpDir: tmuxTmpDir,
-		}
-	}
-	codexHomes := dependencies.CodexHomes
-	if codexHomes == nil {
-		codexHomes = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
-	} else {
-		codexHomes = append([]string{}, codexHomes...)
-	}
-	return &Gatherer{
-		paths:          resolved,
-		proc:           proc,
-		tmux:           tmux,
-		now:            now,
-		codexName:      dependencies.CodexName,
-		codexIDName:    dependencies.CodexIDName,
-		codexThread:    dependencies.CodexThread,
-		codexHomes:     codexHomes,
-		claudeBinary:   dependencies.ClaudeBinary,
-		codexBinary:    dependencies.CodexBinary,
-		openCodeBinary: dependencies.OpenCodeBinary,
-		openCodeSessions: append(
-			[]OpenCodeSession(nil), dependencies.OpenCodeSessions...),
-		labelEmojis: append([]string(nil), dependencies.LabelEmojis...),
-		readOnly:    dependencies.ReadOnly,
-	}, nil
-}
 
 // Gather probes live state. Pane-dependent filesystem and ProcFS probes run
 // concurrently after the one-command-per-socket tmux snapshot is available.
@@ -172,11 +64,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 	})
 	group.Go(func() error {
 		var err error
-		if gatherer.readOnly {
-			crumbs, err = ReadCrumbsReadOnly(gatherer.paths.SIDDir, tmuxProbe.Panes)
-		} else {
-			crumbs, err = ReadCrumbs(gatherer.paths.SIDDir, tmuxProbe.Panes)
-		}
+		crumbs, err = scanCrumbs(gatherer.paths.SIDDir, tmuxProbe.Panes, !gatherer.readOnly, tmuxProbe.Unreadable)
 		return err
 	})
 	group.Go(func() error {
@@ -251,7 +139,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		CrumblessLive:     append([]CrumblessLive(nil), crumblessLive...),
 		CorpseSwept:       append([]string(nil), tmuxProbe.CorpseSwept...),
 		StaleSwept:        append([]string(nil), crumbs.StaleSwept...),
-		Warnings:          append(append([]string(nil), tmuxProbe.ProbeWarnings...), agentWarnings...),
+		Warnings:          slices.Concat(tmuxProbe.ProbeWarnings, agentWarnings, crumbs.Warnings),
 		UnreadableSockets: maps.Clone(tmuxProbe.Unreadable),
 	}, nil
 }

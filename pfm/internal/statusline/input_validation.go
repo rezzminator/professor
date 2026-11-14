@@ -37,47 +37,47 @@ func (data *input) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-func validateInput(data input) error {
-	usage := data.ContextWindow.CurrentUsage
-	if usage.InputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0 ||
-		data.ContextWindow.ContextWindowSize < 0 ||
-		data.ContextWindow.TotalInputTokens < 0 ||
-		data.ContextWindow.TotalOutputTokens < 0 {
-		return fmt.Errorf("negative context counters")
+// sanitizeInput degrades every out-of-range value of the payload to unknown and
+// returns one note per value, so the line still draws every other segment: a
+// bad counter reads as absent, a bad quota window reads ERR, never a lost line.
+func sanitizeInput(data *input) []string {
+	var notes []string
+	window := &data.ContextWindow
+	usage := &window.CurrentUsage
+	if usage.InputTokens < 0 || usage.CacheReadInputTokens < 0 || usage.CacheCreationInputTokens < 0 {
+		notes = append(notes, "negative current_usage counters: context tokens unknown")
+		usage.InputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens = 0, 0, 0
+		usage.Known = false
 	}
-	if data.ContextWindow.UsedPercentage < 0 || data.ContextWindow.UsedPercentage > 100 ||
-		math.IsNaN(data.ContextWindow.UsedPercentage) {
-		return fmt.Errorf("context percentage outside 0..100")
+	if window.ContextWindowSize < 0 {
+		notes = append(notes, fmt.Sprintf("negative context_window_size %d: window unknown", window.ContextWindowSize))
+		window.ContextWindowSize = 0
 	}
-	if data.Cost.TotalCostUSD < 0 || data.Cost.TotalDurationMS < 0 {
-		return fmt.Errorf("negative cost or duration")
+	if window.UsedPercentage < 0 || window.UsedPercentage > 100 || math.IsNaN(window.UsedPercentage) {
+		notes = append(notes, fmt.Sprintf("context percentage %v outside 0..100: unknown", window.UsedPercentage))
+		window.UsedPercentage, window.PercentageKnown = 0, false
 	}
-	for _, limit := range data.RateLimits.Scoped {
+	if data.Cost.TotalCostUSD < 0 {
+		notes = append(notes, fmt.Sprintf("negative cost %v: payload cost unknown", data.Cost.TotalCostUSD))
+		data.Cost.TotalCostUSD = 0
+	}
+	if data.Cost.TotalDurationMS < 0 {
+		notes = append(notes, fmt.Sprintf("negative duration %d: unknown", data.Cost.TotalDurationMS))
+		data.Cost.TotalDurationMS = 0
+	}
+	for i, limit := range data.RateLimits.Scoped {
 		if limit.Percent != nil && (*limit.Percent < 0 || *limit.Percent > 100 || math.IsNaN(*limit.Percent)) {
-			return fmt.Errorf("invalid scoped %s quota", limit.Kind)
+			notes = append(notes, fmt.Sprintf("invalid scoped %s quota %v", limit.Kind, *limit.Percent))
+			data.RateLimits.Scoped[i].Percent = nil
+			// Only the Fable window draws; another model's bad limit is no row's.
+			data.RateLimits.scopedFailed = data.RateLimits.scopedFailed || limit.FableWeekly()
 		}
 	}
 	for name, w := range data.RateLimits.Windows {
 		if w.UsedPercentage < 0 || w.UsedPercentage > 100 || w.ResetsAt < 0 {
-			return fmt.Errorf("invalid %s quota", name)
+			notes = append(notes, fmt.Sprintf("invalid %s quota", name))
+			data.RateLimits.Windows[name] = rateWindow{Failure: true}
 		}
 	}
-	return nil
-}
-
-func (task *subagentTask) UnmarshalJSON(raw []byte) error {
-	type plain subagentTask
-	var decoded plain
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return err
-	}
-	var present struct {
-		Tokens *int64 `json:"tokenCount"`
-	}
-	if err := json.Unmarshal(raw, &present); err != nil {
-		return err
-	}
-	decoded.tokenKnown = present.Tokens != nil
-	*task = subagentTask(decoded)
-	return nil
+	return notes
 }

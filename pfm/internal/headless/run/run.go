@@ -5,7 +5,6 @@
 package run
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,7 +24,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -212,7 +210,7 @@ func Resolve(request Request) (Request, error) {
 			return Request{}, err
 		}
 	}
-	binaryPath, err := obs.Runner(deps.RealRunner{}).LookPath(binary)
+	binaryPath, err := deps.Resolve(binary)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return Request{}, &BinaryMissingError{
@@ -508,7 +506,6 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		environment = append([]string(nil), request.Env...)
 	}
 	setEnvironment(environment, request.Engine, request.ConfigDir, request.Env != nil, &environment)
-	environment = request.Config.ExtensionEnvironment(pfmengine.MustLookup(request.Engine).LongName, environment)
 	var openCode openCodeRun
 	if request.Engine == pfmengine.OpenCode {
 		openCode, err = startOpenCode(ctx, &request, environment, cwd)
@@ -568,9 +565,8 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		}
 		return result, nil
 	}
-	if stdout.truncated || stderr.truncated {
-		return result, fmt.Errorf("normalized headless output exceeded the %d-byte capture limit", maxCapturedOutput)
-	}
+	stdout.noteOverflow("stdout", &result)
+	stderr.noteOverflow("stderr", &result)
 	if runErr != nil {
 		result.IsError = true
 		// An engine that exits non-zero with an empty stderr said what went wrong on stdout
@@ -591,6 +587,8 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 	}
 	if err := parseOutput(&result, request); err != nil {
 		result.IsError = true
+		// output pfm could not read is shown, never dropped: its tails go to the receipt
+		result.Diagnostics = append(result.Diagnostics, failureDiagnostics(result)...)
 		return result, err
 	}
 	return result, nil
@@ -760,29 +758,6 @@ func setEnvironment(
 		filtered = append(filtered, name+"="+configDir)
 	}
 	*target = filtered
-}
-
-type boundedBuffer struct {
-	bytes.Buffer
-	truncated bool
-	limited   bool
-}
-
-func (buffer *boundedBuffer) Write(value []byte) (int, error) {
-	if !buffer.limited {
-		return buffer.Buffer.Write(value)
-	}
-	remaining := maxCapturedOutput - buffer.Len()
-	if remaining <= 0 {
-		buffer.truncated = true
-		return len(value), nil
-	}
-	if len(value) > remaining {
-		_, _ = buffer.Buffer.Write(value[:remaining])
-		buffer.truncated = true
-		return len(value), nil
-	}
-	return buffer.Buffer.Write(value)
 }
 
 func writerFor(stream, capture io.Writer) io.Writer {

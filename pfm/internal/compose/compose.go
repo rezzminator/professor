@@ -33,6 +33,7 @@ type composer struct {
 	killedByID       map[string]store.Killed
 	panesBySocket    map[string][]gather.ProbePane
 	paneByTarget     map[string]gather.ProbePane
+	launches         launchCache
 	claudeSockets    map[string]struct{}
 	liveTranscripts  map[string]struct{}
 	livePaneThreads  map[string]string
@@ -838,7 +839,7 @@ func (current *composer) agentRows() []Row {
 		}
 		agent := agents[id]
 		transcript, found := current.transcriptByID[id]
-		if current.abandonedLaunch(agent, transcript, found) {
+		if current.abandonedLaunch(agent, transcript, found) || current.bootingLaunch(agent) {
 			continue
 		}
 		if !found {

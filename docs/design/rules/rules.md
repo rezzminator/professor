@@ -1,8 +1,8 @@
 # rules
 
-A rule is a Markdown instruction file under `.claude/rules/`. Claude Code reads rules natively; Codex and OpenCode have no equivalent. engine-sync (`docs/design/engine-sync/engine-sync.md`) carries every rule to both engines over two channels: an always-on rule (no `paths:`) is compiled into an instruction file the engine reads at session start, and a path-scoped rule is injected mid-session by one engine-sync matcher, run from a Codex hook entry and an OpenCode shim that engine-sync writes. This file is the design; the global always-on channel is built.
+A rule is a Markdown instruction file under `.claude/rules/`. Claude Code reads rules natively; Codex and OpenCode have no equivalent. engine-sync (`docs/design/engine-sync/engine-sync.md`) carries every rule to both engines by compiling it into an instruction file the engine reads at session start: an always-on rule (no `paths:`) is inlined, and a path-scoped rule becomes a read-on-match pointer, one line telling the loop to read the rule when it works on a matching file. Global rules compile into the Codex home's `AGENTS.md` block and an OpenCode `instructions` file; a project's own rules compile into that project's `AGENTS.md`, which OpenCode reads too. A designed injector would add a path-scoped rule's body mid-session, from one engine-sync matcher run by a Codex hook entry and an OpenCode shim.
 
-**Status:** partly built. Built: [Global rule source](#global-rule-source), [Global always-on rules](#global-always-on-rules) (the Codex block, the OpenCode file and `instructions` entry, refreshed at `pfm install`), [Agent targeting](#agent-targeting) on Claude Code (the rule-control plugin), and the [Checks](#checks) rows marked built. Designed, not built: [Always-on project rules](#always-on-project-rules), [Path-scoped rules](#path-scoped-rules) (the `engine-sync hook` injector, its Codex hook entries and OpenCode shim), and the launch-time and `SessionStart` [freshness](#freshness) triggers — **Build path for the rest:** engine-sync phase P3, `flights-foreman` with this file as the spec — **Consumers:** `rm-rf-absolute-path`, `git-writes-through-gitter`, `flights-life-cycle`, `writing-code` and `testing`, shipped always-on; `professor` and `integration-tests`, shipped path-scoped; `pfm-testing-manual`, waiting on the injector ([First consumer](#first-consumer)); the rule-control plugin, which reads a rule's `visible-to:` key to deliver it to chosen loops on Claude Code ([Agent targeting](#agent-targeting))
+**Status:** built except the injector. Built: [Global rule source](#global-rule-source), [Global always-on rules](#global-always-on-rules) (the Codex block, the OpenCode file and `instructions` entry), [Always-on project rules](#always-on-project-rules), the [read-on-match pointer](#read-on-match-pointer) for global and project path-scoped rules, [Agent targeting](#agent-targeting) on Claude Code (the rule-control plugin), the [freshness](#freshness) triggers at `pfm install`, `engine-sync doctor` and the Claude `SessionStart` hook, and the [Checks](#checks) rows marked built. Designed, not built: the [`engine-sync hook {codex|opencode}`](#engine-sync-hook-codexopencode) injector, its Codex hook entries and OpenCode shim, and the launch-time [freshness](#freshness) trigger — **Build path for the rest:** engine-sync phase P3, `flights:foreman` with this file as the spec — **Consumers:** `rm-rf-absolute-path`, `flights-life-cycle`, `coding` and `testing`, shipped always-on; `git-writes-through-gitter`, the project-tier rule `pfm init` scaffolds into `.claude/rules/` ([Always-on project rules](#always-on-project-rules)); `professor` and `integration-tests`, shipped path-scoped; `no-hardcoded-locations`, this repo's own project rule, path-scoped to `pfm/**/*.go`, served by the pointer in `AGENTS.md` ([First consumer](#first-consumer)); `pfm-testing-manual`, not yet a rule; the rule-control plugin, which reads a rule's `visible-to:` key to deliver it to chosen loops on Claude Code ([Agent targeting](#agent-targeting))
 
 `{codex home}` is one Codex account's home; `{claude config dir}` is one Claude account's `configDir`; `{engine-sync home}` is `~/.local/share/engine-sync`; `{engine-sync state}` is `~/.local/state/engine-sync`.
 
@@ -29,15 +29,15 @@ A rule is a Markdown instruction file under `.claude/rules/`. Claude Code reads 
 
 - **`.claude/rules/` is the one source.** Project rules live in `{project}/.claude/rules/**/*.md`, global rules in `~/.claude/rules/**/*.md`. `rules` is a shared store entry (`pfm/internal/installer/claude_store.go`), so every `{claude config dir}/rules` links to `~/.claude/rules`. Professor's own global rules ship as `templates/global/rules/*.md`, which `pfm install` links into `~/.claude/rules/` ([Global rule source](#global-rule-source)). engine-sync reads rules and never writes into either directory.
 - **Two classes, one scope law.** A rule without `paths:` is always-on; a rule with `paths:` is path-scoped. A rule's scope is its owner directory intersected with its `paths:`: a rule in a nested `{dir}/.claude/rules/` applies only under `{dir}`, so a nested always-on rule is path-scoped to `{dir}/**`.
-- **Always-on compiles; path-scoped injects.** Compiled text survives compaction and costs nothing per tool call; injection is the only way to make text appear when a matching file is touched.
-- **One matcher for both non-Claude engines.** `engine-sync hook {codex|opencode}` (Go, in the engine-sync binary) holds path extraction, glob matching, the once-per-agent ledger and the output shape. The Codex hook entry and the OpenCode shim are thin callers of `{engine-sync home}/bin/engine-sync`. A Go binary exec costs about 10 ms on the host (measured on `pfm --version`, three runs).
+- **Always-on compiles inline; path-scoped compiles to a pointer.** Compiled text survives compaction and costs nothing per tool call. A pointer is one line in the compiled text naming the rule file and its globs: the loop reads the rule when it works on a matching file, so the body arrives only if the loop obeys. Only an injector can make the body appear when a matching file is touched ([designed](#path-scoped-rules)).
+- **One matcher for both non-Claude engines (designed).** `engine-sync hook {codex|opencode}` (Go, in the engine-sync binary) holds path extraction, glob matching, the once-per-agent ledger and the output shape. The Codex hook entry and the OpenCode shim are thin callers of `{engine-sync home}/bin/engine-sync`. A Go binary exec costs about 10 ms on the host (measured on `pfm --version`, three runs).
 - **Claude stays native.** engine-sync adds nothing to Claude's delivery; it only lints rule frontmatter, because Claude silently loads an unparseable `paths:` rule as always-on.
 - **Rules reach every agent, the fleet prompt does not.** Rules never ride pfm's fleet-prompt channels (`developer_instructions` on Codex, the composed prompt's `instructions` entry on OpenCode). Those carry the main chat's system layer, and a Codex agent role replaces `developer_instructions`.
 - **Global always-on on Codex:** an engine-sync-owned fenced block in every `{codex home}/AGENTS.md`.
 - **Global always-on on OpenCode:** an engine-sync-owned entry in the global `instructions` array pointing at a compiled file, never `~/.config/opencode/AGENTS.md`.
-- **Freshness.** `engine-sync global` compiles global rules, writing only when bytes differ. Built: it runs at `pfm install`, and `engine-sync doctor` reports `STALE` for any drift. Designed, not built: a run at every pfm launch of a Codex or OpenCode chat and at every Claude `SessionStart` through the plugin. No filesystem watcher.
-- **Codex nested `AGENTS.md` rides the injector.** A Codex session never reads an `AGENTS.md` below its working directory; the injector treats each one as a rule scoped to its own directory.
-- **Rules carry protocol, engines differ in mechanics.** A compiled or injected rule body gets the same transform `CLAUDE.md` gets for `AGENTS.md` (`/command` and model-name rewrites), and nothing else.
+- **Freshness.** `engine-sync global` compiles global rules, writing only when bytes differ. Built: it runs at `pfm install` and at every Claude `SessionStart` through the plugin, and `engine-sync doctor` reports `STALE` for any drift. Designed, not built: a run at every pfm launch of a Codex or OpenCode chat. No filesystem watcher. A project's rules compile with its `AGENTS.md`, rebuilt by the plugin's `Stop` hook and repaired at `SessionStart`.
+- **Codex nested `AGENTS.md` rides the injector (designed).** A Codex session never reads an `AGENTS.md` below its working directory; the injector treats each one as a rule scoped to its own directory.
+- **Rules carry protocol, engines differ in mechanics.** A compiled or injected rule body gets the same transform `CLAUDE.md` gets for `AGENTS.md` (`/command` and model-name rewrites, `CLAUDE.md` read as `AGENTS.md`), and nothing else.
 
 ## Engine facts
 
@@ -96,32 +96,51 @@ So a user rule guards files only by project-relative globs, and only in sessions
 
 | Scope | Class | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- | --- |
-| project | always-on | native | compiled into the project's `AGENTS.md` | the same `AGENTS.md` |
-| project | path-scoped | native | `engine-sync hook codex` via `PreToolUse` entry | `engine-sync hook opencode` via shim |
-| global | always-on | native | owned block in `{codex home}/AGENTS.md` | owned `instructions` entry |
-| global | path-scoped | native | `engine-sync hook codex` via `PreToolUse` entry | `engine-sync hook opencode` via shim |
-| nested `{dir}/.claude/rules` | either | native, on demand | the injector, scoped to `{dir}/**` | the injector, scoped to `{dir}/**` |
-| nested `{dir}/AGENTS.md` | n/a | native (`CLAUDE.md`) | the injector, scoped to `{dir}/**` | native on `read` |
+| project | always-on | native | inlined in the project's `AGENTS.md` | the same `AGENTS.md` |
+| project | path-scoped | native | read-on-match pointer in the project's `AGENTS.md` | the same `AGENTS.md` |
+| global | always-on | native | inlined in the owned block in `{codex home}/AGENTS.md` | inlined in the owned `instructions` entry |
+| global | path-scoped | native | read-on-match pointer in the owned block | read-on-match pointer in the owned `instructions` entry |
+| nested `{dir}/.claude/rules` of a child project | either | native, on demand | compiled into `{dir}/AGENTS.md`, which Codex reads only for a session started at or below `{dir}` | compiled into `{dir}/AGENTS.md`, attached on a `read` below `{dir}` |
+| nested `{dir}/AGENTS.md` | n/a | native (`CLAUDE.md`) | the injector, scoped to `{dir}/**` (designed) | native on `read` |
 
-Built: the global always-on row, plus every Claude Code cell (native). Every other Codex and OpenCode cell is designed: until the injector ships, a global path-scoped rule reaches neither engine, and `engine-sync doctor` names it `PATH-SCOPED`.
+Every cell is built except the Codex nested `AGENTS.md` one. A pointer asks the loop to read the rule; no engine hook enforces it, so the rule body reaches the context only when the loop follows the line. The injector (designed) would add the body on top of the pointer.
 
 ## Always-on project rules
 
-**Designed, not built.**
+**Built.** A project's own `.claude/rules/**/*.md` compile into that project's `AGENTS.md`, for the root and for every child project with its own `AGENTS.md`.
 
-**Compile point:** engine-sync's Codex target appends the project's always-on rules after the compiled `CLAUDE.md` body and before the root adapter, inside the per-project `AGENTS.md` loop of `plugins/engine-sync/internal/target/codex/target.go:271` (the body compiled at `:273`, the root adapter appended at `:277-284`), for the root and for every child project with its own `.claude/`. Order is path order. Each rule becomes a block opened by `<!-- rule: .claude/rules/{relpath} -->`, frontmatter stripped, body transformed like `CLAUDE.md`.
+**Loading:** `source.Rules` (`plugins/engine-sync/internal/source/rules.go`) reads a rules directory, the one door global rules use too: every `.md` below it, links followed, in sorted relative-path order; an absent directory holds no rules. `LoadProject` (`internal/source/project.go`) calls it for `{project}/.claude/rules` of each project.
 
-**Check:** `engine-sync check` compares the compiled `AGENTS.md` byte for byte (the compare at `plugins/engine-sync/internal/reconcile/reconcile.go:228`), so a rule edit not rebuilt reports `STALE`. OpenCode reads the same `AGENTS.md`; the OpenCode compiler needs no change.
+**Compile point:** `orientations` in `plugins/engine-sync/internal/target/codex/orientation.go` appends `codex.CompileRules` output after the compiled `CLAUDE.md` body and before `codex.rootAdapter`. Rules sit in sorted path order, each under `<!-- rule: {project-relative}/.claude/rules/{rel} -->` (`.claude/rules/…` at the root, `{child}/.claude/rules/…` in a child), frontmatter stripped. An always-on rule's body gets the same transform the `CLAUDE.md` body gets, so `CLAUDE.md` inside a rule reads `AGENTS.md`. A rule with `visible-to:` and no `paths:` stays always-on. A path-scoped rule becomes its [pointer](#read-on-match-pointer). A project with no rules compiles unchanged.
 
-**Budget:** Codex silently stops adding project docs past `project_doc_max_bytes`. The root `AGENTS.md` is 18417 bytes before any rule.
+**Failure:** an unparseable rule header is `RULE-FRONTMATTER {path}: {error}`, a rule body holding the engine-sync rules fence line `RULE-FENCE {path}: …`, an unreadable rule or directory `read rule {path}: …` or `read rules {dir}: …`. Each is a problem that fails the run: that project's `AGENTS.md` is not compiled, and a failure never reads as no rules.
+
+**Check:** `engine-sync codex check` compares the compiled `AGENTS.md` byte for byte (`internal/reconcile`), so a rule edit not rebuilt reports `STALE`. OpenCode reads the same `AGENTS.md`, gets no file or `instructions` entry of its own, and `engine-sync opencode check` and `doctor` report a differing engine-sync-owned `AGENTS.md` as `STALE {path}` with the remedy to run `engine-sync codex build`.
+
+**Budget:** Codex stops adding project docs past `project_doc_max_bytes`, 32768 by default. `AGENTS-BUDGET {path}` (`internal/target/codex/budget.go`) measures the Codex chain, that `AGENTS.md` plus the `AGENTS.md` of every project above it, against the limit from the project's `.codex/config.toml`; a project that sets none gets the strictest Codex home's limit, and a home without the key counts as 32768. `0` disables the check and a negative limit is an error. A build warns and writes the file whole, `check` fails, and nothing is ever cut.
 
 **Adopters:** the engine-sync plugin's `Stop` hook already builds both mirrors, so adopter rules compile with no template change.
 
+**Scaffolded rule:** `templates/project/rules/git-writes-through-gitter.md` is the rule the project tier ships. `pfm init` copies `templates/project/rules/` into `.claude/rules/` (`initTemplatePaths`, `pfm/internal/professor/scaffold.go`), and `pfm doctor --project-updates` reports it `NEW` to an adopter scaffolded before it. It says: every git write goes to the `gitter` agent, `git fetch` included (check a remote with `ls-remote`); the main chat runs reads plus the own-file operations the git-guard hook allows (`stash push -- <paths>`, `checkout -- <file>`, `restore <file>`, dry runs, `worktree.sh list`), and the repo's `worktree.sh` `create`, `land` and `remove` while git tracks that script unchanged from HEAD (never `prune` or `--discard`); a denied command is never re-spelled past the guard; push, tag and release only on the user's in-turn ask; on Codex and OpenCode the engine guard denies every git write, `gitter`'s included ([engine-guard](../hooks/engine-guard.md)). It carries `visible-to: main`, so on Claude Code only the main chat reads it; a sub-agent meets the one line it needs, never retry, rephrase, split or wrap a denied command, in git-guard's deny ([git-guard](../hooks/git-guard.md#the-deny)). Codex and OpenCode ignore `visible-to`, so it compiles into the project's `AGENTS.md` for every loop there. Its worktree item names the verbs `.claude/scripts/worktree.sh` declares in its header and dispatches in its `case`; `scripts/worktree-verbs.sh`, sourced by `scripts/test-worktree.sh` (the template pair) and `scripts/test-worktree-local.sh` (this repo's pair), holds the three sets equal. A repo that never ran `pfm init` has no copy: git-guard's deny carries the routing there, and the machine-global `gitter` stays its writer.
+
 ## Path-scoped rules
 
-**Designed, not built.**
+### Read-on-match pointer
+
+**Built.** `codex.CompileRules` (`plugins/engine-sync/internal/target/codex/rules.go`) compiles a rule with `paths:` into two lines in its sorted place, one pointer per rule, body not compiled:
+
+```text
+<!-- rule: {path} (path-scoped) -->
+Before working on a file matching `{glob}`, read {path} and follow it.
+```
+
+Several globs read `` `{glob}`, `{glob}` ``. `{path}` is `{project-relative}/.claude/rules/{rel}` for a project rule, in that project's `AGENTS.md`, and `~/.claude/rules/{rel}` for a global rule, in the owned Codex block and the OpenCode `instructions` file (`internal/machine/rules.go`). A global pointer counts toward `GLOBAL-BUDGET`. `engine-sync doctor --machine` names each global one in a `global-rules PATH-SCOPED {rule} delivered to Codex and OpenCode as a read-on-match pointer` row, level `ok`.
+
+The pointer is the delivery on Codex and OpenCode today: both engines have no path trigger, so the line is an instruction the loop follows when it touches a matching file.
 
 ### `engine-sync hook {codex|opencode}`
+
+**Designed, not built.** The injector would add the rule body when a matching file is touched, on top of the pointer. Today `engine-sync hook codex` and `hook opencode` (`internal/cli/hook.go`, `runHook`) exit 0 with no output, and no Codex hook entry or OpenCode shim calls them.
 
 **Input:** the engine's hook JSON on stdin. Codex: `session_id`, `agent_id` (sub-agents only), `cwd`, `tool_name`, `tool_input`. OpenCode: the shim forwards `sessionID`, `tool`, `args` and the instance directory.
 
@@ -149,7 +168,7 @@ Codex reads through `sed`, `nl`, `rg`, `cat` and others, so the Bash rule takes 
 
 ### Codex wiring
 
-`engine-sync global` adds two engine-sync-owned entries to every target `{codex home}/hooks.json`, beside pfm's `resume-unkill` entry:
+**Designed, not built.** `engine-sync global` would add two engine-sync-owned entries to every target `{codex home}/hooks.json`, beside pfm's `resume-unkill` entry:
 
 - `PreToolUse`, matcher `Bash|apply_patch` (a pattern of `[A-Za-z0-9_|]` is an exact name list), command `$HOME/.local/share/engine-sync/bin/engine-sync hook codex`. Pre, not Post: an edit receives its rule before it writes.
 - `PostCompact`, command `$HOME/.local/share/engine-sync/bin/engine-sync hook codex --reset`, clearing the ledger because hook developer messages are not carried across a local compaction.
@@ -158,7 +177,7 @@ Codex runs a hook only once trusted, by a `sha256` of its event, matcher and han
 
 ### OpenCode wiring
 
-`engine-sync global` writes an engine-sync-owned shim at `~/.config/opencode/plugins/engine-sync.js`, auto-loaded from that directory, with an ownership receipt. Its `tool.execute.after` runs `{engine-sync home}/bin/engine-sync hook opencode` for `read`, `edit`, `write`, `apply_patch` and `bash`, and appends the result to `output.output`. Appending to the tool result keeps the system prompt byte-stable for prompt caching. A session-compaction event resets the session's ledger. pfm's workbench seat plugin (`pfm/internal/workbench/opencode_seat.go:15`) is the precedent for a staged OpenCode plugin file.
+**Designed, not built.** `engine-sync global` would write an engine-sync-owned shim at `~/.config/opencode/plugins/engine-sync.js`, auto-loaded from that directory, with an ownership receipt. Its `tool.execute.after` runs `{engine-sync home}/bin/engine-sync hook opencode` for `read`, `edit`, `write`, `apply_patch` and `bash`, and appends the result to `output.output`. Appending to the tool result keeps the system prompt byte-stable for prompt caching. A session-compaction event resets the session's ledger. pfm's workbench seat plugin (`pfm/internal/workbench/opencode_seat.go:15`) is the precedent for a staged OpenCode plugin file.
 
 ## Global rule source
 
@@ -180,33 +199,32 @@ Codex runs a hook only once trusted, by a `sha256` of its event, matcher and han
 | Rule | Class | Says |
 | --- | --- | --- |
 | `rm-rf-absolute-path.md` | always-on | `rm -rf` in any shell command an agent or main chat runs takes a literal absolute path, never a variable, substitution, glob or relative path; code written into files is exempt |
-| `git-writes-through-gitter.md` | always-on | every git write goes to the `gitter` agent, `git fetch` included (check a remote with `ls-remote`); others run reads plus the own-file operations the git-guard hook allows (`stash push -- <paths>`, `checkout -- <file>`, `restore <file>`, dry runs, `worktree.sh list`); a denied command is never re-spelled past the guard; push, tag and release only on the user's in-turn ask; on Codex and OpenCode the engine guard denies every git write, `gitter`'s included ([engine-guard](../hooks/engine-guard.md)) |
 | `professor.md` | path-scoped (`**/CLAUDE.md`, `**/.claude/**`), visible to the main chat only | only `pcm` writes a `CLAUDE.md` or a `.claude/**` file, shell writes included; others hand `pcm` the change, however small; Professor's own `templates/**` law lives in its `CLAUDE.md` |
-| `flights-life-cycle.md` | always-on | binds the main chat: settle, then size — small work in place with no worktree or lander, larger work in a gitter-made `.worktrees/{flight}/`; related changes found while a flight's worktree is open join that worktree; one `flights-lander` per worktree once every foreman returned; gitter merges and tears down |
-| `writing-code.md` | always-on, visible to the foremen and the lander only (`visible-to`) | the write-time coding laws: one door per operation and mechanism, every caller uses it, grep before writing; a copy met in the touched code folds into its door before the change builds on it, every copy found by grepping the expression, one outside the task's files reported, one left named with why; a fold keeps every caller's exact result, a disagreement becoming a parameter or a named behavior change, tests green after the fold; one concept folded, never a coincidence; a file over the size ceiling split before logic is added; presentation displays values, domain computation moves to its door; one name per concept; code lives with what changes with it, no negation-named directories; lists derived or generated, repeated scripts in `scripts/`; a failure never reads as absence |
-| `testing.md` | always-on, visible to the foremen and the lander only (`visible-to`) | how to write a test, never how to run one (running laws live in each project's testing manual): extend an existing test before adding one; test each decision once at the lowest layer; assert the exact value, never a substring, existence or a bare status; a test that can fail, watched failing; a fixed user-visible failure pinned at its surface; runs the code; guards both ways; fakes through the production seam; bounded polls, no sleeps; run-unique resources and id-scoped reads; changes inside the blast radius; failure messages carry expected, actual and artifact path; no self-skip or quarantine; domain names |
-| `integration-tests.md` | path-scoped (`integration`, `e2e`, `hermetic`, `lanes`, `suites` paths) | points suite design to `/quality:integration-suite`; tier placement, process boot, scripted protocol mocks, sequenced lanes with preludes, after-effect checks, reading probes, clean-log verdicts, LLM output by structure |
+| `flights-life-cycle.md` | always-on, visible to the main chat and the speccer only (`visible-to`) | binds the main chat, and the speccer's `## Phases` (rules 2, 4, 6, 7): a flight builds software (program source and its tests), while docs and framework files (prompts, rules, commands, agent definitions, config, scripts) are never a flight and are edited on the current branch with no worktree, foreman or lander, through the agent a guard reserves them to, else by hand, gitter committing on the passing check; settle, then size by the code edits alone — small code work (every edit fixed in advance, any file count) by hand on the current branch with no worktree and no lander, code work with judgment left in a `.worktrees/{flight}/` the main chat makes through the repo's `worktree.sh` where it has one, gitter otherwise; briefs written from the request, one `flights:tracer` only for a question the cut cannot be decided without; the work cut by tier into the fewest foremen, the core built first; related work, code or not, found while a flight's worktree is open joins that worktree, the only way non-code work enters one; one `flights:lander` per worktree once every foreman returned; the main chat lands and removes the worktree through `worktree.sh land` where the repo has it, gitter on any refusal and in every repo without it |
+| `coding.md` | always-on, visible to the main chat, the foremen, the speccer and the lander only (`visible-to`) | the write-time coding laws: one door per operation and mechanism, every caller uses it, grep before writing; a copy met in the touched code folds into its door before the change builds on it, every copy found by grepping the expression, one outside the task's files reported, one left named with why; a fold keeps every caller's exact result, a disagreement becoming a parameter or a named behavior change, tests green after the fold; one concept folded, never a coincidence; a file over the size ceiling split before logic is added; presentation displays values, domain computation moves to its door; a name is its literal owner chain, widest first, one word per concept in file name, identifier, wire key, env var and test (no metaphor, no `handler`, `process`, `data`), a breaking name in touched code renamed end to end (three lines, `templates/global/rules/coding.md`); code lives with what changes with it, no negation-named directories; lists derived or generated, repeated scripts in `scripts/`; a failure never reads as absence |
+| `testing.md` | always-on, visible to the main chat, the foremen, the speccer and the lander only (`visible-to`) | how to write a test, never how to run one (running laws live in each project's testing manual): extend an existing test before adding one; test each decision once at the lowest layer; assert the exact value, never a substring, existence or a bare status; a test that can fail, watched failing; a fixed user-visible failure pinned at its surface, and an escaped bug growing the assertions of the test that ran its path blind; runs the code; guards both ways; fakes through the production seam; bounded polls, no sleeps; run-unique resources and id-scoped reads; changes inside the blast radius; failure messages carry expected, actual and artifact path; no self-skip or quarantine; domain names |
+| `integration-tests.md` | path-scoped (`integration`, `e2e`, `hermetic`, `journey`, `lanes`, `suites` paths) | points suite design to `/design:test-suite`; each tier only for what the one below cannot see, process boot, scripted protocol mocks recorded both ways, the live tree on every pull request on every listed OS, a tree of small steps forking unless one needs what another left, a failed step blocking only its descendants, branches owning what they create, machine-wide work at the joins, owner entries for every action, the screen first and the state underneath, the log gate and consistency check, unplayable steps named never skipped, a disposable machine, reading probes, failure evidence, LLM output by structure |
 
 ## Global always-on rules
 
-**Built** in `plugins/engine-sync/internal/machine/rules.go` and `rules_opencode.go`. `engine-sync global` reads the rules under the first Claude config dir (the store), `{store}/rules/**/*.md`. It compiles every rule without `paths:` into one always-on set, each rule under its `<!-- rule: … -->` line in sorted path order, frontmatter stripped; a rule carrying rule-control's `visible-to:` is compiled the same way ([the engine-sync gap](#agent-targeting)). A rule whose frontmatter does not parse is skipped with a `RULE-FRONTMATTER` line. `engine-sync global --uninstall` removes the Codex block and the OpenCode entry without reading any rule.
+**Built** in `plugins/engine-sync/internal/machine/rules.go` and `rules_opencode.go`. `engine-sync global` reads the rules under the first Claude config dir (the store), `{store}/rules/**/*.md`. It compiles through `codex.CompileRules`, the door project rules use too ([Always-on project rules](#always-on-project-rules)): every rule without `paths:` inline and every rule with `paths:` as its [read-on-match pointer](#read-on-match-pointer), each under its `<!-- rule: … -->` line in sorted path order, frontmatter stripped; a rule carrying rule-control's `visible-to:` is compiled the same way ([the engine-sync gap](#agent-targeting)). A rule whose frontmatter does not parse is skipped with a `RULE-FRONTMATTER` line. `engine-sync global --uninstall` removes the Codex block and the OpenCode entry without reading any rule.
 
 ### Codex: `{codex home}/AGENTS.md`
 
-`engine-sync global` writes the always-on set as one block between `<!-- BEGIN engine-sync rules — owned -->` and `<!-- END engine-sync rules — owned -->` in each target Codex home's `AGENTS.md`. Text outside the fence is preserved. If the block was all the file held and the set empties, the file is deleted. Codex sends the global file as the first user-role message, before project docs, which matches Claude's order of user rules before project rules. `project_doc_max_bytes` does not cap it, it is rebuilt into the initial context after compaction, and sub-agents inherit the global instruction snapshot. A `{codex home}/AGENTS.override.md` makes Codex skip `AGENTS.md`, and doctor reports that as `SHADOWED`.
+`engine-sync global` writes the compiled set (always-on bodies and pointers) as one block between `<!-- BEGIN engine-sync rules — owned -->` and `<!-- END engine-sync rules — owned -->` in each target Codex home's `AGENTS.md`. Text outside the fence is preserved. If the block was all the file held and the set empties, the file is deleted. Codex sends the global file as the first user-role message, before project docs, which matches Claude's order of user rules before project rules. `project_doc_max_bytes` does not cap it, it is rebuilt into the initial context after compaction, and sub-agents inherit the global instruction snapshot. A `{codex home}/AGENTS.override.md` makes Codex skip `AGENTS.md`, and doctor reports that as `SHADOWED`.
 
 ### OpenCode: the `instructions` entry
 
-`engine-sync global` compiles the same always-on set into `{engine-sync home}/rules/global-always-on.md`. It registers that path in the global `instructions` array of `~/.config/opencode/opencode.jsonc`, recording the entry it added in the receipt `{engine-sync state}/opencode-instructions.json`. The entry sits beside pfm's fleet-prompt entry. OpenCode rebuilds instructions on every step and gives them to sub-agents. A glob straight at `~/.claude/rules/*.md` cannot work, because it would include path-scoped rules and their raw frontmatter.
+`engine-sync global` compiles the same set into `{engine-sync home}/rules/global-always-on.md`. It registers that path in the global `instructions` array of `~/.config/opencode/opencode.jsonc`, recording the entry it added in the receipt `{engine-sync state}/opencode-instructions.json`. The entry sits beside pfm's fleet-prompt entry. OpenCode rebuilds instructions on every step and gives them to sub-agents. A glob straight at `~/.claude/rules/*.md` cannot work, because it would include path-scoped rule bodies and raw frontmatter.
 
 ### Freshness
 
-No project build covers `~/.claude/rules/`. Each trigger below runs `engine-sync global`:
+No project build covers `~/.claude/rules/`. Triggers 1, 3 and 4 run `engine-sync global`; trigger 2 only reports drift:
 
 1. **Built:** `pfm install`, for every Codex home and OpenCode.
 2. **Built:** `engine-sync doctor --machine`, rendered by `pfm doctor`. It compares each compiled target with its sources and reports `STALE`, which catches drift from every rule edit made since the last install.
-3. **Designed:** every pfm launch of a Codex or OpenCode chat, writing only when bytes differ.
-4. **Designed:** the engine-sync plugin's Claude `SessionStart` hook, for every target.
+3. **Built:** the engine-sync plugin's Claude `SessionStart` hook (`engine-sync hook claude start`, `Start` in `plugins/engine-sync/internal/hook/hook.go`), which runs `engine-sync global` over the machine roster after repairing the project's stale mirror.
+4. **Designed:** every pfm launch of a Codex or OpenCode chat, writing only when bytes differ. `pfm` runs `engine-sync global` only at `pfm install`.
 
 ## Checks
 
@@ -215,15 +233,16 @@ No project build covers `~/.claude/rules/`. Each trigger below runs `engine-sync
 | `pfm doctor` | `doctor: rules` link `missing`, `copy`, `wrong-target`, `conflict`; unreadable source `CHECK-FAILED` | built |
 | `engine-sync doctor --machine` | `global-rules codex {path} state=MISSING`, `STALE` or `SHADOWED` | built |
 | `engine-sync doctor --machine` | `global-rules opencode {file} state=MISSING` or `STALE`; `global-rules opencode instructions entry {config} state=MISSING` or `STALE` | built |
-| `engine-sync doctor --machine` | `RULE-FRONTMATTER {path}: {parse error}` for a global rule | built |
-| `engine-sync doctor --machine` | `global-rules PATH-SCOPED {rule} not delivered to Codex or OpenCode` (warning, until the injector ships) | built |
+| `engine-sync doctor --machine` | `RULE-FRONTMATTER {path}: {parse error}` or `RULE-FENCE {path}: …` for a global rule, level `fail`, the rule skipped | built |
+| `engine-sync doctor --machine` | `global-rules PATH-SCOPED {rule} delivered to Codex and OpenCode as a read-on-match pointer` (`ok`: the [pointer](#read-on-match-pointer), no repair) | built |
 | `engine-sync doctor --machine` | `global-rules VISIBLE-TO {rule} delivered to every Codex and OpenCode loop` (`ok`: the [agent-targeting](#agent-targeting) gap, no repair) | built |
-| `engine-sync doctor --machine` | `GLOBAL-BUDGET {bytes} > 8192` when the always-on global set exceeds 8 KiB, the cost every agent of every project pays (warning) | built |
-| `engine-sync doctor --machine` | `global-rules ERROR …` when a source, target or config cannot be read; never shown as a clean state | built |
+| `engine-sync doctor --machine` | `GLOBAL-BUDGET {bytes} > 9216` when the compiled global set (always-on bodies and pointers) exceeds 9 KiB, the cost every agent of every project pays (warning); the compiled set is 9,461 bytes against the 9,216 budget, so the warning shows | built |
+| `engine-sync doctor --machine` | `global-rules ERROR …` when a source, target or config cannot be read, `read rule {path}: …` and `read rules {dir}: …` included; never shown as a clean state | built |
 | `pfm doctor` | every `engine-sync doctor` row, rendered; a missing binary as a failing row | built |
-| `engine-sync check` | `STALE` or `MISSING` `AGENTS.md` after a project rule edit (existing reconcile) | designed |
-| `engine-sync check` | `RULE-FRONTMATTER {path}: {parse error}` for a project rule whose YAML does not parse | designed |
-| `engine-sync check` | `AGENTS-BUDGET {bytes} > {limit}` when a compiled project `AGENTS.md` exceeds Codex's `project_doc_max_bytes` | designed |
+| `engine-sync codex check` | `STALE` or `MISSING` `AGENTS.md` after a project rule edit (the reconcile compare) | built |
+| `engine-sync codex check`, `build` | `RULE-FRONTMATTER {path}: {parse error}`, `RULE-FENCE {path}: …`, `read rule {path}: …` or `read rules {dir}: …` for a project rule: a problem, that project's `AGENTS.md` not compiled | built |
+| `engine-sync codex check` | `AGENTS-BUDGET {path}: its Codex chain is {bytes} > {limit} bytes (…)` when a compiled `AGENTS.md` plus the project `AGENTS.md` above it exceeds `project_doc_max_bytes`; a failure in `check`, a warning in `build`, never a cut | built |
+| `engine-sync opencode check`, `doctor` | `STALE {path}` for an engine-sync-owned `AGENTS.md` that differs from a fresh compile, remedy `OpenCode reads it; run engine-sync codex build` | built |
 | `engine-sync doctor` | Codex hook entry `MISSING` or `UNTRUSTED` in a `{codex home}` | designed |
 | `engine-sync doctor` | OpenCode shim `MISSING` or `STALE` | designed |
 | `engine-sync doctor` | injector errors logged since the last doctor run | designed |
@@ -293,7 +312,9 @@ Claude passed 1–5 on 2.1.295 in `/tmp/professor/rules-test/`.
 
 **Global, shipped:** `templates/global/rules/rm-rf-absolute-path.md`, an always-on rule ([Global rule source](#global-rule-source)). It reaches Claude natively, and reaches Codex and OpenCode through the built global channel.
 
-**Project path-scoped, designed:** `.claude/rules/pfm-testing.md`, not yet created, waits on the injector. It is a symlink to `../commands/pfm-testing-manual.md`, whose frontmatter gains `paths:` for `pfm/**/*_test.go`. Local to this repo, no `templates/project/` twin. One file stays both the `/pfm-testing-manual` command and the rule; Claude ignores `name` and `description` on the rule, and the skill loaders ignore `paths`. The flights briefs keep naming the manual explicitly: the rule adds automatic delivery, the explicit read stays the protocol on every engine.
+**Project path-scoped, built:** `.claude/rules/no-hardcoded-locations.md`, this repo's own rule (`paths: ["pfm/**/*.go"]`), binds every loop editing Go under `pfm/`. It reaches Claude natively, and Codex and OpenCode through the [pointer](#read-on-match-pointer) `engine-sync codex build` compiles into the root `AGENTS.md` under `<!-- rule: .claude/rules/no-hardcoded-locations.md (path-scoped) -->`. The pointer delivers an instruction to read the rule, not its body; the injector would add the body.
+
+**Project path-scoped, not yet a rule:** `pfm-testing-manual`. Its file, `.claude/commands/pfm-testing-manual.md`, carries no `paths:` and no `.claude/rules/pfm-testing.md` exists, so no pointer serves it. The plan is a symlink `.claude/rules/pfm-testing.md` to `../commands/pfm-testing-manual.md`, whose frontmatter gains `paths:` for `pfm/**/*_test.go`; the pointer would then serve it on Codex and OpenCode, with the injector adding the body later. Local to this repo, no `templates/project/` twin. One file stays both the `/pfm-testing-manual` command and the rule; Claude ignores `name` and `description` on the rule, and the skill loaders ignore `paths`. The flights briefs keep naming the manual explicitly: the rule adds automatic delivery, the explicit read stays the protocol on every engine.
 
 ## Surfaces that stay in sync
 
@@ -306,9 +327,9 @@ Built channel, kept in step with this file:
 
 Changes that land with the designed parts:
 
-- `docs/design/hooks/hooks.md`: the Codex hook rows and the OpenCode row ("carries none") gain engine-sync's entries and shim.
-- `.claude/commands/pfm-testing-manual.md`: the `paths:` key, through the `pcm` agent.
-- `README.md`, `docs/SETUP.md`: wherever they list what the engine mirrors compile, once project rules compile into `AGENTS.md`.
+- `docs/design/hooks/hooks.md`: the Codex hook rows and the OpenCode row ("carries none") gain engine-sync's entries and shim, once the injector ships.
+- `.claude/commands/pfm-testing-manual.md`: the `paths:` key, through the `pcm` agent, when it becomes a rule.
+- `README.md`, `docs/SETUP.md`: wherever they list what the engine mirrors compile, now that project rules compile into `AGENTS.md`.
 
 ## Sources
 

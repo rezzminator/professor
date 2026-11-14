@@ -1,10 +1,15 @@
 package place
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // A newborn files where its row will: under the outer root when its repo is
@@ -15,13 +20,40 @@ func TestFleetOfPlacesANewbornByTheFold(t *testing.T) {
 		cwd  string
 		want Place
 	}{
-		{"/jail/me/fw/plugins/meter", Place{Root: "/jail/me/fw", Label: ".fw"}},
-		{"/jail/me/fw", Place{Root: "/jail/me/fw", Label: ".fw"}},
-		{"/jail/me/ops", Place{Root: "/jail/me/ops", Label: "ops"}},
-		{"/jail/me/fresh", Place{Root: "/jail/me/fresh", Label: "fresh"}},
+		{testjail.Place("/jail/me/fw/plugins/meter"), Place{Root: testjail.Place("/jail/me/fw"), Label: ".fw"}},
+		{testjail.Place("/jail/me/fw"), Place{Root: testjail.Place("/jail/me/fw"), Label: ".fw"}},
+		{testjail.Place("/jail/me/ops"), Place{Root: testjail.Place("/jail/me/ops"), Label: "ops"}},
+		{testjail.Place("/jail/me/fresh"), Place{Root: testjail.Place("/jail/me/fresh"), Label: "fresh"}},
 	} {
 		if got := fleet.Of(test.cwd); got != test.want {
 			t.Errorf("Of(%q) = %+v, want %+v", test.cwd, got, test.want)
+		}
+	}
+}
+
+// A chat anywhere under a project sits in that project's workspace, even when
+// no chat ever ran at the project's top: a linked worktree, a workbench and a
+// plain subdirectory roll up to the repository, as its root does.
+func TestFleetOfRollsANestedDirectoryUpToItsProject(t *testing.T) {
+	repo := testjail.GitRepoWithWorktrees(t, &fakegit.Runner{}, "lantern")
+	bench := filepath.Join(repo.Repo, ".workbenches", "outreach")
+	if err := os.MkdirAll(bench, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fleet := Fleet{
+		Rows:    []compose.Row{{Kind: compose.LiveClaude, Project: "other-repo", CWD: repo.Other}},
+		Home:    repo.Base,
+		Benches: []workbench.Bench{{Dir: bench, Root: repo.Repo, Project: "lantern", Key: "lantern › outreach"}},
+	}
+	want := Place{Root: repo.Repo, Label: "lantern"}
+	for _, test := range []struct{ name, cwd string }{
+		{"the project root", repo.Repo},
+		{"a linked worktree", repo.Inner},
+		{"a workbench", bench},
+		{"a plain subdirectory", repo.Subdir},
+	} {
+		if got := fleet.Of(test.cwd); got != want {
+			t.Errorf("%s: Of(%q) = %+v, want %+v", test.name, test.cwd, got, want)
 		}
 	}
 }

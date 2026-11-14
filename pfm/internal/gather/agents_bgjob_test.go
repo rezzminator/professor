@@ -1,10 +1,12 @@
 package gather
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
-	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -44,6 +46,11 @@ func TestDetectAgentsFindsClaudeDaemonJobs(t *testing.T) {
 			stat:    ProcStat{ParentPID: 1, StartTime: start},
 		}
 	}
+	// unreadable is a Claude process whose /proc environ read fails as the kernel fails it.
+	unreadable := func(op string, pid int, errno syscall.Errno) fakeProcess {
+		path := "/proc/" + strconv.Itoa(pid) + "/environ"
+		return fakeProcess{cmdline: []string{"claude"}, environErr: &fs.PathError{Op: op, Path: path, Err: errno}}
+	}
 	record(configDir, 800, jobSession, "bg", 27840284)
 	record(primaryDir, 801, primaryJobSession, "bg", 500)          // primary config dir: still a job
 	record(configDir, 802, recycledSession, "bg", 111)             // pid recycled since the record was written
@@ -55,6 +62,11 @@ func TestDetectAgentsFindsClaudeDaemonJobs(t *testing.T) {
 		803: spare(configDir, 222),
 		804: spare(configDir, 333), // an unclaimed spare: no record at all
 		805: spare(configDir, 444), // a record that exists but cannot be parsed
+		// An environment the kernel would not hand over: a failure to look.
+		806: unreadable("read", 806, syscall.EIO),
+		// Another user's process, and one gone since the listing: no agent here.
+		807: unreadable("open", 807, syscall.EACCES),
+		808: unreadable("open", 808, syscall.ENOENT),
 	}}
 	corrupt := filepath.Join(configDir, "sessions", "805.json")
 	if err := os.WriteFile(corrupt, []byte(`{"pid":805,"sessionId":`), 0o600); err != nil {
@@ -65,17 +77,22 @@ func TestDetectAgentsFindsClaudeDaemonJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DetectAgents() error = %v", err)
 	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], corrupt) {
+	wantWarnings := []string{
+		"claude process record " + corrupt + " malformed; a daemon job there may be missing: unexpected end of JSON input",
+		"claude process 806 environment unreadable; an agent session there may be missing: " +
+			"read /proc/806/environ: input/output error",
+	}
+	if !slices.Equal(warnings, wantWarnings) {
 		t.Fatalf(
-			"DetectAgents() warnings = %q, want one naming %s — "+
-				"a record that failed to parse is a job the scan could not see, not an absent one",
-			warnings, corrupt,
+			"DetectAgents() warnings = %q, want %q — "+
+				"a record or environment that failed to read is a job the scan could not see, not an absent one",
+			warnings, wantWarnings,
 		)
 	}
 	if len(agents) != 2 {
 		t.Fatalf("DetectAgents() = %#v, want exactly the two live daemon jobs", agents)
 	}
-	if agents[0].SessionID != jobSession || agents[0].PID != 800 ||
+	if agents[0].SessionID != jobSession || agents[0].PID != 800 || agents[0].ParentPID != 1 ||
 		agents[0].ConfigDir != configDir || agents[0].Socket != "" {
 		t.Fatalf("DetectAgents()[0] = %#v, want pid 800 on %s with no pane", agents[0], configDir)
 	}

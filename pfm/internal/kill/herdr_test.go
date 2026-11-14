@@ -69,7 +69,7 @@ func newKillHerdr(t *testing.T) *killHerdr {
 		pane:        "w1:p1",
 		terminal:    "kill-terminal",
 		proc:        proc,
-		socket:      filepath.Join(t.TempDir(), "s"),
+		socket:      filepath.Join(testjail.ShortRoot(t), "s"),
 		frame:       idleFrame,
 		processType: "pane_process_info",
 		processes:   []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}},
@@ -242,7 +242,7 @@ func TestHerdrKillRoutesByDurableSeat(t *testing.T) {
 			server := newKillHerdr(t)
 			seat := seedKillHerdr(t, database, server)
 			spawner := &captureSpawner{}
-			manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
+			manager, err := New(database, Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, Spawner: spawner})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -347,6 +347,7 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 			finisher, err := NewFinisher(
 				database,
 				Dependencies{
+					Paths:        jail.resolved(),
 					Tmux:         tmux,
 					Refresher:    refreshFunc(func(context.Context) error { return nil }),
 					Delay:        time.Nanosecond,
@@ -408,7 +409,6 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 		processes            any
 		gone                 bool
 		probeError           string
-		held                 bool
 		wantError, wantClose bool
 	}{
 		{name: "pane gone", gone: true, wantError: true},
@@ -418,8 +418,6 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 		{name: "omitted list", wantClose: true, omitProcesses: true, wantError: true},
 		{name: "engine argv0", processes: []any{map[string]any{"pid": 7, "argv0": "/opt/bin/" + pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
 		{name: "engine name", processes: []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}}, wantClose: true},
-		// Herdr sees herdr-keep's attach client; the engine runs in its holder's shell.
-		{name: "held engine", processes: []any{map[string]any{"pid": 77, "name": "herdr-keep"}}, held: true, wantClose: true},
 		{name: "missing process type", missingType: true, processes: []any{}, wantError: true},
 		{name: "null list", wantClose: true, wantError: true},
 		{name: "unknown process", wantClose: true, processes: []any{map[string]any{"pid": 7}}, wantError: true},
@@ -432,9 +430,6 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 			server := newKillHerdr(t)
 			server.processes, server.gone, server.probeError = test.processes, test.gone, test.probeError
 			server.omitProcesses = test.omitProcesses
-			if test.held {
-				stageHeldEngine(t, server)
-			}
 			if test.missingType {
 				server.processType = ""
 			}
@@ -447,15 +442,11 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 			); err != nil {
 				t.Fatal(err)
 			}
-			if test.held {
-				// Escalation closes either way: the held engine must read as present, never unproved.
-				client := herdrKiller{engine: pfmengine.Claude, database: database, seat: seat, sidDir: jail.sidDir}
-				if present, err := client.PaneExists(context.Background(), "", ""); err != nil || !present {
-					t.Fatalf("held engine PaneExists = %t, %v; want true, no error", present, err)
-				}
-			}
 			tmux := &fakeTmux{}
-			manager, err := New(database, Dependencies{Tmux: tmux, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1})
+			manager, err := New(
+				database,
+				Dependencies{Paths: jail.resolved(), Tmux: tmux, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -504,7 +495,10 @@ func TestHerdrConfirmUnreachableIsNotGone(t *testing.T) {
 	if err := os.Remove(server.socket); err != nil {
 		t.Fatal(err)
 	}
-	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1})
+	manager, err := New(
+		database,
+		Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,6 +547,7 @@ func TestHerdrFinisherProtectsGoneOrReownedPane(t *testing.T) {
 			finisher, err := NewFinisher(
 				database,
 				Dependencies{
+					Paths:        jail.resolved(),
 					Tmux:         tmux,
 					Refresher:    refreshFunc(func(context.Context) error { return nil }),
 					Delay:        time.Nanosecond,
@@ -596,6 +591,7 @@ func TestHerdrDegradedSeatStoreKeepsExplicitTmux(t *testing.T) {
 			jail := newKillJail(t)
 			statePath := filepath.Join(jail.root, "broken-state.db")
 			t.Setenv("PFM_STATE_DB", statePath)
+			t.Setenv("PFM_CACHE_DB", filepath.Join(jail.root, "pfm-cache.db"))
 			bootstrap, err := store.Open()
 			if err != nil {
 				t.Fatal(err)
@@ -642,6 +638,7 @@ func TestHerdrDegradedSeatStoreKeepsExplicitTmux(t *testing.T) {
 			}
 			spawner := &captureSpawner{}
 			dependencies := Dependencies{
+				Paths:           jail.resolved(),
 				Tmux:            tmux,
 				Screen:          tmux,
 				Spawner:         spawner,
@@ -856,7 +853,7 @@ func TestHerdrKillSelfUsesTheSharedIdentity(t *testing.T) {
 	database := jail.open(t)
 	server := newKillHerdr(t)
 	seat := seedKillHerdr(t, database, server)
-	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: &captureSpawner{}})
+	manager, err := New(database, Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, Spawner: &captureSpawner{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -877,7 +874,7 @@ func TestHerdrKillSelfUsesTheSharedIdentity(t *testing.T) {
 	}
 }
 
-func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
+func TestHerdrForcedCloseRemovesReloadRecord(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		// stuck plants a non-empty directory at the record, so its remove fails.
@@ -887,7 +884,7 @@ func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
 		{name: "removed with the seat"},
 		{
 			name:  "a file that will not go never keeps the closed pane's row",
-			stuck: true, wantWarning: "its reload files stay behind",
+			stuck: true, wantWarning: "its reload record stays behind",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -923,12 +920,11 @@ func TestHerdrForcedCloseRemovesReloadFiles(t *testing.T) {
 			if _, found, err := database.Shared().Seat(context.Background(), seat.SeatID); err != nil || found {
 				t.Fatalf("closed seat row found=%t err=%v; want it retired", found, err)
 			}
-			if !test.stuck {
-				for _, suffix := range []string{".pid", ".log"} {
-					if _, err := os.Stat(reloadFile(seat.SeatID, suffix)); !os.IsNotExist(err) {
-						t.Errorf("reload %s of the closed seat: stat err=%v; want it removed", suffix, err)
-					}
-				}
+			if _, err := os.Stat(reloadFile(seat.SeatID, ".pid")); !test.stuck && !os.IsNotExist(err) {
+				t.Errorf("reload record of the closed seat: stat err=%v; want it removed", err)
+			}
+			if _, err := os.Stat(reloadFile(seat.SeatID, ".log")); err != nil {
+				t.Errorf("reload log of the closed seat: %v; want it kept as the last reload's evidence", err)
 			}
 			if test.wantWarning == "" && log.Len() != 0 {
 				t.Errorf("kill warnings = %q, want none", log.String())
@@ -957,7 +953,7 @@ func TestHerdrKillOfALostSeatOnlyHides(t *testing.T) {
 		t.Fatal(err)
 	}
 	spawner := &captureSpawner{}
-	manager, err := New(database, Dependencies{Tmux: &fakeTmux{}, Spawner: spawner})
+	manager, err := New(database, Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, Spawner: spawner})
 	if err != nil {
 		t.Fatal(err)
 	}

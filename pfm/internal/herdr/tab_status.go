@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -41,7 +42,6 @@ type TabDecoration struct {
 	// Glyphs are the theme's tab status glyphs this tick (themesync
 	// HerdrTabGlyphs); the zero value draws the defaults.
 	Glyphs   TabGlyphs
-	Revision uint64
 	Session  json.RawMessage
 	Validate func(context.Context) (bool, error)
 	// Retained marks a view whose live owner is gone (a bridge tab whose tmux
@@ -143,14 +143,31 @@ func (pane TabPane) valid() bool {
 	return pane.Pane != "" && pane.Terminal != "" && pane.Workspace != "" && pane.Tab != "" && pane.Focused != nil
 }
 
+// IncompleteTabPanesError names the panes pane.list listed without a full
+// identity. ReadTabPanes returns it beside every complete pane: a caller may
+// paint those, but must not read a skipped pane as gone.
+type IncompleteTabPanesError struct {
+	Skipped []string
+}
+
+func (e *IncompleteTabPanesError) Error() string {
+	quoted := make([]string, len(e.Skipped))
+	for index, pane := range e.Skipped {
+		quoted[index] = strconv.Quote(pane)
+	}
+	return "tab panes: incomplete PaneInfo for " + strings.Join(quoted, ", ")
+}
+
 // ReadTabPanes reads pane.list (ListPanes) and validates its identity fields
-// at data entry.
+// at data entry. An incomplete pane is skipped and named in an
+// IncompleteTabPanesError returned with the complete ones.
 func ReadTabPanes(ctx context.Context, socket string) ([]TabPane, error) {
 	listed, err := ListPanes(ctx, socket)
 	if err != nil {
 		return nil, fmt.Errorf("list tab panes: %w", err)
 	}
 	panes := make([]TabPane, 0, len(listed))
+	var skipped []string
 	for index := range listed {
 		pane := &listed[index]
 		tab := TabPane{
@@ -158,9 +175,13 @@ func ReadTabPanes(ctx context.Context, socket string) ([]TabPane, error) {
 			Focused: pane.Focused, Revision: pane.Revision, Session: pane.AgentSession, State: pane.AgentStatus,
 		}
 		if !tab.valid() {
-			return nil, fmt.Errorf("tab panes: incomplete PaneInfo for %q", tab.Pane)
+			skipped = append(skipped, tab.Pane)
+			continue
 		}
 		panes = append(panes, tab)
+	}
+	if len(skipped) > 0 {
+		return panes, &IncompleteTabPanesError{Skipped: skipped}
 	}
 	return panes, nil
 }
@@ -190,7 +211,7 @@ func readTabPane(
 	if err := json.Unmarshal(bodies[0], &result); err != nil {
 		return TabPane{}, fmt.Errorf("decode tab pane: %w", err)
 	}
-	if result.Type != "pane_info" || !result.Pane.valid() {
+	if result.Type != paneInfoType || !result.Pane.valid() {
 		return TabPane{}, fmt.Errorf("incomplete pane.get: %s", bodies[0])
 	}
 	return result.Pane, nil
@@ -208,7 +229,7 @@ func sameTabObservation(pane TabPane, d TabDecoration) bool {
 			return false
 		}
 	}
-	return pane.Pane == d.Pane && pane.Terminal == d.Terminal && pane.Tab == d.Tab && pane.Revision == d.Revision &&
+	return pane.Pane == d.Pane && pane.Terminal == d.Terminal && pane.Tab == d.Tab &&
 		pane.State == d.AgentStatus &&
 		reflect.DeepEqual(a, b)
 }
@@ -413,7 +434,6 @@ func (painter *indicatorPainter) restoreTabs(ctx context.Context) error {
 			}
 			continue
 		}
-		d.Revision = pane.Revision
 		d.AgentStatus = pane.State
 		d.Mode = TabStatusOff
 		if _, err := reconcileTab(ctx, painter.socket, painter.lockDir, d, 0, painter.call); err != nil &&

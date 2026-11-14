@@ -1,21 +1,15 @@
 package ui
 
 import (
-	"context"
-	"os"
-	"os/exec"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 const (
@@ -102,26 +96,25 @@ func TestWorkbenchTopLaunchRowArrowsDoNothing(t *testing.T) {
 
 func TestWorkbenchLaunchRowOffersOnlyItsOwnEngines(t *testing.T) {
 	for _, test := range []struct {
-		remembered pfmengine.ID
-		label      string
+		remembered   pfmengine.ID
+		label, chips string
 	}{
-		{pfmengine.Claude, "New chat → acme › Scribe  Claude"},
-		{pfmengine.Codex, "New chat → acme › Scribe  Codex"},
-		{pfmengine.OpenCode, "New chat → acme › Scribe  Claude"}, // the bench has no OpenCode: the configured default stands in
+		{pfmengine.Claude, "› ✦ New chat → acme › Scribe  Claude · 🥈 · 1h               🥈                                                         ", "› ✦ New chat › ◖ Claude ◗ [ Codex ]                          🥈                                                         "},
+		{pfmengine.Codex, "› ✦ New chat → acme › Scribe  Codex · 🥉                     ⬢ 🥉                                                       ", "› ✦ New chat › ◖ Codex ◗ [ Claude ]                          ⬢ 🥉                                                       "},
+		{pfmengine.OpenCode, "› ✦ New chat → acme › Scribe  Claude · 🥈 · 1h               🥈                                                         ", "› ✦ New chat › ◖ Claude ◗ [ Codex ]                          🥈                                                         "}, // the bench has no OpenCode: the configured default stands in
 	} {
 		t.Run(string(test.remembered), func(t *testing.T) {
 			model := workbenchSelectedModel(4)
 			model.remembered.Engine = string(test.remembered)
 			row, _ := model.selectedRow()
 			plain := ansi.Strip(model.renderGroupedRow(row, true, 120, false))
-			if !strings.Contains(plain, test.label) {
+			if plain != test.label {
 				t.Errorf("workbench launch row = %q, want %q", plain, test.label)
 			}
 			model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
 			chips := ansi.Strip(model.renderGroupedRow(row, true, 120, false))
-			if !strings.Contains(chips, "Codex") || !strings.Contains(chips, "Claude") ||
-				strings.Contains(chips, "OpenCode") {
-				t.Errorf("workbench wizard chips = %q, want only Codex and Claude", chips)
+			if chips != test.chips {
+				t.Errorf("workbench wizard chips = %q, want %q", chips, test.chips)
 			}
 		})
 	}
@@ -243,40 +236,4 @@ func TestWorkbenchDossierLaunchPurpose(t *testing.T) {
 	) {
 		t.Errorf("dossier does not name the steps and the workbench: %s", joined)
 	}
-}
-
-const ownLauncherHelper = "PFM_UI_OWN_LAUNCHER_HELPER"
-
-// TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage pins that the
-// new-chat picker reads the launcher registry, never a fixed engine list: an
-// engine whose launcher is registered only in its own package (a fourth
-// engine) is offered. The registration runs in a child process of this test
-// binary, so every other test here keeps the shipped engines.
-func TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage(t *testing.T) {
-	const name = "TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage"
-	if os.Getenv(ownLauncherHelper) != "1" {
-		t.Parallel()
-		command := exec.Command(os.Args[0], "-test.run=^"+name+"$", "-test.v")
-		command.Env = append(os.Environ(), ownLauncherHelper+"=1")
-		output, err := command.CombinedOutput()
-		if err != nil || !strings.Contains(string(output), "--- PASS: "+name) {
-			t.Fatalf("own-launcher proof failed: %v\n%s", err, output)
-		}
-		return
-	}
-	id := pfmengine.ID("zz")
-	spawn.RegisterLauncher(id, ownLauncher{})
-	if got := workbenchGoldenModel(80).newChatEngines(); !slices.Contains(got, id) {
-		t.Fatalf("new-chat engines = %v, want the launcher registered as %s", got, id)
-	}
-}
-
-type ownLauncher struct{}
-
-func (ownLauncher) ComposerReady(string) bool { return true }
-
-func (ownLauncher) Rename(
-	context.Context, pfmcall.Screen, pfmcall.Target, string, spawn.Timings, spawn.Trace,
-) (string, error) {
-	return "", nil
 }

@@ -7,12 +7,20 @@
 # resolver, .claude/scripts/unit-path.sh (cwd-relative, repository-relative, pfm-relative or absolute;
 # a file deleted at HEAD drops silently and still brings its unit's checks). Each path brings its
 # affected tests:
-#   pfm/**/*_test.go          go test -v of its package (pfm/e2e/ with the e2e tag), -count, -timeout,
-#                             -p and -parallel (the last two only when set) from the fence config
+#   pfm/**/*_test.go          go test -v of its package (pfm/e2e/ with the e2e tag; a jail file, one
+#                             whose //go:build line names jail unnegated, with the jail tag; any other
+#                             untagged, the unit tier inside testjail's unit net), -count, -timeout, -p
+#                             and -parallel (the last two only when set) from the fence config
 #                             (PFM_FENCE_TEST_COUNT, PFM_FENCE_AFFECTED_*: infra/fence/shared.sh), -run the
 #                             ::selector byte for byte, else every Test and Fuzz func of the file
 #                             (TestMain excluded); a test file with none runs its whole package
-#   pfm/**/*.go               go test -v of its whole package
+#   pfm/**/*.go               its whole package: untagged (label pfm/{dir}/), then with the jail tag
+#                             -run every Test and Fuzz func of its jail files but darwin-only ones
+#                             (label pfm/{dir}/ (jail)) when it has one; the untagged run is left
+#                             out when the package has jail files and no other test file
+#   pfm/journey/*.go          go vet -tags journey of pfm/journey/... for Linux and GOOS=darwin, no
+#                             selector, never a go test: the suite runs only on its own disposable
+#                             machine (infra/fence/journey/run.sh); pfm/journey/harness/ tests as any package
 #   pfm/scripts/*_test.sh     bash; pfm/scripts/x.sh brings pfm/scripts/x_test.sh when it exists
 #   *.test.mjs                node --test (TAP); ::selector is --test-name-pattern; x.mjs brings x.test.mjs
 #   *_test.py                 importing unittest: python3 -m unittest, its own directory as PYTHONPATH
@@ -21,19 +29,23 @@
 #                             the proof; x.py brings x_test.py
 #   scripts/test-*.py         python3, no selector; scripts/x.{sh,py} brings scripts/test-x.{sh,py}
 #   *_test.sh, scripts/test-*.sh  bash, no selector; .claude/scripts/x.sh brings scripts/test-x.sh
-#                             (dev.sh: scripts/test-dev-report.sh and infra/fence/lanes/tests/
+#                             (dev.sh: scripts/test-dev-report.sh and infra/fence/tests/
 #                             iso-housekeeping_test.sh, format-md.sh: scripts/test-format-md.sh on that
-#                             copy); infra/fence/x.sh, infra/fence/lanes/x.sh bring
-#                             infra/fence/lanes/tests/x_test.sh; infra/demo/x.sh infra/demo/tests/x_test.sh;
-#                             a sourced helper brings its users' tests: scripts/shtest.sh and
-#                             scripts/stub-root.sh every tracked test naming it, infra/fence/mkdir-lock.sh
-#                             its own and the shared, root and gate-history tests
+#                             copy, worktree.sh and .claude/rules/git-writes-through-gitter.md:
+#                             scripts/test-worktree-local.sh, templates/project/scripts/worktree.sh and
+#                             templates/project/rules/git-writes-through-gitter.md:
+#                             scripts/test-worktree.sh);
+#                             infra/fence/x.sh brings infra/fence/tests/x_test.sh;
+#                             a sourced helper brings its users' tests: scripts/shtest.sh,
+#                             scripts/stub-root.sh and scripts/worktree-verbs.sh every tracked test naming
+#                             it, infra/fence/mkdir-lock.sh its own and the shared and gate-history
+#                             tests, infra/fence/local-env.sh the fence-env and iso-housekeeping tests
 # The rules hold under pfm/ as everywhere. Any other file brings no test, only checks, and is named on
 # its own `TEST UNCOVERED <file>` line, a gap that does not fail the run. The checks, every one run
 # even after one fails:
-#   pfm paths      fmt (golangci-lint fmt --diff, named .go files), typecheck (go vet of the named .go
-#                  files' packages plus every module package importing one, test imports included; with
-#                  no named .go file the whole module), lint-new (make lint-new LINT_PKGS=those packages:
+#   pfm paths      fmt (golangci-lint fmt --diff, named .go files), typecheck (go vet, untagged then
+#                  -tags jail, of the named .go files' packages plus every module package importing
+#                  one, test imports included; with no named .go file the whole module), lint-new (make lint-new LINT_PKGS=those packages:
 #                  FAIL on a finding in a named file or any `(typecheck)` finding; others are burn-down),
 #                  arch, launch-literals
 #   any path       rumdl (named .md files), leak (named files)
@@ -47,13 +59,16 @@
 # run with `# pass 0`, only the file itself as the passing test, or `# skipped|todo N`; a unittest run
 # with `Ran 0 tests`, `skipped=N`, or exit 5 `NO TESTS RAN`; a script-style Python test with no `ok `
 # line. A shell test is judged by its exit code.
-# Output: one `TEST <PASS|FAIL|NO-TEST-RAN|UNLISTED-SKIP|SKIPPED> …` line per test invocation, one
+# Output: before the first Go test, `PROFILE <host path>`: the run directory under the fence's timing
+# base, outliving the call, that every Go test process profiles into (PFM_TEST_ARTIFACT_DIR: summary.json,
+# failure bundles), the newest 20 kept; `PROFILE NOT KEPT (…)` when it cannot be made. Then one
+# `TEST <PASS|FAIL|NO-TEST-RAN|UNLISTED-SKIP|SKIPPED> …` line per test invocation, one
 # `TEST UNCOVERED …` line per named file no test maps to, one
 # `CHECK <PASS|FAIL|SKIP> …` line per check, then `TESTS …`, `STATIC …`, on red the log's last 40
 # other lines, `VERDICT PASS|FAIL`, and last `log: <path>` — /tmp/{project}/test/{UTC}-{pid}.log holds
 # the whole run, every runner's own output indented `  | ` so only this run's summary lines sit at
 # column 0. Exit 0 PASS, 1 FAIL, 2 usage.
-# --full is the full gate (dev.sh iso gate): pfm, templates, e2e and the lane self-tests as concurrent
+# --full is the full gate (dev.sh iso gate): pfm, templates, e2e and the fence self-tests as concurrent
 # steps in one run, the STEPS line, RUN DIR, gate.tsv, the budget and the ledger row, streamed as it runs
 # and kept in the log; then its `VERDICT PASS|FAIL` from the gate's closing line (`all steps passed.` or
 # `N step(s) failed or could not run.`) and `log: <path>`, exit 0 PASS, else the gate's code (1 when it
@@ -86,8 +101,25 @@ t_out() { # t_out <runner output>: into the log indented, so a nested run's TEST
   # never read as this run's (the host takes only column-0 summary lines)
   [ -z "$1" ] || sed 's/^/  | /' <<<"$1"
 }
+P_ROOT='' P_KEPT=20
+p_root() { # p_root: once, before the run's first Go test — PFM_TEST_ARTIFACT_DIR on a run directory under
+  # the fence's timing base (PFM_TEST_TIMING_DIR, the host's PFM_TEST_TIMING_HOST), which outlives the
+  # call, the newest P_KEPT kept; one column-0 PROFILE line names its host path
+  [ -z "$P_ROOT" ] || return 0
+  P_ROOT=none
+  local base="${PFM_TEST_TIMING_DIR:-}" dir old
+  if [ -z "$base" ]; then
+    echo "PROFILE NOT KEPT (PFM_TEST_TIMING_DIR unset: a red Go test's bundle stays in this call's /tmp)"; return 0
+  fi
+  dir="$base/test-sh/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  if ! mkdir -p "$dir"; then echo "PROFILE NOT KEPT ($dir could not be created: a red Go test's bundle stays in this call's /tmp)"; return 0; fi
+  while IFS= read -r old; do rm -rf "${base:?}/test-sh/$old"; done < <(ls -1 "$base/test-sh" | sort -r | awk -v k="$P_KEPT" 'NR > k')
+  P_ROOT="$dir"; export PFM_TEST_ARTIFACT_DIR="$dir"
+  echo "PROFILE ${PFM_TEST_TIMING_HOST:-$base}/${dir#"$base"/}"
+}
 t_go() { # t_go <label> <import path> <command>...
   local label=$1 pkg=$2 out c=0 t cls skips=0 unlisted=0; shift 2
+  p_root
   out="$("$@" 2>&1)" || c=$?
   t_out "$out"
   if [ "$c" = 0 ]; then
@@ -162,13 +194,13 @@ static_pfm() { # static_pfm <file>...: pfm's checks over the named files
     case " ${pkgs[*]+"${pkgs[*]}"} " in *" $d "*) ;; *) pkgs+=("$d") ;; esac
   done
   if [ "${#pkgs[@]}" = 0 ]; then
-    s_check typecheck go -C pfm vet ./...
+    s_check typecheck bash -c 'go -C pfm vet ./... && go -C pfm vet -tags jail ./...'
   else
     mod="$(sed -n 's/^module[[:space:]]*//p' pfm/go.mod)"
     lrc=0; listed=
     if [ -z "$mod" ]; then lrc=1; listed='pfm/go.mod names no module path'
     else
-      listed="$(go -C pfm list -e -f '{{.ImportPath}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>&1)" || lrc=$?
+      listed="$(go -C pfm list -tags jail -e -f '{{.ImportPath}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... 2>&1)" || lrc=$?
     fi
     if [ "$lrc" != 0 ]; then
       s_verdict typecheck "$lrc" "go list (the importers of the named packages) failed — no package was vetted:
@@ -185,7 +217,7 @@ $listed"
           esac
         done
       done <<<"$listed"
-      s_check typecheck go -C pfm vet "${vetpkgs[@]}"
+      s_check typecheck bash -c 'go -C pfm vet "$@" && go -C pfm vet -tags jail "$@"' _ "${vetpkgs[@]}"
     fi
   fi
   if [ "${#gofiles[@]}" = 0 ]; then
@@ -284,6 +316,10 @@ go_affected() { # go_affected <go test arg>...: go test -v of pfm under the fenc
   [ -z "${PFM_FENCE_AFFECTED_PARALLEL:-}" ] || flags+=(-parallel "$PFM_FENCE_AFFECTED_PARALLEL")
   go -C pfm test -v "${flags[@]}" "$@"
 }
+go_journey_vet() { # the journey suite compiled under its tag for Linux and macOS; the fence has no
+  # systemd, so it never runs here
+  go -C pfm vet -tags journey ./journey/... && GOOS=darwin go -C pfm vet -tags journey ./journey/...
+}
 
 fence_half() {
   local units="$1" n="$2" inv i files f has_md=0 has_go=0 missing="" tool inst_out inst_rc=0 knob
@@ -342,7 +378,9 @@ fence_half() {
 }
 
 if [ "${1:-}" = --fence ]; then
-  [ -n "${PFM_DEV_FENCE:-}" ] || { echo 'test.sh: --fence runs inside the fence only' >&2; exit 2; }
+  # shellcheck source=scripts/platform.sh
+  . "$ROOT/scripts/platform.sh" || { echo "test.sh: cannot source $ROOT/scripts/platform.sh" >&2; exit 2; }
+  platform_in_fence || { echo 'test.sh: --fence runs inside the fence only' >&2; exit 2; }
   shift
   rc=0; fence_half "$@" || rc=$?
   exit "$rc"
@@ -395,14 +433,40 @@ add_raw() { # add_raw <invocation string>: sets MAPPED, even for a repeat
   INVS+=("$1")
 }
 pfm_module="$(sed -n 's/^module[[:space:]][[:space:]]*//p' "$ROOT/pfm/go.mod" 2>/dev/null | head -1)"
-go_pkg_inv() { # go_pkg_inv <label> <pfm-relative dir> [-run selector]: one go test of a package
-  local label="$1" dir="$2" pkg pkgpath tags=()
-  shift 2
+go_pkg_inv() { # go_pkg_inv <label> <pfm-relative dir> <unit|jail> [-run selector]: one go test of a package
+  local label="$1" dir="$2" tier="$3" pkg pkgpath tags=()
+  shift 3
   [ -n "$pfm_module" ] || { echo "test.sh: pfm/go.mod names no module" >&2; exit 2; }
   pkg="./"; [ -z "$dir" ] || pkg="./$dir/"
   pkgpath="$pfm_module"; [ -z "$dir" ] || pkgpath="$pfm_module/$dir"
-  case "$dir" in e2e | e2e/*) tags=(-tags e2e) ;; esac
+  case "$dir" in
+    e2e | e2e/*) tags=(-tags e2e) ;;
+    journey)
+      case "$label" in *::*) echo "test.sh: $label: the journey suite takes no selector (it is only vetted)" >&2; usage ;; esac
+      add_inv t_sh "$label" go_journey_vet; return ;;
+    *) [ "$tier" = unit ] || tags=(-tags jail) ;;
+  esac
   add_inv t_go "$label" "$pkgpath" go_affected ${tags[@]+"${tags[@]}"} "$pkg" "$@"
+}
+go_tier() { # go_tier <repository-relative _test.go>: jail when its //go:build line names jail unnegated, else unit
+  if sed -n '/^\/\/go:build /{p;q;}' "$ROOT/$1" | grep -qE '(^|[^!A-Za-z0-9_])jail([^A-Za-z0-9_]|$)'; then echo jail; else echo unit; fi
+}
+go_funcs() { # go_funcs <repository-relative _test.go>: its Test and Fuzz funcs, TestMain excluded, one per line
+  grep -oE '^func ((Test|Fuzz)[A-Za-z0-9_]*)\(' "$ROOT/$1" | sed 's/^func //; s/($//' | grep -vx TestMain || true
+}
+go_whole_pkg() { # go_whole_pkg <pfm-relative dir>: the unit tier untagged, then its jail files' funcs under the jail tag
+  local dir="$1" f fn unit=0 sel='' label="pfm/$1${1:+/}"
+  for f in "$ROOT/pfm/$dir${dir:+/}"*_test.go; do
+    [ -f "$f" ] || continue
+    f="${f#"$ROOT"/}"
+    if [ "$(go_tier "$f")" = unit ]; then unit=1; continue; fi
+    case "$f" in *_darwin_test.go) continue ;; esac
+    sed -n '/^\/\/go:build /{p;q;}' "$ROOT/$f" | grep -q darwin && continue
+    while IFS= read -r fn; do [ -z "$fn" ] || sel+="$fn|"; done < <(go_funcs "$f")
+  done
+  case "$dir" in e2e | e2e/* | journey) go_pkg_inv "$label" "$dir" unit; return ;; esac
+  if [ "$unit" = 1 ] || [ -z "$sel" ]; then go_pkg_inv "$label" "$dir" unit; fi
+  [ -z "$sel" ] || go_pkg_inv "$label (jail)" "$dir" jail -run "^(${sel%|})\$"
 }
 sut_rows() { # sut_rows <test file>: the scripts a SUT-taking test runs against, one per line
   case "$1" in
@@ -434,21 +498,21 @@ py_inv() { # py_inv <test file> <has selector 0|1> <selector>: unittest when the
 }
 no_sel() { [ "$2" = 0 ] || { echo "test.sh: $1: a $3 takes no selector" >&2; usage; }; }
 derive() { # derive <repository-relative path> <has selector 0|1> <selector>
-  local f="$1" has="$2" sel="$3" dir base names fn sib
+  local f="$1" has="$2" sel="$3" dir base names fn sib tier
   case "$f" in
     pfm/*_test.go)
       dir="${f%/*}"; dir="${dir#pfm}"; dir="${dir#/}"
-      if [ "$has" = 1 ]; then go_pkg_inv "$f::$sel" "$dir" -run "$sel"; return; fi
+      tier="$(go_tier "$f")"
+      if [ "$has" = 1 ]; then go_pkg_inv "$f::$sel" "$dir" "$tier" -run "$sel"; return; fi
       names=()
-      while IFS= read -r fn; do [ "$fn" = TestMain ] || names+=("$fn"); done \
-        < <(grep -oE '^func ((Test|Fuzz)[A-Za-z0-9_]*)\(' "$ROOT/$f" | sed 's/^func //; s/($//' || true)
-      if [ "${#names[@]}" = 0 ]; then go_pkg_inv "pfm/$dir${dir:+/}" "$dir"; return; fi
+      while IFS= read -r fn; do [ -z "$fn" ] || names+=("$fn"); done < <(go_funcs "$f")
+      if [ "${#names[@]}" = 0 ]; then go_whole_pkg "$dir"; return; fi
       sel='^('; for fn in "${names[@]}"; do sel+="$fn|"; done; sel="${sel%|})\$"
-      go_pkg_inv "$f" "$dir" -run "$sel" ;;
+      go_pkg_inv "$f" "$dir" "$tier" -run "$sel" ;;
     pfm/*.go)
       no_sel "$f" "$has" "non-test Go file (its whole package runs)"
       dir="${f%/*}"; dir="${dir#pfm}"; dir="${dir#/}"
-      go_pkg_inv "pfm/$dir${dir:+/}" "$dir" ;;
+      go_whole_pkg "$dir" ;;
     pfm/scripts/*_test.sh) no_sel "$f" "$has" "shell test"; add_inv t_sh "$f" bash "$f" ;;
     pfm/scripts/*.sh)
       no_sel "$f" "$has" "script (its test runs)"; sib="${f%.sh}_test.sh"
@@ -466,26 +530,30 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
         .claude/scripts/test.sh) shell_test scripts/test-test.sh ;;
         .claude/scripts/dev.sh)
           shell_test scripts/test-dev-report.sh .claude/scripts/dev.sh
-          [ ! -f "$ROOT/infra/fence/lanes/tests/iso-housekeeping_test.sh" ] || shell_test infra/fence/lanes/tests/iso-housekeeping_test.sh ;;
-        scripts/shtest.sh | scripts/stub-root.sh)
+          [ ! -f "$ROOT/infra/fence/tests/iso-housekeeping_test.sh" ] || shell_test infra/fence/tests/iso-housekeeping_test.sh ;;
+        scripts/shtest.sh | scripts/stub-root.sh | scripts/worktree-verbs.sh)
           while IFS= read -r sib; do
             [ -z "$sib" ] || [ "$sib" = "$f" ] || [ ! -f "$ROOT/$sib" ] || ! grep -qF -- "$f" "$ROOT/$sib" || shell_test "$sib"
           done < <(git -C "$ROOT" ls-files -- '*_test.sh' 'scripts/test-*.sh') ;;
+        infra/fence/local-env.sh)
+          for sib in infra/fence/tests/fence-env_test.sh infra/fence/tests/iso-housekeeping_test.sh; do
+            [ ! -f "$ROOT/$sib" ] || shell_test "$sib"
+          done ;;
         infra/fence/mkdir-lock.sh)
-          for sib in infra/fence/lanes/tests/mkdir-lock_test.sh infra/fence/lanes/tests/shared_test.sh \
-            infra/fence/lanes/tests/root_test.sh infra/fence/lanes/tests/gate-history_test.sh; do
+          for sib in infra/fence/tests/mkdir-lock_test.sh infra/fence/tests/shared_test.sh \
+            infra/fence/tests/gate-history_test.sh; do
             [ ! -f "$ROOT/$sib" ] || shell_test "$sib"
           done ;;
         .claude/scripts/format-md.sh | templates/project/scripts/format-md.sh) shell_test scripts/test-format-md.sh "$f" ;;
+        .claude/scripts/worktree.sh | .claude/rules/git-writes-through-gitter.md) shell_test scripts/test-worktree-local.sh ;;
+        templates/project/scripts/worktree.sh | templates/project/rules/git-writes-through-gitter.md) shell_test scripts/test-worktree.sh ;;
         .claude/scripts/*.sh | scripts/*.sh | scripts/*.py)
           for sib in "scripts/test-${base%.*}.sh" "scripts/test-${base%.*}.py"; do
             [ -f "$ROOT/$sib" ] || continue
             case "$sib" in *.py) add_inv t_proof "$sib" unittest python3 "$sib" ;; *) shell_test "$sib" ;; esac
           done ;;
-        infra/fence/*.sh | infra/fence/lanes/*.sh)
-          sib="infra/fence/lanes/tests/${base%.sh}_test.sh"; [ ! -f "$ROOT/$sib" ] || shell_test "$sib" ;;
-        infra/demo/*.sh)
-          sib="infra/demo/tests/${base%.sh}_test.sh"; [ ! -f "$ROOT/$sib" ] || shell_test "$sib" ;;
+        infra/fence/*.sh)
+          sib="infra/fence/tests/${base%.sh}_test.sh"; [ ! -f "$ROOT/$sib" ] || shell_test "$sib" ;;
         *.mjs) sib="${f%.mjs}.test.mjs"; [ ! -f "$ROOT/$sib" ] || add_inv t_proof "$sib" tap node --test --test-reporter=tap "$sib" ;;
         *.py) sib="${f%.py}_test.py"; [ ! -f "$ROOT/$sib" ] || py_inv "$sib" 0 '' ;;
       esac ;;
@@ -510,7 +578,7 @@ rc=0
 PFM_FENCE_NET=private PFM_FENCE_WATCH_PIDS="$$${PFM_FENCE_WATCH_PIDS:+ $PFM_FENCE_WATCH_PIDS}" \
   "$DEV" iso run "$cmd" >"$UNIT_LOG" 2>&1 || rc=$?
 # Only column-0 lines are this run's summary: every runner's own output sits indented (t_out).
-grep -E '^(TEST|CHECK|TESTS|STATIC) ' "$UNIT_LOG" || true
+grep -E '^(TEST|CHECK|TESTS|STATIC|PROFILE) ' "$UNIT_LOG" || true
 verdict="$(grep -E '^VERDICT (PASS|FAIL)$' "$UNIT_LOG" | tail -n 1 || true)"
 if [ -z "$verdict" ]; then
   verdict="$(fence_dead 'dev.sh iso run' "$rc")"
@@ -518,7 +586,7 @@ elif [ "$verdict" = 'VERDICT PASS' ] && [ "$rc" != 0 ]; then
   verdict="VERDICT FAIL (fence: dev.sh iso run exited $rc after its PASS verdict — see the log)"
 fi
 # On red, the log's last 40 lines past the summary lines already printed above.
-if [ "$verdict" != 'VERDICT PASS' ]; then grep -vE '^(TEST|CHECK|TESTS|STATIC|VERDICT) ' "$UNIT_LOG" | tail -n 40 || true; fi
+if [ "$verdict" != 'VERDICT PASS' ]; then grep -vE '^(TEST|CHECK|TESTS|STATIC|PROFILE|VERDICT) ' "$UNIT_LOG" | tail -n 40 || true; fi
 echo "$verdict"
 echo "log: $UNIT_LOG"
 case "$verdict" in

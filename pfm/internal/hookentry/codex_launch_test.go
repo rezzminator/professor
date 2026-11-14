@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -25,14 +26,15 @@ func TestCodexLaunchDropsThePaneOfAChildThatIsNoInteractiveChat(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(root)
-	t.Setenv("PATH", binDir)
+	codex := &deps.FakeRunner{}
+	codex.ScriptLookPath("codex", binary, nil)
 	t.Setenv("HERDR_ENV", "1")
 	t.Setenv("HERDR_PANE_ID", "w1:p1")
-	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
+	t.Setenv("HERDR_SOCKET_PATH", testjail.Place("/tmp/h.sock"))
 	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
 	t.Setenv("TMUX_PANE", "%3")
@@ -73,19 +75,9 @@ func TestCodexLaunchDropsThePaneOfAChildThatIsNoInteractiveChat(t *testing.T) {
 				SIDDir:  filepath.Join(root, "sid"),
 				TmuxDir: filepath.Join(root, "tmux"),
 			}}
-			runtime.Config.Extensions = map[string]config.Extension{
-				"ponytail": {
-					Enabled: true,
-					Engines: []string{"codex"},
-					Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "^worker$"},
-				},
-			}
 			var stderr bytes.Buffer
-			if code := CodexLaunch(test.args, &stderr, runtime); code != 0 {
+			if code := CodexLaunchWith(test.args, &stderr, runtime, codex); code != 0 {
 				t.Fatalf("CodexLaunch code=%d stderr=%q", code, stderr.String())
-			}
-			if !slices.Contains(gotEnv, "PONYTAIL_SUBAGENT_MATCHER=^worker$") {
-				t.Errorf("extension env lost at Codex exec: %q", gotEnv)
 			}
 			if gotEnv == nil {
 				t.Fatalf("CodexLaunch never reached exec")
@@ -162,22 +154,41 @@ func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(root)
-	t.Setenv("PATH", binDir)
+	codex := &deps.FakeRunner{}
+	codex.ScriptLookPath("codex", binary, nil)
 	previous := LaunchExec
 	t.Cleanup(func() { LaunchExec = previous })
 	for _, test := range []struct {
-		name string
-		args []string
-		want []string
+		name       string
+		args       []string
+		want       []string
+		primary    string
+		wantStderr string
 	}{
-		{"resume", []string{"resume", "--last"}, []string{binary, "--no-daemon", "resume", "--last"}},
-		{"the user's remote", []string{"--remote", "ws://h:1"}, []string{binary, "--remote", "ws://h:1"}},
+		{"resume", []string{"resume", "--last"}, []string{binary, "--no-daemon", "resume", "--last"}, "", ""},
+		{"the user's remote", []string{"--remote", "ws://h:1"}, []string{binary, "--remote", "ws://h:1"}, "", ""},
+		{
+			"an unreadable primary account launches on the implicit one",
+			[]string{"resume", "--last"},
+			[]string{binary, "--no-daemon", "resume", "--last"},
+			"garbage",
+			"pfm: primary account unreadable (read primary account: parse primary account mirror: " +
+				`strconv.Atoi: parsing "garbage": invalid syntax); launching on account 1` + "\n",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			mirror := filepath.Join(root, ".claude-primary")
+			if test.primary == "" {
+				if err := os.Remove(mirror); err != nil && !os.IsNotExist(err) {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(mirror, []byte(test.primary), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			var gotArgv []string
 			LaunchExec = func(_ string, argv, _ []string) error {
 				gotArgv = append([]string(nil), argv...)
@@ -190,62 +201,91 @@ func TestCodexLaunchRunsTheChatInProcess(t *testing.T) {
 				TmuxDir: filepath.Join(root, "tmux"),
 			}}
 			var stderr bytes.Buffer
-			if code := CodexLaunch(test.args, &stderr, runtime); code != 0 {
+			if code := CodexLaunchWith(test.args, &stderr, runtime, codex); code != 0 {
 				t.Fatalf("CodexLaunch code=%d stderr=%q", code, stderr.String())
 			}
 			if !slices.Equal(gotArgv, test.want) {
 				t.Fatalf("CodexLaunch(%q) exec argv = %q, want %q", test.args, gotArgv, test.want)
 			}
+			if stderr.String() != test.wantStderr {
+				t.Fatalf("CodexLaunch(%q) stderr = %q, want %q", test.args, stderr.String(), test.wantStderr)
+			}
 		})
 	}
 }
 
-func TestCodexLaunchExtensionOwnership(t *testing.T) {
+// A Codex workbench persona whose mirror build or model alias fails launches
+// with the rest of the persona and says what it left out; a workbench that
+// does not enable Codex stays refused, naming its fix.
+func TestCodexLaunchWorkbenchPersonaParts(t *testing.T) {
 	root := testjail.ShortRoot(t)
-	binary := filepath.Join(root, "codex")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	binDir := filepath.Join(root, "bin")
+	binary := filepath.Join(binDir, "codex")
+	_, runner := testjail.FakeEngineSyncRunner(t, `{"ok":false,"problems":["mirror boom"]}`, 1)
+	runner.ScriptLookPath("codex", binary, nil)
+	agent := filepath.Join(root, ".claude", "agents", "astra.md")
+	if err := os.MkdirAll(agent, 0o700); err != nil { // a directory: the alias cannot be read
 		t.Fatal(err)
 	}
+	dir := filepath.Join(root, "acme", "docs", "scribe")
 	t.Chdir(root)
-	t.Setenv("PATH", root)
-	t.Setenv("PONYTAIL_USER_EXPORT", "user")
-	t.Setenv("PONYTAIL_SUBAGENT_MATCHER", "inherited")
 	previous := LaunchExec
 	t.Cleanup(func() { LaunchExec = previous })
-	for _, mode := range []string{"on", "off", "dropped"} {
-		t.Run(mode, func(t *testing.T) {
-			ext := config.Extension{
-				Enabled: mode != "off",
-				Engines: []string{"codex"},
-				Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "configured"},
+	for _, test := range []struct {
+		name, manifest, wantStderr string
+		code                       int
+		want                       []string
+	}{
+		{
+			name:     "mirror and model unresolvable",
+			manifest: `{"prompt":"scribe.md","engines":["codex"],"model":"astra","effort":"high"}`,
+			want: []string{
+				binary, "--no-daemon", "-c", `model_reasoning_effort="high"`,
+				"-c", "developer_instructions=\"\"\"\nYou are scribe.\"\"\"",
+			},
+			wantStderr: "launch Codex: build the codex mirror of workbench " + dir +
+				": mirror boom; launching on the mirror as it stands\n" +
+				`launch Codex: codex model "astra": read agent persona ` + agent + ": read " + agent +
+				": is a directory; launching on Codex's default model\n",
+		},
+		{
+			name:     "codex not enabled",
+			manifest: `{"prompt":"scribe.md"}`,
+			code:     1,
+			wantStderr: "launch Codex: workbench " + dir + ` does not enable codex: add "codex" to "engines" in ` +
+				paths.WorkbenchManifest(dir) + "\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for path, body := range map[string]string{
+				filepath.Join(root, "acme", ".professor", "baseline.json"): "{}",
+				paths.WorkbenchManifest(dir):                               test.manifest,
+				filepath.Join(dir, ".professor", "scribe.md"):              "You are scribe.",
+			} {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if mode == "dropped" {
-				ext.Engines = nil
+			t.Chdir(dir)
+			var gotArgv []string
+			LaunchExec = func(_ string, argv, _ []string) error {
+				gotArgv = append([]string(nil), argv...)
+				return nil
 			}
-			var env []string
-			LaunchExec = func(_ string, _, environment []string) error { env = environment; return nil }
-			runtime := config.Runtime{
-				Config: config.Config{Extensions: map[string]config.Extension{"ponytail": ext}},
-				Paths: paths.Values{
-					Home:    root,
-					StateDB: filepath.Join(root, "state", "pfm.db"),
-					SIDDir:  filepath.Join(root, "sid"),
-					TmuxDir: filepath.Join(root, "tmux"),
-				},
-			}
+			runtime := config.Runtime{Paths: paths.Values{
+				Home:    root,
+				StateDB: filepath.Join(root, "state", "pfm.db"),
+				SIDDir:  filepath.Join(root, "sid"),
+				TmuxDir: filepath.Join(root, "tmux"),
+			}}
 			var stderr bytes.Buffer
-			if code := CodexLaunch(nil, &stderr, runtime); code != 0 {
-				t.Fatalf("launch code=%d: %s", code, &stderr)
-			}
-			if !slices.Contains(env, "PONYTAIL_USER_EXPORT=user") {
-				t.Errorf("exec overlay lost unowned export: %v", env)
-			}
-			want := "inherited"
-			if mode == "on" {
-				want = "configured"
-			}
-			if !slices.Contains(env, "PONYTAIL_SUBAGENT_MATCHER="+want) {
-				t.Errorf("exec overlay precedence wrong: %v", env)
+			code := CodexLaunchWith(nil, &stderr, runtime, runner)
+			if code != test.code || !slices.Equal(gotArgv, test.want) || stderr.String() != test.wantStderr {
+				t.Fatalf("CodexLaunch code=%d argv=%q stderr=%q\nwant code=%d argv=%q stderr=%q",
+					code, gotArgv, stderr.String(), test.code, test.want, test.wantStderr)
 			}
 		})
 	}

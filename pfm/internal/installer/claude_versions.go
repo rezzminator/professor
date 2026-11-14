@@ -29,20 +29,13 @@ var claudeVersionsDir = gather.ClaudeVersionsDir
 // InspectClaudeVersions is the shared structural inspector's compatibility facade.
 var InspectClaudeVersions = gather.InspectClaudeVersions
 
-// Signaler delivers a signal to pid; signal 0 only asks whether pid exists.
-// syscall.Kill is the real one; a test's fake plays the kernel — the same
-// contract as internal/stale.Signaler (stale.go:45-47), defined again here
-// rather than imported so the installer package's dependency surface stays
-// its own; the two are not the same concern and should not couple.
-type Signaler func(pid int, signal syscall.Signal) error
-
 // ProbeLiveClaudeVersions is InspectClaudeVersions' separate, expensive
 // half: cross-referencing the live process table against every version
 // already enumerated, so a build a running chat is executing is never read
 // as unused. Only `pfm doctor` and pruneClaudeVersions call it — never the
 // managed launcher's hot path (see InspectClaudeVersions's doc comment).
 //
-// Scoping mirrors internal/stale.Find (stale.go:53-89): a pid is a Claude
+// Scoping mirrors internal/stale.Find: a pid is a Claude
 // candidate only when its argv[0] names the Claude binary, lives inside the
 // versions directory, or its own basename parses as a version — every other
 // pid, and any pid whose Cmdline could not be read, is skipped BEFORE Image
@@ -58,7 +51,11 @@ type Signaler func(pid int, signal syscall.Signal) error
 // Any OTHER candidate Image error still refuses the whole prune, naming the
 // pid: a live build pfm could not identify is the unsafe direction to guess
 // "unused" about.
-func ProbeLiveClaudeVersions(report ClaudeVersionsReport, procs gather.ProcFS, signal Signaler) ClaudeVersionsReport {
+func ProbeLiveClaudeVersions(
+	report ClaudeVersionsReport,
+	procs gather.ProcFS,
+	probe gather.Probe,
+) ClaudeVersionsReport {
 	if report.Protected == nil {
 		report.Protected = map[string]string{}
 	}
@@ -82,7 +79,7 @@ func ProbeLiveClaudeVersions(report ClaudeVersionsReport, procs gather.ProcFS, s
 		}
 		image, imageErr := imager.Image(pid)
 		if imageErr != nil {
-			if errors.Is(signal(pid, 0), syscall.ESRCH) {
+			if errors.Is(probe(pid), syscall.ESRCH) {
 				continue // the pid exited mid-scan — not a probe failure
 			}
 			if report.LiveProbeErr == nil {

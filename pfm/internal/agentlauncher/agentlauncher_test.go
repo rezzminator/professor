@@ -2,10 +2,7 @@ package agentlauncher
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,37 +21,14 @@ func TestContentExecsThePfmThroughOneSingleQuotedWord(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			content := string(Content(test.pfm))
-			if !strings.HasPrefix(content, "#!/bin/sh\n") || !strings.HasSuffix(content, test.want+"\n") {
-				t.Fatalf("launcher = %q, want a /bin/sh script ending in %q", content, test.want)
+			want := "#!/bin/sh\n" +
+				"# Stable launchd entry for pfm's LaunchAgents (written by pfm install, never edited).\n" +
+				"# It execs pfm so launchd keeps one pid, while Background Task Management sees\n" +
+				"# this unchanging file instead of a pfm binary that is a new identity per build.\n" + test.want + "\n"
+			if content := string(Content(test.pfm)); content != want {
+				t.Fatalf("launcher = %q, want %q", content, want)
 			}
 		})
-	}
-}
-
-// TestLauncherRunsThePfmWithItsArgumentsAndPid proves the script does what the
-// agents rely on: argv passes through unchanged and the pfm replaces the shell.
-func TestLauncherRunsThePfmWithItsArgumentsAndPid(t *testing.T) {
-	t.Parallel()
-	home := testjail.ShortRoot(t)
-	pfm := ExecTarget(home)
-	if err := os.MkdirAll(filepath.Dir(pfm), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := testjail.WriteExecutable(pfm, []byte("#!/bin/sh\nprintf '%s|' \"$$\" \"$@\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := Stage(home); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(Program(home), "internal", "schedule-fire", "two words")
-	output, err := command.Output()
-	if err != nil {
-		t.Fatalf("launcher run: %v", err)
-	}
-	want := strconv.Itoa(command.Process.Pid) + "|internal|schedule-fire|two words|"
-	if got := string(output); got != want {
-		t.Fatalf("output %q, want %q: the launcher's own pid, then the arguments unchanged", got, want)
 	}
 }
 
@@ -176,12 +150,13 @@ func TestRemoveDeletesTheLauncherAndOnlyItsOwnEmptyDirectory(t *testing.T) {
 	}
 }
 
+// writeFile writes a launcher the test only compares and stats: nothing runs it.
 func writeFile(t *testing.T, path, content string, mode os.FileMode) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(path, []byte(content), mode); err != nil {
+	if err := testjail.WriteExecutableNeverRun(path, []byte(content), mode); err != nil {
 		t.Fatal(err)
 	}
 }

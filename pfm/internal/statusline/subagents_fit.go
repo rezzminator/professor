@@ -20,8 +20,8 @@ func appendRowSegment(line, segment string) string {
 }
 
 // fitRow joins the parts and, while the row is wider than columns leaves for
-// it, gives parts up rank by rank. columns 0 (no width in the payload) keeps
-// the full row.
+// it past Claude Code's footer padding, gives parts up rank by rank. columns 0
+// (no width in the payload) keeps the full row.
 func fitRow(parts []rowPart, columns int) string {
 	join := func() string {
 		line := ""
@@ -31,7 +31,7 @@ func fitRow(parts []rowPart, columns int) string {
 		return line
 	}
 	line := join()
-	budget := columns - rowPrefixWidth
+	budget := columns - footerPadding
 	for rank := dropCwd; columns > 0 && rank <= dropEffort && ansi.StringWidth(line) > budget; rank++ {
 		for index := range parts {
 			if parts[index].drop == rank {

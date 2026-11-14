@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -259,14 +260,46 @@ func TestInspectSeatCapturesOnlyAPendingToolCallQuietPastTheThreshold(t *testing
 }
 
 // "We failed to look" is an error, never a state: a pane that could not be
-// read must not render a silent pending tool call as blocked or working.
-func TestInspectSeatReturnsACaptureFailureOnASilentPendingToolCall(t *testing.T) {
+// read must not render a silent pending tool call, or a seat with no
+// transcript, as blocked or working. A pane whose tmux server is gone is no
+// failure to look: the chat ended after the listing found it, and it is dead.
+func TestInspectSeatReadsAGoneServerAsDeadAndEveryOtherCaptureFailureAsAnError(t *testing.T) {
 	testjail.Fleet(t)
-	chat := pendingToolChat(t, claudeToolCall, 90*time.Second)
-	_, err := InspectSeat(context.Background(), nil, chat, time.Now(),
-		func(context.Context, string, string) (string, error) { return "", errors.New("tmux could not run") })
-	if err == nil || !strings.Contains(err.Error(), "tmux could not run") {
-		t.Fatalf("InspectSeat error = %v, want the capture failure named", err)
+	gone := fmt.Errorf(
+		"capture pane %%0: %w: exit status 1: error connecting to /t/ox-1-2-3 (No such file or directory)",
+		gather.ErrServerGone,
+	)
+	transcriptless := headless.Chat{Name: "seat", Engine: pfmengine.Claude, Live: true, Socket: "ox-1-2-3", Pane: "%0"}
+	for _, tc := range []struct {
+		name    string
+		chat    headless.Chat
+		failure error
+		wantErr string
+	}{
+		{"a silent pending tool call on a gone server", pendingToolChat(t, claudeToolCall, 90*time.Second), gone, ""},
+		{"a transcriptless seat on a gone server", transcriptless, gone, ""},
+		{
+			"a silent pending tool call whose capture failed", pendingToolChat(t, claudeToolCall, 90*time.Second),
+			errors.New("tmux could not run"), "tmux could not run",
+		},
+		{
+			"a transcriptless seat whose capture failed", transcriptless,
+			errors.New("tmux could not run"), "tmux could not run",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, err := InspectSeat(context.Background(), nil, tc.chat, time.Now(),
+				func(context.Context, string, string) (string, error) { return "", tc.failure })
+			if tc.wantErr != "" {
+				if err == nil || !strings.HasSuffix(err.Error(), ": "+tc.wantErr) {
+					t.Fatalf("InspectSeat() = %#v, %v; want the capture failure %q named", status, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || status.State != headless.StateDead || status.IdleSeconds != 0 || status.Error != "" {
+				t.Fatalf("InspectSeat() = %#v, %v; want dead with zero idle seconds and no error", status, err)
+			}
+		})
 	}
 }
 
@@ -340,18 +373,18 @@ func TestInspectSeatKeepsAnOpenCodexTurnWorking(t *testing.T) {
 	}
 }
 
-// Native states are the fallback only; a broken or unknown response is not idle.
+// Native states are the fallback only; an unknown or future state is not idle:
+// it keeps the transcript verdict and names itself in state_source.
 func TestHerdrStatusNativeFallback(t *testing.T) {
 	for _, tc := range []struct {
-		state, want string
-		bad         bool
+		state, want, source string
 	}{
-		{"idle", headless.StateIdle, false},
-		{"done", headless.StateIdle, false},
-		{"working", headless.StateWorking, false},
-		{"blocked", headless.StateBlocked, false},
-		{"unknown", headless.StateWorking, false},
-		{"future", "", true},
+		{"idle", headless.StateIdle, ""},
+		{"done", headless.StateIdle, ""},
+		{"working", headless.StateWorking, ""},
+		{"blocked", headless.StateBlocked, ""},
+		{"unknown", headless.StateWorking, "transcript (Herdr unknown)"},
+		{"future", headless.StateWorking, "transcript (Herdr future)"},
 	} {
 		t.Run(tc.state, func(t *testing.T) {
 			socket := herdrStatusSocket(t, fmt.Sprintf(`{"agent":{"pane_id":"w6:p3","agent_status":%q}}`, tc.state))
@@ -362,14 +395,8 @@ func TestHerdrStatusNativeFallback(t *testing.T) {
 				time.Now(),
 				nil,
 			)
-			if tc.bad {
-				if err == nil {
-					t.Fatalf("unknown state returned %+v, want error", got)
-				}
-				return
-			}
-			if err != nil || got.State != tc.want {
-				t.Fatalf("status=%+v, %v; want %s", got, err, tc.want)
+			if err != nil || got.State != tc.want || got.StateSource != tc.source {
+				t.Fatalf("status=%+v, %v; want %s from %q", got, err, tc.want, tc.source)
 			}
 		})
 	}

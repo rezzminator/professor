@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -39,6 +39,10 @@ func (noNetworkThemeTransport) RoundTrip(*http.Request) (*http.Response, error) 
 // watch ladder builds its mock engine once; empty when no build ran.
 var testBinaryDir string
 
+// attachHelperEnv marks a re-exec of this test binary as the attach helper a jailed attach test
+// runs inside a live tmux pane (attach_jail_test.go); TestMain reads it in every build.
+const attachHelperEnv = "PFM_ATTACH_HELPER"
+
 // TestMain gives this package a short, canonical TMPDIR before any test builds
 // a path from it. See internal/testjail for why both properties matter.
 func TestMain(m *testing.M) {
@@ -46,10 +50,11 @@ func TestMain(m *testing.M) {
 	binaryDir := ""
 	// This daemon test exercises its in-process handler and never starts the
 	// shared CLI binary. Its one-test run need not pay for a Go build.
+	// An armed unit binary starts no go build: only the jail tier's tests run the shared binary.
 	if flag.Lookup("test.list").Value.String() == "" && os.Getenv(attachHelperEnv) != "1" &&
-		!runningOnlyMCPDaemonMountedTest() {
+		!runningOnlyMCPDaemonMountedTest() && !testjail.UnitNetArmed() {
 		var err error
-		binaryDir, err = os.MkdirTemp("", "pfm-cmd-test-binary-")
+		binaryDir, err = os.MkdirTemp(paths.TempRoot(), "pfm-cmd-test-binary-")
 		if err != nil {
 			_, _ = os.Stderr.WriteString("create shared pfm test binary directory: " + err.Error() + "\n")
 			os.Exit(1)
@@ -74,6 +79,9 @@ func TestMain(m *testing.M) {
 	// would run the whole suite again, detached. A test that counts spawns
 	// replaces this stub.
 	statuslinePacedSpawn = func(string) error { return nil }
+	// The same holds for a kill's detached exit finisher: a test that reads
+	// the start replaces this recorder.
+	fleet.KillFinisherRunner = &deps.FakeRunner{}
 	doctor.DaemonReachabilityOverride = func(pfmconfig.Runtime) (mcpserv.DaemonStatus, error) {
 		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
 	}
@@ -136,42 +144,4 @@ func runningOnlyMCPDaemonMountedTest() bool {
 		}
 	}
 	return false
-}
-
-func TestTestMainUsesPrebuiltPFMBinary(t *testing.T) {
-	if want := os.Getenv("TEST_EXPECT_PFM_BINARY"); want != "" {
-		if testPFMBinary != want {
-			t.Fatalf("testPFMBinary = %q, want prebuilt %q", testPFMBinary, want)
-		}
-		return
-	}
-	goDir := t.TempDir()
-	if err := testjail.WriteExecutable(filepath.Join(goDir, "go"), []byte("#!/bin/sh\nexit 41\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	prebuilt := filepath.Join(t.TempDir(), "pfm")
-	if err := testjail.WriteExecutable(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(os.Args[0], "-test.run=^TestTestMainUsesPrebuiltPFMBinary$")
-	command.Env = append(os.Environ(),
-		"PATH="+goDir, paths.EnvTestPFMBinary+"="+prebuilt, "TEST_EXPECT_PFM_BINARY="+prebuilt,
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("run with prebuilt pfm: %v\n%s", err, output)
-	}
-	if _, err := os.Stat(prebuilt); err != nil {
-		t.Fatalf("TestMain removed prebuilt binary %q: %v", prebuilt, err)
-	}
-}
-
-func TestTestMainRejectsBrokenPrebuiltPFMBinary(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing-pfm")
-	command := exec.Command(os.Args[0], "-test.run=^TestTestMainRejectsBrokenPrebuiltPFMBinary$")
-	command.Env = append(os.Environ(), paths.EnvTestPFMBinary+"="+missing)
-	output, err := command.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), paths.EnvTestPFMBinary) ||
-		!strings.Contains(string(output), missing) {
-		t.Fatalf("TestMain broken prebuilt = %v, %q; want named failure", err, output)
-	}
 }

@@ -1,7 +1,6 @@
 package compose
 
 import (
-	"strings"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -9,7 +8,7 @@ import (
 
 func TestEngineForKindCheckedRejectsUnknown(t *testing.T) {
 	_, err := EngineForKindChecked(Kind(255))
-	if err == nil || !strings.Contains(err.Error(), "unknown compose kind 255") {
+	if err == nil || err.Error() != "unknown compose kind 255" {
 		t.Fatalf("EngineForKindChecked(255) error=%v", err)
 	}
 }

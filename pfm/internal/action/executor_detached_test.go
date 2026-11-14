@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -173,9 +174,12 @@ func TestOpenDetachedCodexRequiresLogin(t *testing.T) {
 		Row:      compose.Row{Kind: compose.ResumeCodex, ID: "t1", CWD: "/work"},
 		Config:   machine, Home: home, PrimaryAccount: 1, FreshSocket: "cx-fresh",
 	})
-	want := "open detached: Codex account 1: " + authPath + " "
-	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) || len(tmux.created) != 0 {
-		t.Fatalf("detached Open error=%v created=%d; want %q", err, len(tmux.created), want)
+	if got, want := rooted(
+		t,
+		fmt.Sprint(err),
+	), "open detached: Codex account 1: {root}/002/.codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"; !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || got != want ||
+		len(tmux.created) != 0 {
+		t.Errorf("detached Open created=%d error = %q, want %q", len(tmux.created), got, want)
 	}
 }
 
@@ -349,6 +353,8 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 		wantErr     []string
 		wantWarning []string
 		wantKilled  []string
+		// wantRetired: the sockets whose recorded seat a launch that died had retired.
+		wantRetired []string
 		// cancelled: the caller has stopped waiting before the watch reads
 		// the pane, so every context-bound read fails.
 		cancelled bool
@@ -361,9 +367,29 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 		wantCleared bool
 	}{
 		{
-			name:        "a chat that settles",
-			launch:      fakeLaunch{screen: "Claude Code\n\n> \n", command: "claude"},
+			name: "a chat that settles",
+			launch: fakeLaunch{
+				command: "claude", then: []fakeLaunch{{screen: "Claude Code\n\n> \n", command: "claude"}},
+			},
+			maxReads:    3,
 			wantCleared: true,
+		},
+		{
+			// A resume refused, and its fallback's line is read with the engine the
+			// fallback starts already running: that engine dies before it paints, so
+			// the words are not its own and the open fails quoting them.
+			name: "an engine that dies before painting under a launcher's words",
+			launch: fakeLaunch{command: "bash", then: []fakeLaunch{
+				{screen: "resume refused — session is live elsewhere:\n", command: "claude"},
+				{screen: "resume refused — session is live elsewhere:\n", command: "claude"},
+				{screen: "resume refused — session is live elsewhere:\nError: crashed at launch\n", dead: true},
+			}},
+			wantErr: []string{
+				"the chat resumable chat exited at launch — its pane said: " +
+					"resume refused — session is live elsewhere: | Error: crashed at launch",
+			},
+			wantKilled:  []string{socket},
+			wantRetired: []string{socket},
 		},
 		{
 			name: "the pane's process exits at launch",
@@ -372,22 +398,36 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 					"66666666-6666-4666-8666-666666666666\n\n[exited]\n",
 				dead: true,
 			},
-			wantErr:    []string{"resumable chat exited at launch", "refusing the double-resume"},
-			wantKilled: []string{socket},
+			wantErr:     []string{"resumable chat exited at launch", "refusing the double-resume"},
+			wantKilled:  []string{socket},
+			wantRetired: []string{socket},
 		},
 		{
-			name:    "the server is gone before the watch reads it",
-			launch:  fakeLaunch{gone: true},
-			wantErr: []string{"resumable chat died at launch", socket, "what it printed was lost"},
+			name:        "the server is gone before the watch reads it",
+			launch:      fakeLaunch{gone: true},
+			wantErr:     []string{"resumable chat died at launch", socket, "what it printed was lost"},
+			wantRetired: []string{socket},
+		},
+		{
+			name:   "the server is gone after its pane printed",
+			launch: fakeLaunch{screen: "zsh: command not found: claude\n", command: "zsh", goneAfterReads: 1},
+			wantErr: []string{
+				"the chat resumable chat died at launch: its server on socket " + socket +
+					" is gone (no server running on " + socket + ") — its pane last read: zsh: command not found: claude",
+			},
+			wantRetired: []string{socket},
 		},
 		{
 			// A resume row's pane runs its compound line under a shell that
 			// never execs, and an agent row's under pfm: the engine is a
 			// child on the pane's terminal, never the pane's own command.
-			name:        "an engine running under the pane's shell",
-			launch:      fakeLaunch{screen: "Claude Code\n\n> \n", command: "bash", tty: "pts/7"},
+			name: "an engine running under the pane's shell",
+			launch: fakeLaunch{
+				command: "bash", tty: "pts/7",
+				then: []fakeLaunch{{screen: "Claude Code\n\n> \n", command: "bash", tty: "pts/7"}},
+			},
 			processes:   []Process{{PID: 4242, Argv: []string{"/opt/bin/claude", "--resume"}, TTY: "pts/7"}},
-			maxReads:    2,
+			maxReads:    3,
 			wantCleared: true,
 		},
 		{
@@ -430,6 +470,7 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 				stageProfessorPrompt(t, home)
 				jailAction(t)
 				t.Cleanup(launchnotice.Replace(strings.NewReader(""), false))
+				retired := recordRetires(t)
 				var stderr bytes.Buffer
 				tmux := &fakeActionTmux{
 					alive:    map[string]bool{},
@@ -495,6 +536,9 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 				}
 				if !reflect.DeepEqual(tmux.killedServer, test.wantKilled) {
 					t.Fatalf("killed servers = %q, want %q", tmux.killedServer, test.wantKilled)
+				}
+				if !reflect.DeepEqual(*retired, test.wantRetired) {
+					t.Fatalf("retired seats = %q, want %q", *retired, test.wantRetired)
 				}
 				if test.maxReads > 0 && tmux.launchReads > test.maxReads {
 					t.Fatalf("the watch read the pane %d times, want it up by read %d", tmux.launchReads, test.maxReads)

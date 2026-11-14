@@ -1,7 +1,9 @@
 package action
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,7 +14,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -35,9 +36,40 @@ func TestSynthesizeWorkbenchPersona(t *testing.T) {
 			name += "/without-fleet"
 		}
 		t.Run(name, func(t *testing.T) {
+			// The adopter's settings envs ride ahead of pfm's own, which win a shared name.
+			owned := map[compose.Kind]string{
+				compose.NewClaude: "CLAUDE_CONFIG_DIR", compose.ResumeClaude: "CLAUDE_CONFIG_DIR",
+				compose.Agent: "CLAUDE_CONFIG_DIR", compose.ResumeCodex: "CODEX_HOME",
+				compose.NewOpenCode: "OPENCODE_CONFIG_CONTENT", compose.ResumeOpenCode: "OPENCODE_CONFIG_CONTENT",
+				compose.NewCodex: "CODEX_HOME",
+			}[request.Row.Kind]
+			request.Persona.Envs = map[string]string{"TEAM_MODE": "strict", owned: "/adopter/value"}
 			plan, err := Synthesize(request)
 			if err != nil {
 				t.Fatal(err)
+			}
+			seatEnv := []string{"TEAM_MODE=strict"} // the agent router's plan is a run line alone
+			switch {
+			case plan.SeatRun != nil:
+				seatEnv = plan.SeatRun.Env
+			case request.Row.Kind != compose.Agent:
+				t.Fatalf("plan carries no seat recipe: %#v", plan)
+			}
+			var adopted []string
+			for _, entry := range seatEnv {
+				if strings.HasPrefix(entry, "TEAM_MODE=") || strings.Contains(entry, "/adopter/value") {
+					adopted = append(adopted, entry)
+				}
+			}
+			if !reflect.DeepEqual(adopted, []string{"TEAM_MODE=strict"}) {
+				t.Errorf("seat env adopter entries = %q, want [TEAM_MODE=strict]", adopted)
+			}
+			envWord := " TEAM_MODE='strict' " + owned + "="
+			if request.Row.Kind == compose.NewCodex {
+				envWord = "" // cx's own launcher applies the settings (hookentry.CodexLaunch)
+			}
+			if !strings.Contains(plan.Run, envWord) || strings.Contains(plan.Run, "/adopter/value") {
+				t.Errorf("run lacks %q or carries the adopter's %s: %s", envWord, owned, plan.Run)
 			}
 			var words []string
 			switch request.Row.Kind {
@@ -168,9 +200,9 @@ func TestWorkbenchPersonaEffort(t *testing.T) {
 			_, dir := actionWorkbenchFixture(t, test.manifest)
 			for _, engine := range test.engines {
 				t.Run(string(engine), func(t *testing.T) {
-					persona, err := WorkbenchPersona(dir, engine, test.mode)
+					persona, err := WorkbenchPersona(dir, "", engine, test.mode)
 					if test.passThrough {
-						_, wantErr := workbench.ForLaunch(dir, engine, test.mode)
+						_, wantErr := workbench.ForLaunch(dir, "", engine, test.mode)
 						if wantErr == nil || err == nil || err.Error() != wantErr.Error() {
 							t.Fatalf("WorkbenchPersona = %v; want ForLaunch error %v", err, wantErr)
 						}
@@ -203,10 +235,13 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 		kind           compose.Kind
 		both           bool
 	}{
-		{"refusal before any side effect", `{"prompt":""}`, compose.ResumeClaude, true},
+		{"broken persona opens without it", `{"prompt":""}`, compose.ResumeClaude, true},
+		{"disabled new chat refused before any side effect", `{"prompt":"scribe.md","engines":["codex"]}`, compose.NewClaude, false},
 		{"allowed", `{"prompt":"scribe.md","effort":"xhigh","engines":["claude","codex","opencode"]}`, compose.ResumeClaude, true},
 		{"disabled resume", `{"prompt":"scribe.md"}`, compose.ResumeCodex, false},
 		{"booting row ignores the manifest", `{"prompt":""}`, compose.Booting, false},
+		{"settings envs beside a broken persona", `{"prompt":""}`, compose.ResumeClaude, true},
+		{"faulty settings beside a persona", `{"prompt":"scribe.md","effort":"xhigh"}`, compose.ResumeClaude, true},
 	} {
 		doors := []bool{false}
 		if test.both {
@@ -217,17 +252,28 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				request, dir := actionWorkbenchFixture(t, test.manifest)
 				request.Row.Kind = test.kind
 				processes := &fakeProcesses{}
-				var wantError, wantRun string
+				var wantError, wantRun, wantWarning string
+				var wantWarnings []string
+				settings := paths.Settings(filepath.Dir(filepath.Dir(dir)))
 				switch test.name {
-				case "refusal before any side effect":
-					processes.processes = []Process{
-						{PID: 42, Argv: []string{"claude", "--resume", request.Row.ID}, TTY: "pts/1"},
+				case "settings envs beside a broken persona":
+					if err := atomicfile.Write(settings, []byte(`{"envs":{"TEAM_MODE":"strict"}}`), 0o600); err != nil {
+						t.Fatal(err)
 					}
-					_, err := workbench.ForLaunch(dir, pfmengine.Claude, workbench.Resume)
-					if err == nil {
-						t.Fatal("fixture ForLaunch did not fail")
+					wantWarning = "workbench persona not applied (" + paths.WorkbenchManifest(dir) +
+						`: "prompt" is required); launching without it`
+				case "faulty settings beside a persona":
+					if err := atomicfile.Write(settings, []byte(`{"envs":{"team_mode":"strict"}}`), 0o600); err != nil {
+						t.Fatal(err)
 					}
-					wantError = err.Error()
+					wantWarning = settings + `: envs name "team_mode" must be upper snake: A-Z, 0-9 and _, ` +
+						"starting with a letter; launching without the settings"
+				case "broken persona opens without it":
+					wantWarning = "workbench persona not applied (" + paths.WorkbenchManifest(dir) +
+						`: "prompt" is required); launching without it`
+				case "disabled new chat refused before any side effect":
+					wantError = "workbench " + dir + ` does not enable claude: add "claude" to "engines" in ` +
+						paths.WorkbenchManifest(dir)
 				case "disabled resume":
 					plain, err := Synthesize(request)
 					if err != nil {
@@ -241,24 +287,31 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 					}
 				}
 				tmux := &fakeActionTmux{alive: map[string]bool{}}
+				var stderr bytes.Buffer
 				executor, err := New(Dependencies{
 					Tmux:      tmux,
 					Processes: processes,
 					Gate:      fixedGate(false),
 					Runner:    &captureRunner{},
-					Stderr:    io.Discard,
+					Stderr:    &stderr,
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
 				var line string
+				var told []string
 				if detached {
-					_, err = executor.Open(context.Background(), detachedRequest(request))
+					var result OpenResult
+					result, err = executor.Open(context.Background(), detachedRequest(request))
+					told = result.Warnings
 				} else {
 					line, err = openLine(executor, context.Background(), request)
+					if stderr.Len() > 0 {
+						told = strings.Split(strings.TrimSuffix(stderr.String(), "\n"), "\n")
+					}
 				}
 				if wantError != "" {
-					if err == nil || !strings.Contains(err.Error(), wantError) || len(tmux.created) != 0 ||
+					if err == nil || err.Error() != wantError || len(tmux.created) != 0 ||
 						len(processes.terminated) != 0 {
 						t.Fatalf(
 							"refusal=%v, created=%v, terminated=%v; want %q",
@@ -273,6 +326,16 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				want := wantWarnings
+				if wantWarning != "" {
+					want = []string{wantWarning}
+					if !detached {
+						want = []string{"pfm: " + wantWarning}
+					}
+				}
+				if !reflect.DeepEqual(told, want) {
+					t.Fatalf("open told %q, want %q", told, want)
+				}
 				if test.kind == compose.Booting {
 					if !strings.Contains(line, "cc-new-fixture-1") || len(tmux.created) != 0 {
 						t.Fatalf("booting attach = %q, created=%v", line, tmux.created)
@@ -286,6 +349,18 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				if test.name == "disabled resume" {
 					if run != wantRun {
 						t.Fatalf("disabled resume=%s; want %s", run, wantRun)
+					}
+					return
+				}
+				if test.name == "settings envs beside a broken persona" &&
+					!strings.Contains(run, " TEAM_MODE='strict' CLAUDE_CONFIG_DIR=") {
+					t.Fatalf("settings envs missing beside the broken persona: %s", run)
+				}
+				if test.name == "broken persona opens without it" ||
+					test.name == "settings envs beside a broken persona" {
+					prompt := filepath.Join(dir, ".professor", "scribe.md")
+					if !stringsContainsAll(run, "'--resume' '"+request.Row.ID+"'") || strings.Contains(run, prompt) {
+						t.Fatalf("broken persona run=%s; want the resume without %s", run, prompt)
 					}
 					return
 				}
@@ -322,7 +397,7 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 				if test.fail && test.kind == compose.ResumeCodex {
 					reply, code = testjail.FailedMirrorReply, 1
 				}
-				record := testjail.FakeEngineSync(t, reply, code)
+				record, engineSync := testjail.FakeEngineSyncRunner(t, reply, code)
 				if test.fail && test.kind == compose.NewOpenCode {
 					if err := atomicfile.Write(
 						filepath.Join(request.Home, ".local", "state", "pfm"),
@@ -345,20 +420,51 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 						}
 					}
 				}
-				executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
+				var stderr bytes.Buffer
+				executor, err := New(Dependencies{
+					Tmux: tmux, Processes: &fakeProcesses{}, Stderr: &stderr, EngineSyncRunner: engineSync,
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
+				var told []string
 				if detached {
-					_, err = executor.Open(context.Background(), detachedRequest(request))
+					var result OpenResult
+					result, err = executor.Open(context.Background(), detachedRequest(request))
+					told = result.Warnings
 				} else {
 					_, err = executor.Open(context.Background(), request)
+					if stderr.Len() > 0 {
+						told = strings.Split(strings.TrimSuffix(stderr.String(), "\n"), "\n")
+					}
 				}
-				if test.fail {
+				switch {
+				case test.fail && test.kind == compose.NewOpenCode:
 					if err == nil || len(tmux.created) != 0 {
 						t.Fatalf("preparation refusal=%v, created=%v", err, tmux.created)
 					}
-				} else if err != nil || len(tmux.created) != 1 {
+				case test.fail:
+					// A mirror that will not build opens the chat on the mirror as it stands, said.
+					persona, personaErr := workbench.ForLaunch(dir, "", pfmengine.Codex, workbench.Resume)
+					if personaErr != nil {
+						t.Fatal(personaErr)
+					}
+					mirrorErr := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home, engineSync)
+					if mirrorErr == nil {
+						t.Fatal("mirror fixture did not fail")
+					}
+					want := mirrorErr.Error() + "; launching on the mirror as it stands"
+					if !detached {
+						want = "pfm: " + want
+					}
+					if err != nil || len(tmux.created) != 1 || !reflect.DeepEqual(told, []string{want}) {
+						t.Fatalf("mirror failure open=%v, created=%d, told %q; want one server and %q",
+							err, len(tmux.created), told, want)
+					}
+					if !strings.Contains(tmux.created[0].Run, "developer_instructions") {
+						t.Fatalf("mirror failure dropped the persona: %s", tmux.created[0].Run)
+					}
+				case err != nil || len(tmux.created) != 1:
 					t.Fatalf("prepared open=%v, created=%v; want one server", err, tmux.created)
 				}
 			})
@@ -367,9 +473,15 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 }
 
 func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
+	wants := map[string]string{
+		"clone recorded":      "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"instructions\":[\"{root}/001/acme/docs/scribe/.professor/scribe.md\"],\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-workbench-plugin.mjs\",\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' PFM_OPENCODE_FLEET_FILE='{root}/002/clone/pfm/harness-prompts/generated/opencode.md' PFM_OPENCODE_SYSTEM_FILE='{root}/001/acme/docs/scribe/.professor/scribe.md' opencode '{root}/001/acme/docs/scribe'",
+		"no clone recorded":   "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"instructions\":[\"{root}/001/acme/docs/scribe/.professor/scribe.md\"],\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-workbench-plugin.mjs\",\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' PFM_OPENCODE_SYSTEM_FILE='{root}/001/acme/docs/scribe/.professor/scribe.md' opencode '{root}/001/acme/docs/scribe'",
+		"recorded clone gone": "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"instructions\":[\"{root}/001/acme/docs/scribe/.professor/scribe.md\"],\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-workbench-plugin.mjs\",\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' PFM_OPENCODE_SYSTEM_FILE='{root}/001/acme/docs/scribe/.professor/scribe.md' opencode '{root}/001/acme/docs/scribe'",
+		"marker unreadable":   "resolve the fleet prompt an OpenCode workbench launch replaces: resolve generated harness prompt: read source repository marker {root}/001/home/.local/share/pfm/install/source-repo: read {root}/001/home/.local/share/pfm/install/source-repo: is a directory",
+	}
 	for _, marker := range []string{"clone recorded", "no clone recorded", "recorded clone gone", "marker unreadable"} {
 		t.Run(marker, func(t *testing.T) {
-			request, dir := actionWorkbenchFixture(t, `{"prompt":"scribe.md","engines":["opencode"]}`)
+			request, _ := actionWorkbenchFixture(t, `{"prompt":"scribe.md","engines":["opencode"]}`)
 			request.Row.Kind = compose.NewOpenCode
 			clone := filepath.Join(t.TempDir(), "clone")
 			switch marker {
@@ -396,36 +508,12 @@ func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = executor.Open(context.Background(), request)
-			if marker == "marker unreadable" {
-				if err == nil ||
-					!strings.Contains(err.Error(), "resolve the fleet prompt an OpenCode workbench launch replaces") ||
-					!strings.Contains(err.Error(), "read source repository marker") ||
-					len(tmux.created) != 0 {
-					t.Fatalf("marker refusal=%v, created=%d", err, len(tmux.created))
-				}
-				return
+			got := fmt.Sprint(err)
+			if len(tmux.created) == 1 {
+				got = tmux.created[0].Run
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(tmux.created) != 1 {
-				t.Fatalf("created=%d", len(tmux.created))
-			}
-			run := tmux.created[0].Run
-			prompt := filepath.Join(dir, ".professor", "scribe.md")
-			want := `OPENCODE_CONFIG_CONTENT='{"instructions":["` + prompt + `"],"plugin":["file://` + paths.OpenCodeWorkbenchPlugin(
-				request.Home,
-			) + `","file://` + paths.OpenCodeHerdrPlugin(
-				request.Home,
-			) + `"]}'`
-			if marker == "clone recorded" {
-				want += " PFM_OPENCODE_FLEET_FILE=" + cmdparse.Quote(
-					paths.GeneratedHarnessPromptIn(clone, pfmengine.OpenCode),
-				)
-			}
-			want += " PFM_OPENCODE_SYSTEM_FILE=" + cmdparse.Quote(prompt) + " opencode"
-			if !strings.Contains(run, want) {
-				t.Fatalf("run lacks %q: %s", want, run)
+			if got := rooted(t, got); len(tmux.created) > 1 || got != wants[marker] {
+				t.Errorf("created=%d run or refusal = %q, want %q", len(tmux.created), got, wants[marker])
 			}
 		})
 	}
@@ -440,18 +528,18 @@ func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
 		kind           compose.Kind
 		want           string
 	}{
-		{"persona chat", `{"prompt":"scribe.md","engines":["opencode"]}`, compose.NewOpenCode, "persona"},
-		{"no persona, fresh, outside a workbench", `{"prompt":"scribe.md"}`, compose.NewOpenCode, "plain"},
-		{"no persona, resume", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "plain"},
-		{"claude chat", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeClaude, "none"},
+		{"persona chat", `{"prompt":"scribe.md","engines":["opencode"]}`, compose.NewOpenCode, "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"instructions\":[\"{root}/001/acme/docs/scribe/.professor/scribe.md\"],\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-workbench-plugin.mjs\",\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' PFM_OPENCODE_SYSTEM_FILE='{root}/001/acme/docs/scribe/.professor/scribe.md' opencode '{root}/001/acme/docs/scribe'\nconst PFM_BINARY = \"{root}/001/home/.local/bin/pfm\""},
+		{"no persona, fresh, outside a workbench", `{"prompt":"scribe.md"}`, compose.NewOpenCode, "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' opencode '{root}/001/acme'\nconst PFM_BINARY = \"{root}/001/home/.local/bin/pfm\""},
+		{"no persona, resume", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "printf '%s\\n' '═══ RESUME of 44444444-4444-4444-8444-444444444444 — verify before trusting this pane ═══' '    History loaded? Check the session list above the composer before' '    treating this seat as continuing its prior work.'; env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE OPENCODE_CONFIG_CONTENT='{\"plugin\":[\"file://{root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs\"]}' opencode --session '44444444-4444-4444-8444-444444444444' '{root}/001/acme/docs/scribe'\nconst PFM_BINARY = \"{root}/001/home/.local/bin/pfm\""},
+		{"claude chat", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeClaude, "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CLAUDE_CONFIG_DIR='{root}/001/home/.cc/1' CACHE_LIVE_CONTROL_MAIN_TTL='5m' PFM_COST_LEDGER='failed' 'claude' '--remote-control' '--resume' '44444444-4444-4444-8444-444444444444' '--settings' '{\"cleanupPeriodDays\":36500,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"9007199254740991\",\"CLAUDE_CODE_TMUX_TRUECOLOR\":\"1\"},\"hooks\":{\"Notification\":[{\"hooks\":[{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude notification\",\"type\":\"command\"}],\"matcher\":\"permission_prompt|elicitation_dialog|idle_prompt|plugin_notification\"}],\"PermissionRequest\":[{\"hooks\":[{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude blocked\",\"type\":\"command\"}]}],\"PostToolUse\":[{\"hooks\":[{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}],\"PostToolUseFailure\":[{\"hooks\":[{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}],\"PreToolUse\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal git-guard\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal store-guard\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal orchestrator-wait\",\"type\":\"command\"}],\"matcher\":\"Bash\"},{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal pcm-guard\",\"type\":\"command\"}],\"matcher\":\"Edit|Write|MultiEdit|NotebookEdit|Bash\"}],\"SessionEnd\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal clear-kill\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal exit-close\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude end\",\"type\":\"command\"}]}],\"SessionStart\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal launcher-repair\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude start\",\"type\":\"command\"}]},{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal resume-unkill\",\"type\":\"command\"}],\"matcher\":\"resume\"},{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal clear-name\",\"type\":\"command\"}],\"matcher\":\"clear\"}],\"Stop\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude idle\",\"type\":\"command\"}]}],\"SubagentStart\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal rr-dir\",\"type\":\"command\"}],\"matcher\":\"rr|rr-pro|rr-pro-max\"},{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude agent-start\",\"type\":\"command\"}]}],\"SubagentStop\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude agent-stop\",\"type\":\"command\"}]}],\"UserPromptSubmit\":[{\"hooks\":[{\"command\":\"{root}/001/home/.local/bin/pfm usage-hook\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal clear-name\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal epic-inject\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal reload-intercept\",\"type\":\"command\"},{\"command\":\"{root}/001/home/.local/bin/pfm internal exit-intercept\",\"type\":\"command\"},{\"async\":true,\"command\":\"{root}/001/home/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}]},\"outputStyle\":\"default\",\"statusLine\":{\"command\":\"{root}/001/home/.local/bin/pfm-statusline\",\"hideVimModeIndicator\":true,\"padding\":0,\"refreshInterval\":2,\"type\":\"command\"}}' '--system-prompt-file' '{root}/001/acme/docs/scribe/.professor/scribe.md' '--allow-dangerously-skip-permissions' '--dangerously-skip-permissions' || { echo; echo 'resume refused — session is live elsewhere:'; env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID pfm internal agent-open --id '44444444-4444-4444-8444-444444444444' --cwd '{root}/001/acme/docs/scribe' --cache 5m; }\nopen {root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs: no such file or directory"},
 		// The reporter is optional: a staging failure launches the chat
 		// without it.
-		{"staging fails", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "unstaged"},
+		{"staging fails", `{"prompt":"scribe.md","engines":["claude"]}`, compose.ResumeOpenCode, "printf '%s\\n' '═══ RESUME of 44444444-4444-4444-8444-444444444444 — verify before trusting this pane ═══' '    History loaded? Check the session list above the composer before' '    treating this seat as continuing its prior work.'; env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID -u CLAUDE_CODE_SSE_PORT -u PFM_OPENCODE_MODEL -u PFM_OPENCODE_VARIANT -u PFM_OPENCODE_POLICY -u PFM_OPENCODE_SYSTEM_FILE -u PFM_OPENCODE_FLEET_FILE opencode --session '44444444-4444-4444-8444-444444444444' '{root}/001/acme/docs/scribe'\nread {root}/001/home/.local/state/pfm/opencode-herdr-plugin.mjs: is a directory"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request, dir := actionWorkbenchFixture(t, test.manifest)
 			request.Row.Kind = test.kind
-			if test.want == "unstaged" {
+			if test.name == "staging fails" {
 				if err := os.MkdirAll(paths.OpenCodeHerdrPlugin(request.Home), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -470,69 +558,15 @@ func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
 			if len(tmux.created) != 1 {
 				t.Fatalf("created=%d", len(tmux.created))
 			}
-			run := tmux.created[0].Run
-			plugin := paths.OpenCodeHerdrPlugin(request.Home)
-			herdrURL := `"file://` + plugin + `"`
-			staged, stageErr := os.ReadFile(plugin)
-			switch test.want {
-			case "unstaged":
-				if strings.Contains(run, plugin) || strings.Contains(run, "OPENCODE_CONFIG_CONTENT") {
-					t.Fatalf("a chat whose Herdr plugin failed to stage loads it: %s", run)
-				}
-				return
-			case "none":
-				if stageErr == nil || strings.Contains(run, plugin) {
-					t.Fatalf("a Claude chat staged or loaded the OpenCode Herdr plugin: %v\n%s", stageErr, run)
-				}
-				return
-			case "plain":
-				want := `OPENCODE_CONFIG_CONTENT='{"plugin":[` + herdrURL + `]}'`
-				if !strings.Contains(run, want) || strings.Contains(run, "PFM_OPENCODE_SYSTEM_FILE=") {
-					t.Fatalf("run lacks %q or carries a persona env: %s", want, run)
-				}
-			case "persona":
-				want := `"plugin":["file://` + paths.OpenCodeWorkbenchPlugin(request.Home) + `",` + herdrURL + `]}'`
-				if !strings.Contains(run, want) {
-					t.Fatalf("run lacks %q: %s", want, run)
+			staged, stageErr := os.ReadFile(paths.OpenCodeHerdrPlugin(request.Home))
+			binaryLine := fmt.Sprint(stageErr)
+			for _, line := range strings.Split(string(staged), "\n") {
+				if strings.HasPrefix(line, "const PFM_BINARY") {
+					binaryLine = line
 				}
 			}
-			binary := filepath.Join(request.Home, ".local", "bin", "pfm")
-			if stageErr != nil || !strings.Contains(string(staged), `const PFM_BINARY = "`+binary+`"`) {
-				t.Fatalf("staged plugin %s does not carry the pfm binary %s: %v", plugin, binary, stageErr)
-			}
-		})
-	}
-}
-
-func TestExtensionLaunchDoors(t *testing.T) {
-	machine := testMachineConfig(t.TempDir())
-	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: t.TempDir()}}
-	machine.Extensions = map[string]pfmconfig.Extension{
-		"ponytail": {
-			Enabled: true,
-			Engines: []string{"codex", "opencode"},
-			Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "^worker$"},
-		},
-	}
-	for _, kind := range []compose.Kind{compose.NewCodex, compose.ResumeCodex, compose.NewOpenCode, compose.ResumeOpenCode} {
-		t.Run(kind.String(), func(t *testing.T) {
-			request := Request{
-				Config:         machine,
-				Home:           t.TempDir(),
-				PrimaryAccount: 1,
-				FreshSocket:    "fixture",
-				Row:            compose.Row{Kind: kind, ID: "session", CWD: t.TempDir()},
-			}
-			plan, err := Synthesize(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if plan.SeatRun == nil ||
-				!strings.Contains(strings.Join(plan.SeatRun.Env, "\n"), "PONYTAIL_SUBAGENT_MATCHER=^worker$") {
-				t.Fatalf("extension env lost in typed recipe: %+v", plan.SeatRun)
-			}
-			if kind != compose.NewCodex && !strings.Contains(plan.Run, "PONYTAIL_SUBAGENT_MATCHER='^worker$'") {
-				t.Fatalf("extension env lost in shell recipe: %s", plan.Run)
+			if got := rooted(t, tmux.created[0].Run+"\n"+binaryLine); got != test.want {
+				t.Errorf("run and staged binary = %q, want %q", got, test.want)
 			}
 		})
 	}

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -604,6 +605,7 @@ func (h *e2eHarness) assertInit(project, source string) {
 		{"codex", ".codex", ""},
 		{"docs-commands", "docs/commands", ""},
 		{"docs-hub", "docs", ""},
+		{"rules", ".claude/rules", ""},
 	} {
 		sourceDir := filepath.Join(templates, mapping.source)
 		targetDir := filepath.Join(project, mapping.target)
@@ -781,9 +783,6 @@ func (h *e2eHarness) assertUninstalled(home string) {
 		if err := json.Unmarshal(raw, &codex); err != nil {
 			h.t.Fatalf("uninstall failed; differing paths: .codex/hooks.json parse; status: %v", err)
 		}
-		if containsJSONString(codex, filepath.Join(home, ".local", "bin", "pfm")+" internal clear-kill") {
-			h.t.Fatalf("uninstall failed; differing paths: retired installer Codex hook")
-		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		h.t.Fatalf("uninstall failed; differing paths: .codex/hooks.json; status: %v", err)
 	}
@@ -847,7 +846,10 @@ func addSnapshotFile(path, home string, snapshot surfaceSnapshot) error {
 	return nil
 }
 
+// normalizeHome replaces what differs between two homes by design: the home's
+// path and the install mark digested from it (paths.InstallMark).
 func normalizeHome(value, home string) string {
+	value = strings.ReplaceAll(value, paths.InstallMark(home), "<E2E_INSTALL_MARK>")
 	return strings.ReplaceAll(value, home, "<E2E_HOME>")
 }
 

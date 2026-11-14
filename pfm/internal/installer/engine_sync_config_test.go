@@ -3,7 +3,6 @@ package installer
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -184,15 +182,6 @@ func TestWireEngineSyncConfigLeavesAnUnownedFile(t *testing.T) {
 
 func TestWireEngineSyncConfigWithoutTheTemplate(t *testing.T) {
 	installer, output, home := engineSyncGlobalEngine(t, ModeApply, nil)
-	oldDir := filepath.Join(home, ".config", "engine-sync")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	oldPolicy := filepath.Join(installer.options.SourceRepo, "templates", "global", "engine-sync", "config.json")
-	oldLink := filepath.Join(oldDir, "config.json")
-	oldTargets := filepath.Join(oldDir, "targets.json")
-	writeFixture(t, oldTargets, `{"sourceRepo":"`+installer.options.SourceRepo+`"}`)
-	if err := os.Symlink(oldPolicy, oldLink); err != nil {
-		t.Fatal(err)
-	}
 	want := "  skip    engine-sync machine policy source missing: " + engineSyncPolicySource(
 		installer.options.SourceRepo,
 	)
@@ -206,154 +195,11 @@ func TestWireEngineSyncConfigWithoutTheTemplate(t *testing.T) {
 	if _, err := os.Lstat(enginesync.GlobalConfigPath(home)); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a global file was written without a template: %v", err)
 	}
-	for _, path := range []string{oldLink, oldTargets} {
-		if _, err := os.Lstat(path); err != nil {
-			t.Errorf("missing template retired legacy config %s: %v", path, err)
-		}
-	}
 }
 
-// The upgrade migration: the old policy link (into a clone that no longer
-// ships it) and pfm's targets.json become the one 0600 global file holding
-// the same targets, and both old paths are gone after one install.
-func TestInstallMigratesTheOldEngineSyncFiles(t *testing.T) {
-	for _, testCase := range []struct {
-		name string
-		xdg  bool
-	}{{name: "under home/.config"}, {name: "under an absolute XDG_CONFIG_HOME", xdg: true}} {
-		t.Run(testCase.name, func(t *testing.T) {
-			home := t.TempDir()
-			clone := filepath.Join(home, ".professor")
-			codex := filepath.Join(home, "h", ".codex")
-			oldDir := filepath.Join(home, ".config", "engine-sync")
-			t.Setenv("XDG_CONFIG_HOME", "")
-			if testCase.xdg {
-				t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
-				oldDir = filepath.Join(home, "xdg", "engine-sync")
-			}
-			writeFixture(t, engineSyncPolicySource(clone), engineSyncTemplate)
-			oldPolicy := filepath.Join(clone, "templates", "global", "engine-sync", "config.json")
-			oldTargets := filepath.Join(oldDir, "targets.json")
-			writeFixture(t, oldTargets, `{"codexHomes":["`+codex+`"],"sourceRepo":"`+clone+`"}`)
-			if err := os.Symlink(oldPolicy, filepath.Join(oldDir, "config.json")); err != nil {
-				t.Fatal(err)
-			}
-			testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
-			var output bytes.Buffer
-			if _, err := Run(context.Background(), Options{
-				MCPConfigPath: testConfigPath(t), SourceRepo: clone, CodexHomes: []string{codex},
-				Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
-			}); err != nil {
-				t.Fatalf("install: %v\n%s", err, output.String())
-			}
-			path := enginesync.GlobalConfigPath(home)
-			info, err := os.Lstat(path)
-			if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-				t.Fatalf("global file = %v (%v), want a regular 0600 file", info, err)
-			}
-			var written struct {
-				Machine struct {
-					ManagedBy string `json:"managedBy"`
-				} `json:"machine"`
-				Targets engineSyncTargets `json:"targets"`
-			}
-			if err := json.Unmarshal([]byte(readFixture(t, path)), &written); err != nil {
-				t.Fatal(err)
-			}
-			if written.Machine.ManagedBy != "professor" || len(written.Targets.CodexHomes) != 1 ||
-				written.Targets.CodexHomes[0] != codex || written.Targets.SourceRepo != clone {
-				t.Fatalf("global file = %+v, want the old targets under managedBy professor", written)
-			}
-			for _, old := range []string{filepath.Join(oldDir, "config.json"), oldTargets} {
-				if _, err := os.Lstat(old); !errors.Is(err, fs.ErrNotExist) {
-					t.Fatalf("install left the old file %s: %v\n%s", old, err, output.String())
-				}
-			}
-		})
-	}
-}
-
-// Old files that are not pfm's stay: an operator's regular policy, a link
-// outside any clone, a targets.json holding a key pfm never wrote.
-func TestWireEngineSyncConfigLeavesUnownedOldFiles(t *testing.T) {
-	installer, _, home := engineSyncConfigEngine(t, ModeApply, nil)
-	dir := filepath.Join(home, ".config", "engine-sync")
-	foreign := filepath.Join(home, "operator-policy.json")
-	writeFixture(t, foreign, `{"version":1}`)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(foreign, filepath.Join(dir, "config.json")); err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, filepath.Join(dir, "targets.json"), `{"codexHomes":[],"operator":true}`)
-	if err := installer.wireEngineSyncConfig(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(enginesync.GlobalConfigPath(home)); err != nil {
-		t.Fatalf("the install wrote no global file beside the operator's old files: %v", err)
-	}
-	if got, err := os.Readlink(filepath.Join(dir, "config.json")); err != nil || got != foreign {
-		t.Fatalf("the operator's link = %q (%v), want it kept", got, err)
-	}
-	if got := readFixture(t, filepath.Join(dir, "targets.json")); got != `{"codexHomes":[],"operator":true}` {
-		t.Fatalf("the operator's targets.json = %q, want it kept", got)
-	}
-	installer.options.Mode = ModeUninstall
-	if err := installer.retireOldEngineSyncFiles(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(filepath.Join(dir, "config.json")); err != nil {
-		t.Fatalf("uninstall removed the operator's link: %v", err)
-	}
-}
-
-// A link into a clone the recorded marker names (moved, or deleted with the
-// marker the only trace) is still pfm's: install and uninstall retire it.
-func TestRetireOldEngineSyncFilesRecognisesMovedAndDeletedClones(t *testing.T) {
-	for _, name := range []string{"moved apply", "moved uninstall", "moved deleted uninstall", "deleted marker uninstall"} {
-		t.Run(name, func(t *testing.T) {
-			mode := ModeApply
-			if strings.Contains(name, "uninstall") {
-				mode = ModeUninstall
-			}
-			installer, _, home := engineSyncConfigEngine(t, mode, nil)
-			oldRepo := filepath.Join(home, "previous-clone")
-			if err := os.MkdirAll(oldRepo, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			writeFixture(t, paths.SourceRepoPath(home), oldRepo+"\n")
-			link := filepath.Join(home, ".config", "engine-sync", "config.json")
-			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(
-				filepath.Join(oldRepo, "templates", "global", "engine-sync", "config.json"),
-				link,
-			); err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(name, "deleted") {
-				if err := os.RemoveAll(oldRepo); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if name == "deleted marker uninstall" {
-				installer.options.SourceRepo = ""
-			}
-			if err := installer.retireOldEngineSyncFiles(); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := os.Lstat(link); !errors.Is(err, fs.ErrNotExist) {
-				t.Fatalf("the old policy link survived: %v", err)
-			}
-		})
-	}
-}
-
-// An uninstall retires the global file when it is pfm's and the old files
-// pfm owns; an operator's global file stays byte-identical.
-func TestUninstallRetiresTheGlobalFileAndOldFiles(t *testing.T) {
+// An uninstall retires the global file when it is pfm's; an operator's global
+// file stays byte-identical.
+func TestUninstallRetiresTheGlobalFile(t *testing.T) {
 	for _, owned := range []bool{true, false} {
 		name := "an operator's file"
 		if owned {
@@ -364,18 +210,17 @@ func TestUninstallRetiresTheGlobalFileAndOldFiles(t *testing.T) {
 			home := t.TempDir()
 			clone := filepath.Join(home, ".professor")
 			writeFixture(t, engineSyncPolicySource(clone), engineSyncTemplate)
-			testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 			path := enginesync.GlobalConfigPath(home)
 			if owned {
 				writeFixture(t, path, wantEngineSyncFile(nil, filepath.Join(home, ".claude"), clone, nil))
 			} else {
 				writeFixture(t, path, `{"version":1}`)
 			}
-			oldDir := filepath.Join(home, ".config", "engine-sync")
-			writeFixture(t, filepath.Join(oldDir, "targets.json"), `{"codexHomes":[]}`)
 			var output bytes.Buffer
 			if _, err := Run(context.Background(), Options{
-				MCPConfigPath: testConfigPath(t), SourceRepo: clone,
+				EngineSyncRunner: engineSync,
+				MCPConfigPath:    testConfigPath(t), SourceRepo: clone,
 				Mode: ModeUninstall, Home: home, Stdout: &output, Runner: &fakeRunner{},
 			}); err != nil {
 				t.Fatalf("uninstall: %v\n%s", err, output.String())
@@ -387,17 +232,13 @@ func TestUninstallRetiresTheGlobalFileAndOldFiles(t *testing.T) {
 			if !owned && readFixture(t, path) != `{"version":1}` {
 				t.Fatalf("uninstall rewrote the operator's file: %s", readFixture(t, path))
 			}
-			if _, err := os.Lstat(filepath.Join(oldDir, "targets.json")); !errors.Is(err, fs.ErrNotExist) {
-				t.Fatalf("uninstall left the old targets.json: %v", err)
-			}
 		})
 	}
 }
 
 // A dry run does not preview `engine-sync global` when the install would write
-// the global file or retire an old one: it prints one named skip line and
-// makes no engine-sync call, since engine-sync reads the file first and
-// refuses to start beside an old config.
+// the global file: it prints one named skip line and makes no engine-sync
+// call, since engine-sync reads the file first.
 func TestEngineSyncPreviewIsSkippedByNameWhenTheInstallChangesTheConfig(t *testing.T) {
 	for _, testCase := range []struct {
 		name  string
@@ -419,31 +260,25 @@ func TestEngineSyncPreviewIsSkippedByNameWhenTheInstallChangesTheConfig(t *testi
 			want: "would write {file}",
 		},
 		{
-			name: "an owned old file is still there", mode: ModeDryRun,
+			name: "a rule link this pass retires", mode: ModeDryRun,
 			setup: func(t *testing.T, installer *engine, home string) {
 				writeCurrentGlobalFile(t, installer, home)
-				writeFixture(t, filepath.Join(home, ".config", "engine-sync", "targets.json"), `{"codexHomes":[]}`)
+				installer.markRemoved(filepath.Join(installer.options.ConfigDir, "rules", "renamed.md"))
 			},
-			want: "would retire {old}",
-		},
-		{
-			name: "an uninstall with an owned old file", mode: ModeUninstall,
-			setup: func(t *testing.T, _ *engine, home string) {
-				writeFixture(t, filepath.Join(home, ".config", "engine-sync", "targets.json"), `{"codexHomes":[]}`)
-			},
-			want: "would retire {old}",
+			want: "would retire {rule}",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			installer, output, home := engineSyncConfigEngine(t, testCase.mode, nil)
 			installer.apply = false
 			testCase.setup(t, installer, home)
-			record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
+			installer.options.EngineSyncRunner = engineSync
 			if err := installer.wireEngineSyncGlobal(nil); err != nil {
 				t.Fatal(err)
 			}
 			want := strings.NewReplacer("{file}", enginesync.GlobalConfigPath(home),
-				"{old}", filepath.Join(home, ".config", "engine-sync", "targets.json")).Replace(testCase.want)
+				"{rule}", filepath.Join(installer.options.ConfigDir, "rules", "renamed.md")).Replace(testCase.want)
 			line := "  skip    engine-sync global preview skipped: this install " + want +
 				", which engine-sync reads before it plans; the apply runs it after\n"
 			if output.String() != line {
@@ -486,7 +321,8 @@ func TestEngineSyncPreviewWithoutAChangeUsesTheRealHome(t *testing.T) {
 			} else {
 				writeFixture(t, enginesync.GlobalConfigPath(home), content)
 			}
-			record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+			record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
+			installer.options.EngineSyncRunner = engineSync
 			if err := installer.wireEngineSyncGlobal(nil); err != nil {
 				t.Fatalf("%v\n%s", err, output.String())
 			}

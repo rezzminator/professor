@@ -119,6 +119,7 @@ func DigestTranscript(ctx context.Context, args []string, env Env) (Output, erro
 	if err != nil {
 		return out, err
 	}
+	out.Warnings = append(out.Warnings, parsed.warnings...)
 	text, err := showDigest(parsed, &req, env.Home)
 	if err != nil {
 		return out, err

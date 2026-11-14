@@ -12,25 +12,29 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakePane is a pane in the fake Herdr's table: its id, the terminal that
 // outlives a move, the foreground process pids pane.process_info reports, and
-// the pane's own shell (0: none reported); kept names every process
-// herdr-keep, the attach client of a pane herdr-keep holds.
+// the pane's own shell (0: none reported); shellFront makes Herdr list a
+// shell, not Claude, as the pane's foreground.
 type fakePane struct {
 	id, terminal string
 	pids         []int
 	shell        int
-	kept         bool
+	shellFront   bool
+	noFront      bool // Herdr lists no foreground process in the pane
 }
 
 type fakeAgent struct{ name, pane string }
@@ -48,20 +52,38 @@ type fakeTab struct {
 // code) for a vacated pane id. As Herdr does, it serves ONE request per
 // connection, then closes it.
 type fakeHerdr struct {
-	sessionResumeRefusals int
-	path                  string
-	mu                    sync.Mutex
-	lines                 []string
-	refuse                map[string]string
-	refuseRename          map[string]string
-	panes                 []fakePane
-	vacated               map[string]bool
-	aliases               map[string]string
-	agents                []fakeAgent
+	path         string
+	mu           sync.Mutex
+	lines        []string
+	refuse       map[string]string
+	refuseRename map[string]string
+	panes        []fakePane
+	vacated      map[string]bool
+	aliases      map[string]string
+	agents       []fakeAgent
 	// tabOf is the tab agent.list names for an agent's pane; tabs answers
 	// tab.get, and tab.rename relabels one.
 	tabOf map[string]string
 	tabs  map[string]fakeTab
+	// processInfoAnswers, when set, is how many pane.process_info requests the
+	// native fixture answers before it refuses every later one.
+	processInfoAnswers, processInfoSeen int
+	// unanswered counts down, per method or "{method} {state}", the requests
+	// the fake reads and then drops, unrecorded and unanswered, as a Herdr too
+	// loaded to answer before the reporter gives up on it.
+	unanswered map[string]int
+}
+
+// dropsUnanswered reports whether the request is one unanswered still counts
+// down, and counts it; called with the lock held.
+func (server *fakeHerdr) dropsUnanswered(method, state string) bool {
+	for _, key := range []string{method + " " + state, method} {
+		if server.unanswered[key] > 0 {
+			server.unanswered[key]--
+			return true
+		}
+	}
+	return false
 }
 
 func newFakeHerdr(t *testing.T) *fakeHerdr {
@@ -104,14 +126,14 @@ func (server *fakeHerdr) addShellPane(id, terminal string, shell int, pids ...in
 	server.panes = append(server.panes, fakePane{id: id, terminal: terminal, pids: pids, shell: shell})
 }
 
-// addKeptPane adds a pane herdr-keep holds: Herdr sees its attach client
-// (pid client) as both shell and foreground.
-func (server *fakeHerdr) addKeptPane(id, terminal string, client int) {
+// addShellFrontPane adds a pane whose foreground Herdr lists as shell pid
+// client, not Claude.
+func (server *fakeHerdr) addShellFrontPane(id, terminal string, client int) {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	server.panes = append(
 		server.panes,
-		fakePane{id: id, terminal: terminal, pids: []int{client}, shell: client, kept: true},
+		fakePane{id: id, terminal: terminal, pids: []int{client}, shellFront: true},
 	)
 }
 
@@ -186,12 +208,12 @@ func (server *fakeHerdr) serve(conn net.Conn) {
 	}
 	_ = json.Unmarshal([]byte(line), &request)
 	server.mu.Lock()
+	if server.dropsUnanswered(request.Method, request.Params.State) {
+		server.mu.Unlock()
+		return
+	}
 	server.lines = append(server.lines, line)
 	code, result := server.answer(request.Method, request.Params.PaneID, request.Params.Target, request.Params.Name)
-	if request.Method == "pane.report_agent_session" && server.sessionResumeRefusals > 0 {
-		server.sessionResumeRefusals--
-		code = "resume_not_accepted"
-	}
 	if code == "" && strings.HasPrefix(request.Method, "tab.") {
 		code, result = server.answerTab(request.Method, request.Params.TabID, request.Params.Label)
 	}
@@ -258,8 +280,8 @@ func (server *fakeHerdr) answer(method, pane, target, name string) (code, result
 			}
 			foreground := make([]map[string]any, 0, len(candidate.pids))
 			name := "proc"
-			if candidate.kept {
-				name = herdr.KeepBinary
+			if candidate.shellFront {
+				name = "sh"
 			}
 			for _, pid := range candidate.pids {
 				foreground = append(foreground, map[string]any{"pid": pid, "name": name})
@@ -360,6 +382,9 @@ type fakeTmux struct {
 	panes  []string
 	calls  []string
 	failOn string
+	// hangOn is the subcommand a loaded server leaves unanswered until the
+	// caller's deadline.
+	hangOn string
 	// probeErr is what the pane-list door (deps.listPanes) answers instead of
 	// the panes: a dead or unresponsive server.
 	probeErr error
@@ -371,7 +396,14 @@ func newFakeTmux(session string) *fakeTmux {
 	return &fakeTmux{session: session, panePID: "50"}
 }
 
-func (tmux *fakeTmux) run(_ context.Context, socket string, args ...string) (string, error) {
+func (tmux *fakeTmux) run(ctx context.Context, socket string, args ...string) (string, error) {
+	tmux.mu.Lock()
+	hang := tmux.hangOn != "" && args[0] == tmux.hangOn
+	tmux.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return "", fmt.Errorf("fake tmux %s did not answer: %w", args[0], ctx.Err())
+	}
 	if args[0] == "set-option" && args[len(args)-2] == herdrStoredOption && tmux.beforeWrite != nil {
 		tmux.beforeWrite(args[len(args)-1])
 	}
@@ -530,6 +562,9 @@ type herdrJail struct {
 	procFails map[int]error
 	// answers is each process the pid probe still finds; a pid it lacks is gone.
 	answers map[int]bool
+	// started is each process's spawn, in Unix nanoseconds; nil leaves the
+	// spawn clock out of the run, so a hook is ordered by its run.
+	started map[int]int64
 }
 
 // newHerdrJail lays out the usual chat: the engine (pid 50) is the pane's own
@@ -611,6 +646,15 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 			return environment, nil
 		},
 	}
+	if jail.started != nil {
+		deps.started = func(pid int) (time.Time, error) {
+			spawned, ok := jail.started[pid]
+			if !ok {
+				return time.Time{}, fmt.Errorf("fake process table has no start for pid %d: %w", pid, fs.ErrNotExist)
+			}
+			return time.Unix(0, spawned), nil
+		}
+	}
 	if jail.activityTmux != nil {
 		deps.tmux = jail.activityTmux.run
 		deps.listPanes = jail.activityTmux.listPanes
@@ -655,4 +699,185 @@ func herdrPaneEnv(server *fakeHerdr, pane string) map[string]string {
 		"HERDR_SOCKET_PATH": server.path,
 		"HERDR_BIN_PATH":    "/usr/bin/herdr",
 	}
+}
+
+// This producer-faithful native fixture records mutations separately from proof reads.
+func newNativeReporterHerdr(t *testing.T, seatID, pane, terminal string, beforeSend ...func()) *fakeHerdr {
+	return newNativeReporterHerdrCount(t, seatID, pane, terminal, nil, nil, beforeSend...)
+}
+
+func newNativeReporterHerdrCount(
+	t *testing.T,
+	seatID, pane, terminal string,
+	onProof func(),
+	location func() (string, string),
+	beforeSend ...func(),
+) *fakeHerdr {
+	t.Helper()
+	root := testjail.ShortRoot(t)
+	proc := filepath.Join(root, "proc")
+	if err := os.MkdirAll(proc, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proc, "stat"), []byte("btime 1000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(pid, parent int, argv string) {
+		dir := filepath.Join(proc, strconv.Itoa(pid))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fields := make([]string, 24)
+		for i := range fields {
+			fields[i] = "0"
+		}
+		fields[0] = "S"
+		fields[1] = strconv.Itoa(parent)
+		fields[19] = "100"
+		if err := os.WriteFile(
+			filepath.Join(dir, "stat"),
+			[]byte(fmt.Sprintf("%d (pfm) %s", pid, strings.Join(fields, " "))),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(argv), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(900001, 1, "/fixture/pfm\x00internal\x00seat-host\x00"+seatID+"\x00")
+	// The seat host runs the engine, whose hook is this process.
+	write(900002, 900001, "claude\x00")
+	write(os.Getpid(), 900002, "/fixture/pfm\x00internal\x00herdr-state\x00working\x00")
+	t.Setenv(paths.EnvProcRoot, proc)
+	server := &fakeHerdr{path: filepath.Join(root, "h.sock")}
+	listener, err := net.Listen("unix", server.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				var req struct {
+					ID     string                     `json:"id"`
+					Method string                     `json:"method"`
+					Params map[string]json.RawMessage `json:"params"`
+				}
+				if err := json.NewDecoder(conn).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				var result any
+				if (req.Method == "pane.list" || req.Method == "pane.process_info") && onProof != nil {
+					onProof()
+				}
+				if location != nil {
+					pane, terminal = location()
+				}
+				switch req.Method {
+				case "pane.list":
+					fields := testjail.HerdrPaneInfo(pane)["pane"].(map[string]any)
+					fields["terminal_id"] = terminal
+					result = map[string]any{"type": "pane_list", "panes": []any{fields}}
+				case "pane.process_info":
+					server.mu.Lock()
+					server.processInfoSeen++
+					refused := server.processInfoAnswers > 0 && server.processInfoSeen > server.processInfoAnswers
+					server.mu.Unlock()
+					if refused {
+						const refusal = `{"id":%q,"error":{"code":"server_error","message":"refused by fake herdr"}}`
+						fmt.Fprintf(conn, refusal+"\n", req.ID)
+						return
+					}
+					// Herdr lists Claude in the pane's foreground unless the pane says otherwise.
+					info := map[string]any{"pane_id": pane, "shell_pid": 900001, "foreground_processes": []any{
+						map[string]any{"pid": 900002, "name": "claude", "argv": []string{"claude"}},
+					}}
+					server.mu.Lock()
+					for _, candidate := range server.panes {
+						switch {
+						case candidate.id != pane:
+						case candidate.shellFront:
+							// Herdr lists a shell, not Claude, in the pane's foreground.
+							info["foreground_processes"] = []any{
+								map[string]any{"pid": candidate.pids[0], "name": "sh", "argv": []string{"sh"}},
+							}
+						case candidate.noFront:
+							delete(info, "foreground_processes")
+						}
+					}
+					server.mu.Unlock()
+					result = map[string]any{"type": "pane_process_info", "process_info": info}
+				default:
+					for _, check := range beforeSend {
+						check()
+					}
+					line, _ := json.Marshal(req)
+					var state string
+					_ = json.Unmarshal(req.Params["state"], &state)
+					server.mu.Lock()
+					if server.dropsUnanswered(req.Method, state) {
+						server.mu.Unlock()
+						return
+					}
+					server.lines = append(server.lines, string(line))
+					refused := server.refuse[req.Method]
+					server.mu.Unlock()
+					if refused != "" {
+						const refusal = `{"id":%q,"error":{"code":%q,"message":"refused by fake herdr"}}`
+						fmt.Fprintf(conn, refusal+"\n", req.ID, refused)
+						return
+					}
+					result = map[string]any{"type": "ok"}
+					switch req.Method {
+					case "pane.rename":
+						result = map[string]any{"pane": map[string]any{"pane_id": pane, "label": req.Params["label"]}}
+					case "agent.rename":
+						result = map[string]any{"agent": map[string]any{"pane_id": pane, "name": req.Params["name"]}}
+					case "pane.get":
+						result = testjail.HerdrPaneInfo(pane)
+					case "tab.get":
+						result = map[string]any{
+							"type": "tab_info",
+							"tab":  map[string]any{"tab_id": "w6:t1", "label": "Previous", "pane_count": 1},
+						}
+					}
+				}
+				if err := json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+	}()
+	return server
+}
+
+// shellFrontNativeReporterPane makes pane one where Herdr lists a shell, not
+// Claude, in the foreground: Herdr sees no agent there, so pfm reports.
+func shellFrontNativeReporterPane(t *testing.T, server *fakeHerdr, pane string) {
+	t.Helper()
+	server.addShellFrontPane(pane, "native", 900030)
+}
+
+// noFrontNativeReporterPane makes pane one where Herdr lists no foreground
+// process at all: a read that cannot say, so pfm reports.
+func noFrontNativeReporterPane(server *fakeHerdr, pane string) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.panes = append(server.panes, fakePane{id: pane, terminal: "native", noFront: true})
+}
+
+func stampNativeReporterSeat(t *testing.T, seat *fleetdb.Seat) {
+	t.Helper()
+	if err := gather.StampHerdrHost(gather.NewProcFS(os.Getenv(paths.EnvProcRoot)), seat, 900001); err != nil {
+		t.Fatal(err)
+	}
+	seat.HerdrTerminalID = "native-terminal"
+	seat.HerdrWorkspace = "w6"
 }

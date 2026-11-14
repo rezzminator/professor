@@ -22,7 +22,6 @@ import (
 const (
 	Version        = 2
 	FileName       = "pfm.config.json"
-	LegacyFileName = "config.json"
 	DefaultMCPPort = 18377
 )
 
@@ -48,6 +47,9 @@ const (
 const (
 	PermissionBypass = "bypass"
 	PermissionPrompt = "prompted"
+	// PermissionAuto starts a chat in auto mode (the permission classifier)
+	// with bypass reachable through shift+tab.
+	PermissionAuto = "auto"
 
 	// claude.systemPrompt values: which system prompt every managed Claude
 	// launch carries. Production leaves the CLI's own prompt untouched; lean
@@ -114,9 +116,6 @@ type ClaudePrefs struct {
 	// capability gpt-agents (engine-sync installs only agents that require it). Off by
 	// default; no agent requires it today.
 	GptAgents bool
-	// SubagentStatuslineTrace is claude.subagentStatuslineTrace: the machine-wide switch that
-	// launches Claude with the sub-agent status line's trace on. Off by default.
-	SubagentStatuslineTrace bool
 	// Plugins is claude.plugins: the Claude Code plugins pfm install ensures.
 	// Machine-wide: an account may not set it.
 	Plugins []ClaudePlugin
@@ -220,8 +219,7 @@ func (config AskConfig) PrefsFor(id pfmengine.ID) EnginePrefs {
 // Config is the fully materialized configuration. Sources records whether
 // each effective value came from the machine file or from a default.
 type Config struct {
-	Extensions map[string]Extension
-	Chat       ChatConfig
+	Chat ChatConfig
 	// SeedContent carries the validated seed bytes into installation.
 	SeedContent      []byte `json:"-"`
 	Version          int
@@ -265,21 +263,23 @@ type rawState struct {
 }
 
 type rawConfig struct {
-	Extensions json.RawMessage `json:"extensions,omitempty"`
-	Chat       *rawChat        `json:"chat,omitempty"`
-	Version    *int            `json:"version"`
-	Theme      *string         `json:"theme,omitempty"`
-	State      *rawState       `json:"state,omitempty"`
-	Accounts   *[]rawAccount   `json:"accounts,omitempty"`
-	Claude     *rawClaude      `json:"claude,omitempty"`
-	Codex      *rawCodex       `json:"codex,omitempty"`
-	OpenCode   *rawOpenCode    `json:"opencode,omitempty"`
-	Tmux       *rawTmux        `json:"tmux,omitempty"`
-	NameSync   *rawNameSync    `json:"nameSync,omitempty"`
-	Doctor     *rawDoctor      `json:"doctor,omitempty"`
-	MCP        *rawMCP         `json:"mcp,omitempty"`
-	Log        *rawLog         `json:"log,omitempty"`
-	Ask        *rawAsk         `json:"ask,omitempty"`
+	Chat     *rawChat      `json:"chat,omitempty"`
+	Version  *int          `json:"version"`
+	Theme    *string       `json:"theme,omitempty"`
+	State    *rawState     `json:"state,omitempty"`
+	Accounts *[]rawAccount `json:"accounts,omitempty"`
+	Claude   *rawClaude    `json:"claude,omitempty"`
+	Codex    *rawCodex     `json:"codex,omitempty"`
+	OpenCode *rawOpenCode  `json:"opencode,omitempty"`
+	Tmux     *rawTmux      `json:"tmux,omitempty"`
+	NameSync *rawNameSync  `json:"nameSync,omitempty"`
+	Doctor   *rawDoctor    `json:"doctor,omitempty"`
+	MCP      *rawMCP       `json:"mcp,omitempty"`
+	Log      *rawLog       `json:"log,omitempty"`
+	Ask      *rawAsk       `json:"ask,omitempty"`
+	// RetiredExtensions accepts the block the previous release wrote for an enabled extension; it
+	// is never read or written.
+	RetiredExtensions json.RawMessage `json:"extensions,omitempty"`
 }
 
 type rawTmux struct {
@@ -316,18 +316,19 @@ type rawClaude struct {
 	NativeCursor          *bool   `json:"nativeCursor,omitempty"`
 	RemoteControl         *bool   `json:"remoteControl,omitempty"`
 	SystemPrompt          *string `json:"systemPrompt,omitempty"`
-	// RetiredCompactNudge accepts old config files; it is never read or written.
-	RetiredCompactNudge json.RawMessage `json:"compactNudge,omitempty"`
+	// RetiredCompactNudge and RetiredSubagentStatuslineTrace accept old config files; they are
+	// never read or written.
+	RetiredCompactNudge            json.RawMessage `json:"compactNudge,omitempty"`
+	RetiredSubagentStatuslineTrace json.RawMessage `json:"subagentStatuslineTrace,omitempty"`
 	// The sub-agent ceilings — see subagents.go.
-	MaxSubagentSpawnDepth   *int    `json:"maxSubagentSpawnDepth,omitempty"`
-	MaxConcurrentSubagents  *int    `json:"maxConcurrentSubagents,omitempty"`
-	PluginCheckoutRoot      *string `json:"pluginCheckoutRoot,omitempty"`
-	CostLedger              *bool   `json:"costLedger,omitempty"`
-	GptAgents               *bool   `json:"gptAgents,omitempty"`
-	SubagentStatuslineTrace *bool   `json:"subagentStatuslineTrace,omitempty"`
+	MaxSubagentSpawnDepth  *int    `json:"maxSubagentSpawnDepth,omitempty"`
+	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
+	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
+	CostLedger             *bool   `json:"costLedger,omitempty"`
+	GptAgents              *bool   `json:"gptAgents,omitempty"`
 	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
 	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
-	// Env is claude.env; decodeClaudeEnv validates each name and value.
+	// Env is claude.env; DecodeEnv validates each name and value.
 	Env json.RawMessage `json:"env,omitempty"`
 }
 
@@ -357,7 +358,6 @@ type rawMCP struct {
 	ThirdParty map[string]json.RawMessage `json:"thirdParty,omitempty"`
 	Servers    map[string]json.RawMessage `json:"servers,omitempty"`
 	HTTP       *rawMCPHTTP                `json:"http,omitempty"`
-	AuthToken  *string                    `json:"authToken,omitempty"`
 }
 
 type rawMCPServer struct {
@@ -398,7 +398,7 @@ func (raw *rawAsk) UnmarshalJSON(content []byte) error {
 			return fmt.Errorf("ask.%s: %w", key, err)
 		}
 		var prefs rawEngine
-		if err := decodeStrict(value, &prefs); err != nil {
+		if err := DecodeStrict(value, &prefs, multipleJSONValues); err != nil {
 			return fmt.Errorf("ask.%s: %w", key, err)
 		}
 		raw.Prefs[id] = prefs
@@ -487,7 +487,6 @@ func defaultsWithMCPServers(
 		KeyClaudePlugins:                                     SourceDefault,
 		KeyClaudeCostLedger:                                  SourceDefault,
 		KeyClaudeGptAgents:                                   SourceDefault,
-		KeyClaudeSubagentStatuslineTrace:                     SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
@@ -629,7 +628,7 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 	accounts := make([]Account, 0, len(candidates))
 	skips := make([]AccountSkip, 0)
 	for _, candidate := range candidates {
-		if !hasValidAccountCredentials(candidate.path) {
+		if !hasAccountCredentials(candidate.path) {
 			skips = append(skips, AccountSkip{
 				ID: candidate.id, ConfigDir: candidate.path, Reason: "no valid credentials",
 			})
@@ -643,17 +642,19 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 	return accounts, skips
 }
 
-func hasValidAccountCredentials(configDir string) bool {
+// hasAccountCredentials is false only for an absent file or one with no access
+// token: an unreadable or torn one (mid OAuth rotation) keeps its account.
+func hasAccountCredentials(configDir string) bool {
 	body, err := os.ReadFile(filepath.Join(configDir, ".credentials.json"))
 	if err != nil {
-		return false
+		return !errors.Is(err, os.ErrNotExist)
 	}
 	var marker struct {
 		OAuth struct {
 			AccessToken string `json:"accessToken"`
 		} `json:"claudeAiOauth"`
 	}
-	return json.Unmarshal(body, &marker) == nil && strings.TrimSpace(marker.OAuth.AccessToken) != ""
+	return json.Unmarshal(body, &marker) != nil || strings.TrimSpace(marker.OAuth.AccessToken) != ""
 }
 
 func skipsOutsideDir(skips []AccountSkip, root string) []AccountSkip {
@@ -681,10 +682,6 @@ func loadWithMCPServers(
 	registered map[string]MCPServer,
 	codexHomes ...string,
 ) (Config, error) {
-	openCodeHome := openCodeAccountHome(home)
-	if _, err := openCodeStoreExists(openCodeHome); err != nil {
-		return Config{}, fmt.Errorf("discover OpenCode account data %s: %w", openCodeHome, err)
-	}
 	result := defaultsWithMCPServers(home, projectRoots, registered, codexHomes...)
 	if path == "" {
 		var err error
@@ -717,15 +714,10 @@ func loadWithMCPServers(
 	if err != nil {
 		return Config{}, err
 	}
-	if raw.Extensions != nil {
-		result.Sources["extensions"] = SourceFile
+	if raw.Version != nil { // an absent version reads as the current one, its source left default
+		result.Sources[keyVersion] = SourceFile
+		result.InputVersion = *raw.Version
 	}
-	result.Extensions, err = decodeExtensions(raw.Extensions)
-	if err != nil {
-		return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
-	}
-	result.Sources[keyVersion] = SourceFile
-	result.InputVersion = *raw.Version
 	// Version 1 is accepted as a compatibility input, but callers always see
 	// the current materialized schema version.
 	result.Version = Version
@@ -911,7 +903,7 @@ func loadWithMCPServers(
 				continue
 			}
 			var server rawMCPServer
-			if err := decodeStrict(rawServer, &server); err != nil {
+			if err := DecodeStrict(rawServer, &server, multipleJSONValues); err != nil {
 				return Config{}, fmt.Errorf("config %s: mcp.servers.%s: %w", result.Path, name, err)
 			}
 			if server.Enabled == nil {
@@ -932,9 +924,6 @@ func loadWithMCPServers(
 			result.MCP.HTTP.Port = raw.MCP.HTTP.Port
 			result.Sources["mcp.http.port"] = SourceFile
 		}
-		// authToken was briefly installer-owned. Keep accepting the legacy key
-		// so install can remove it, but it has no effective runtime value: the
-		// local MCP daemon is loopback-only and deliberately unauthenticated.
 	}
 	if err := applyChatAndAsk(&result, raw); err != nil {
 		return Config{}, err
@@ -972,7 +961,12 @@ func parseNameSyncInterval(value, path string) (time.Duration, error) {
 	return interval, nil
 }
 
-func decodeStrict(content []byte, target any) error {
+// multipleJSONValues is the machine config's refusal of a second value.
+const multipleJSONValues = "multiple JSON values"
+
+// DecodeStrict decodes one JSON value into target, refusing an unknown field
+// and, under the trailing message, anything after the value.
+func DecodeStrict(content []byte, target any, trailing string) error {
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
@@ -981,7 +975,7 @@ func decodeStrict(content []byte, target any) error {
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return errors.New("multiple JSON values")
+			return errors.New(trailing)
 		}
 		return err
 	}
@@ -1420,9 +1414,6 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		},
 		"ask": askValue,
 		"log": MarshalLog(config.Log),
-	}
-	if config.Extensions != nil {
-		value["extensions"] = config.Extensions
 	}
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty

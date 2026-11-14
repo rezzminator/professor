@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 )
 
@@ -103,14 +104,38 @@ type codexTurnError struct {
 // that carries nothing a reader would want: sidechains, compaction summaries,
 // token counts, and the harness-injected records naming.IsJunkPrompt names.
 func Parse(line []byte, engine string) (Entry, bool) {
+	entry, ok, _ := parseLine(line, engine)
+	return entry, ok
+}
+
+// parseLine is Parse that also says whether the line was no JSON at all, the
+// one loss Parse cannot tell from a record with nothing to show.
+func parseLine(line []byte, engine string) (entry Entry, ok, malformed bool) {
 	var parsed record
-	if err := json.Unmarshal(line, &parsed); err != nil || parsed.IsSidechain {
-		return Entry{}, false
+	if err := DecodeTolerant(line, &parsed); err != nil {
+		return Entry{}, false, len(bytes.TrimSpace(line)) > 0
+	}
+	if parsed.IsSidechain {
+		return Entry{}, false, false
 	}
 	if engine == string(pfmengine.Codex) {
-		return parseCodex(parsed)
+		entry, ok = parseCodex(parsed)
+		return entry, ok, false
 	}
-	return parseClaude(parsed)
+	entry, ok = parseClaude(parsed)
+	return entry, ok, false
+}
+
+// warnMalformedLines names the complete lines of path that were no JSON: each
+// cost itself, and the entries read from the lines around it stand.
+func warnMalformedLines(path string, count int) {
+	if count == 0 {
+		return
+	}
+	obs.Logger(context.Background()).Warn(
+		"transcript.lines_malformed", "path", path, "rows", count,
+		obs.FieldErr, fmt.Sprintf("%d complete line(s) were no JSON and left unread", count),
+	)
 }
 
 func parseClaude(parsed record) (Entry, bool) {
@@ -136,7 +161,7 @@ func parseClaude(parsed record) (Entry, bool) {
 		if text == "" {
 			return Entry{}, false
 		}
-		if parsed.Type == "user" && strings.HasPrefix(text, claudeInterruptMarker) {
+		if parsed.Type == "user" && ClaudeInterrupted(text) {
 			// Before the junk drop: the marker starts with "[Request", which
 			// naming.IsJunkPrompt discards, and an interrupted turn must not
 			// vanish from the record.
@@ -247,9 +272,13 @@ func codexTurnEnd(raw json.RawMessage, timestamp string) (Entry, bool) {
 	return Entry{Role: RoleAssistant, Text: text, Error: kind, Timestamp: timestamp}, true
 }
 
-// claudeInterruptMarker starts the user record Claude Code writes when its
+// ClaudeInterruptMarker starts the user record Claude Code writes when its
 // human interrupts a turn ("[Request interrupted by user]", "... for tool use]").
-const claudeInterruptMarker = "[Request interrupted by user"
+const ClaudeInterruptMarker = "[Request interrupted by user"
+
+// ClaudeInterrupted reports whether the text of a Claude user record is the
+// interrupt marker that ends its turn.
+func ClaudeInterrupted(text string) bool { return strings.HasPrefix(text, ClaudeInterruptMarker) }
 
 // interruptedTurn is the entry for a turn its human aborted (Codex's
 // turn_aborted, Claude's interrupt marker). The abort stands in the assistant's
@@ -300,15 +329,32 @@ func toolCall(raw json.RawMessage) (Entry, bool) {
 	return Entry{}, false
 }
 
+const (
+	systemReminderOpen  = "<system-reminder>"
+	systemReminderClose = "</system-reminder>"
+)
+
+// stripLeadingReminders drops the harness reminders a string-bodied turn opens
+// with and keeps the human text after them; a reminder with no closing tag is
+// all reminder.
+func stripLeadingReminders(text string) string {
+	for strings.HasPrefix(text, systemReminderOpen) {
+		end := strings.Index(text, systemReminderClose)
+		if end < 0 {
+			return ""
+		}
+		text = strings.TrimLeft(text[end+len(systemReminderClose):], " \t\r\n")
+	}
+	return text
+}
+
 // Visible returns the human-readable text of a message body, dropping the
-// system reminders the harness injects into user turns.
+// system reminders the harness injects into user turns: a block that is one,
+// and the leading reminders of a string body, whose remaining text stays.
 func Visible(raw json.RawMessage) string {
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
-		if strings.HasPrefix(text, "<system-reminder>") {
-			return ""
-		}
-		return text
+		return stripLeadingReminders(text)
 	}
 	blocks, ok := DecodeContent(raw)
 	if !ok {
@@ -386,14 +432,19 @@ func Tail(
 
 	reader := bufio.NewReaderSize(file, 64<<10)
 	ring := make([]Entry, 0, lastN)
-	total := 0
+	total, malformed := 0, 0
+	defer func() { warnMalformedLines(path, malformed) }()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
 		}
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			if entry, ok := Parse(line, engine); ok {
+			entry, ok, bad := parseLine(line, engine)
+			if bad && readErr == nil {
+				malformed++
+			}
+			if ok {
 				total++
 				if maxBytes > 0 {
 					entry.Text = Truncate(entry.Text, maxBytes)
@@ -431,13 +482,19 @@ func All(ctx context.Context, path, engine string) (entries []Entry, returnErr e
 		}
 	}()
 	reader := bufio.NewReaderSize(file, 64<<10)
+	malformed := 0
+	defer func() { warnMalformedLines(path, malformed) }()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			if entry, ok := Parse(line, engine); ok {
+			entry, ok, bad := parseLine(line, engine)
+			if bad && readErr == nil {
+				malformed++
+			}
+			if ok {
 				entries = append(entries, entry)
 			}
 		}

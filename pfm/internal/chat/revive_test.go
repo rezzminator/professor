@@ -95,11 +95,12 @@ func TestOpenNativeDeadDetachedRevivesOnItsOwnHerdrHost(t *testing.T) {
 			}
 			runtime.Config = loaded.Config
 			seedClaudeChat(t, root, seat.SessionID)
-			// The replaced seat's reload schedule files go with its row: the
-			// new seat has a new id, so nothing else would remove them.
+			// The replaced seat's reload schedule record goes with its row: the
+			// new seat has a new id, so nothing else would remove it. Its
+			// reload log stays.
 			reloadFiles := plantNativeReloadFiles(t, runtime.Paths.SIDDir, seat.SeatID)
 			binary := filepath.Join(runtime.Paths.Home, "native-engine")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.WriteSeatRun(
@@ -157,7 +158,7 @@ func TestOpenNativeDeadDetachedRevivesOnItsOwnHerdrHost(t *testing.T) {
 			} else if !oldPaneLingers && len(closes) != 0 {
 				t.Fatalf("a pane already gone was closed again: %v", closes)
 			}
-			assertNativeReloadFilesGone(t, reloadFiles)
+			assertNativeReloadRecordRetired(t, reloadFiles)
 			// A stale exact row fails closed; the refreshed row finds the
 			// completed birth and lays out no second tab.
 			stale := target

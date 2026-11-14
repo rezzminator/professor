@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -30,9 +31,9 @@ import (
 // returns an error here and is SKIPPED by the detectors, which is the correct
 // outcome: it is not a chat.
 type DarwinProcFS struct {
-	residentOnce sync.Once
-	resident     map[int]int64
-	residentErr  error
+	snapshotOnce sync.Once
+	snapshot     map[int]psRow
+	snapshotErr  error
 }
 
 // NewDarwinProcFS returns a process table reader for macOS. It carries a small
@@ -66,7 +67,8 @@ func (proc *DarwinProcFS) Cmdline(pid int) ([]string, error) {
 func (proc *DarwinProcFS) Environ(pid int) (map[string]string, error) {
 	_, env, err := procArgs(pid)
 	if err != nil {
-		return nil, err
+		identity, identityErr := proc.ProcessIdentity(pid)
+		return nil, environWithheld(err, ProbeProcess(pid), identity, identityErr)
 	}
 	environment := make(map[string]string, len(env))
 	for _, entry := range env {
@@ -84,7 +86,7 @@ func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 		return ProcessIdentity{}, fmt.Errorf(
 			"read process identity for pid %d via kern.proc.pid: %w",
 			pid,
-			processReadError(pid, err, unix.Kill(pid, 0)),
+			processReadError(pid, err, ProbeProcess(pid)),
 		)
 	}
 	command := make([]byte, 0, len(process.Proc.P_comm))
@@ -96,7 +98,7 @@ func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 	}
 	return ProcessIdentity{
 		EffectiveUID: process.Eproc.Ucred.Uid,
-		Zombie:       process.Proc.P_stat == 5, // SZOMB in Darwin sys/proc.h.
+		Zombie:       darwinDead(process.Proc.P_stat, process.Proc.P_flag),
 		Command:      string(command),
 	}, nil
 }
@@ -115,7 +117,7 @@ func (proc *DarwinProcFS) Stat(pid int) (ProcStat, error) {
 		return ProcStat{}, fmt.Errorf(
 			"read kern.proc.pid for %d: %w",
 			pid,
-			processReadError(pid, err, unix.Kill(pid, 0)),
+			processReadError(pid, err, ProbeProcess(pid)),
 		)
 	}
 	started := process.Proc.P_starttime
@@ -125,11 +127,21 @@ func (proc *DarwinProcFS) Stat(pid int) (ProcStat, error) {
 	}, nil
 }
 
+// Started is the process's p_starttime, the wall-clock microsecond the kernel
+// created it.
+func (proc *DarwinProcFS) Started(pid int) (time.Time, error) {
+	stat, err := proc.Stat(pid)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMicro(int64(stat.StartTime)), nil
+}
+
 // Birth returns the process start time in epoch seconds.
 func (proc *DarwinProcFS) Birth(pid int) (int64, error) {
 	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err != nil {
-		return 0, fmt.Errorf("read kern.proc.pid for %d: %w", pid, err)
+		return 0, fmt.Errorf("read kern.proc.pid for %d: %w", pid, processReadError(pid, err, ProbeProcess(pid)))
 	}
 	return process.Proc.P_starttime.Sec, nil
 }
@@ -137,48 +149,51 @@ func (proc *DarwinProcFS) Birth(pid int) (int64, error) {
 // RSSKB returns a process's resident set size in kilobytes.
 //
 // The kernel does not carry usable resident memory in kinfo_proc — that lives
-// behind task_info, which needs cgo — so this shells out to ps ONCE and keeps
-// the whole table. The reaper sums a process subtree, so the alternative was a
-// fork per pid; one snapshot is also more honest, because every pid in a
-// subtree is then measured at the same instant.
+// behind task_info, which needs cgo — so it comes from the table's one ps
+// snapshot. The reaper sums a process subtree, so the alternative was a fork
+// per pid; one snapshot is also more honest, because every pid in a subtree is
+// then measured at the same instant.
 func (proc *DarwinProcFS) RSSKB(pid int) (int64, error) {
-	proc.residentOnce.Do(proc.loadResident)
-	if proc.residentErr != nil {
-		return 0, proc.residentErr
+	rows, err := proc.rows()
+	if err != nil {
+		return 0, fmt.Errorf("sample resident memory: %w", err)
 	}
-	kilobytes, found := proc.resident[pid]
-	if !found {
+	row, found := rows[pid]
+	if !found || row.rssUnknown {
 		return 0, fmt.Errorf("no resident size for pid %d", pid)
 	}
-	return kilobytes, nil
+	return int64(row.counter.RSSBytes / 1024), nil
 }
 
-func (proc *DarwinProcFS) loadResident() {
-	result, err := obs.Runner(deps.RealRunner{}).Run(
-		context.Background(),
-		[]string{deps.Executable("ps"), "-A", "-o", "pid=,rss="},
-		deps.RunOptions{},
-	)
-	if err == nil && result.ExitCode != 0 {
-		err = fmt.Errorf("exit status %d", result.ExitCode)
-	}
+// Terminals maps pids to their controlling terminal from the table's one ps
+// snapshot, which prints the short form ("ttys001"); a process without one has
+// no entry. A snapshot that could not run is an error, never a table of no
+// terminals.
+func (proc *DarwinProcFS) Terminals() (map[int]string, error) {
+	rows, err := proc.rows()
 	if err != nil {
-		proc.residentErr = fmt.Errorf("sample resident memory via ps: %w", err)
-		return
+		return nil, fmt.Errorf("map controlling terminals: %w", err)
 	}
-	output := result.Stdout
-	proc.resident = make(map[int]int64)
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
-		}
-		pid, pidErr := strconv.Atoi(fields[0])
-		kilobytes, sizeErr := strconv.ParseInt(fields[1], 10, 64)
-		if pidErr == nil && sizeErr == nil {
-			proc.resident[pid] = kilobytes
+	terminals := make(map[int]string)
+	for pid, row := range rows {
+		if row.tty != "" {
+			terminals[pid] = row.tty
 		}
 	}
+	return terminals, nil
+}
+
+// rows is the table's one ps snapshot, taken on first use.
+func (proc *DarwinProcFS) rows() (map[int]psRow, error) {
+	proc.snapshotOnce.Do(func() {
+		var output string
+		output, proc.snapshotErr = runPSSnapshot()
+		if proc.snapshotErr != nil {
+			return
+		}
+		proc.snapshot, proc.snapshotErr = snapshotTable(output)
+	})
+	return proc.snapshot, proc.snapshotErr
 }
 
 // FDLinks returns a process's numeric file descriptors and their targets.
@@ -189,9 +204,13 @@ func (proc *DarwinProcFS) loadResident() {
 // transcript a live chat holds open, and "no open files" is a claim, not a
 // shrug — reporting it falsely would let archive evict a file still in use.
 func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
+	lsof, err := deps.Resolve("lsof")
+	if err != nil {
+		return nil, fmt.Errorf("list open files for pid %d: resolve lsof: %w", pid, err)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
-		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn"},
+		[]string{lsof, "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn"},
 		deps.RunOptions{},
 	)
 	if err == nil && result.ExitCode != 0 {
@@ -203,7 +222,11 @@ func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
 		// still prints what it found. Only an empty result alongside an error is
 		// a probe that could not run.
 		if len(output) == 0 {
-			return nil, fmt.Errorf("list open files for pid %d via lsof: %w", pid, err)
+			return nil, fmt.Errorf(
+				"list open files for pid %d via lsof: %w",
+				pid,
+				processReadError(pid, err, ProbeProcess(pid)),
+			)
 		}
 	}
 	links := make([]FDLink, 0)
@@ -238,9 +261,13 @@ func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
 // the one the process still holds after an install renamed a new file over
 // the path. A missing entry is an error, never a zero identity.
 func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
+	lsof, err := deps.Resolve("lsof")
+	if err != nil {
+		return FileID{}, fmt.Errorf("read the executable of pid %d: resolve lsof: %w", pid, err)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
-		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di"},
+		[]string{lsof, "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di"},
 		deps.RunOptions{},
 	)
 	if err == nil && result.ExitCode != 0 {
@@ -248,7 +275,11 @@ func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
 	}
 	output := result.Stdout
 	if err != nil && len(output) == 0 {
-		return FileID{}, fmt.Errorf("read the executable of pid %d via lsof: %w", pid, err)
+		return FileID{}, fmt.Errorf(
+			"read the executable of pid %d via lsof: %w",
+			pid,
+			processReadError(pid, err, ProbeProcess(pid)),
+		)
 	}
 	var id FileID
 	var sawDevice, sawInode bool
@@ -298,7 +329,7 @@ func procArgs(pid int) (argv, env []string, err error) {
 		return nil, nil, fmt.Errorf(
 			"read kern.procargs2 for %d: %w",
 			pid,
-			processReadError(pid, err, unix.Kill(pid, 0)),
+			processReadError(pid, err, ProbeProcess(pid)),
 		)
 	}
 	if len(buffer) < 4 {
@@ -334,7 +365,11 @@ func procArgs(pid int) (argv, env []string, err error) {
 func (proc *DarwinProcFS) Executable(pid int) (string, error) {
 	buffer, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
-		return "", fmt.Errorf("read executable via kern.procargs2 for %d: %w", pid, err)
+		return "", fmt.Errorf(
+			"read executable via kern.procargs2 for %d: %w",
+			pid,
+			processReadError(pid, err, ProbeProcess(pid)),
+		)
 	}
 	path, err := procExecutablePath(buffer)
 	if err != nil {

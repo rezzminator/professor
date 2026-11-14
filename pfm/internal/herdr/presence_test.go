@@ -5,11 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // herdrFake is a Herdr socket that answers one request per connection (the
@@ -40,7 +44,19 @@ func (fake *herdrFake) total() int {
 // with the "error:" prefix an error response whose code follows.
 func serveHerdr(t *testing.T, table map[string]string) *herdrFake {
 	t.Helper()
-	fake := &herdrFake{path: filepath.Join(t.TempDir(), "h.sock"), counts: map[string]int{}}
+	// A one-letter directory under the test's temp root keeps the socket path inside macOS's 104 bytes,
+	// which t.TempDir's test-named directory overruns; testjail.ShortRoot is out of reach here (testjail
+	// imports config, which imports herdr).
+	dir, err := os.MkdirTemp(paths.TempRoot(), "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove herdr fake socket directory %s: %v", dir, err)
+		}
+	})
+	fake := &herdrFake{path: filepath.Join(dir, "h.sock"), counts: map[string]int{}}
 	listener, err := net.Listen("unix", fake.path)
 	if err != nil {
 		t.Fatal(err)
@@ -138,13 +154,18 @@ func storedWith(clients map[string]Client) string {
 	return string(encoded)
 }
 
+// errServerGone is the error a Tmux read of a socket with no server behind it wraps.
+var errServerGone = errors.New("no tmux server on socket")
+
 func probeFor(tmux *fakeTmux, withHerdr bool, warn *strings.Builder) Probe {
 	probe := Probe{
 		Getenv:   func(string) string { return "" },
 		LookPath: func(string) (string, error) { return "", errors.New("not found") },
 		Tmux:     tmux.run,
 		Call:     Call,
-		Warn:     warn,
+		// errServerGone stands in for gather.ErrServerGone, which imports this package.
+		ServerGone: func(err error) bool { return errors.Is(err, errServerGone) },
+		Warn:       warn,
 	}
 	if withHerdr {
 		probe.Getenv = func(name string) string {
@@ -193,6 +214,12 @@ func TestPresenceRequiresExplicitEnumerationArrays(t *testing.T) {
 				if shape == "empty" {
 					if got != PresenceNotInHerdr || warn.Len() != 0 {
 						t.Fatalf("explicit empty arrays = %q, warning %q", got, warn.String())
+					}
+				} else if list.method != "pane.list" {
+					// The explicit empty pane list proves the pane gone; the
+					// unreadable agent or label list is named beside it.
+					if got != PresenceNotInHerdr || !strings.Contains(warn.String(), list.method) {
+						t.Fatalf("invalid %s enumeration = %q, warning %q", list.method, got, warn.String())
 					}
 				} else if !strings.HasPrefix(got, presenceUnreachableLead) ||
 					!strings.Contains(got, list.method) || !strings.Contains(warn.String(), list.method) {
@@ -314,6 +341,11 @@ func TestPresenceNotInHerdrWhenNoServerNoOptionNoClientOrNoLivePane(t *testing.T
 		"/t/cc-3|s3": storedWith(nil),
 		// the only registered client's terminal is gone from Herdr
 		"/t/cc-4|s4": storedWith(map[string]Client{"4": {Pane: "w9:p9", Terminal: "term_gone", Socket: fake.path}}),
+		"/t/cc-6|s6": "",
+	}, errs: map[string]error{
+		// the chat's tmux server ended between the listing and its option read, or its client read
+		"s5":         fmt.Errorf("tmux show-options -qv -t s5 @pfm_herdr: %w: /t/cc-5", errServerGone),
+		"clients:s6": fmt.Errorf("tmux list-clients -t s6 -F #{client_pid}: %w: /t/cc-6", errServerGone),
 	}}
 	seats := []Seat{
 		{}, // a resumable row: no live tmux server
@@ -323,11 +355,17 @@ func TestPresenceNotInHerdrWhenNoServerNoOptionNoClientOrNoLivePane(t *testing.T
 		},
 		{SocketPath: "/t/cc-3", Session: "s3"},
 		{SocketPath: "/t/cc-4", Session: "s4"},
+		{SocketPath: "/t/cc-5", Session: "s5"},
+		{SocketPath: "/t/cc-6", Session: "s6"},
 	}
-	for index, got := range probeFor(tmux, true, nil).Presence(context.Background(), seats) {
+	var warn strings.Builder
+	for index, got := range probeFor(tmux, true, &warn).Presence(context.Background(), seats) {
 		if got != PresenceNotInHerdr {
 			t.Errorf("seat %d Presence = %q, want %q", index, got, PresenceNotInHerdr)
 		}
+	}
+	if warn.String() != "" {
+		t.Errorf("warnings = %q, want none: an ended chat is no failed lookup", warn.String())
 	}
 }
 
@@ -352,6 +390,9 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 	wrongType := serveHerdr(t, map[string]string{
 		"pane.list": panesJSON, "agent.list": agentsJSON, "workspace.list": `{"type":"nope"}`,
 	})
+	agentsWrongType := serveHerdr(t, map[string]string{
+		"pane.list": panesJSON, "agent.list": `{"type":"nope"}`, "workspace.list": workspacesJSON,
+	})
 	deadSocket := filepath.Join(t.TempDir(), "dead.sock")
 	client := func(socket string) string {
 		return storedWith(map[string]Client{"1": {Pane: "w6:p2", Terminal: "term_a", Socket: socket}})
@@ -362,6 +403,7 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 			"/t/cc-dial|dial":  client(deadSocket),
 			"/t/cc-refuse|ref": client(refusing.path),
 			"/t/cc-type|type":  client(wrongType.path),
+			"/t/cc-agent|agt":  client(agentsWrongType.path),
 			"/t/cc-json|json":  "{not json",
 			"/t/cc-nosock|nos": storedWith(map[string]Client{"1": {Pane: "w6:p2"}}),
 		},
@@ -371,7 +413,6 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 		{SocketPath: "/t/cc-ok", Session: "ok"},
 		{SocketPath: "/t/cc-dial", Session: "dial"},
 		{SocketPath: "/t/cc-refuse", Session: "ref"},
-		{SocketPath: "/t/cc-type", Session: "type"},
 		{SocketPath: "/t/cc-json", Session: "json"},
 		{SocketPath: "/t/cc-nosock", Session: "nos"},
 		{SocketPath: "/t/cc-tmux", Session: "tmuxerr"},
@@ -381,6 +422,10 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 			Session:    "pf",
 			Err:        errors.New("resolve socket \"x/y\": must be one relative tmux socket name"),
 		},
+		// Panes alone place a client: an unreadable label or agent list is
+		// named on the warning stream and shown as such, never "unreachable".
+		{SocketPath: "/t/cc-type", Session: "type"},
+		{SocketPath: "/t/cc-agent", Session: "agt"},
 	}
 	var warn strings.Builder
 	got := probeFor(tmux, true, &warn).Presence(context.Background(), seats)
@@ -390,7 +435,6 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 	causes := []string{
 		"dial",
 		"forbidden",
-		"workspace_list",
 		"decode",
 		"no pane or no Herdr socket",
 		"no server running",
@@ -400,7 +444,7 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 	// A Herdr socket that could not be read is unreachable; every other failure
 	// stays a herdr error.
 	leads := []string{
-		"herdr unreachable: ", "herdr unreachable: ", "herdr unreachable: ",
+		"herdr unreachable: ", "herdr unreachable: ",
 		"herdr error: ", "herdr error: ", "herdr error: ", "herdr error: ", "herdr error: ",
 	}
 	for offset, cause := range causes {
@@ -412,8 +456,25 @@ func TestPresenceFailedLookupReadsHerdrErrorNeverNotInHerdr(t *testing.T) {
 			t.Errorf("seat %d failed lookup read as %q", offset+1, PresenceNotInHerdr)
 		}
 	}
-	if lines := strings.Count(warn.String(), "\n"); lines != len(causes) {
-		t.Errorf("warn lines = %d, want one per failed seat (%d):\n%s", lines, len(causes), warn.String())
+	if got[len(got)-2] != "w6:p2 w6 idle pfm-1" || got[len(got)-1] != "w6:p2 .professor agents-unread" {
+		t.Errorf("partial socket reads = %q, %q; want the pane by workspace id, then its agent unread",
+			got[len(got)-2], got[len(got)-1])
+	}
+	for _, named := range []string{
+		"pfm chat ls: herdr socket " + wrongType.path + `: herdr workspace.list: result type "nope", want workspace_list — panes shown by workspace id`,
+		"pfm chat ls: herdr socket " + agentsWrongType.path + `: herdr agent.list: result type "nope", want agent_list — panes shown with agents-unread`,
+	} {
+		if !strings.Contains(warn.String(), named) {
+			t.Errorf("warnings do not name %q:\n%s", named, warn.String())
+		}
+	}
+	if lines := strings.Count(warn.String(), "\n"); lines != len(causes)+2 {
+		t.Errorf(
+			"warn lines = %d, want one per failed seat and partial socket (%d):\n%s",
+			lines,
+			len(causes)+2,
+			warn.String(),
+		)
 	}
 }
 
@@ -491,11 +552,29 @@ func TestPresenceLiveClientCases(t *testing.T) {
 	cases := []struct {
 		name     string
 		clients  string
+		stored   string
 		envs     map[int]map[string]string
 		hookless func(Seat) (bool, bool)
 		want     string
 	}{
 		{name: "no client", clients: "", want: PresenceNotInHerdr},
+		// A registered record that cannot be read never hides the live client.
+		{
+			name: "an undecodable record still shows the live client and names it", clients: "66597\n",
+			stored:   "{not json",
+			envs:     map[int]map[string]string{66597: clientEnv(fake.path, "w6:p2")},
+			hookless: unknownHookless(true, false),
+			want: `w6:p2 .professor unknown KEYS, herdr error: decode @pfm_herdr of KEYS ("{not json"): ` +
+				"invalid character 'n' looking for beginning of object key string",
+		},
+		{
+			name: "a malformed registered client still shows the live one and names it", clients: "66597\n",
+			stored:   storedWith(map[string]Client{"5": {Pane: "w6:p2"}}),
+			envs:     map[int]map[string]string{66597: clientEnv(fake.path, "w6:p2")},
+			hookless: unknownHookless(true, false),
+			want: "w6:p2 .professor unknown KEYS, herdr error: @pfm_herdr of KEYS: client 5 names no pane or " +
+				"no Herdr socket: {Pane:w6:p2 Terminal: Socket:}",
+		},
 		{
 			name: "a client outside Herdr", clients: "123\n",
 			envs: map[int]map[string]string{123: clientEnv("", "")},
@@ -543,7 +622,10 @@ func TestPresenceLiveClientCases(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			tmux := &fakeTmux{clients: map[string]string{"/t/cc-keys|KEYS": test.clients}}
+			tmux := &fakeTmux{
+				clients: map[string]string{"/t/cc-keys|KEYS": test.clients},
+				stored:  map[string]string{"/t/cc-keys|KEYS": test.stored},
+			}
 			var warn strings.Builder
 			probe := probeFor(tmux, true, &warn)
 			probe.Environ = func(pid int) (map[string]string, error) { return test.envs[pid], nil }
@@ -587,20 +669,16 @@ func TestPresenceNamesAHerdrReadFailure(t *testing.T) {
 	var warn strings.Builder
 	probe.Warn = &warn
 	got := probe.Presence(context.Background(), seats)
-	wants := []struct{ lead, cause string }{
-		{"herdr unreachable: ", "forbidden"},
-		{"herdr unreachable: ", "dial"},
-		{"herdr error: ", "client 3 runs in no pane of " + healthy.path},
-		{"herdr error: ", "client 4 runs in no pane of " + healthy.path},
-		{"herdr error: ", "list tmux clients of e"},
+	clean := strings.NewReplacer(healthy.path, "{healthy}", refusing.path, "{refusing}", deadSocket, "{dead}")
+	if presence, want := clean.Replace(
+		strings.Join(got, "\n"),
+	), "herdr unreachable: place tmux client 1: list the panes of {refusing}: herdr socket {refusing}: herdr refused pane.list pfm-1: forbidden: no\nherdr unreachable: place tmux client 2: list the panes of {dead}: herdr socket {dead}: herdr socket {dead}: dial for pane.list pfm-1: dial unix {dead}: connect: no such file or directory\nherdr error: place tmux client 3: client 3 runs in no pane of {healthy}; nested tmux is unsupported: Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr\nherdr error: place tmux client 4: client 4 runs in no pane of {healthy}; nested tmux is unsupported: Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr\nherdr error: list tmux clients of e: tmux list-clients: no server running"; presence != want {
+		t.Errorf("Presence = %q, want %q", presence, want)
 	}
-	for index, want := range wants {
-		if !strings.HasPrefix(got[index], want.lead) || !strings.Contains(got[index], want.cause) {
-			t.Errorf("seat %d Presence = %q, want %q naming %q", index, got[index], want.lead+"…", want.cause)
-		}
-	}
-	if lines := strings.Count(warn.String(), "\n"); lines != len(seats) {
-		t.Errorf("warn lines = %d, want one per failed seat (%d):\n%s", lines, len(seats), warn.String())
+	if warned, want := clean.Replace(
+		warn.String(),
+	), "pfm chat ls: herdr presence of {SocketPath:/t/cc-a Session:a Pane: Name: PanePIDs:[] Err:<nil>}: place tmux client 1: list the panes of {refusing}: herdr socket {refusing}: herdr refused pane.list pfm-1: forbidden: no\npfm chat ls: herdr presence of {SocketPath:/t/cc-b Session:b Pane: Name: PanePIDs:[] Err:<nil>}: place tmux client 2: list the panes of {dead}: herdr socket {dead}: herdr socket {dead}: dial for pane.list pfm-1: dial unix {dead}: connect: no such file or directory\npfm chat ls: herdr presence of {SocketPath:/t/cc-c Session:c Pane: Name: PanePIDs:[] Err:<nil>}: place tmux client 3: client 3 runs in no pane of {healthy}; nested tmux is unsupported: Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr\npfm chat ls: herdr presence of {SocketPath:/t/cc-d Session:d Pane: Name: PanePIDs:[] Err:<nil>}: place tmux client 4: client 4 runs in no pane of {healthy}; nested tmux is unsupported: Herdr exposes only the outer foreground process group; attach the pfm client directly in Herdr\npfm chat ls: herdr presence of {SocketPath:/t/cc-e Session:e Pane: Name: PanePIDs:[] Err:<nil>}: list tmux clients of e: tmux list-clients: no server running\n"; warned != want {
+		t.Errorf("warn = %q, want %q", warned, want)
 	}
 }
 

@@ -10,9 +10,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // A plain shell's long command reports to the Herdr pane whose shell (or one
@@ -43,8 +40,6 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 		// hidden is text the user typed that no error line may carry.
 		hidden string
 		rc     int
-		// kept has herdr-keep's holder 300 run the shell 4242 for pane wT:p1.
-		kept bool
 	}{
 		"done reports working then idle to the pane the shell was born in": {
 			setup: func(server *fakeHerdr) { server.addShellPane("wT:p1", "t1", 4242) },
@@ -74,15 +69,6 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 				sprintf(info, "wT:p1"), sprintf(working, "wT:p1"),
 				sprintf(idle, "wT:p1", strings.Repeat("x", 226)+"… exit 3 · 12s"),
 				sprintf(title, "wT:p1", strings.Repeat("x", 66)+"… exit 3 · 12s"),
-			},
-		},
-		"a pane herdr-keep holds reports for the shell its holder runs": {
-			setup: func(server *fakeHerdr) { server.addKeptPane("wT:p1", "t1", 77) },
-			kept:  true,
-			args:  []string{"done", "--pid", "4242", "--command", "make test", "--exit", "3", "--seconds", "12"},
-			want: []string{
-				sprintf(info, "wT:p1"), sprintf(working, "wT:p1"), sprintf(idle, "wT:p1", "make test exit 3 · 12s"),
-				sprintf(title, "wT:p1", "make test exit 3 · 12s"),
 			},
 		},
 		"a pane moved away is found by its shell": {
@@ -212,32 +198,6 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 			jail := newHerdrJail(t)
 			clock := int64(1_000_000)
 			deps := jail.deps(env, &clock)
-			if test.kept {
-				proc := t.TempDir()
-				zeros := strings.Repeat("0 ", 13)
-				for pid, stat := range map[int]string{
-					300:  "300 (herdr-keep) S 1 300 300 0 -1 " + zeros + "30 0\n",
-					4242: "4242 (zsh) S 300 4242 4242 0 4250 " + zeros + "31 0\n",
-					4250: "4250 (make) S 4242 4250 4242 0 4250 " + zeros + "32 0\n",
-				} {
-					dir := filepath.Join(proc, fmt.Sprint(pid))
-					if err := os.MkdirAll(dir, 0o700); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(stat), 0o600); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.WriteFile(
-						filepath.Join(dir, "cmdline"),
-						[]byte("make\x00test\x00"),
-						0o600,
-					); err != nil {
-						t.Fatal(err)
-					}
-				}
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(300, 30, 4242, 31, "wT:p1", server.path), 0)
-				deps.keep = gather.HerdrKeep(gather.NewProcFS(proc))
-			}
 			var stderr bytes.Buffer
 			if rc := reportShellRun(test.args, &stderr, deps); rc != test.rc {
 				t.Fatalf("rc=%d, want %d (stderr %q)", rc, test.rc, stderr.String())

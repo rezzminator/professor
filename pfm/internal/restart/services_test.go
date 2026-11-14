@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const keepAlivePlist = "<plist><dict><key>KeepAlive</key>\n  <true/></dict></plist>"
@@ -47,7 +48,7 @@ func (model *launchd) run(argv []string) (deps.RunResult, error) {
 	case "print":
 		label := filepath.Base(argv[2])
 		if !model.loaded[label] {
-			return exitWith(launchctlNotFound, "Could not find service")
+			return exitWith(servicemanager.NotFoundExit, "Could not find service")
 		}
 		return answer("\tstate = running\n")
 	case "bootout":
@@ -164,7 +165,10 @@ func TestLaunchdStartWaitsForTheHealthProbe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail, err := units[1].Start(context.Background()); err != nil || !strings.HasSuffix(detail, "probe answered") {
+	if detail, err := units[1].Start(
+		context.Background(),
+	); err != nil ||
+		detail != "loaded, state = running, health probe answered" {
 		t.Fatalf("start of a daemon that answers on its third probe = %q, %v", detail, err)
 	}
 }
@@ -176,7 +180,10 @@ func TestSystemdStartWaitsForTheHealthProbe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail, err := units[5].Start(context.Background()); err != nil || !strings.HasSuffix(detail, "probe answered") {
+	if detail, err := units[5].Start(
+		context.Background(),
+	); err != nil ||
+		detail != "ActiveState=active, health probe answered" {
 		t.Fatalf("start of a daemon that answers on its third probe = %q, %v", detail, err)
 	}
 }
@@ -197,7 +204,7 @@ func TestLaunchdFailuresAreNamed(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if _, err := units[1].Stop(ctx); err == nil || !strings.Contains(err.Error(), "still loaded") {
+	if _, err := units[1].Stop(ctx); err == nil || err.Error() != "still loaded 5s after launchctl bootout (exit 0: )" {
 		t.Fatalf("a bootout that did not take = %v", err)
 	}
 	if _, err := units[0].Stop(ctx); err != nil {
@@ -209,7 +216,7 @@ func TestLaunchdFailuresAreNamed(t *testing.T) {
 	if _, err := units[1].Start(
 		ctx,
 	); err == nil ||
-		!strings.Contains(err.Error(), "health probe failed: connection refused") {
+		err.Error() != "loaded, state = running, but its health probe failed: connection refused, still 15s after start" {
 		t.Fatalf("a failing health probe = %v", err)
 	}
 }
@@ -218,7 +225,7 @@ func TestLaunchdAbsentIsNamedAndALookupFailureIsAnError(t *testing.T) {
 	manager, _, runner := newLaunchd(t)
 	delete(runner.paths, "launchctl")
 	units, detail, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
-	if err != nil || len(units) != 0 || !strings.Contains(detail, "no launchctl") {
+	if err != nil || len(units) != 0 || detail != "no launchctl on this host — no launch agents to restart" {
 		t.Fatalf("no launchctl = %v, %q, %v", units, detail, err)
 	}
 	runner.lookErr = map[string]error{"launchctl": errors.New("permission denied")}
@@ -227,10 +234,42 @@ func TestLaunchdAbsentIsNamedAndALookupFailureIsAnError(t *testing.T) {
 	}
 	runner.lookErr = nil
 	runner.paths["launchctl"] = "/bin/launchctl"
+}
+
+// TestLaunchdAnUnreadableAgentFailsAloneAndTheRestRestart: a launchctl print
+// that cannot answer, and a plist that cannot be read, each fail only their
+// own agent's stop step, named; the readable loaded agent restarts and the
+// plan exits 1.
+func TestLaunchdAnUnreadableAgentFailsAloneAndTheRestRestart(t *testing.T) {
+	manager, model, runner := newLaunchd(t, "com.professor.pfm.mcp")
+	plist := filepath.Join(manager.Dir, "com.professor.pfm.schedule.plist")
+	if err := os.Remove(plist); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(t.TempDir(), "gone.plist")
+	if err := os.Symlink(gone, plist); err != nil { // dangling: unreadable even for root
+		t.Fatal(err)
+	}
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatalf("one unreadable plist failed the whole listing: %v", err)
+	}
+	printed, executed, code := printAndRun(t, units)
+	want := "stop   services       launchd com.professor.pfm.schedule  FAILED  state unreadable: read launch agent " +
+		plist + ": open " + plist + ": no such file or directory\n"
+	if code != 1 || !strings.Contains(executed, want) || !strings.Contains(executed, "restart: 1 step(s) FAILED\n") ||
+		!strings.Contains(executed, "start  services       launchd com.professor.pfm.mcp  ok  ") ||
+		!model.loaded["com.professor.pfm.mcp"] {
+		t.Fatalf("code=%d printed:\n%s\nexecuted (want line %q):\n%s", code, printed, want, executed)
+	}
 	runner.handle = func([]string) (deps.RunResult, error) { return exitWith(1, "launchd is wedged") }
-	if _, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil); err == nil ||
-		!strings.Contains(err.Error(), "launchd is wedged") {
-		t.Fatalf("an unreadable launchctl print = %v", err)
+	units, _, err = manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil || len(units) != 2 {
+		t.Fatalf("a wedged launchctl print = %d units, %v; want both listed", len(units), err)
+	}
+	if _, err := units[1].Stop(context.Background()); err == nil ||
+		err.Error() != "state unreadable: launchctl print gui/501/com.professor.pfm.schedule: exit 1: launchd is wedged" {
+		t.Fatalf("an unreadable launchctl print = %v, want the stop step to fail naming it", err)
 	}
 }
 
@@ -363,16 +402,22 @@ func TestLaunchdKeepAliveReadsThePlist(t *testing.T) {
 
 func TestNativeServiceManagerIsLaunchdOnMacOSAndSystemdOnLinux(t *testing.T) {
 	home := t.TempDir()
-	launchdManager, ok := nativeServiceManager("darwin", &hostRunner{}, newTickClock(), home, 501).(LaunchdManager)
+	launchdManager, ok := nativeServiceManager(servicemanager.KindLaunchd, &hostRunner{}, newTickClock(), home, 501).(LaunchdManager)
 	if !ok || launchdManager.Dir != filepath.Join(home, "Library", "LaunchAgents") || launchdManager.UID != 501 {
-		t.Fatalf("darwin manager = %#v, want launchd over the LaunchAgents dir", launchdManager)
+		t.Fatalf("launchd manager = %#v, want launchd over the LaunchAgents dir", launchdManager)
 	}
-	systemdManager, ok := nativeServiceManager("linux", &hostRunner{}, newTickClock(), home, 501).(SystemdManager)
+	systemdManager, ok := nativeServiceManager(servicemanager.KindSystemd, &hostRunner{}, newTickClock(), home, 501).(SystemdManager)
 	if !ok || systemdManager.Dir != filepath.Join(home, ".config", "systemd", "user") {
-		t.Fatalf("linux manager = %#v, want systemd over the user unit dir", systemdManager)
+		t.Fatalf("systemd manager = %#v, want systemd over the user unit dir", systemdManager)
 	}
-	if manager := nativeServiceManager("freebsd", &hostRunner{}, newTickClock(), home, 501); manager != nil {
-		t.Fatalf("freebsd manager = %#v, want none", manager)
+	if manager := nativeServiceManager(
+		servicemanager.Kind("rc.d"),
+		&hostRunner{},
+		newTickClock(),
+		home,
+		501,
+	); manager != nil {
+		t.Fatalf("rc.d manager = %#v, want none", manager)
 	}
 }
 
@@ -436,14 +481,30 @@ func TestSystemdAUnitInactiveBeforeStaysStopped(t *testing.T) {
 	assertStaysStopped(t, printed, executed, "systemd pfm-name-sync.timer", "ActiveState=inactive")
 }
 
-// TestSystemdAnUnreadableActiveStateFailsThePlan: a state word systemd's
-// documentation does not list is a failed read, never "stopped".
-func TestSystemdAnUnreadableActiveStateFailsThePlan(t *testing.T) {
+// TestSystemdAnUnreadableActiveStateFailsOnlyItsUnits: a state word systemd's
+// documentation does not list is a failed read, never "stopped": that unit and
+// the service it triggers fail their stop step, named, and the rest restart.
+func TestSystemdAnUnreadableActiveStateFailsOnlyItsUnits(t *testing.T) {
 	manager, model := newSystemd(t)
 	model.state["pfm-schedule.timer"] = "bewildered"
-	if _, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil); err == nil ||
-		!strings.Contains(err.Error(), `"bewildered"`) {
-		t.Fatalf("an unknown ActiveState = %v, want the plan failed with the word named", err)
+	units, _, err := manager.Units(context.Background(), FamilyServices, pfmService, nil)
+	if err != nil {
+		t.Fatalf("one unreadable ActiveState failed the whole listing: %v", err)
+	}
+	_, executed, code := printAndRun(t, units)
+	cause := `state unreadable: systemctl --user show pfm-schedule.timer: unknown ActiveState "bewildered"`
+	for _, want := range []string{
+		"stop   services       systemd pfm-schedule.timer  FAILED  " + cause + "\n",
+		"stop   services       systemd pfm-schedule.service  FAILED  " + cause + "\n",
+		"restart: 2 step(s) FAILED\n",
+		"start  services       systemd pfm-mcp.service  ok  ActiveState=active\n",
+	} {
+		if !strings.Contains(executed, want) {
+			t.Errorf("result lines lack %q:\n%s", want, executed)
+		}
+	}
+	if code != 1 {
+		t.Fatalf("Execute = %d, want 1", code)
 	}
 }
 
@@ -510,5 +571,11 @@ func TestSystemdAUnitInMaintenanceStaysStopped(t *testing.T) {
 		t.Fatalf("a unit in maintenance failed the plan: %v", err)
 	}
 	printed, executed, _ := printAndRun(t, units)
-	assertStaysStopped(t, printed, executed, "systemd pfm-schedule.timer", "ActiveState=maintenance")
+	if got, want := strings.ReplaceAll(
+		printed+"--- executed\n"+executed,
+		manager.Dir,
+		"{units}",
+	), "restart plan: stop downstream first, then start upstream first only what was running before; chats are not brought back\nstop   1  services       systemd pfm-mcp.service\n          found: {units}/pfm-mcp.service, ActiveState=active\n          stop:  systemctl --user stop pfm-mcp.service; verified: ActiveState inactive or failed\nstart  1  services       systemd pfm-mcp.service  restart (was up: ActiveState=active)\n          start: systemctl --user start pfm-mcp.service; verified: ActiveState active\nkeep      services       systemd pfm-name-sync.path  stays stopped (was not running before: ActiveState=inactive)\n          found: {units}/pfm-name-sync.path, ActiveState=inactive\nkeep      services       systemd pfm-name-sync.timer  stays stopped (was not running before: ActiveState=inactive)\n          found: {units}/pfm-name-sync.timer, ActiveState=inactive\nkeep      services       systemd pfm-schedule.timer  stays stopped (was not running before: ActiveState=maintenance)\n          found: {units}/pfm-schedule.timer, ActiveState=maintenance\nkeep      services       systemd pfm-name-sync.service  stays stopped (was not running before: ActiveState=inactive)\n          found: {units}/pfm-name-sync.service, ActiveState=inactive\nkeep      services       systemd pfm-schedule.service  stays stopped (was not running before: ActiveState=inactive)\n          found: {units}/pfm-schedule.service, ActiveState=inactive\nlast      pfm            the worker\n--- executed\nstop   services       systemd pfm-mcp.service  ok  ActiveState=inactive\nstart  services       systemd pfm-mcp.service  ok  ActiveState=active\nkeep   services       systemd pfm-name-sync.path  stays stopped (was not running before: ActiveState=inactive)\nkeep   services       systemd pfm-name-sync.timer  stays stopped (was not running before: ActiveState=inactive)\nkeep   services       systemd pfm-schedule.timer  stays stopped (was not running before: ActiveState=maintenance)\nkeep   services       systemd pfm-name-sync.service  stays stopped (was not running before: ActiveState=inactive)\nkeep   services       systemd pfm-schedule.service  stays stopped (was not running before: ActiveState=inactive)\nrestart: ended 0 chat(s)\nlast   pfm            the worker\nrestart: every step verified\nrestart: exit 0\n"; got != want {
+		t.Fatalf("plan and result = %q, want %q", got, want)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -22,7 +23,7 @@ const (
 func newLinuxHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
-	h.goos = "linux"
+	h.platform = linuxPlatform
 	h.write(linuxServerVscode, fixtureVscode)
 	h.rearm()
 	if err := os.RemoveAll(h.path("Library")); err != nil {
@@ -72,6 +73,7 @@ func TestLinuxFollowerIsASystemdUnitTrioNeverALaunchAgent(t *testing.T) {
 	for _, want := range []string{
 		"Type=oneshot\n",
 		`Environment="PATH=` + paths.ServicePath(h.home) + `"` + "\n",
+		`Environment="PFM_INSTALL_MARK=` + paths.InstallMark(h.home) + `"` + "\n",
 		`Environment="XPC_SERVICE_NAME=com.professor.pfm.theme"` + "\n",
 		`ExecStart="/opt/bin/pfm" theme sync` + "\n",
 		"StandardOutput=append:" + filepath.Join(h.stateDir, "follow.log") + "\n",
@@ -109,7 +111,7 @@ func TestLinuxFollowerIsASystemdUnitTrioNeverALaunchAgent(t *testing.T) {
 	}
 	h.unitsInactive = true
 	h.rearm()
-	wantVerdict(t, h.status(), "follower", VerdictDrift, "not active")
+	wantVerdict(t, h.status(), "follower", VerdictDrift, "systemd units not active: pfm-theme.path inactive")
 	calls = len(h.runner.Calls())
 	h.sync(false)
 	if got := strings.Join(
@@ -122,7 +124,7 @@ func TestLinuxFollowerIsASystemdUnitTrioNeverALaunchAgent(t *testing.T) {
 		t.Errorf("a sync over inactive units ran systemctl --user %q, want a restart", got)
 	}
 	h.write(linuxUnitDir+"pfm-theme.path", "[Path]\n")
-	wantVerdict(t, h.status(), "follower", VerdictDrift, "pfm-theme.path differs from the render")
+	wantVerdict(t, h.status(), "follower", VerdictDrift, "systemd unit pfm-theme.path differs from the render")
 }
 
 // A rewritten unit owes the user manager a reload until one succeeds: a
@@ -138,8 +140,20 @@ func TestLinuxFollowerReloadOwedUntilARestartSucceeds(t *testing.T) {
 		nil,
 	)
 	report := h.sync(false)
-	wantVerdict(t, report, "follower", VerdictError, "No medium found")
-	wantVerdict(t, h.status(), "follower", VerdictError, "not reloaded")
+	wantVerdict(
+		t,
+		report,
+		"follower",
+		VerdictError,
+		"themesync: systemctl --user restart pfm-theme.path pfm-theme.timer exited 1: Failed to connect to bus: No medium found",
+	)
+	wantVerdict(
+		t,
+		h.status(),
+		"follower",
+		VerdictError,
+		"themesync: systemd units rewritten but the user manager was not reloaded: run `pfm theme sync` in a shell",
+	)
 	h.rearm()
 	calls := len(h.runner.Calls())
 	h.sync(false)
@@ -238,11 +252,29 @@ func TestLinuxVscodeFindsTheServerAndDesktopSettings(t *testing.T) {
 			t.Errorf("on backed up no %s: %v", rel, backups)
 		}
 	}
-	h.psVscode = h.home + "/.vscode-server/cli/servers/Stable-0123/server/node --max-old-space-size=8192 " +
-		h.home + "/.vscode-server/cli/servers/Stable-0123/server/out/server-main.js\n"
+	// A kernel thread (no argv), a process gone mid-scan (no cmdline) and a
+	// shell editing the server's settings are no VS Code.
+	h.processes = [][]string{{}, nil, {"/bin/zsh", "-l"}, {"/usr/bin/vim", h.path(linuxServerVscode)}}
 	h.rearm()
-	if got := row(t, h.status(), "vscode"); strings.Contains(got.Detail, vscodeDeferred) {
-		t.Errorf("vscode row = %s %q while the VS Code Server runs", got.Verdict, got.Detail)
+	if got := row(t, h.status(), "vscode"); got.Verdict != VerdictPending || got.Detail != vscodeDeferred {
+		t.Errorf("vscode row = %s %q with no VS Code running, want %s %q",
+			got.Verdict, got.Detail, VerdictPending, vscodeDeferred)
+	}
+	h.processes = append(h.processes, []string{
+		h.path(".vscode-server/bin/abc123/node"), h.path(".vscode-server/bin/abc123/out/server-main.js"),
+	})
+	h.rearm()
+	const waiting = "waiting for the extension to apply generation 1"
+	if got := row(t, h.status(), "vscode"); got.Verdict != VerdictPending || got.Detail != waiting {
+		t.Errorf("vscode row = %s %q while the VS Code Server runs, want %s %q",
+			got.Verdict, got.Detail, VerdictPending, waiting)
+	}
+	unlisted := filepath.Join(t.TempDir(), "proc")
+	h.env.Proc = gather.RealProcFS{Root: unlisted}
+	wantUnlisted := "themesync: list processes: read proc root: open " + unlisted + ": no such file or directory"
+	if got := row(t, h.status(), "vscode"); got.Verdict != VerdictError || got.Detail != wantUnlisted {
+		t.Errorf("vscode row = %s %q with an unreadable process table, want %s %q",
+			got.Verdict, got.Detail, VerdictError, wantUnlisted)
 	}
 
 	bare := newLinuxHarness(t)

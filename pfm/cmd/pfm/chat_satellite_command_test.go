@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +17,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -32,13 +28,14 @@ func TestHistoryPoolsUsesOnlySharedClaudeRoot(t *testing.T) {
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	got, err := historyPools()
+	t.Setenv(pfmengine.MustLookup(pfmengine.Codex).RootEnv, "")
+	got, codex, err := historyPools()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(home, ".claude", "projects")
-	if len(got) != 1 || got[0] != want {
-		t.Fatalf("history roots = %q, want [%q]", got, want)
+	want, wantCodex := filepath.Join(home, ".claude", "projects"), filepath.Join(home, ".codex")
+	if len(got) != 1 || got[0] != want || len(codex) != 1 || codex[0] != wantCodex {
+		t.Fatalf("history roots = %q and Codex homes %q, want [%q] and [%q]", got, codex, want, wantCodex)
 	}
 }
 
@@ -99,12 +96,23 @@ func TestChatSaveDispatchUsesScopedCallerRepository(t *testing.T) {
 	if err := os.MkdirAll(callerCWD, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	result, err := (deps.RealRunner{}).Run(context.Background(), []string{
-		deps.Executable("git"), "init", "-b", "caller-snapshot", callerCWD,
-	}, deps.RunOptions{})
-	if err != nil || result.ExitCode != 0 {
-		t.Fatalf("initialize caller repository: result=%+v err=%v", result, err)
-	}
+	git := &deps.FakeRunner{}
+	git.ScriptLookPath("git", "scripted-git", nil)
+	git.Script(
+		[]string{"scripted-git", "rev-parse", "--is-inside-work-tree"},
+		deps.RunResult{Stdout: []byte("true\n")},
+		nil,
+	)
+	git.Script(
+		[]string{"scripted-git", branchAction, "--show-current"},
+		deps.RunResult{Stdout: []byte("caller-snapshot\n")},
+		nil,
+	)
+	git.Script([]string{"scripted-git", "status", "--short"}, deps.RunResult{}, nil)
+	git.Script([]string{"scripted-git", "worktree", "list"}, deps.RunResult{}, nil)
+	previousRunner := commandRunner
+	commandRunner = git
+	t.Cleanup(func() { commandRunner = previousRunner })
 	ctx := pfmchat.WithResolvedSelf(context.Background(), headless.Chat{CWD: callerCWD})
 	var stdout, stderr bytes.Buffer
 	if code := runChatWithRuntime(
@@ -124,6 +132,14 @@ func TestChatSaveDispatchUsesScopedCallerRepository(t *testing.T) {
 	if !strings.Contains(string(saved), "Branch: caller-snapshot\n") {
 		t.Fatalf("saved snapshot = %q, want caller repository branch from %q", saved, callerCWD)
 	}
+	for index, call := range git.Calls() {
+		if call.Opts.Dir != callerCWD {
+			t.Errorf("git call %d ran in %q, want the caller repository %q", index, call.Opts.Dir, callerCWD)
+		}
+	}
+	if len(git.Calls()) != 4 {
+		t.Errorf("git calls = %d, want the four snapshot probes", len(git.Calls()))
+	}
 }
 
 func TestChatSaveContextKeepsExplicitTranscriptReadFailuresVisible(t *testing.T) {
@@ -141,13 +157,12 @@ func TestChatSaveContextKeepsExplicitTranscriptReadFailuresVisible(t *testing.T)
 		nil,
 		commandRuntime{},
 	)
-	if code != 1 || !strings.Contains(stderr.String(), missingTranscript) {
-		t.Fatalf(
-			"save code=%d stdout=%q stderr=%q, want named transcript read failure",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
+	if got, want := rooted(
+		stderr.String(),
+		root,
+	), "pfm chat save: {root}/missing.jsonl: no recognizable Claude or Codex transcript record\n"; code != 1 ||
+		got != want {
+		t.Fatalf("save code=%d stdout=%q stderr = %q, want %q", code, stdout.String(), got, want)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatalf("target stat error = %v, want no output after transcript read failure", err)
@@ -276,6 +291,42 @@ func TestChatHistoryUsesConfiguredRootsToResolveTheTranscript(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "configured roots transcript") {
 		t.Fatalf("history did not render the transcript message: %q", stdout.String())
+	}
+}
+
+// TestChatHistoryRendersACodexRollout: a rollout path is read as Codex, its
+// harness instructions and tool calls left out, never as an empty Claude file.
+func TestChatHistoryRendersACodexRollout(t *testing.T) {
+	codexHome := t.TempDir()
+	path := filepath.Join(codexHome, "sessions", "2026", "01", "02",
+		"rollout-2026-01-02T03-04-05-71717171-7171-4171-8171-717171717171.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Join([]string{
+		`{"timestamp":"2026-01-02T03:04:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n\n<INSTRUCTIONS>\nbe brief\n</INSTRUCTIONS>"}]}}`,
+		`{"timestamp":"2026-01-02T03:04:06Z","type":"event_msg","payload":{"type":"user_message","message":"reply with OK"}}`,
+		`{"timestamp":"2026-01-02T03:04:07Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}"}}`,
+		`{"timestamp":"2026-01-02T03:04:08Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := "== " + path + " · last 5 messages ==\n" +
+		"\n───── 2026-01-02T03:04:06Z · user ─────\nreply with OK\n" +
+		"\n───── 2026-01-02T03:04:08Z · assistant ─────\nOK\n"
+	runtime := commandRuntime{Paths: paths.Values{Roots: map[pfmengine.ID][]string{
+		pfmengine.Claude: {t.TempDir()}, pfmengine.Codex: {codexHome},
+	}}}
+	// By its path, and by the Codex thread id alone: no Claude pool holds it, the Codex homes do.
+	for _, sid := range []string{path, "71717171-7171-4171-8171-717171717171"} {
+		var stdout, stderr bytes.Buffer
+		code := runChatSatellite("history", []string{sid, "5", "-fixture-project"}, strings.NewReader(""), &stdout,
+			&stderr, nil, nil, runtime)
+		if code != 0 || stdout.String() != want {
+			t.Fatalf("history %s code=%d stdout=%q, want 0 and %q; stderr=%q", sid, code, stdout.String(), want,
+				stderr.String())
+		}
 	}
 }
 
@@ -461,221 +512,6 @@ func TestChatLSHeaderNamesBothViewVariants(t *testing.T) {
 	}
 }
 
-// TestChatLSPrintsNameBeforeSessionAtAndOverTruncationBoundary is the
-// red-first proof for the NAME-primary row format: two real live tmux
-// panes get distinct pane-title-derived names, one exactly at the 28-char
-// truncation boundary and one well over it. For both rows the printed line
-// must carry the (possibly truncated) NAME first, at a fixed column, with
-// the tmux session id still present immediately after it — never lost,
-// never reordered, and never pushed out of alignment by an oversized name.
-func TestChatLSPrintsNameBeforeSessionAtAndOverTruncationBoundary(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	jail := newKillCLIJail(t)
-	sidDir := filepath.Join(jail.root, "sid")
-
-	epoch := strconv.FormatInt(time.Now().Unix(), 10)
-	pid := strconv.Itoa(os.Getpid())
-	exactSocket := "cc-" + epoch + "-" + pid + "-1"
-	overSocket := "cc-" + epoch + "-" + pid + "-2"
-	exactName := strings.Repeat("A", 28) // exactly at the truncation boundary
-	overName := strings.Repeat("B", 40)  // well over it
-
-	seat := func(socket, title string) {
-		startBootingPane(t, socket)
-		paneID := strings.TrimSpace(runTmuxOutput(t, socket, "list-panes", "-F", "#{pane_id}"))
-		if output, err := exec.Command(
-			"tmux", "-L", socket, "select-pane", "-t", paneID, "-T", title,
-		).CombinedOutput(); err != nil {
-			t.Fatalf("set pane title for %q: %v: %s", socket, err, output)
-		}
-		crumb := filepath.Join(sidDir, socket+"."+paneID)
-		if err := os.WriteFile(crumb, []byte("/nonexistent/"+socket+".jsonl\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	seat(exactSocket, exactName)
-	seat(overSocket, overName)
-
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"chat", "ls", "--all"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("chat ls --all code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-
-	findRow := func(socket string) string {
-		for _, line := range strings.Split(stdout.String(), "\n") {
-			if strings.Contains(line, socket) {
-				return line
-			}
-		}
-		t.Fatalf("no row for socket %q in stdout=%q", socket, stdout.String())
-		return ""
-	}
-
-	check := func(socket, fullName, wantTruncated string) {
-		line := findRow(socket)
-		const nameStart, nameWidth = 2, 28
-		if len(line) < nameStart+nameWidth+1 {
-			t.Fatalf("row for %q too short to hold the name column: %q", socket, line)
-		}
-		if got := line[nameStart : nameStart+nameWidth]; got != wantTruncated {
-			t.Fatalf("row for %q name column = %q, want %q (line=%q)", socket, got, wantTruncated, line)
-		}
-		if line[nameStart+nameWidth] != ' ' {
-			t.Fatalf("row for %q has no delimiter after the name column: %q", socket, line)
-		}
-		sessionStart := nameStart + nameWidth + 1
-		if got := line[sessionStart : sessionStart+len(socket)]; got != socket {
-			t.Fatalf(
-				"row for %q session id at column %d = %q, want %q — name column pushed it out of alignment: %q",
-				socket,
-				sessionStart,
-				got,
-				socket,
-				line,
-			)
-		}
-		nameIdx := strings.Index(line, wantTruncated)
-		sessionIdx := strings.Index(line, socket)
-		if nameIdx < 0 || sessionIdx < 0 || nameIdx >= sessionIdx {
-			t.Fatalf(
-				"row for %q: name must appear before session id — name@%d session@%d line=%q",
-				socket,
-				nameIdx,
-				sessionIdx,
-				line,
-			)
-		}
-		if len(fullName) > nameWidth && strings.Contains(stdout.String(), fullName) {
-			t.Fatalf("full untruncated name %q leaked into stdout — truncation did not run", fullName)
-		}
-	}
-	check(exactSocket, exactName, exactName)
-	check(overSocket, overName, overName[:28])
-}
-
-// serveHerdrOneRequestPerConnection is a Herdr socket: one request line per
-// connection, answered from the method's result in table.
-func serveHerdrOneRequestPerConnection(t *testing.T, path string, table map[string]string) {
-	t.Helper()
-	listener, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				defer func() { _ = conn.Close() }()
-				line, err := bufio.NewReader(conn).ReadBytes('\n')
-				if err != nil {
-					return
-				}
-				var asked struct {
-					ID     string `json:"id"`
-					Method string `json:"method"`
-				}
-				if json.Unmarshal(line, &asked) != nil {
-					return
-				}
-				_, _ = conn.Write([]byte(`{"id":"` + asked.ID + `","result":` + table[asked.Method] + "}\n"))
-			}()
-		}
-	}()
-}
-
-// TestChatLSShowsEachChatsHerdrPresence pins the herdr column of `pfm chat
-// ls` over two real tmux seats: one no Herdr client ever attached to (real
-// tmux answers an unset option with nothing), one registered to a pane that
-// moved (found by its terminal id over the real socket); and, with no Herdr on
-// the host, a dash for every row. A failed lookup's text is presence_test's.
-func TestChatLSShowsEachChatsHerdrPresence(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	jail := newKillCLIJail(t)
-	sidDir := filepath.Join(jail.root, "sid")
-	herdrSocket := filepath.Join(jail.root, "h.sock")
-	serveHerdrOneRequestPerConnection(t, herdrSocket, map[string]string{
-		"pane.list":      `{"type":"pane_list","panes":[{"pane_id":"w6:p2","terminal_id":"term_a","workspace_id":"w6"}]}`,
-		"agent.list":     `{"type":"agent_list","agents":[{"pane_id":"w6:p2","workspace_id":"w6","agent":"claude","agent_status":"idle","name":"pfm-1"}]}`,
-		"workspace.list": `{"type":"workspace_list","workspaces":[{"workspace_id":"w6","label":".professor"}]}`,
-	})
-	epoch := strconv.FormatInt(time.Now().Unix(), 10)
-	pid := strconv.Itoa(os.Getpid())
-	seat := func(suffix string, clients map[string]herdr.Client) string {
-		socket := "cc-" + epoch + "-" + pid + "-" + suffix
-		startBootingPane(t, socket)
-		paneID := strings.TrimSpace(runTmuxOutput(t, socket, "list-panes", "-F", "#{pane_id}"))
-		crumb := filepath.Join(sidDir, socket+"."+paneID)
-		if err := os.WriteFile(crumb, []byte("/nonexistent/"+socket+".jsonl\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if clients != nil {
-			stored, err := json.Marshal(herdr.Stored{Engine: "claude", State: "idle", Clients: clients})
-			if err != nil {
-				t.Fatal(err)
-			}
-			runTmuxOutput(t, socket, "set-option", "-t", socket, herdr.StoredOption, string(stored))
-		}
-		return socket
-	}
-	free := seat("1", nil)
-	moved := seat("2", map[string]herdr.Client{"1": {Pane: "w1:p9", Terminal: "term_a", Socket: herdrSocket}})
-
-	rowOf := func(stdout, socket string) string {
-		for _, line := range strings.Split(stdout, "\n") {
-			if strings.Contains(line, socket) {
-				return line
-			}
-		}
-		t.Fatalf("no row for socket %q in stdout=%q", socket, stdout)
-		return ""
-	}
-	listAll := func() string {
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"chat", "ls", "--all"}, &stdout, &stderr); code != 0 {
-			t.Fatalf("chat ls --all code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-		}
-		return stdout.String()
-	}
-
-	t.Setenv(herdr.EnvBin, "/usr/bin/herdr")
-	withHerdr := listAll()
-	if row := rowOf(withHerdr, free); !strings.Contains(row, herdr.PresenceNotInHerdr) {
-		t.Errorf("row of a chat no Herdr client attached to = %q, want %q", row, herdr.PresenceNotInHerdr)
-	}
-	if row := rowOf(withHerdr, moved); !strings.Contains(row, "w6:p2 .professor idle pfm-1") {
-		t.Errorf("row of a chat whose pane moved = %q, want its current pane, workspace label, status and name", row)
-	}
-
-	// No Herdr on the host: no HERDR_BIN_PATH, and a PATH that holds tmux alone.
-	bin := filepath.Join(jail.root, "bin")
-	if err := os.MkdirAll(bin, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(tmuxPath, filepath.Join(bin, "tmux")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(herdr.EnvBin, "")
-	t.Setenv("PATH", bin)
-	without := listAll()
-	for _, socket := range []string{free, moved} {
-		if row := rowOf(without, socket); !strings.Contains(row, "  "+herdr.PresenceNoHerdr+"  ") {
-			t.Errorf("row with no Herdr on the host = %q, want %q", row, herdr.PresenceNoHerdr)
-		}
-	}
-}
-
 // steppingClock advances its fake time on every Sleep, so a poll loop runs to
 // its deadline without real sleeping; onSleep sees the time after each step.
 type steppingClock struct {
@@ -703,9 +539,10 @@ func TestWaitForBranchSessionIDGivesUpAtThirtySecondsNamingNoLaunchRecord(t *tes
 	if elapsed := clk.Now().Sub(start); elapsed < 30*time.Second || elapsed > 31*time.Second {
 		t.Fatalf("gave up after %s of fake time, want 30s", elapsed)
 	}
-	if err == nil || !strings.Contains(err.Error(), "no launch record written") ||
-		!strings.Contains(err.Error(), "pfm-fork") || !strings.Contains(err.Error(), "30s") {
-		t.Fatalf("err = %v, want a named 30s timeout carrying the socket and the missing launch record", err)
+	if got, want := fmt.Sprint(
+		err,
+	), "did not resolve within 30s on tmux socket pfm-fork; no launch record written for the fork"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 }
 
@@ -742,6 +579,16 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+	// A socket file nothing listens on: Herdr cannot be read, never proved gone.
+	dead := filepath.Join(t.TempDir(), "dead.sock")
+	listener, err := net.Listen("unix", dead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := state.PutSeat(
 		context.Background(),
 		fleetdb.Seat{
@@ -752,7 +599,7 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 			State:          "live",
 			Name:           "OFFLINE",
 			LostNote:       "your last message was not answered — re-send it",
-			HerdrSocket:    filepath.Join(t.TempDir(), "dead.sock"),
+			HerdrSocket:    dead,
 			HerdrPane:      "w6:p3",
 			HerdrWorkspace: "w6",
 		},
@@ -761,11 +608,15 @@ func TestChatLSNativeUnreachableIsVisibleAndNonzero(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "ls", "--all"}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stdout.String(), "OFFLINE") ||
-		!strings.Contains(
-			stderr.String(),
-			"HERDR UNREACHABLE",
-		) || !strings.Contains(stdout.String(), "loss note: your last message was not answered — re-send it") {
-		t.Fatalf("unreachable list code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if got, want := rooted(
+		stdout.String()+stderr.String(),
+		filepath.Dir(dead),
+	), "live chats everywhere (name · session · state · herdr · dir · last activity):\n  OFFLINE                      OFFLINE                  unknown HERDR UNREACHABLE {root}/dead.sock: herdr socket {root}/dead.sock: dial for pane.list pfm-seat: dial unix {root}/dead.sock: connect: connection refused    \n    loss note: your last message was not answered — re-send it\nHERDR UNREACHABLE {root}/dead.sock: herdr socket {root}/dead.sock: dial for pane.list pfm-seat: dial unix {root}/dead.sock: connect: connection refused\npfm chat ls: inspect OFFLINE: read Herdr endpoint {root}/dead.sock pane w6:p3: read OFFLINE Herdr state: herdr seat native-offline ownership unproved: prove seat native-offline pane.list: herdr socket {root}/dead.sock: dial for pane.list pfm-seat: dial unix {root}/dead.sock: connect: connection refused\n"; code != 1 ||
+		got != want {
+		t.Fatalf("unreachable list code=%d stdout+stderr = %q, want %q", code, got, want)
 	}
 }
+
+// answered is the transcript text of the assistant's answer reply: the
+// typed prompt names the reply too, so only this marks the turn as ended.
+func answered(reply string) string { return `"text":"` + reply + `"` }

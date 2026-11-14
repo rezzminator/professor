@@ -184,9 +184,28 @@ func TestTreeWorktreeIsTheWriteScope(t *testing.T) {
 			t.Errorf("a write to %q = %d, want 0", path, got)
 		}
 	}
+	// Scoped at the root, only the temp roots keep a write out: the system
+	// /tmp under both spellings and this run's TMPDIR.
+	for path, want := range map[string]int64{
+		"/work/a.go":        3,
+		"/tmp/a.go":         0,
+		"/private/tmp/a.go": 0,
+		filepath.Join(paths.TempRoot(), "scratch.go"): 0,
+	} {
+		raw, _ := json.Marshal(map[string]string{"file_path": path, "content": "abc"})
+		if got := writtenBytes("Write", raw, "/"); got != want {
+			t.Errorf("a write to %q scoped at / = %d, want %d", path, got, want)
+		}
+	}
 	if got := writtenBytes("Read", json.RawMessage(`{"file_path":"/work/repo/src/a.go","content":"abc"}`),
 		"/work/repo/src"); got != 0 {
 		t.Errorf("a Read = %d, want 0", got)
+	}
+	// One edit that is no object counts nothing and never zeroes the bytes of its siblings.
+	if got := writtenBytes("MultiEdit",
+		json.RawMessage(`{"file_path":"/work/repo/a.go","edits":[{"new_string":"ab"},7,{"new_string":"c"}]}`),
+		"/work/repo"); got != 3 {
+		t.Errorf("a MultiEdit with one odd edit = %d, want 3", got)
 	}
 	if got := writtenBytes(
 		"Edit",
@@ -197,8 +216,8 @@ func TestTreeWorktreeIsTheWriteScope(t *testing.T) {
 	}
 }
 
-// TestTreeUnreadableAgentIsANamedRow: a sub-agent whose meta cannot be parsed
-// and one whose transcript cannot be opened stay rows, named in NOT READ and
+// TestTreeUnreadableAgentIsANamedRow: a sub-agent whose meta cannot be parsed,
+// one whose transcript cannot be opened and one whose parent has no transcript stay rows, named in NOT READ and
 // left out of every total, and the run exits 1.
 func TestTreeUnreadableAgentIsANamedRow(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "projects")
@@ -219,16 +238,47 @@ func TestTreeUnreadableAgentIsANamedRow(t *testing.T) {
 	if err := os.Symlink(filepath.Join(sub, "no-such-transcript.jsonl"), gone+".jsonl"); err != nil {
 		t.Fatal(err)
 	}
+	// An agent whose parent has no transcript has an unknown place, not no place: it stays a row.
+	orphan := filepath.Join(sub, "agent-a0f00000000000b3")
+	if err := os.WriteFile(orphan+".meta.json", []byte(`{"agentType":"tracer","parentAgentId":"a0f0ffffffffffff",`+
+		`"spawnDepth":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(orphan+".jsonl", []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A line that is no record costs that agent's byte totals those lines; the row counts them.
+	worker := filepath.Join(sub, "agent-"+treeWorker1+".jsonl")
+	appended, err := os.OpenFile(worker, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appended.WriteString("{not json\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := appended.Close(); err != nil {
+		t.Fatal(err)
+	}
 	code, stdout, _ := treeAudit(t, root, "--tree", treeSession)
-	if code != 1 || !strings.Contains(stdout, "NOT READ                   2 agents — ") ||
+	if code != 1 || !strings.Contains(stdout, "NOT READ                   3 agents — ") ||
 		!strings.Contains(stdout, "a0f00000000000b1: meta: parse sub-agent meta") ||
 		!strings.Contains(stdout, "a0f00000000000b2: open ") ||
+		!strings.Contains(stdout, "a0f00000000000b3: parent chain: parent a0f0ffffffffffff not found") ||
+		!strings.Contains(stdout, "(1 undecodable lines: their writes and reads are not counted)") ||
 		!strings.Contains(stdout, "  a0f00000000000b2                     tracer                   unreadable: open ") {
 		t.Fatalf("exit %d stdout:\n%s\nwant exit 1 naming both unreadable agents", code, stdout)
 	}
 	code, document, _ := treeJSON(t, root, "--tree", treeSession)
-	if code != 1 || document.Tree.NotRead != 2 || document.Tree.Agents != 7 || document.Tree.InputTokens != 162100 {
-		t.Fatalf("exit %d tree %+v, want 2 of 7 not read and the totals unchanged", code, document.Tree)
+	if code != 1 || document.Tree.NotRead != 3 || document.Tree.Agents != 8 || document.Tree.InputTokens != 162100 {
+		t.Fatalf("exit %d tree %+v, want 3 of 8 not read and the totals unchanged", code, document.Tree)
+	}
+	if row := agentRow(t, document, "a0f00000000000b3"); row.Unreadable == nil ||
+		*row.Unreadable != "parent chain: parent a0f0ffffffffffff not found" || row.Depth != nil ||
+		row.Parent == nil || *row.Parent != "a0f0ffffffffffff" {
+		t.Errorf("orphan row %+v, want unreadable naming the missing parent, no depth", row)
+	}
+	if row := agentRow(t, document, treeWorker1); row.UndecodableLines != 1 {
+		t.Errorf("worker one row %+v, want one undecodable line counted", row)
 	}
 	if row := agentRow(t, document, "a0f00000000000b1"); row.Unreadable == nil || row.Depth != nil ||
 		row.USD != nil || row.Parent != nil {
@@ -267,20 +317,41 @@ func TestTreeFlagsGoTogether(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--tree", "s", "--worktree", "/w"}, "--worktree and --base go together"},
-		{[]string{"--tree", "s", "--base", "abc"}, "--worktree and --base go together"},
-		{[]string{"--tree", "s", "--worktree", "", "--base", "abc"}, "--worktree and --base go together"},
-		{[]string{"--json"}, "--json measures a spawn tree: pass --tree with it"},
-		{[]string{"--worktree", "/w", "--base", "abc"}, "--worktree measures a spawn tree: pass --tree with it"},
-		{[]string{"--tree", "s", "--codex"}, "--tree is its own mode"},
-		{[]string{"--tree", "s", "--since", "3d"}, "--tree is its own mode"},
-		{[]string{"--tree", "agent-"}, "--tree wants a session id or an agent id"},
-		{[]string{"--opencode", "--tree", "s"}, "--opencode is its own mode: it takes no --codex, --tree,"},
+		{
+			[]string{"--tree", "s", "--worktree", "/w"},
+			"pfm tokens: --worktree and --base go together: pass both, each with a value, or neither\n",
+		},
+		{
+			[]string{"--tree", "s", "--base", "abc"},
+			"pfm tokens: --worktree and --base go together: pass both, each with a value, or neither\n",
+		},
+		{
+			[]string{"--tree", "s", "--worktree", "", "--base", "abc"},
+			"pfm tokens: --worktree and --base go together: pass both, each with a value, or neither\n",
+		},
+		{[]string{"--json"}, "pfm tokens: --json measures a spawn tree: pass --tree with it\n"},
+		{
+			[]string{"--worktree", "/w", "--base", "abc"},
+			"pfm tokens: --worktree measures a spawn tree: pass --tree with it\n",
+		},
+		{
+			[]string{"--tree", "s", "--codex"},
+			"pfm tokens: --tree is its own mode: it takes no --codex, --opencode, --since, --project, --family, --family-rx, --session, --top, --view, --briefs, --host-label, --codex-root or --opencode-root\n",
+		},
+		{
+			[]string{"--tree", "s", "--since", "3d"},
+			"pfm tokens: --tree is its own mode: it takes no --codex, --opencode, --since, --project, --family, --family-rx, --session, --top, --view, --briefs, --host-label, --codex-root or --opencode-root\n",
+		},
+		{[]string{"--tree", "agent-"}, "pfm tokens: --tree wants a session id or an agent id\n"},
+		{
+			[]string{"--opencode", "--tree", "s"},
+			"pfm tokens: --opencode is its own mode: it takes no --codex, --tree, --root, --family, --family-rx, --session, --out, --view or --briefs\n",
+		},
 	}
 	for _, c := range cases {
 		code, stdout, stderr := auditWith(t, Options{}, append(c.args, "--prices", fixture(t, "model-cost.json"))...)
-		if code != 2 || stdout != "" || !strings.HasPrefix(stderr, "pfm tokens: "+c.want) {
-			t.Errorf("%v: exit %d stdout %q stderr %q, want 2 and %q", c.args, code, stdout, stderr, c.want)
+		if code != 2 || stdout != "" || stderr != c.want {
+			t.Errorf("%v: exit %d stdout %q stderr = %q, want %q", c.args, code, stdout, stderr, c.want)
 		}
 	}
 }

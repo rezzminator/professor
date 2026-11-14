@@ -21,17 +21,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -217,7 +215,7 @@ func runChatSaveContext(
 	); err != nil {
 		return fail("write transcript: %v", err)
 	}
-	writeRepositorySnapshot(ctx, file, obs.Runner(deps.RealRunner{}))
+	writeRepositorySnapshot(ctx, file, commandRunner)
 	closed = true
 	if err := file.Close(); err != nil {
 		return fail("close target: %v", err)
@@ -241,11 +239,7 @@ func runChatSaveContext(
 	return 0
 }
 
-func runChatBranch(
-	args []string,
-	stdout, stderr io.Writer,
-	env paths.Env,
-	clk clock.Clock,
+func runChatBranch(args []string, stdout, stderr io.Writer, env paths.Env, clk clock.Clock,
 	runtimes ...commandRuntime,
 ) int {
 	env = defaultEnv(env)
@@ -296,26 +290,21 @@ func runChatBranch(
 		return 2
 	}
 	// A fork inherits its parent's account and cache posture, not the caller's.
-	parent, parentFound, err := parentBranchRow(context.Background(), *id, runtimes...)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat branch: resolve parent session: %v\n", err)
-		return 1
-	}
 	var parentLaunch fleetdb.Launch
 	parentRecorded := false
 	if engine == pfmengine.Claude {
 		launches, openErr := fleetdb.OpenLaunches(context.Background(), runtime.Paths)
 		if openErr != nil {
-			fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v\n", *id, openErr)
-			return 1
+			fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v; continuing without it\n", *id, openErr)
+		} else {
+			parentLaunch, err = launches.LaunchFor(context.Background(), *id)
+			closeErr := launches.Close()
+			if err != nil && !errors.Is(err, fleetdb.ErrNoLaunch) || closeErr != nil {
+				fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v; continuing without it\n",
+					*id, errors.Join(err, closeErr))
+			}
+			parentRecorded = err == nil
 		}
-		parentLaunch, err = launches.LaunchFor(context.Background(), *id)
-		closeErr := launches.Close()
-		if err != nil && !errors.Is(err, fleetdb.ErrNoLaunch) || closeErr != nil {
-			fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v\n", *id, errors.Join(err, closeErr))
-			return 1
-		}
-		parentRecorded = err == nil
 	}
 	// The launch record, else the live seat's process: never the primary
 	// as a guess when the machine offers a choice of accounts.
@@ -323,18 +312,23 @@ func runChatBranch(
 	if requestedAccount == 0 && engine == pfmengine.Claude && parentRecorded {
 		requestedAccount = parentLaunch.Account
 	}
-	if requestedAccount == 0 && parentFound {
-		requestedAccount = parent.Account
+	if requestedAccount == 0 {
+		parent, parentFound, scanErr := parentBranchRow(context.Background(), *id, runtimes...)
+		if scanErr != nil {
+			fmt.Fprintf(stderr, "pfm chat branch: resolve parent session: %v\n", scanErr)
+		}
+		if parentFound {
+			requestedAccount = parent.Account
+		}
 	}
 	if requestedAccount == 0 && runtime.Config.AccountChoices(engine) > 1 {
 		fmt.Fprintf(stderr, "pfm chat branch: the account of session %s could not be resolved "+
 			"(no launch record, no live seat naming it); pass --account N\n", *id)
 		return 1
 	}
-	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+	primary, primaryErr := fleet.PrimaryAccountOrImplicit(runtime.Paths, runtime.Config)
 	if primaryErr != nil {
-		fmt.Fprintf(stderr, "pfm chat branch: read primary account: %v\n", primaryErr)
-		return 1
+		fmt.Fprintf(stderr, "pfm chat branch: %v; account %d stands in\n", primaryErr, primary)
 	}
 	engine, selectedAccount, err := resolveRunEngineIDAccount(engine, requestedAccount, runtime.Config, primary)
 	if err != nil {
@@ -345,13 +339,14 @@ func runChatBranch(
 	if engine == pfmengine.Codex {
 		binary = runtime.Config.EffectiveCodex(selectedAccount).Binary
 	}
-	if _, err := obs.Runner(deps.RealRunner{}).LookPath(binary); err != nil {
+	if _, err := commandRunner.LookPath(binary); err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: configured %s binary %q is not executable: %v\n", engine, binary, err)
 		return 1
 	}
-	if _, err := obs.Runner(deps.RealRunner{}).LookPath(pfmtmux.Binary); err != nil {
-		fmt.Fprintln(stderr, "pfm chat branch: tmux is not on PATH")
-		return 1
+	choice, forkID, err := pfmchat.BranchPlace(context.Background(), runtime.Config.Chat.Backend, engine, commandRunner)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
+		return spawn.FailureCode(err)
 	}
 	resolved := runtime.Paths
 	cwd := strings.TrimSpace(*requestedCWD)
@@ -362,14 +357,13 @@ func runChatBranch(
 			return 1
 		}
 	}
-	persona, err := action.WorkbenchPersona(cwd, engine, workbench.Resume)
-	if err == nil && engine == pfmengine.Codex && persona.Applies() {
-		err = workbench.EnsureMirror(persona.Bench, engine, runtime.Paths.Home)
-	}
+	persona, warnings, err := action.LaunchPersona(cwd, runtime.Paths.Home, engine, workbench.Resume)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
 		return 1
 	}
+	warnings = append(warnings, action.PersonaMirror(persona, engine, runtime.Paths.Home, nil)...)
+	launchnotice.Print(stderr, "pfm chat branch", warnings)
 	nameInput := *requestedName
 	if flags.NArg() != 0 {
 		nameInput = strings.Join(flags.Args(), " ")
@@ -395,13 +389,21 @@ func runChatBranch(
 		Home: runtime.Paths.Home, PrimaryAccount: selectedAccount,
 		Cache1H: forkCache1H,
 		Persona: persona,
-		Model:   model, Config: runtime.Config,
+		Model:   model, Config: runtime.Config, ForkID: forkID,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: plan fork: %v\n", err)
 		return 1
 	}
-	// A fork is born detached on its own tmux server, never placed: its
+	if choice.Backend == spawn.BackendHerdr {
+		_, err := pfmchat.BranchHerdr(context.Background(), choice, plan, &runtime, name, *id, stdout, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	// A fork placed in tmux is born detached on its own tmux server: its
 	// lineage, launch record and session-id wait below bind to that socket.
 	socket := spawn.FreshSocket(engine)
 	if override := env.Get(spawn.TestFreshSocketEnv); override != "" {
@@ -427,7 +429,7 @@ func runChatBranch(
 		})
 	}
 	if err != nil {
-		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket)
+		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket, "")
 		if rollbackErr != nil {
 			fmt.Fprintf(stderr, "pfm chat branch: create detached seat: %v; rollback: %v\n", err, rollbackErr)
 		} else {
@@ -457,7 +459,7 @@ func runChatBranch(
 	recordErr := state.RecordBranchSeat(context.Background(), socket, *id, clk.Now().Unix())
 	closeErr := state.Close()
 	if recordErr != nil || closeErr != nil {
-		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket)
+		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket, "")
 		failure := errors.Join(recordErr, closeErr)
 		if rollbackErr != nil {
 			failure = errors.Join(failure, fmt.Errorf("rollback detached seat: %w", rollbackErr))
@@ -487,16 +489,10 @@ func runChatBranch(
 	if model != "" {
 		fmt.Fprintf(stdout, " on %s", model)
 	}
-	fmt.Fprintf(
-		stdout,
-		" into detached socket %s — waiting in pfm ls; open later with pfm chat open %q.\n",
-		socket,
-		name,
-	)
-	if len(branchWarnings) != 0 {
-		for _, warning := range branchWarnings {
-			fmt.Fprintf(stdout, "warning: %s\n", warning)
-		}
+	fmt.Fprintf(stdout, " into detached socket %s — waiting in pfm ls; open later with pfm chat open %q.\n",
+		socket, name)
+	for _, warning := range branchWarnings {
+		fmt.Fprintf(stdout, "warning: %s\n", warning)
 	}
 	return 0
 }
@@ -678,10 +674,10 @@ func runChatHistory(args []string, stdout, stderr io.Writer, runtimes ...command
 	}
 	path := sid
 	if info, statErr := os.Stat(sid); statErr != nil || !info.Mode().IsRegular() {
-		pools, err := historyPools(runtimes...)
+		pools, codexHomes, err := historyPools(runtimes...)
 		resolvedPath := ""
 		if err == nil {
-			resolvedPath, err = transcript.FindHistory(pools, slug, sid)
+			resolvedPath, err = transcript.ResolveHistory(context.Background(), pools, codexHomes, slug, sid)
 		}
 		if err != nil {
 			fmt.Fprintln(stderr, err.Error())
@@ -701,19 +697,17 @@ func runChatHistory(args []string, stdout, stderr io.Writer, runtimes ...command
 	return 0
 }
 
-// historyPools mirrors runChatScript's former PFM_HISTORY_ROOTS_JSON
-// marshalling exactly: a supplied runtime's configured Claude roots are used
-// as-is (even an empty list, never widened), and only the ENTIRE absence of a
-// runtime falls back to the unconfigured defaults history.sh assumed.
-func historyPools(runtimes ...commandRuntime) ([]string, error) {
+// historyPools is the Claude pools and Codex homes history searches: a supplied runtime's configured
+// roots as-is (even an empty list, never widened); only no runtime at all falls back to the defaults.
+func historyPools(runtimes ...commandRuntime) (claude, codex []string, err error) {
 	if len(runtimes) != 0 {
-		return runtimes[0].Paths.Roots[pfmengine.Claude], nil
+		return runtimes[0].Paths.Roots[pfmengine.Claude], runtimes[0].Paths.Roots[pfmengine.Codex], nil
 	}
 	resolved, err := paths.Resolve()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return []string{filepath.Join(resolved.Home, ".claude", "projects")}, nil
+	return []string{filepath.Join(resolved.Home, ".claude", "projects")}, []string{paths.CodexHome(resolved.Home)}, nil
 }
 
 func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
@@ -736,7 +730,7 @@ func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock, runt
 		fmt.Fprintf(stderr, "pfm chat modal: %q is not running\n", chat.Name)
 		return codeDeadChat
 	}
-	seat, err := chatTarget(chat)
+	seat, err := pfmchat.LiveSeatTarget(chat)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
 		return 1

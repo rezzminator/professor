@@ -285,9 +285,8 @@ func TestRetiringAThemeAnAccountStillSelectsKeepsItAndNamesTheAccount(t *testing
 		" left in place: select another theme with `pfm theme use`, then install again to retire it"
 
 	_, preview := host.run(ModeDryRun)
-	if !strings.Contains(preview, want) || strings.Contains(preview, "retire theme chosen ") {
-		t.Fatalf("the preview must name the selecting account and preview no retirement of chosen:\n%s", preview)
-	}
+	retiring := []string{"  " + want, "  " + strings.Replace(want, "theme chosen", "theme chosen profile copy", 1)}
+	wantOutputLines(t, preview, retiring, "theme chosen is", "theme chosen profile", "retire theme chosen")
 
 	_, output := host.run(ModeApply)
 
@@ -296,9 +295,7 @@ func TestRetiringAThemeAnAccountStillSelectsKeepsItAndNamesTheAccount(t *testing
 			t.Errorf("a theme an account selects was retired: %s removed", path)
 		}
 	}
-	if !strings.Contains(output, want) {
-		t.Fatalf("the kept theme was not reported naming the selecting account:\n%s", output)
-	}
+	wantOutputLines(t, output, retiring, "theme chosen is", "theme chosen profile", "retire theme chosen")
 	if !absent(t, host.claudeFile("unchosen")) {
 		t.Errorf("an unselected stale theme was kept")
 	}
@@ -325,9 +322,14 @@ func TestRetireKeepsTheThemeWhenAnAccountCannotBeRead(t *testing.T) {
 	if absent(t, host.claudeFile("stale")) {
 		t.Fatalf("a theme was retired although an account could not be read:\n%s", output)
 	}
-	if !strings.Contains(output, "skip    theme stale retire check failed, left in place: ") {
-		t.Fatalf("the failed selection check was not reported:\n%s", output)
+	unreadable, err := filepath.EvalSymlinks(filepath.Join(host.home, ".cc", "9", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	wantOutputLines(t, output, []string{
+		"  skip    theme stale retire check failed, left in place: themesync: read " + unreadable +
+			": read " + unreadable + ": is a directory",
+	}, "theme stale")
 }
 
 func TestByteIdenticalUnownedThemeIsAdoptedAndADifferingOneIsKept(t *testing.T) {
@@ -410,9 +412,8 @@ func TestPreviewSkipsAThemeWhoseOwnedProfileCopyWasEdited(t *testing.T) {
 	_, preview := host.run(ModeDryRun)
 	_, output := host.run(ModeApply)
 
-	if !strings.Contains(preview, want) || !strings.Contains(output, want) {
-		t.Fatalf("preview and apply must both skip the edited profile copy\npreview:\n%s\napply:\n%s", preview, output)
-	}
+	wantOutputLines(t, preview, []string{"  " + want}, "plain-lagoon profile copy")
+	wantOutputLines(t, output, []string{"  " + want}, "plain-lagoon profile copy")
 }
 
 func TestUninstallRemovesTheProfileCopiesAndTheirDirectory(t *testing.T) {
@@ -428,10 +429,15 @@ func TestUninstallRemovesTheProfileCopiesAndTheirDirectory(t *testing.T) {
 	if !absent(t, copyOf("pinned-night")) || !absent(t, host.claudeFile("pinned-night")) {
 		t.Errorf("uninstall kept an owned, unmodified profile or its copy:\n%s", output)
 	}
-	if got := readFixture(t, copyOf("plain-lagoon")); got != "the user's edit of the copy\n" ||
-		!strings.Contains(output, "skip    theme plain-lagoon profile copy locally modified; left in place") {
-		t.Fatalf("an edited profile copy was removed or the skip is not named (%q):\n%s", got, output)
+	if got := readFixture(t, copyOf("plain-lagoon")); got != "the user's edit of the copy\n" {
+		t.Fatalf("an edited profile copy was removed (%q):\n%s", got, output)
 	}
+	wantOutputLines(t, output, []string{
+		"  skip    theme plain-lagoon profile copy locally modified; left in place and retained recovery ownership at " +
+			copyOf(
+				"plain-lagoon",
+			),
+	}, "plain-lagoon profile copy")
 }
 
 // The real clone, read the way pfm install reads it: every directory in its
@@ -459,7 +465,7 @@ func TestSourceCloneInstallsEveryThemeInTemplatesThemes(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatalf("no theme directory in %s: the enumeration found nothing to check", themes)
 	}
-	profiles, err := loadThemeProfiles(context.Background(), Options{SourceRepo: repoRoot})
+	profiles, _, err := loadThemeProfiles(context.Background(), Options{SourceRepo: repoRoot})
 	if err != nil {
 		t.Fatalf("load the clone's themes: %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // ErrSignedOut marks an account whose credential EXISTS but carries no usable
@@ -253,8 +254,8 @@ func SettleProbe(cacheDir string, account int, claim ProbeClaim, outcome, failur
 
 // holdRefreshLock takes the account's refresh lock; release removes it.
 func holdRefreshLock(cacheDir string, account int) (release func() error, held bool, err error) {
-	if err := EnsurePrivateDir(cacheDir); err != nil {
-		return nil, false, fmt.Errorf("usage cache directory %s: %w", cacheDir, err)
+	if err := paths.EnsurePrivateDir("usage cache directory", cacheDir); err != nil {
+		return nil, false, err
 	}
 	lockPath := RefreshLockPath(cacheDir, account)
 	held, err = takeRefreshLock(lockPath, clock.Real.Now())

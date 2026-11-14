@@ -1,13 +1,31 @@
 package paths
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+// SettingsFile is the adopter's pfm settings file, read at its managed root.
+const SettingsFile = "pfm.settings.json"
+
+// Settings is the pfm settings file of the managed root root.
+func Settings(root string) string { return filepath.Join(root, SettingsFile) }
+
+// SettingsPrompt is the prompt file a settings `extend` composes for engine:
+// one per managed root and engine under the pfm state directory.
+func SettingsPrompt(home, root string, engine pfmengine.ID) string {
+	sum := sha256.Sum256([]byte(root))
+	return filepath.Join(home, ".local", "state", "pfm", "settings-prompts", hex.EncodeToString(sum[:8]),
+		pfmengine.MustLookup(engine).LongName+".md")
+}
 
 // HasWorkbenchManifest inspects a workbench marker without following links.
 func HasWorkbenchManifest(dir string) (bool, error) {

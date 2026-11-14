@@ -1,19 +1,11 @@
-// Package codexappendix retires the Codex SessionStart appendix hook and
-// records the Codex trust of the one Codex hook pfm owns, resume-unkill.
-//
-// The hook used to deliver the fleet prompt as `additionalContext`, which
-// codex-cli truncates at 2,500 tokens, drops at compaction, and re-appends —
-// still truncated — on every resume and compact. The prompt now reaches a
-// session through config.toml's `developer_instructions`, so nothing
-// registers the hook any more. What remains is the cleanup an EXISTING
-// install needs: the identity of the retired handler, so the installer can
-// recognize and remove its hooks.json entry, and the recorded trust it wrote
-// into each account's config.toml. The resume-unkill hook's trust has its own
-// receipt and its own register/unregister pair (trust.go).
+// Package codexappendix records the Codex trust of the Codex hooks pfm owns
+// (resume-unkill, and a plugin's hooks), each under its own receipt, and
+// removes exactly the trust its receipt names.
 package codexappendix
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,35 +17,31 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// Matcher and Command are the retired handler's exact spelling in
-// hooks.json — the only way to tell pfm's own entry from an operator's.
-const Matcher = "startup|resume|clear|compact"
+// processRunner starts the app-server child (trust.go) when the context
+// carries no runner (WithAppServerRunner); nil is the real process table.
+var processRunner deps.Runner
 
-// Command identifies only Professor's handler, including homes containing shell metacharacters.
-func Command(home string) string {
-	path := filepath.Join(home, ".local", "bin", "pfm")
-	return cmdparse.Quote(path) + " internal codex-appendix"
+type runnerKey struct{}
+
+// WithAppServerRunner returns ctx carrying the runner that starts the app-server child
+// of every trust call made with it; the installer hands its process runner
+// through here.
+func WithAppServerRunner(ctx context.Context, runner deps.Runner) context.Context {
+	return context.WithValue(ctx, runnerKey{}, runner)
 }
 
-func receiptPath(account string) string {
-	return filepath.Join(account, ".professor-appendix-trust.json")
-}
-
-// TrustRecorded reports whether this account still carries the trust receipt
-// the retired hook's registration wrote. It is the installer's "is there
-// anything left to clean up" question; an unreadable receipt answers yes, so
-// the cleanup runs and reports its own error rather than passing as absence.
-func TrustRecorded(account string) bool {
-	return receiptRecorded(receiptPath(account))
-}
-
-// Unregister removes recorded trust without depending on native hook discovery,
-// feature enablement, the original hook file, or an installed native executable.
-func Unregister(account string) error {
-	return unregisterTrust(receiptPath(account), account)
+func appServerRunner(ctx context.Context) deps.Runner {
+	if runner, ok := ctx.Value(runnerKey{}).(deps.Runner); ok && runner != nil {
+		return runner
+	}
+	if processRunner != nil {
+		return processRunner
+	}
+	return obs.Runner(deps.RealRunner{})
 }
 
 func receiptRecorded(receipt string) bool {

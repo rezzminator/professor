@@ -137,11 +137,12 @@ lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gat
 	$(call need-tool,LINT)
 	$(FENCE_GIT) GOMEMLIMIT=1000MiB $(LINT) run --new-from-merge-base=$(LINT_BASE) $(LINT_PKGS)
 
-vet: ## go vet the whole module
+vet: ## go vet the whole module, the unit tier untagged and the jail tier under -tags jail
 	go vet ./...
+	go vet -tags jail ./...
 
-# Suites never run on the host: there `cover` runs in the fence instead (testjail/fence.go).
-IN_FENCE := $(shell [ -e /.dockerenv ] && [ "$$PFM_DEV_FENCE" = 1 ] && echo 1)
+# Suites never run on the host: there `cover` runs in the fence instead (scripts/platform.sh platform_in_fence).
+IN_FENCE := $(shell . "$(REPO)/scripts/platform.sh" && platform_in_fence && echo 1)
 ifneq ($(IN_FENCE),1)
 cover:
 	bash "$(DEV)" iso cover pfm
@@ -149,7 +150,7 @@ else
 cover: ## Unit coverage (cross-package) + any e2e GOCOVERDIR run, merged and thresholded
 	$(call need-tool,COVER)
 	rm -rf "$(COVER_DIR)/unit" && mkdir -p "$(COVER_DIR)/unit"
-	go test ./... -count=1 -coverpkg=./... -covermode=atomic -args -test.gocoverdir="$(COVER_DIR)/unit"
+	go test -tags jail ./... -count=1 -coverpkg=./... -covermode=atomic -args -test.gocoverdir="$(COVER_DIR)/unit"
 	@dirs="$(COVER_DIR)/unit"; \
 	if ls "$(COVER_DIR)/e2e"/covmeta.* >/dev/null 2>&1; then dirs="$$dirs,$(COVER_DIR)/e2e"; fi; \
 	echo "cover: merging $$dirs"; \
@@ -272,7 +273,7 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  fi; \
 	  pid="$$(systemctl --user show -p MainPID --value $(UNIT))"; \
 	  echo "mcp: $(UNIT) restarted, pid $$pid"; \
-	elif [ "$$(uname)" = Darwin ] && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
+	elif command -v launchctl >/dev/null 2>&1 && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
 	  agent_pid() { launchctl print "gui/$$(id -u)/$(AGENT)" | awk '$$1 == "pid" && $$2 == "=" { print $$3; exit }'; }; \
 	  old="$$(agent_pid)"; \
 	  launchctl kickstart -k "gui/$$(id -u)/$(AGENT)"; \
@@ -288,23 +289,40 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	    exit 1; \
 	  fi; \
 	  echo "mcp: $(AGENT) restarted, pid $$pid"; \
-	elif pgrep -f 'mcp serve$$' >/dev/null 2>&1; then \
-	  echo "mcp: no $(UNIT) unit or $(AGENT) agent; killing unsupervised 'pfm mcp serve' so the next client starts a fresh one"; \
-	  pkill -f 'mcp serve$$'; \
 	else \
-	  echo "mcp: no daemon running and no $(UNIT) unit or $(AGENT) agent — nothing to restart"; \
+	  rc=0; pids="$$(pgrep -f 'mcp serve$$')" || rc=$$?; \
+	  if [ $$rc -gt 1 ]; then \
+	    echo "mcp: pgrep failed (rc $$rc) — could not look for an unsupervised 'pfm mcp serve'; no $(UNIT) unit or $(AGENT) agent either" >&2; \
+	  elif [ -n "$$pids" ]; then \
+	    echo "mcp: no $(UNIT) unit or $(AGENT) agent supervises 'pfm mcp serve'; make stops no process by name — each one below still runs the binary it started on:" >&2; \
+	    for pid in $$pids; do \
+	      if args="$$(ps -o args= -p "$$pid")"; then \
+	        echo "  pid $$pid: $$args" >&2; \
+	        quoted="$$(printf '%s' "$$args" | sed "s/'/'\\\\''/g")"; \
+	        echo "    stop it: ps -o args= -p $$pid | grep -qxF '$$quoted' && kill $$pid" >&2; \
+	      else \
+	        echo "  pid $$pid: exited before its command line could be read" >&2; \
+	      fi; \
+	    done; \
+	    echo "mcp: make sweep-stale stops each one that runs a replaced binary; the next client then starts a fresh daemon" >&2; \
+	  else \
+	    echo "mcp: no daemon running and no $(UNIT) unit or $(AGENT) agent — nothing to restart"; \
+	  fi; \
 	fi
 	@# Restarting unconditionally is deliberate. Deciding whether the daemon is
 	@# stale needs process introspection that not every platform offers, and a
 	@# restart is cheap, supervised, and idempotent — so the guarantee does not
-	@# depend on a probe that might not be able to run.
+	@# depend on a probe that might not be able to run. An unsupervised daemon
+	@# is only listed: a pattern match is no proof the process is this install's
+	@# (any `… mcp serve` matches), so its stop is the operator's, identity-checked,
+	@# or sweep-stale's, which signals only a process proven to run a replaced pfm.
 
 mcp-status: ## Report the daemon, then every pfm process still running a replaced binary
 	@if command -v systemctl >/dev/null 2>&1 && \
 	    systemctl --user cat $(UNIT) >/dev/null 2>&1; then \
 	  echo "unit:  $$(systemctl --user is-active $(UNIT))"; \
 	  echo "pid:   $$(systemctl --user show -p MainPID --value $(UNIT))"; \
-	elif [ "$$(uname)" = Darwin ] && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
+	elif command -v launchctl >/dev/null 2>&1 && launchctl print "gui/$$(id -u)/$(AGENT)" >/dev/null 2>&1; then \
 	  launchctl print "gui/$$(id -u)/$(AGENT)" | awk '($$1 == "state" || $$1 == "pid") && $$2 == "=" && !seen[$$1]++ { printf "%-6s %s\n", $$1 ":", $$3 }'; \
 	else \
 	  echo "unit:  not installed"; \

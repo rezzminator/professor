@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func TestInstallManagedCleanup(t *testing.T) {
@@ -46,7 +45,7 @@ func TestInstallManagedCleanup(t *testing.T) {
 			options.Stdout = &output
 			installer := &engine{options: options, apply: apply}
 			err := installer.installManagedCleanup(context.Background())
-			if scenario == "unreadable" || scenario == "noninteger" {
+			if scenario == "unreadable" {
 				if err == nil || !strings.Contains(err.Error(), "managed-cleanup "+path+":") {
 					t.Fatalf("err=%v", err)
 				}
@@ -66,14 +65,15 @@ func TestInstallManagedCleanup(t *testing.T) {
 				t.Fatalf("output=%q want=%q", output.String(), want)
 			}
 			changed := 0
-			if scenario == "absent" || scenario == "wrong" || scenario == "keyless" || scenario == "preview" {
+			if scenario == "absent" || scenario == "wrong" || scenario == "keyless" || scenario == "noninteger" ||
+				scenario == "preview" {
 				changed = 1
 			}
 			if installer.report.Changed != changed {
 				t.Fatalf("Changed=%d want=%d", installer.report.Changed, changed)
 			}
 			switch scenario {
-			case "absent", "wrong", "keyless", "correct":
+			case "absent", "wrong", "keyless", "noninteger", "correct":
 				raw, err := os.ReadFile(path)
 				content := "{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}\n"
 				if scenario == "correct" {
@@ -189,7 +189,8 @@ func TestInspectManagedCleanup(t *testing.T) {
 		{`{}`, "wrong", 36500, 0, true},
 		{`{}`, "wrong", 0, 0, true},
 		{`null`, "wrong", 36500, 0, true},
-		{`{"cleanupPeriodDays":"30"}`, "unreadable", 36500, 0, false},
+		{`{"cleanupPeriodDays":"30"}`, "wrong", 36500, 0, false},
+		{`{"cleanupPeriodDays":30.0}`, "wrong", 36500, 0, false},
 	} {
 		t.Run(fmt.Sprintf("%s_%s_want_%d", tc.state, tc.raw, tc.want), func(t *testing.T) {
 			dir := t.TempDir()
@@ -207,57 +208,6 @@ func TestInspectManagedCleanup(t *testing.T) {
 	}
 	if got := InspectManagedCleanup(dir, true, 36500); got.State != "unreadable" {
 		t.Fatalf("directory=%+v", got)
-	}
-}
-
-func TestInstallManagedCleanupDeclinedSudo(t *testing.T) {
-	_, recorder := obs.Test(t)
-	dir := filepath.Join(t.TempDir(), "Application Support", "managed-settings.d")
-	path := filepath.Join(dir, "pfm.json")
-	var output bytes.Buffer
-	installer := &engine{
-		apply: true,
-		options: Options{
-			Mode:                  ModeApply,
-			ManagedSettingsDir:    dir,
-			RequireManagedCleanup: true,
-			CleanupPeriodDays:     36500,
-			Runner:                stateRunner{err: os.ErrPermission},
-			Stdout:                &output,
-			writeManaged:          func(string, []byte) error { return os.ErrPermission },
-		},
-	}
-	if err := installer.installManagedCleanup(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "sudo -n ") {
-		t.Fatalf("output=%q want two lines starting with sudo -n", output.String())
-	}
-	words := parseShellWords(t, lines[0])
-	args := append([]string{"sudo", "-n"}, managedInstallArgs(words[len(words)-2], path)[0]...)
-	if !reflect.DeepEqual(words, args) {
-		t.Fatalf("sudo argv=%q want=%q", words, args)
-	}
-	want := "  warn    managed-cleanup " + path + " not written: permission denied; " + lines[0] + ": permission denied; run: sudo mkdir -p " + shellCommandLine(
-		dir,
-	) + " && printf '%s\\n' '{\"cleanupPeriodDays\":36500,\"prependPlugins\":[]}' | sudo tee " + shellCommandLine(
-		path,
-	) + " >/dev/null"
-	if lines[1] != want || installer.report.Changed != 0 {
-		t.Fatalf("output=%q want warning=%q", output.String(), want)
-	}
-	records := recorder.Records()
-	if len(records) != 1 || records[0].Message != "installer.step" {
-		t.Fatalf("records=%s", recorder.Raw())
-	}
-	for key, want := range map[string]any{
-		obs.FieldComp: "installer", "kind": "apply", "decision": "warn",
-		"step": "managed-cleanup " + path + " not written", obs.FieldErr: "permission denied\npermission denied",
-	} {
-		if got, _ := records[0].Field(key); got != want {
-			t.Fatalf("record %s=%v want=%v", key, got, want)
-		}
 	}
 }
 

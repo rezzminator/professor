@@ -1,0 +1,87 @@
+professor: {tmp}  blueprint {sha} → {sha}
+  current       1
+  ignored       0
+  UPDATED       2
+    .claude/updated-one.md   project/updated-one.md  pinned @{sha}
+      upstream change: git -C {tmp} diff {sha} -- templates/project/updated-one.md
+      upstream commits that changed it since the pin, oldest first — port each one's intent:
+        {sha} new templates
+        {sha} step 01
+        {sha} step 02
+        {sha} step 03
+        {sha} step 04
+        {sha} step 05
+        {sha} step 06
+        {sha} step 07
+        {sha} step 08
+        {sha} step 09
+        {sha} step 10
+        {sha} step 11
+        {sha} step 12
+        {sha} step 13
+        {sha} step 14
+        {sha} step 15
+        {sha} step 16
+        {sha} step 17
+        {sha} step 18
+        {sha} step 19
+        {sha} step 20
+        {sha} step 21
+        {sha} step 22
+        {sha} step 23
+        {sha} step 24
+        {sha} step 25
+        {sha} step 26
+        {sha} step 27
+        {sha} step 28
+        {sha} step 29
+        {sha} step 30
+        {sha} step 31
+        {sha} step 32
+        {sha} step 33
+        {sha} step 34
+        {sha} step 35
+        {sha} step 36
+        {sha} step 37
+        {sha} step 38
+        {sha} step 39
+        … and 6 newer commit(s) not listed: git log --reverse {sha}..HEAD -- templates/project/updated-one.md
+      diff --git a/templates/project/updated-one.md b/templates/project/updated-one.md
+      index {sha}..{sha} 100644
+      --- a/templates/project/updated-one.md
+      +++ b/templates/project/updated-one.md
+      @@ -1 +1 @@
+      -old one
+      +version 45
+      port what applies into .claude/updated-one.md, keep the project's own edits, then: pfm update pin .claude/updated-one.md
+      or keep your version on purpose, on record: pfm update pin .claude/updated-one.md --keep "<what you did not take, and why>"
+    .claude/updated-two.md   project/updated-two.md  pinned @{sha}
+      upstream change: git -C {tmp} diff {sha} -- templates/project/updated-two.md
+      upstream commits that changed it since the pin, oldest first — port each one's intent:
+        {sha} new templates
+      diff --git a/templates/project/updated-two.md b/templates/project/updated-two.md
+      index {sha}..{sha} 100644
+      --- a/templates/project/updated-two.md
+      +++ b/templates/project/updated-two.md
+      @@ -1 +1 @@
+      -old two
+      +new two
+      port what applies into .claude/updated-two.md, keep the project's own edits, then: pfm update pin .claude/updated-two.md
+      or keep your version on purpose, on record: pfm update pin .claude/updated-two.md --keep "<what you did not take, and why>"
+  NEW           1
+    project/new.md — adopt: copy/adapt it locally, then pfm update pin --template project/new.md <local> — or ignore
+  GONE-UPSTREAM 1
+    .claude/gone.md   project/gone.md — retired upstream — delete it and pfm update drop .claude/gone.md; keep it and drop only its pin if the project still uses it
+  MOVED         0
+  LOCAL-DELETED 1
+    .claude/deleted.md   project/deleted.md — pfm update drop .claude/deleted.md to forget, or restore the file
+  RETIRED-NAME  0
+  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:
+    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep "<what you did not take, and why>"
+    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>
+    · GONE-UPSTREAM   pfm update drop <local>
+    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row
+    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason "<why>" [--name <name>]
+    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason "<why>"; read failures must be fixed
+  run the verbs one at a time: each rewrites .professor/baseline.json
+REVIEW REQUIRED — 5 items; nothing was written.

@@ -8,44 +8,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestFollowerPlistHoldsTheContractedKeys(t *testing.T) {
-	plist, err := followerPlist("/opt/pfm", "/h", "/h/.local/state/pfm/theme")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"<key>Label</key>\n\t<string>com.professor.pfm.theme</string>",
-		"<string>/opt/pfm</string>\n\t\t<string>theme</string>\n\t\t<string>sync</string>",
-		"<key>WatchPaths</key>\n\t<array>\n\t\t<string>/h/Library/Preferences/.GlobalPreferences.plist</string>",
-		"<key>StartInterval</key>\n\t<integer>60</integer>",
-		"<key>RunAtLoad</key>\n\t<true/>",
-		"<key>StandardOutPath</key>\n\t<string>/h/.local/state/pfm/theme/follow.log</string>",
-		"<key>StandardErrorPath</key>\n\t<string>/h/.local/state/pfm/theme/follow.log</string>",
-		"<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n" +
-			"\t\t<string>" + paths.ServicePath("/h") + "</string>\n\t</dict>",
-	} {
-		if !strings.Contains(plist, want) {
-			t.Errorf("plist lacks %q:\n%s", want, plist)
+func TestFollowerPlistIsTheWholeDocument(t *testing.T) {
+	for bin, escaped := range map[string]string{"/opt/pfm": "/opt/pfm", "/opt/p&fm<x>": "/opt/p&amp;fm&lt;x&gt;"} {
+		plist, err := followerPlist(bin, "/h", "/h/.local/state/pfm/theme")
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if !strings.HasPrefix(plist, "<?xml") || !strings.HasSuffix(plist, "</plist>\n") {
-		t.Errorf("plist is not a whole document:\n%s", plist)
-	}
-}
-
-func TestFollowerPlistEscapesXML(t *testing.T) {
-	plist, err := followerPlist("/opt/p&fm<x>", "/h", "/s")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(plist, "/opt/p&amp;fm&lt;x&gt;") {
-		t.Fatalf("binary path not escaped:\n%s", plist)
+		got := strings.NewReplacer(paths.ServicePath("/h"), "{path}", paths.InstallMark("/h"), "{mark}", escaped, "{bin}").
+			Replace(plist)
+		golden(t, "follower.plist", got)
 	}
 }
 
@@ -64,7 +43,13 @@ func TestFollowerNeverBootsOutItsOwnJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, report, "follower", VerdictError, "cannot reload itself from inside launchd")
+	wantVerdict(
+		t,
+		report,
+		"follower",
+		VerdictError,
+		"themesync: launch agent plist rewritten; the agent cannot reload itself from inside launchd: run `pfm theme sync` in a shell",
+	)
 	want, err := followerPlist(agentlauncher.Program(h.home), h.home, h.stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +67,13 @@ func TestFollowerNeverBootsOutItsOwnJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, status, "follower", VerdictError, "was not reloaded")
+	wantVerdict(
+		t,
+		status,
+		"follower",
+		VerdictError,
+		"themesync: launch agent plist rewritten but the loaded agent was not reloaded: run `pfm theme sync` in a shell",
+	)
 
 	h.env.LaunchdJob = ""
 	calls = len(h.runner.Calls())
@@ -117,6 +108,9 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 		return strings.Join(ran, " ")
 	}
 	t.Run("a failed bootout stays due", func(t *testing.T) {
+		saved := wallClock
+		wallClock = instantSleep{Clock: clock.Real}
+		t.Cleanup(func() { wallClock = saved })
 		h := newHarness(t)
 		h.on()
 		h.write(plist, "<plist>stale render</plist>\n")
@@ -130,12 +124,19 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantVerdict(t, report, "follower", VerdictError, "bootout exited 5")
+		wantVerdict(t, report, "follower", VerdictError, "themesync: launchctl bootout "+target+
+			" failed and the job is still loaded after 20 checks: launchctl exited 5: Boot-out failed: 5: Input/output error")
 		status, err := ReadBack(context.Background(), h.env)
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantVerdict(t, status, "follower", VerdictError, "was not reloaded")
+		wantVerdict(
+			t,
+			status,
+			"follower",
+			VerdictError,
+			"themesync: launch agent plist rewritten but the loaded agent was not reloaded: run `pfm theme sync` in a shell",
+		)
 		h.rearm()
 		calls := len(h.runner.Calls())
 		report, err = Sync(context.Background(), h.env, false)
@@ -240,19 +241,25 @@ func TestFollowerRunsThroughTheStableLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, status, "follower", VerdictDrift, "launcher")
+	wantVerdict(
+		t,
+		status,
+		"follower",
+		VerdictDrift,
+		"agent launcher {tmp}/.local/libexec/pfm/pfm-agent is missing or differs",
+	)
 }
 
 func TestFollowerDiscoveryFailureKeepsLastValidWatches(t *testing.T) {
-	for _, platform := range []string{"darwin", "linux"} {
-		t.Run(platform, func(t *testing.T) {
+	for name, profile := range map[string]*platform{"darwin": darwinPlatform, "linux": linuxPlatform} {
+		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
-			h.goos = platform
+			h.platform = profile
 			h.rearm()
 			h.on()
 			s := newSession(h.env, stateStore{dir: h.stateDir}, h.state())
 			path := s.followerPath()
-			if platform == "linux" {
+			if profile == linuxPlatform {
 				path = s.systemdFollowerPath()
 			}
 			before, err := os.ReadFile(path)
@@ -285,5 +292,28 @@ func TestFollowerDiscoveryFailureKeepsLastValidWatches(t *testing.T) {
 				t.Errorf("recovery: %+v", result)
 			}
 		})
+	}
+}
+
+// instantSleep is a clock whose waits return at once, for a retry the test
+// drives to exhaustion.
+type instantSleep struct{ clock.Clock }
+
+func (instantSleep) Sleep(context.Context, time.Duration) error { return nil }
+
+// golden compares got with testdata/{file}; a mismatch prints the GOLDEN line the fill script writes from.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Errorf(
+			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN internal/themesync/testdata/%s = %q",
+			file,
+			err,
+			want,
+			got,
+			file,
+			got,
+		)
 	}
 }

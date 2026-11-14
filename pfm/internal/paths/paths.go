@@ -1,4 +1,6 @@
 // Package paths centralizes filesystem defaults and their test-jail overrides.
+//
+// logroot.go: LogRoot, the one folder every pfm log is written to and read from.
 package paths
 
 import (
@@ -36,7 +38,7 @@ const (
 	// SIDReloadHerdrPrefix names a native Herdr chat's reload schedule,
 	// SIDReloadHerdrPrefix+seat+".pid" (the scheduled worker's record) and
 	// SIDReloadHerdrPrefix+seat+".log" (its log); the doctor's crumb audit
-	// accepts both, and ending the seat removes both.
+	// accepts both, and ending the seat removes the record and keeps the log.
 	SIDReloadHerdrPrefix = "reload-herdr-"
 	// SIDHarnessConfigDirPrefix names the throwaway config directory the
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
@@ -70,24 +72,9 @@ const (
 	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
 	EnvTmuxDir      = "PFM_TMUX_DIR"
 	EnvHome         = "PFM_HOME"
-	// EnvSkillSourcesOffline=1 stops pfm install from fetching the
-	// source-fetched global skills (templates/global/skills/sources.json):
-	// an existing store copy is still linked, and pfm doctor reports an
-	// unfetched skill as OFFLINE rather than a warning. The e2e harness sets
-	// it so no test reaches a public repository.
-	EnvSkillSourcesOffline = "PFM_SKILL_SOURCES_OFFLINE"
-	// EnvThemesOffline=1 stops pfm install from downloading the release
-	// profiles; the profiles in the source clone still install.
-	// The test harness sets it so no test fetches themes from a public repository.
-	EnvThemesOffline = "PFM_THEMES_OFFLINE"
 	// EnvDevFence=1 marks a process the fence (infra/fence) started; with
 	// /.dockerenv it is how testjail admits a test run.
 	EnvDevFence = "PFM_DEV_FENCE"
-	// EnvPricesOffline=1 stops every price refresh — pfm model-cost, pfm
-	// install, pfm doctor — from fetching the publishers' pricing pages; the
-	// served table stays the clone file or the embedded copy. The test harness
-	// and the fence lanes set it so no test fetches a pricing page.
-	EnvPricesOffline = "PFM_PRICES_OFFLINE"
 	// EnvCostLedgerDir names the directory of the per-call cost ledger
 	// ({session_id}.jsonl, one line per API call) the cost sink writes and the
 	// status line, `pfm tokens` and callmeter read; unset, it hangs off the
@@ -143,7 +130,6 @@ const (
 	// EnvFormerAutoEffortStateFile is the variable under the plugin's former
 	// name, which the plugin reads in place of an unset EnvAutoEffortStateFile.
 	EnvFormerAutoEffortStateFile = "AUTO_EFFORT_CONTROL_STATE_FILE"
-	defaultTmpDir                = "/tmp"
 )
 
 const sourceRepoMarkerName = "source-repo"
@@ -270,7 +256,7 @@ func GeneratedHarnessPromptIn(repo string, id pfmengine.ID) string {
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,
 // or nothing at all so tmux loads the user's own config.
 func TmuxConfigArguments() []string {
-	if config := os.Getenv(EnvTmuxConf); config != "" {
+	if config := (OSEnv{}).Get(EnvTmuxConf); config != "" {
 		return []string{"-f", config}
 	}
 	return nil
@@ -279,25 +265,24 @@ func TmuxConfigArguments() []string {
 // EnsureTmuxDir creates the private socket directory a fresh machine does not
 // have yet. Tmux's explicit -S form creates the socket, but not its parent.
 func EnsureTmuxDir(directory string) error {
-	if strings.TrimSpace(directory) == "" {
-		return fmt.Errorf("tmux socket directory is empty")
+	return EnsurePrivateDir("tmux socket directory", directory)
+}
+
+// TmuxDirUnder is the socket directory tmux itself derives from a
+// TMUX_TMPDIR value — tmux-{uid} beneath it, the system temp directory when
+// it is empty — so a socket named for tmux -L resolves to the path tmux -S
+// takes.
+func TmuxDirUnder(tmuxTmpDir string) string {
+	if tmuxTmpDir == "" {
+		tmuxTmpDir = SystemTempDir()
 	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create tmux socket directory %s: %w", directory, err)
-	}
-	info, err := os.Lstat(directory)
-	if err != nil {
-		return fmt.Errorf("inspect tmux socket directory %s: %w", directory, err)
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("tmux socket directory %s is not a real directory", directory)
-	}
-	if info.Mode().Perm() != 0o700 {
-		if err := os.Chmod(directory, 0o700); err != nil {
-			return fmt.Errorf("secure tmux socket directory %s: %w", directory, err)
-		}
-	}
-	return nil
+	return TmuxDirOf(tmuxTmpDir, os.Getuid())
+}
+
+// TmuxDirOf is the socket directory tmux keeps for uid under base:
+// tmux-{uid}, the name tmux itself gives it.
+func TmuxDirOf(base string, uid int) string {
+	return filepath.Join(base, "tmux-"+strconv.Itoa(uid))
 }
 
 // Values contains the filesystem locations used by pfm.
@@ -318,11 +303,6 @@ type Values struct {
 	ProcRoot           string
 	ManagedSettingsDir string
 	CgroupRoot         string
-	// LogFile is the home's activity log, the JSON-lines file internal/obs
-	// writes and `pfm log` reads. It hangs off the same pfm state directory
-	// as the fleet cache, so a jail, a fence and the live host each keep
-	// their own and can never mix.
-	LogFile string
 }
 
 // EnvOr returns a non-empty environment override, or fallback otherwise.
@@ -342,9 +322,15 @@ func EnvOrFrom(env Env, name, fallback string) string {
 }
 
 // SIDDirFrom is the SID directory resolved over an injected Env: PFM_SID_DIR,
-// else /tmp/cc-sid. Resolve and every caller holding its own Env share it.
+// else cc-sid under the system temp directory (TMPDIR never moves it: every
+// process on the host must agree on it). Resolve and every caller holding its own Env share it.
 func SIDDirFrom(env Env) string {
-	return EnvOrFrom(env, EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid"))
+	return EnvOrFrom(env, EnvSIDDir, SIDDirUnder(SystemTempDir()))
+}
+
+// SIDDirUnder is the SID directory's name, cc-sid, placed under base.
+func SIDDirUnder(base string) string {
+	return filepath.Join(base, "cc-sid")
 }
 
 // WorkbenchManifest is the marker declaring a nested workbench.
@@ -355,8 +341,9 @@ func WorkbenchManifest(dir string) string {
 // DevRepoGitDir returns the fence-mounted git directory when root is the
 // corresponding mounted worktree.
 func DevRepoGitDir(root string) (string, bool) {
-	workTree := strings.TrimSpace(os.Getenv(EnvDevRepoWorkTree))
-	gitDir := strings.TrimSpace(os.Getenv(EnvDevRepoGitDir))
+	env := OSEnv{}
+	workTree := strings.TrimSpace(env.Get(EnvDevRepoWorkTree))
+	gitDir := strings.TrimSpace(env.Get(EnvDevRepoGitDir))
 	if gitDir == "" {
 		return "", false
 	}
@@ -431,6 +418,14 @@ func HomeFrom(env Env) (string, error) {
 	return home, nil
 }
 
+// LaunchAgentsDir is home's per-user launchd agent directory, where every
+// pfm launch agent plist lives (macOS).
+func LaunchAgentsDir(home string) string { return filepath.Join(home, "Library", "LaunchAgents") }
+
+// SystemdUserDir is home's systemd user unit directory, where every pfm user
+// unit lives (Linux).
+func SystemdUserDir(home string) string { return filepath.Join(home, ".config", "systemd", "user") }
+
 // ServicePath is the ONE search path every pfm service runs on — the
 // installer's launchd agents and systemd units, and the theme follower. A
 // service manager starts jobs on a bare PATH (launchd: /usr/bin:/bin:/usr/sbin:/sbin)
@@ -488,50 +483,14 @@ func DefaultCacheDB(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
 }
 
-// legacyDBName is the one name both pre-layout databases shared.
-const legacyDBName = "fleet.db"
-
-// ErrLegacyPending marks a database create refused because the legacy
-// database it replaces still waits for the operator to apply pfm doctor's fix.
-var ErrLegacyPending = errors.New("legacy database not migrated")
-
-// LegacyStateDB names the old state database; pfm doctor gives the fix for
-// moving it to DefaultStateDB.
-func LegacyStateDB(home string) string {
-	return filepath.Join(home, ".cc", legacyDBName)
-}
-
-// LegacyCacheDB names the old cache database; pfm doctor gives the fix for
-// moving it to DefaultCacheDB.
-func LegacyCacheDB(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", legacyDBName)
-}
-
-// CheckLegacyPending refuses to let a caller create target while legacy still
-// waits for the operator to apply pfm doctor's fix: a fresh target beside legacy
-// data forks the state. An existing target, or no legacy file, is nil. A stat
-// that fails for any reason but not-exist is an error, never read as absence.
-func CheckLegacyPending(target, legacy string) error {
-	_, err := os.Lstat(target)
-	if err == nil {
-		return nil
+// CodexHome is the Codex home holding its models_cache.json: PFM_CODEX_ROOT's first entry, else
+// the engine's default root under home.
+func CodexHome(home string) string {
+	descriptor := pfmengine.MustLookup(pfmengine.Codex)
+	if roots := filepath.SplitList((OSEnv{}).Get(descriptor.RootEnv)); len(roots) > 0 {
+		return roots[0]
 	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("inspect %s: %w", target, err)
-	}
-	_, err = os.Lstat(legacy)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect %s: %w", legacy, err)
-	}
-	return fmt.Errorf(
-		"%w: %s not created while legacy %s still exists — run pfm doctor for the fix",
-		ErrLegacyPending,
-		target,
-		legacy,
-	)
+	return descriptor.DefaultRoots(home)[0]
 }
 
 func Resolve() (Values, error) {
@@ -543,14 +502,12 @@ func Resolve() (Values, error) {
 	roots := make(map[pfmengine.ID][]string, len(pfmengine.All()))
 	for _, id := range pfmengine.All() {
 		descriptor := pfmengine.MustLookup(id)
-		if value := os.Getenv(descriptor.RootEnv); value != "" {
+		if value := (OSEnv{}).Get(descriptor.RootEnv); value != "" {
 			roots[id] = filepath.SplitList(value)
 		} else {
 			roots[id] = descriptor.DefaultRoots(home)
 		}
 	}
-
-	tmuxBase := EnvOr("TMUX_TMPDIR", defaultTmpDir)
 
 	managed := EnvOr(EnvManagedSettingsDir, defaultManagedSettingsDir)
 	if !filepath.IsAbs(managed) {
@@ -561,11 +518,10 @@ func Resolve() (Values, error) {
 		StateDB:            EnvOr(EnvStateDB, DefaultStateDB(home)),
 		SIDDir:             SIDDirFrom(OSEnv{}),
 		Roots:              roots,
-		TmuxDir:            EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
+		TmuxDir:            EnvOr(EnvTmuxDir, TmuxDirUnder((OSEnv{}).Get(EnvTmuxTmpDir))),
 		Home:               home,
 		ArchiveDir:         filepath.Join(home, ".claude-archive"),
-		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
-		ProcRoot:           EnvOr(EnvProcRoot, "/proc"),
+		ProcRoot:           EnvOr(EnvProcRoot, systemProcRoot),
 		ManagedSettingsDir: managed,
 		CgroupRoot:         EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
 	}, nil
@@ -645,23 +601,6 @@ func AutoEffortStateFile(env Env, home, sessionID string) (string, error) {
 	return dir + name[:dot] + "." + safe.String() + name[dot:], nil
 }
 
-// CostSinkLog is the file the detached cost sink logs its failures to, beside
-// the activity log, so `pfm doctor` can show the cause of a sink that stopped.
-func CostSinkLog(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "log", "cost-sink.log")
-}
-
-// SubagentStatuslineTrace is the opt-in structural trace beside the cost sink
-// and activity logs. It never holds prompts, labels or transcript bodies.
-func SubagentStatuslineTrace(home string) string {
-	return filepath.Join(home, ".local", "state", "pfm", "log", "subagent-statusline.jsonl")
-}
-
-// LegacyHarnessPromptsDir identifies the former managed prompt directory.
-func LegacyHarnessPromptsDir(home string) string {
-	return filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
-}
-
 // HarnessBaselineDir resolves Claude's captured baselines in the recorded clone.
 func HarnessBaselineDir(home string) (string, error) {
 	repo, err := ReadSourceRepoMarker(home)
@@ -711,40 +650,6 @@ func (values Values) FirstRoot(id pfmengine.ID) string {
 		return roots[0]
 	}
 	return ""
-}
-
-// SkillSourcesOffline reports EnvSkillSourcesOffline=1: pfm install fetches no
-// source-fetched global skill and pfm doctor reports an unfetched one OFFLINE.
-func SkillSourcesOffline() bool {
-	return SkillSourcesOfflineIn(OSEnv{})
-}
-
-// SkillSourcesOfflineIn is SkillSourcesOffline read from env, the environment
-// a caller was handed.
-func SkillSourcesOfflineIn(env Env) bool {
-	return env.Get(EnvSkillSourcesOffline) == "1"
-}
-
-// ThemesOffline reports EnvThemesOffline=1: pfm install reads the profiles
-// in the source clone but downloads no release profile.
-func ThemesOffline() bool {
-	return ThemesOfflineIn(OSEnv{})
-}
-
-// ThemesOfflineIn is ThemesOffline read from env, the environment a caller was handed.
-func ThemesOfflineIn(env Env) bool {
-	return env.Get(EnvThemesOffline) == "1"
-}
-
-// PricesOffline reports EnvPricesOffline=1: no price refresh fetches the
-// publishers' pricing pages.
-func PricesOffline() bool {
-	return PricesOfflineIn(OSEnv{})
-}
-
-// PricesOfflineIn is PricesOffline read from env, the environment a caller was handed.
-func PricesOfflineIn(env Env) bool {
-	return env.Get(EnvPricesOffline) == "1"
 }
 
 // PrebuiltPFMBinary is the pfm binary a unit run built once for every package that runs one.

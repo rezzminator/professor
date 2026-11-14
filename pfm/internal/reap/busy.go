@@ -32,6 +32,8 @@ type ClaudeAgents struct {
 	Binary     string
 	ConfigDirs []string
 	Timeout    time.Duration
+	// Runner starts the query; nil is the real process table.
+	Runner deps.Runner
 }
 
 // NewClaudeAgents wires the probe to the accounts on this machine.
@@ -98,6 +100,7 @@ func (agents ClaudeAgents) BusySessions(
 		// one-account roster.
 		command, err := action.ClaudeSpawn{
 			Purpose: action.PurposeQuery,
+			Runner:  agents.Runner,
 			Account: 1,
 			Args:    []string{"agents", "--json"},
 			Machine: pfmconfig.Config{

@@ -20,7 +20,7 @@ type assetFile struct {
 	mode fs.FileMode
 }
 
-func assetFiles() ([]assetFile, error) {
+func assetFiles(sched scheduler) ([]assetFile, error) {
 	var files []assetFile
 	err := fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -33,7 +33,7 @@ func assetFiles() ([]assetFile, error) {
 		if relative == "shim/pfm.zsh" || relative == herdrShellAsset {
 			return nil
 		}
-		if !schedulerAsset(relative) {
+		if !schedulerAsset(sched, relative) {
 			// The other platform's scheduler files are embedded (one binary
 			// serves both) but never staged: an operator on macOS should not
 			// find a ~/.config/systemd/user of units nothing will read, and an
@@ -60,14 +60,14 @@ func assetFiles() ([]assetFile, error) {
 	return files, nil
 }
 
-// schedulerAsset reports whether an embedded asset belongs on this platform.
-// The launch agent is not staged even on macOS: launchd refuses a symlinked
-// plist, so wireLaunchAgent writes a real file into ~/Library/LaunchAgents
-// instead of linking one out of the managed root.
-func schedulerAsset(relative string) bool {
+// schedulerAsset reports whether an embedded asset belongs under sched. The
+// launch agent is never staged: launchd refuses a symlinked plist, so
+// wireLaunchAgent writes a real file into ~/Library/LaunchAgents instead of
+// linking one out of the managed root.
+func schedulerAsset(sched scheduler, relative string) bool {
 	switch {
 	case strings.HasPrefix(relative, "systemd/"):
-		return !schedulerIsLaunchd
+		return sched.stagesUnits()
 	case strings.HasPrefix(relative, "launchd/"):
 		return false
 	default:
@@ -108,16 +108,26 @@ func foldReloadUsage(usage string) string {
 }
 
 // servicePathMarker is where every pfm service unit — launchd agent or systemd
-// unit — takes its PATH.
-const servicePathMarker = "__PFM_SERVICE_PATH__"
+// unit — takes its PATH; serviceMarkMarker is where it takes this install's
+// mark (paths.EnvInstallMark), so the pfm a unit starts is provably this
+// install's when a later stop looks at it.
+const (
+	servicePathMarker = "__PFM_SERVICE_PATH__"
+	serviceMarkMarker = "__PFM_INSTALL_MARK__"
+)
 
-// renderServicePath fills a unit's servicePathMarker; a unit without one is
-// returned unchanged.
-func renderServicePath(content []byte, home string) ([]byte, error) {
+// renderServiceEnv fills a unit's servicePathMarker and serviceMarkMarker;
+// a unit without a PATH marker is returned unchanged, and one with a PATH but
+// no mark is an error, since every unit that starts pfm carries both.
+func renderServiceEnv(content []byte, home string) ([]byte, error) {
 	if !strings.Contains(string(content), servicePathMarker) {
 		return content, nil
 	}
 	rendered, err := replaceSingleAssetMarker(string(content), servicePathMarker, paths.ServicePath(home))
+	if err != nil {
+		return nil, err
+	}
+	rendered, err = replaceSingleAssetMarker(rendered, serviceMarkMarker, paths.InstallMark(home))
 	if err != nil {
 		return nil, err
 	}

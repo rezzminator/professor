@@ -2,14 +2,19 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -18,19 +23,28 @@ import (
 // setting and the theme's glyphs, the endpoint's panes (revision, agent
 // status, focus), each live native chat's engine in its pane's foreground (an
 // engine that died abruptly) and each decorated chat's transcript (size and
-// mtime: a failed turn arrives only there). Only decorated chats' transcripts
+// mtime: a failed turn arrives only there), or for an OpenCode chat, which
+// writes none, its title in OpenCode's store. Only decorated chats' transcripts
 // count: a chat with no tab paints nothing, so its turns never warrant a scan.
-// tabs takes the baseline in two phases, the surface after the scan and each
-// decorated chat's transcript right before its status is inspected, so a
-// change that lands after its read is a change the next probe sees.
+// tabs takes the baseline in three phases: the OpenCode titles before the scan
+// reads its mirror, the surface after the scan and each decorated chat's
+// transcript right before its status is inspected, so a change that lands
+// after its read is a change the next probe sees.
 type tabProbe struct {
 	// panes reads the endpoint's panes (nil: herdr.ReadTabPanes); foreground
 	// says whether a seat's engine is its pane's foreground (nil:
-	// tabEngineForeground).
+	// call.HerdrEngine).
 	panes      func(context.Context, string) ([]herdr.TabPane, error)
 	foreground func(context.Context, fleetdb.Seat) (bool, error)
-	engines    []headless.Chat
-	tabbed     []headless.Chat
+	// openCodeRoots are the OpenCode stores a tabbed OpenCode chat's title is
+	// read from: OpenCode writes no transcript, its title lands only there.
+	openCodeRoots []string
+	engines       []headless.Chat
+	tabbed        []headless.Chat
+	// titles renders, before the scan, the titles of titleIDs: the OpenCode
+	// chats the last enumeration tabbed, the ids this one most likely tabs.
+	titles   string
+	titleIDs []string
 	// pending is the baseline being taken; pendingOK says its surface read.
 	pending   strings.Builder
 	pendingOK bool
@@ -60,10 +74,17 @@ func (provider *herdrTabProvider) changed(ctx context.Context, socket string) (b
 	return probe.baseline == "" || now != probe.baseline, nil
 }
 
-// begin drops the baseline: an enumeration that fails leaves none.
-func (probe *tabProbe) begin() {
+// begin drops the baseline, so an enumeration that fails leaves none, and
+// reads the titles of the OpenCode chats the last enumeration tabbed before
+// the scan reads its mirror: a retitle landing during the scan is then one
+// the baseline lacks, so the next probe sees it.
+func (probe *tabProbe) begin(ctx context.Context) {
 	if probe != nil {
 		probe.baseline = ""
+		probe.titleIDs = probe.openCodeIDs()
+		var titles strings.Builder
+		probe.writeOpenCodeTitles(ctx, &titles, probe.titleIDs)
+		probe.titles = titles.String()
 	}
 }
 
@@ -95,9 +116,15 @@ func (probe *tabProbe) track(target headless.Chat) {
 }
 
 // commit makes the baseline being taken the one changed compares with, once
-// the enumeration it describes succeeded.
+// the enumeration it describes succeeded. Titles read before the scan join it
+// only when this enumeration tabbed the same OpenCode chats; otherwise the
+// baseline carries none, so the next probe sees a change and the next
+// enumeration reads the new chats' titles before its scan.
 func (probe *tabProbe) commit() {
 	if probe != nil && probe.pendingOK {
+		if slices.Equal(probe.openCodeIDs(), probe.titleIDs) {
+			probe.pending.WriteString(probe.titles)
+		}
 		probe.baseline = probe.pending.String()
 	}
 }
@@ -111,7 +138,47 @@ func (probe *tabProbe) fingerprint(ctx context.Context, socket, mode, glyphs str
 	for i := range probe.tabbed {
 		writeTranscript(&out, &probe.tabbed[i])
 	}
+	probe.writeOpenCodeTitles(ctx, &out, probe.openCodeIDs())
 	return out.String(), nil
+}
+
+// openCodeIDs are the tabbed OpenCode chats, sorted: the chats whose titles
+// a fingerprint carries.
+func (probe *tabProbe) openCodeIDs() []string {
+	var ids []string
+	for i := range probe.tabbed {
+		if target := &probe.tabbed[i]; target.Engine == pfmengine.OpenCode && target.Path == "" {
+			ids = append(ids, target.ID)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// writeOpenCodeTitles renders the titles of the OpenCode chats ids names as
+// their store holds them: OpenCode writes no transcript, and the title its
+// tab paints lands only there. Only tabbed chats' rows are read, so another
+// chat's turn is no change. A store that cannot be read carries the error in
+// its line, so a lasting failure reads as no change.
+func (probe *tabProbe) writeOpenCodeTitles(ctx context.Context, out *strings.Builder, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	for _, root := range probe.openCodeRoots {
+		titles, err := index.ReadOpenCodeTitles(ctx, root, ids)
+		if errors.Is(err, index.ErrNoOpenCodeStore) {
+			continue
+		}
+		if err != nil {
+			fmt.Fprintf(out, "opencode %q error %q\n", root, err)
+			continue
+		}
+		for _, id := range ids {
+			if title, found := titles[id]; found {
+				fmt.Fprintf(out, "opencode %q %q title %q\n", root, id, title)
+			}
+		}
+	}
 }
 
 // surface renders the mode, glyphs, panes and live engines. An engine that
@@ -124,7 +191,7 @@ func (probe *tabProbe) surface(ctx context.Context, socket, mode, glyphs string,
 	}
 	foreground := probe.foreground
 	if foreground == nil {
-		foreground = tabEngineForeground
+		foreground = call.HerdrEngine
 	}
 	panes, err := readPanes(ctx, socket)
 	if err != nil {

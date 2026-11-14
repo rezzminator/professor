@@ -3,6 +3,7 @@ package headless
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -36,7 +38,9 @@ type StreamOptions struct {
 	// thing a dead chat and a thinking chat have in common.
 	Alive func() bool
 	// Check reports blocked, dead, or failed lookup distinctly. Unlike Alive,
-	// it must not collapse a failed probe into the chat's disappearance.
+	// it must not collapse a failed probe into the chat's disappearance: a
+	// follow retries a failed lookup and ends only after UnreadablePolls in a
+	// row.
 	Check func() error
 	// Clock controls polling in tests; nil uses the wall clock.
 	Clock clock.Clock
@@ -86,6 +90,7 @@ func Stream(
 	window := newContextWindow(options.Filter, options.Margin, out)
 	reader := bufio.NewReaderSize(file, 64<<10)
 	var pending []byte
+	checkFailures := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return window.flush()
@@ -96,10 +101,14 @@ func Stream(
 			pending = append(pending, line...)
 			full := pending
 			pending = nil
+			rendered := ""
 			if entry, ok := transcript.Parse(full, string(engine)); ok {
-				if err := window.add(renderStreamEntry(entry, options.Raw)); err != nil {
-					return err
-				}
+				rendered = renderStreamEntry(entry, options.Raw)
+			} else if !json.Valid(full) {
+				rendered = renderUnreadableLine(full, options.Raw)
+			}
+			if err := window.add(rendered); err != nil {
+				return err
 			}
 			continue
 		case len(line) > 0:
@@ -113,8 +122,22 @@ func Stream(
 			return window.flush()
 		}
 		if options.Check != nil {
-			if err := options.Check(); err != nil {
+			err := options.Check()
+			switch {
+			case err == nil:
+				checkFailures = 0
+			case errors.Is(err, ErrChatGone) || errors.Is(err, ErrTrustDialog):
 				return errors.Join(window.flush(), err)
+			default:
+				checkFailures++
+				if checkFailures >= UnreadablePolls {
+					return errors.Join(window.flush(), err)
+				}
+				obs.Logger(ctx).Warn(
+					"stream: chat lookup failed; following on and retrying",
+					"failures", checkFailures,
+					obs.FieldErr, err.Error(),
+				)
 			}
 		}
 		if options.Alive != nil && !options.Alive() {
@@ -144,6 +167,16 @@ func renderStreamEntry(entry transcript.Entry, raw bool) string {
 		return entry.Role + " " + entry.Tool + " " + entry.Input
 	}
 	return entry.Role + " " + entry.Text
+}
+
+// renderUnreadableLine shows a transcript line that is not JSON as it was
+// written, marked "?", rather than dropping it unseen.
+func renderUnreadableLine(line []byte, raw bool) string {
+	text := strings.TrimSpace(string(line))
+	if !raw {
+		text = transcript.Truncate(text, transcript.TextCap)
+	}
+	return "? " + text
 }
 
 // contextWindow implements grep -C over a stream: it holds back the last

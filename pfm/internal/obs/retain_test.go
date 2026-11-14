@@ -6,135 +6,107 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
-// plantGeneration writes a rotated file and dates its last write age ago.
-func plantGeneration(t *testing.T, path string, age time.Duration, now time.Time) {
+// plantSegment writes a closed segment of content into the log at path's
+// pfm.segments/, named name.
+func plantSegment(t *testing.T, path, name, content string) string {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := segmentsDir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"msg":"old"}`+"\n"), 0o600); err != nil {
+	segment := filepath.Join(dir, name)
+	if err := os.WriteFile(segment, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	stamp := now.Add(-age)
-	if err := os.Chtimes(path, stamp, stamp); err != nil {
-		t.Fatal(err)
-	}
+	return segment
 }
 
-func exists(t *testing.T, path string) bool {
-	t.Helper()
-	_, err := os.Stat(path)
-	if err == nil {
-		return true
-	}
-	if !os.IsNotExist(err) {
-		t.Fatalf("stat %s: %v", path, err)
-	}
-	return false
-}
-
-// TestRetentionDeletesAgedGenerationsAtOpen pins log.keepDays on a fake clock:
-// at open, a rotated file whose newest record is older than keepDays is gone, a
-// younger one stays, and the live file is never deleted however old it is.
-func TestRetentionDeletesAgedGenerationsAtOpen(t *testing.T) {
-	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
-	timing := clock.NewFake(now)
-	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	plantGeneration(t, path, 40*24*time.Hour, now)
-	plantGeneration(t, path+".1", 31*24*time.Hour, now)
-	plantGeneration(t, path+".2", 29*24*time.Hour, now)
-	plantGeneration(t, path+".3", 400*24*time.Hour, now)
-	writer, err := newRotator(path, 5, 8, 30, timing, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = writer.Close() }()
-	if exists(t, path+".1") || exists(t, path+".3") {
-		t.Fatal("a generation older than keepDays survived open")
-	}
-	if !exists(t, path+".2") {
-		t.Fatal("a generation younger than keepDays was deleted")
-	}
-	if !exists(t, path) {
-		t.Fatal("the live file was deleted — it is only ever rotated")
-	}
-}
-
-// TestRetentionZeroKeepsEveryGeneration: keepDays 0 disables the time limit.
-func TestRetentionZeroKeepsEveryGeneration(t *testing.T) {
-	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
-	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	plantGeneration(t, path+".1", 900*24*time.Hour, now)
-	writer, err := newRotator(path, 5, 8, 0, clock.NewFake(now), io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = writer.Close() }()
-	if !exists(t, path+".1") {
-		t.Fatal("keepDays 0 deleted a generation")
-	}
-}
-
-// TestRetentionPrunesAtEveryRotation: a generation that ages past keepDays
-// while the process runs is deleted at the next rotation, not at the next open.
-func TestRetentionPrunesAtEveryRotation(t *testing.T) {
-	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
-	timing := clock.NewFake(now)
-	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	writer, err := newRotator(path, 5, 1, 30, timing, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = writer.Close() }()
-	// Planted after open, so open's prune never saw it; rename keeps mtime,
-	// so it ages into .4 at the rotation and is dropped there.
-	plantGeneration(t, path+".3", 31*24*time.Hour, now)
-	record := append([]byte(strings.Repeat("r", 600*1024)), '\n')
-	for written := 0; written < 2; written++ {
-		if _, err := writer.Write(record); err != nil {
+// TestRetentionKeepsTheNewestKeepBytesWhole: with two segments of one
+// mebibyte kept, a segment that starts within the newest 2 MiB stays whole,
+// though it carries the sum past them (a roll closes a segment just past its
+// size); one starting at 2 MiB or older is reduced.
+func TestRetentionKeepsTheNewestKeepBytesWhole(t *testing.T) {
+	for _, tc := range []struct {
+		newest int
+		kept   []string
+	}{
+		{newest: mebibyte, kept: []string{"b.jsonl", "c.jsonl"}},
+		{newest: mebibyte + 1, kept: []string{"b.jsonl", "c.jsonl"}},
+		{newest: 2 * mebibyte, kept: []string{"c.jsonl"}},
+	} {
+		path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
+		writer := openLogAt(t, path, 2, true, clock.NewFake(segmentStart), io.Discard)
+		info := `{"ts":"2026-11-12T09:00:00Z","level":"INFO","msg":"x"}` + "\n"
+		plantSegment(t, path, "a.jsonl", info)
+		plantSegment(t, path, "b.jsonl", strings.Repeat("b", mebibyte-1)+"\n")
+		plantSegment(t, path, "c.jsonl", strings.Repeat("c", tc.newest-1)+"\n")
+		if err := writer.retain(); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if !exists(t, path+".1") {
-		t.Fatal("the second 600 KiB record did not rotate a 1 MiB file")
-	}
-	if exists(t, path+".4") || exists(t, path+".3") {
-		t.Fatal("the aged generation survived the rotation")
+		if got := listDir(t, segmentsDir(path)); strings.Join(got, ",") != strings.Join(tc.kept, ",") {
+			t.Fatalf("newest %d: segments = %v, want %v", tc.newest, got, tc.kept)
+		}
 	}
 }
 
-// TestRotatorRotatesAtMaxMB is the size limit alone: a record that fits is
-// appended, the one that would carry the file past maxMB rotates first.
-func TestRotatorRotatesAtMaxMB(t *testing.T) {
+// TestRetentionKeepsWarningsAndErrorsByteForByte: a reduced segment's WARN
+// and ERROR records — and a damaged line, which may be an error's — land in
+// pfm.kept/{UTC day of the record}.jsonl exactly as written, nothing else;
+// a last line missing its newline gets one, and the segment is gone.
+func TestRetentionKeepsWarningsAndErrorsByteForByte(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	writer, err := newRotator(path, 5, 1, 30, clock.NewFake(time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)), io.Discard)
-	if err != nil {
+	writer := openLogAt(t, path, 1, true, clock.NewFake(segmentStart), io.Discard)
+	lines := []string{
+		`{"ts":"2026-11-11T23:59:59.5Z","level":"DEBUG","msg":"d"}`,
+		`{"ts":"2026-11-11T23:59:59.6Z","level":"WARN","msg":"w1"}`,
+		`{"ts":"2026-11-12T00:00:00.1+01:00","level":"ERROR","msg":"e-local"}`,
+		`{"ts":"2026-11-12T00:00:01Z","level":"INFO","msg":"i"}`,
+		`{"level":"ERROR+2","ts":"2026-11-12T00:00:02Z","msg":"e2"}`,
+		`not a record`,
+		`{"ts":"2026-11-12T00:00:03Z","level":"WARN","msg":"last"}`,
+	}
+	plantSegment(t, path, "2026-11-12T00-00-04.000Z.jsonl", strings.Join(lines, "\n"))
+	plantSegment(t, path, "z.jsonl", strings.Repeat("z", mebibyte-1)+"\n")
+	if err := writer.retain(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = writer.Close() }()
-	record := append([]byte(strings.Repeat("r", 600*1024)), '\n')
-	if _, err := writer.Write(record); err != nil {
+	kept := keptDir(path)
+	if got := listDir(t, kept); strings.Join(got, ",") != "2026-11-11.jsonl,2026-11-12.jsonl" {
+		t.Fatalf("pfm.kept = %v, want one file per day", got)
+	}
+	// e-local is 23:00:00.1 UTC on the 11th.
+	if got, want := readFile(t, filepath.Join(kept, "2026-11-11.jsonl")), lines[1]+"\n"+lines[2]+"\n"; got != want {
+		t.Fatalf("%s/2026-11-11.jsonl = %q, want %q", kept, got, want)
+	}
+	want := lines[4] + "\n" + lines[5] + "\n" + lines[6] + "\n"
+	if got := readFile(t, filepath.Join(kept, "2026-11-12.jsonl")); got != want {
+		t.Fatalf("%s/2026-11-12.jsonl = %q, want %q", kept, got, want)
+	}
+	if got := listDir(t, segmentsDir(path)); strings.Join(got, ",") != "z.jsonl" {
+		t.Fatalf("segments = %v, want only the newest", got)
+	}
+}
+
+// TestRetentionFailureKeepsTheSegment: a reduction that cannot keep its
+// warnings leaves the segment where it was and names why.
+func TestRetentionFailureKeepsTheSegment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
+	writer := openLogAt(t, path, 1, true, clock.NewFake(segmentStart), io.Discard)
+	old := plantSegment(t, path, "a.jsonl", `{"ts":"2026-11-12T09:00:00Z","level":"WARN","msg":"w"}`+"\n")
+	plantSegment(t, path, "b.jsonl", strings.Repeat("b", mebibyte-1)+"\n")
+	if err := os.WriteFile(keptDir(path), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if exists(t, path+".1") {
-		t.Fatal("a record that fits rotated")
+	err := writer.retain()
+	want := "create kept activity log " + keptDir(path) + ": mkdir " + keptDir(path) + ": not a directory"
+	if err == nil || err.Error() != want {
+		t.Fatalf("retain err = %v, want %q", err, want)
 	}
-	if _, err := writer.Write(record); err != nil {
-		t.Fatal(err)
-	}
-	if !exists(t, path+".1") {
-		t.Fatal("a record past maxMB did not rotate")
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Size() != int64(len(record)) {
-		t.Fatalf("live file holds %d bytes, want exactly the record that rotated in", info.Size())
+	if _, statErr := os.Stat(old); statErr != nil {
+		t.Fatalf("the unreduced segment is gone: %v", statErr)
 	}
 }

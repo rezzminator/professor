@@ -14,7 +14,6 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -27,43 +26,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
-
-// KillServer ends one chat's tmux server and removes its socket, crumbs, and
-// branch-seat marker.
-func KillServer(ctx context.Context, resolved paths.Values, socket string) (err error) {
-	if filepath.IsAbs(socket) {
-		return errors.New("KillServer requires a tmux socket name; use EndResolved for a native Herdr seat")
-	}
-	end := obs.Transition(ctx, "chat", "live", "ended", "KillServer")
-	defer func() { end(err) }()
-	tmux := action.TmuxExecutor{TmuxDir: resolved.TmuxDir}
-	if err := tmux.KillServer(ctx, socket); err != nil {
-		// A failed kill-server ended the server only on tmux's word that it
-		// is dead: an unresponsive or unprobed server may still hold the chat.
-		if state, probeErr := tmux.ServerState(ctx, socket); state != gather.ServerDead {
-			return fmt.Errorf(
-				"kill-server on %s failed and the server is %s: %w",
-				socket,
-				state,
-				errors.Join(err, probeErr),
-			)
-		}
-	}
-	_ = os.Remove(filepath.Join(resolved.TmuxDir, socket))
-	entries, _ := os.ReadDir(resolved.SIDDir)
-	for _, entry := range entries {
-		if name, _, ok := gather.ParseCrumbName(entry.Name()); ok && name == socket {
-			_ = os.Remove(filepath.Join(resolved.SIDDir, entry.Name()))
-		}
-	}
-	state := fleetdb.OpenSharedState(ctx, resolved)
-	clearErr := state.ClearBranchSeat(ctx, socket)
-	closeErr := state.Close()
-	if clearErr != nil || closeErr != nil {
-		return fmt.Errorf("clear branch marker after ending %s: %w", socket, errors.Join(clearErr, closeErr))
-	}
-	return nil
-}
 
 // endsNatively is the one end decision every end door asks: a Herdr seat ends
 // by the proved pane close, every other chat by ending its tmux server.
@@ -95,27 +57,6 @@ func EndNow(ctx context.Context, chat headless.Chat, values paths.Values) error 
 	}
 	if err := agentrole.RemoveSeatPrompt(values.SIDDir, chat.Socket, chat.Pane); err != nil {
 		return fmt.Errorf("chat %s ended, but its role prompt stays: %w", chat.ID, err)
-	}
-	return nil
-}
-
-// endTmux is the one tmux end: KillServer, then the one server probe must say
-// dead. An unresponsive server is not proof of an end.
-func endTmux(ctx context.Context, chat headless.Chat, values paths.Values) error {
-	if chat.Socket == "" {
-		return fmt.Errorf("chat %s has neither a Herdr seat nor a tmux socket to end", chat.ID)
-	}
-	if err := KillServer(ctx, values, chat.Socket); err != nil {
-		return fmt.Errorf("end tmux server %s: %w", chat.Socket, err)
-	}
-	state, err := (action.TmuxExecutor{TmuxDir: values.TmuxDir}).ServerState(ctx, chat.Socket)
-	if state != gather.ServerDead {
-		return fmt.Errorf(
-			"tmux server %s is %s after kill-server: %w",
-			chat.Socket,
-			state,
-			errors.Join(err, errors.New("end unconfirmed")),
-		)
 	}
 	return nil
 }
@@ -375,6 +316,19 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 			"pane.close",
 			map[string]string{nativePaneIDKey: seat.HerdrPane},
 		)
+		if err == nil {
+			// An ack pfm cannot read is a failed close: whether the pane went is
+			// then confirmed from Herdr's terminal list, as after a refused close.
+			var ack struct {
+				Type string `json:"type"`
+				Pane string `json:"pane_id"`
+			}
+			if decodeErr := json.Unmarshal(body, &ack); decodeErr != nil {
+				err = fmt.Errorf("decode Herdr pane close: %w", decodeErr)
+			} else if ack.Type != "ok" && (ack.Type != "pane_closed" || ack.Pane != seat.HerdrPane) {
+				err = fmt.Errorf("unexpected Herdr pane close acknowledgement: %s", body)
+			}
+		}
 		if err != nil {
 			endStep(steps, "pane.close failed: %v", err)
 			absent, confirmErr := endedTerminalAbsent(ctx, seat, values)
@@ -387,16 +341,6 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 			}
 			endStep(steps, "terminal absent confirmed after the close failure")
 		} else {
-			var ack struct {
-				Type string `json:"type"`
-				Pane string `json:"pane_id"`
-			}
-			if err := json.Unmarshal(body, &ack); err != nil {
-				return fmt.Errorf("decode Herdr pane close: %w", err)
-			}
-			if ack.Type != "ok" && (ack.Type != "pane_closed" || ack.Pane != seat.HerdrPane) {
-				return fmt.Errorf("unexpected Herdr pane close acknowledgement: %s", body)
-			}
 			endStep(steps, "pane.close acknowledged")
 		}
 	}
@@ -424,8 +368,8 @@ func endHerdrSteps(ctx context.Context, chat headless.Chat, values paths.Values,
 		}
 	}
 	// Before the seat row goes, so a failure here leaves the seat retryable.
-	if err := herdr.RemoveReloadFiles(values.SIDDir, seat.SeatID); err != nil {
-		return fmt.Errorf("remove ended seat reload files: %w", err)
+	if err := herdr.RemoveReloadRecord(values.SIDDir, seat.SeatID); err != nil {
+		return fmt.Errorf("remove ended seat reload record: %w", err)
 	}
 	if preserve {
 		before := seat

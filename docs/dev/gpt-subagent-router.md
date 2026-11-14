@@ -127,8 +127,8 @@ A GPT agent exists only in a session started through the router. pfm's launch li
 
 `Agent(subagent_type: "sol", description: …, prompt: …)`, with no `model`. A spawn-time `model` silently overrides the GPT definition back to Claude (W9).
 
-- **The foreman needs no change.** `flights-foreman` already spawns its child foremen (`flights-foreman-sonnet`, `flights-foreman`) by name with no model override (`templates/global/agents/flights-foreman.md`).
-- **The fleet prompt needs an exception.** It names a tier alias at each spawn site (`pfm/harness-prompts/claude/professor.md`, § Claude Code: "The tiers, by model alias, named inline at each spawn site"). A GPT-pinned agent must be spawned with no `model`.
+- **The foreman needs no change.** `flights:foreman` spawns no agent: its `tools:` line lists no `Agent` (`plugins/flights/plugins/flights/agents/foreman.md`), so it never overrides a pin.
+- **The fleet prompt needs no change.** It spawns an agent whose definition pins `model:` with no `model` (`pfm/harness-prompts/claude/professor.md`, § Claude Code), so a GPT-pinned agent keeps its pin.
 
 ## Translator
 
@@ -388,7 +388,7 @@ Ruled on 2026-10-09:
 4. **Router fork in `gateway.py`**, with the sub-agent-only guard and per-upstream connections.
 5. **Live acceptance.** One `sol` sub-agent in a router session runs a tool-using task. On every turn from the third, the lane's `cached_tokens / input_tokens` is ≥ 0.8 and every reasoning item round-trips. Claude Code shows no error.
 6. **Answer open question 1.**
-7. **Productize.** Use `flights-foreman` with this doc as the spec (pfm launch line, GPT agents, fleet-prompt exception), or drop.
+7. **Productize.** Use `flights:foreman` with this doc as the spec (pfm launch line, GPT agents, fleet-prompt exception), or drop.
 
 ## Reproducing the probes
 

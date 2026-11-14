@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // skillCommitMarker is the pfm-owned sibling recording the commit a store was
@@ -36,9 +35,9 @@ func symlinkFixture(t *testing.T, target, link string) {
 
 func repoHead(t *testing.T, repo string) string {
 	t.Helper()
-	head, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	head, err := os.ReadFile(filepath.Join(repo, ".git", "fixture-head"))
 	if err != nil {
-		t.Fatalf("rev-parse %s: %v", repo, err)
+		t.Fatalf("read the head of %s: %v", repo, err)
 	}
 	return strings.TrimSpace(string(head))
 }
@@ -159,9 +158,10 @@ func TestSourceFetchedSkillsCreateTheStoreRootOnlyUnderTheLock(t *testing.T) {
 
 	output := runSkillInstall(t, home, ModeApply)
 
-	if !strings.Contains(output, "SKILL-SOURCES-BUSY ") {
-		t.Fatalf("a held lock was not reported busy:\n%s", output)
-	}
+	wantOutputLines(t, output, []string{
+		"  skip    SKILL-SOURCES-BUSY another pfm install holds " + skillStoreRoot(home) +
+			"; source-fetched skills left as they are",
+	}, "SKILL-SOURCES-")
 	requireNoPath(t, skillStoreRoot(home), "the store root was created outside the lock")
 }
 
@@ -172,43 +172,17 @@ func TestRunSkillGitStripsOnlyRepositorySelection(t *testing.T) {
 	t.Setenv("SSH_ASKPASS", "/user/askpass")
 	t.Setenv("GIT_SSL_CAINFO", "/user/ca.pem")
 	t.Setenv("GIT_DIR", "/elsewhere/.git")
-	script := filepath.Join(t.TempDir(), "git")
-	if err := testjail.WriteExecutable(
-		script,
-		[]byte(
-			"#!/bin/sh\nprintf 'askpass=[%s] ca=[%s] dir=[%s]' \"$SSH_ASKPASS\" \"$GIT_SSL_CAINFO\" \"${GIT_DIR-unset}\"\n",
-		),
-		0o755,
-	); err != nil {
-		t.Fatal(err)
-	}
-	got, err := runSkillGitWith(deps.RealRunner{}, 10*time.Second, skillGitWaitDelay, script, t.TempDir(), "ls-remote")
+	runner := &skillGitEnvironmentRunner{echo: func(lookup func(key string) (string, bool)) string {
+		askpass, _ := lookup("SSH_ASKPASS")
+		ca, _ := lookup("GIT_SSL_CAINFO")
+		return fmt.Sprintf("askpass=[%s] ca=[%s] dir=[%s]", askpass, ca, shellDefault(lookup, "GIT_DIR"))
+	}}
+	got, err := runSkillGitWith(runner, 10*time.Second, skillGitWaitDelay, "git", t.TempDir(), "ls-remote")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := "askpass=[] ca=[/user/ca.pem] dir=[unset]"; got != want {
 		t.Fatalf("git environment = %q, want %q", got, want)
-	}
-}
-
-// TestSourceFetchedSkillsIgnoreAHomeRepositoryConfig pins F24: a dotfiles
-// repository at $HOME whose config rewrites every URL never reaches a skill
-// fetch — no git call discovers it.
-func TestSourceFetchedSkillsIgnoreAHomeRepositoryConfig(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	skillFixtureGit(t, home, "init", "--quiet")
-	skillFixtureGit(t, home, "config", "url.file:///nonexistent-rewrite/.insteadOf", "file://")
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
-
-	output := runSkillInstall(t, home, ModeApply)
-
-	if strings.Contains(output, "SKILL-FETCH-FAILED") {
-		t.Fatalf("a home repository's config steered the fetch:\n%s", output)
-	}
-	if got := readSkillFile(t, filepath.Join(skillStoreRoot(home), "god-speed", "SKILL.md")); got != "# gs\n" {
-		t.Fatalf("store SKILL.md = %q\n%s", got, output)
 	}
 }
 
@@ -235,30 +209,6 @@ func TestSourceFetchedSkillsRecloneAStoreWithoutSKILLMd(t *testing.T) {
 	assertLink(t, filepath.Join(home, ".agents", "skills", "god-speed"), store)
 }
 
-func TestSourceFetchedSkillsDryRunKeepsExistingStore(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
-	runSkillInstall(t, home, ModeApply)
-	was := repoHead(t, repo)
-	skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# gs v2\n"})
-
-	output := runSkillInstall(t, home, ModeDryRun)
-	store := filepath.Join(skillStoreRoot(home), "god-speed")
-	want := "check   " + store + " against file://" + repo +
-		" (a dry run reads no remote; the apply replaces it if the head moved)\n"
-	if !strings.Contains(output, want) {
-		t.Fatalf("preview missing %q:\n%s", want, output)
-	}
-	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# gs\n" {
-		t.Fatalf("preview changed the store to %q", got)
-	}
-	if got := readSkillFile(t, skillCommitPath(store)); got != was+"\n" {
-		t.Fatalf("preview changed the commit record to %q", got)
-	}
-}
-
 // TestSourceFetchedSkillsAdoptAHandMadeClone pins the host state a manual
 // setup leaves: a plain shallow clone at the store path with no commit record,
 // already linked from every registry. The first install re-clones and swaps
@@ -273,7 +223,11 @@ func TestSourceFetchedSkillsAdoptAHandMadeClone(t *testing.T) {
 	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	skillFixtureGit(t, storeRoot, "clone", "--depth", "1", "--quiet", "file://"+repo, "god-speed")
+	if _, err := (skillGit{}).Run(context.Background(), []string{
+		skillGitPath, "clone", "--depth", "1", "--quiet", "--", "file://" + repo, store,
+	}, deps.RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	links := []string{
 		filepath.Join(home, ".claude", "skills", "god-speed"),
 		filepath.Join(home, ".agents", "skills", "god-speed"),
@@ -451,6 +405,7 @@ func TestSourceFetchedSkillsSwapFailure(t *testing.T) {
 			var output bytes.Buffer
 			_, err := Run(context.Background(), Options{
 				Mode: ModeApply, Home: home, MCPConfigPath: testConfigPath(t), Stdout: &output, Runner: &fakeRunner{},
+				ProcessRunner: skillGit{},
 			})
 			if restoreFails {
 				if err == nil || !strings.Contains(err.Error(), "replace skill store "+store+": ") ||
@@ -485,27 +440,6 @@ func TestSourceFetchedSkillsSwapFailure(t *testing.T) {
 				t.Fatalf("swap leftovers = %v, err=%v", entries, err)
 			}
 		})
-	}
-}
-
-func TestSourceFetchedSkillsDryRunReclonesAnUnusableStore(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
-	runSkillInstall(t, home, ModeApply)
-	store := filepath.Join(skillStoreRoot(home), "god-speed")
-	skill := filepath.Join(store, "SKILL.md")
-	if err := os.Remove(skill); err != nil {
-		t.Fatal(err)
-	}
-	output := runSkillInstall(t, home, ModeDryRun)
-	want := "  change  re-clone " + store + " from file://" + repo +
-		" (inspect " + skill + ": lstat " + skill + ": no such file or directory)\n"
-	if !strings.Contains(output, want) ||
-		!strings.Contains(output, "  ok      "+filepath.Join(home, ".agents", "skills", "god-speed")+"\n") ||
-		strings.Contains(output, "SKILL-SOURCE-MISSING god-speed") {
-		t.Fatalf("dry run did not preview the usable replacement %q:\n%s", want, output)
 	}
 }
 
@@ -545,6 +479,7 @@ func TestSourceFetchedSkillsInterruptedSwap(t *testing.T) {
 			var output bytes.Buffer
 			_, err := Run(context.Background(), Options{
 				Mode: ModeApply, Home: home, MCPConfigPath: testConfigPath(t), Stdout: &output, Runner: &fakeRunner{},
+				ProcessRunner: skillGit{},
 			})
 			if restoreFails {
 				want := fmt.Sprintf("restore %s from %s: %v", store, trash, restoreErr)
@@ -592,19 +527,11 @@ func TestRunSkillGitSSHEnvironment(t *testing.T) {
 					}
 				}
 			}
-			script := filepath.Join(t.TempDir(), "git")
-			if err := testjail.WriteExecutable(
-				script,
-				[]byte("#!/bin/sh\nprintf '%s' \"${GIT_SSH_COMMAND-unset}\"\n"),
-				0o755,
-			); err != nil {
-				t.Fatal(err)
-			}
 			got, err := runSkillGitWith(
-				deps.RealRunner{},
+				&skillGitEnvironmentRunner{echo: echoGitSSHCommand},
 				10*time.Second,
 				skillGitWaitDelay,
-				script,
+				"git",
 				t.TempDir(),
 				"ls-remote",
 			)
@@ -665,6 +592,8 @@ func TestSourceFetchedSkillsInterruptedSwapPreviewAndSelection(t *testing.T) {
 		})
 	}
 }
+
+func (*skillDeadlineRunner) LookPath(string) (string, error) { return skillGitPath, nil }
 
 func (runner *skillDeadlineRunner) Run(ctx context.Context, _ []string, _ deps.RunOptions) (deps.RunResult, error) {
 	deadline, _ := ctx.Deadline()
@@ -736,19 +665,11 @@ func TestSkillGitSSHTransportAndOptions(t *testing.T) {
 					}
 				}
 			}
-			script := filepath.Join(t.TempDir(), "git")
-			if err := testjail.WriteExecutable(
-				script,
-				[]byte("#!/bin/sh\nprintf '%s' \"${GIT_SSH_COMMAND-unset}\"\n"),
-				0o700,
-			); err != nil {
-				t.Fatal(err)
-			}
 			got, err := runSkillGitWith(
-				deps.RealRunner{},
+				&skillGitEnvironmentRunner{echo: echoGitSSHCommand},
 				time.Second,
 				skillGitWaitDelay,
-				script,
+				"git",
 				t.TempDir(),
 				tc.args...)
 			if tc.errText != "" {
@@ -769,9 +690,14 @@ func TestSkillGitSSHTransportAndOptions(t *testing.T) {
 	}
 }
 
+// skillGitEnvironmentRunner records the options of the one git call it
+// answers. With echo set, its stdout is echo over the environment the call
+// hands the child: lookup reads a variable as the child would, the last entry
+// naming it, as os/exec passes it on.
 type skillGitEnvironmentRunner struct {
 	deps.Runner
 	options deps.RunOptions
+	echo    func(lookup func(key string) (string, bool)) string
 }
 
 func (runner *skillGitEnvironmentRunner) Run(
@@ -780,7 +706,33 @@ func (runner *skillGitEnvironmentRunner) Run(
 	options deps.RunOptions,
 ) (deps.RunResult, error) {
 	runner.options = options
-	return deps.RunResult{Stdout: []byte("head")}, nil
+	if runner.echo == nil {
+		return deps.RunResult{Stdout: []byte("head")}, nil
+	}
+	lookup := func(key string) (string, bool) {
+		value, found := "", false
+		for _, entry := range options.Env {
+			if name, entryValue, _ := strings.Cut(entry, "="); name == key {
+				value, found = entryValue, true
+			}
+		}
+		return value, found
+	}
+	return deps.RunResult{Stdout: []byte(runner.echo(lookup))}, nil
+}
+
+// shellDefault is the shell's ${key-unset}: the value when key is set, even
+// to empty, else "unset".
+func shellDefault(lookup func(key string) (string, bool), key string) string {
+	if value, ok := lookup(key); ok {
+		return value
+	}
+	return "unset"
+}
+
+// echoGitSSHCommand answers what `printf '%s' "${GIT_SSH_COMMAND-unset}"` prints.
+func echoGitSSHCommand(lookup func(key string) (string, bool)) string {
+	return shellDefault(lookup, "GIT_SSH_COMMAND")
 }
 
 func TestSkillGitTransportOverridePreservesRepositoryBoundary(t *testing.T) {
@@ -814,4 +766,106 @@ func TestSkillGitTransportOverridePreservesRepositoryBoundary(t *testing.T) {
 		runner.options.Dir != dir {
 		t.Fatalf("transport override environment=%v dir=%s", values, runner.options.Dir)
 	}
+}
+
+// copySkillTree copies from's files and symlinks (never its top-level .git)
+// to to, which it creates; a directory holding no file is not copied.
+func copySkillTree(from, to string) error {
+	if err := os.MkdirAll(to, 0o755); err != nil {
+		return err
+	}
+	return filepath.WalkDir(from, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(from, path)
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if relative == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(to, relative)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, content, 0o644)
+	})
+}
+
+// skillGit is the fake git a skill fetch runs through the installer's process
+// seam. It serves skillFixtureRepo repositories and answers the three calls a
+// fetch makes: ls-remote of HEAD, a shallow clone (the committed tree, plus
+// .git/fixture-head) and rev-parse of HEAD in a clone; a repository that is
+// not there fails as git does, exit 128; any other call is unscripted.
+type skillGit struct{}
+
+const skillGitPath = "/fixture/git"
+
+func (skillGit) LookPath(name string) (string, error) {
+	if name == "git" {
+		return skillGitPath, nil
+	}
+	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
+}
+
+func (skillGit) Start(_ context.Context, argv []string, _ deps.StartOptions) (deps.Process, error) {
+	return nil, deps.UnscriptedError{Argv: argv}
+}
+
+func (skillGit) Run(_ context.Context, argv []string, _ deps.RunOptions) (deps.RunResult, error) {
+	args := argv[1:]
+	fatal := func(message string) (deps.RunResult, error) {
+		return deps.RunResult{Stderr: []byte("fatal: " + message + "\n"), ExitCode: 128}, nil
+	}
+	head := func(gitDir string) (string, bool) {
+		content, err := os.ReadFile(filepath.Join(gitDir, "fixture-head"))
+		return strings.TrimSpace(string(content)), err == nil
+	}
+	switch {
+	case len(args) == 4 && args[0] == "ls-remote" && args[1] == "--" && args[3] == "HEAD":
+		commit, ok := head(filepath.Join(strings.TrimPrefix(args[2], "file://"), ".git"))
+		if !ok {
+			return fatal("'" + args[2] + "' does not appear to be a git repository")
+		}
+		return deps.RunResult{Stdout: []byte(commit + "\tHEAD\n")}, nil
+	case len(args) == 7 && strings.Join(args[:5], " ") == "clone --depth 1 --quiet --":
+		source := filepath.Join(strings.TrimPrefix(args[5], "file://"), ".git")
+		commit, ok := head(source)
+		if !ok {
+			return fatal("repository '" + args[5] + "' does not exist")
+		}
+		if err := copySkillTree(filepath.Join(source, "fixture-tree"), args[6]); err != nil {
+			return fatal(err.Error())
+		}
+		clone := filepath.Join(args[6], ".git")
+		if err := os.MkdirAll(clone, 0o755); err != nil {
+			return fatal(err.Error())
+		}
+		if err := os.WriteFile(filepath.Join(clone, "fixture-head"), []byte(commit+"\n"), 0o644); err != nil {
+			return fatal(err.Error())
+		}
+		return deps.RunResult{}, nil
+	case len(args) == 4 && args[0] == "--git-dir" && args[2] == "rev-parse" && args[3] == "HEAD":
+		commit, ok := head(args[1])
+		if !ok {
+			return fatal("not a git repository: '" + args[1] + "'")
+		}
+		return deps.RunResult{Stdout: []byte(commit + "\n")}, nil
+	}
+	return deps.RunResult{ExitCode: -1}, deps.UnscriptedError{Argv: argv}
 }

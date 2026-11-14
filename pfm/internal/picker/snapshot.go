@@ -115,41 +115,6 @@ func pickerTheme(home string) (*theme.Palette, string) {
 	return &palette, ""
 }
 
-// enrichFacts fills each row's model, effort and working state from its
-// transcript, and names the rows whose facts could not be read.
-func enrichFacts(request scanRequest, rows []compose.Row, nowNS int64) ([]compose.Row, string) {
-	if request.Facts == nil {
-		return rows, ""
-	}
-	rows, failures := request.Facts.Enrich(rows, nowNS)
-	if len(failures) > 0 {
-		return rows, fmt.Sprintf("%d unreadable, first: %v", len(failures), failures[0])
-	}
-	return rows, ""
-}
-
-// rereadFacts is the parked picker's busy/idle refresh: the last pass's
-// snapshot with only the rows' facts read again. The rows are the composed
-// output (so a fact that stopped being readable falls back to the composed
-// value, as it does in a full pass) carrying the schedule flags the last pass
-// read; the ledger, the schedule flags, the cosmos and the compose are the last
-// pass's own. It costs a stat per transcript and reads no store.
-func rereadFacts(environment fleet.Env, request scanRequest, last sentRefresh) ui.Snapshot {
-	rows := slices.Clone(last.output.Rows)
-	if len(last.snapshot.Rows) == len(rows) {
-		for index := range rows {
-			rows[index].ScheduleFired = last.snapshot.Rows[index].ScheduleFired
-		}
-	}
-	snapshot := last.snapshot
-	if hasLiveRow(rows) {
-		snapshot.Rows, snapshot.FactsError = enrichFacts(request, rows, environment.NowNS)
-	}
-	snapshot.ThemePalette, snapshot.ThemeError = pickerTheme(environment.Paths.Home)
-	snapshot.NowNS = environment.NowNS
-	return snapshot
-}
-
 // sentRefresh is one published pass: the composed output (kept so a parked
 // poll can re-read row facts over it without a new gather) and the snapshot
 // the picker received.
@@ -173,9 +138,6 @@ func sendRefresh(
 	if err == nil && len(failures) > 0 {
 		err = fmt.Errorf("probe native seats: %s", strings.Join(failures, "\n"))
 	}
-	if err == nil {
-		data, err = fleet.EnrichNative(ctx, database, data, native)
-	}
 	if err != nil {
 		return sentRefresh{failed: true}, sendRefreshFailure(
 			ctx,
@@ -185,8 +147,16 @@ func sendRefresh(
 			time.Unix(0, environment.NowNS),
 		)
 	}
+	// A seat EnrichNative could not read stays bare beside every other seat's
+	// enrichment; it and any account fault are named in the header.
+	scanErrors := slices.Clone(environment.Faults)
+	data, err = fleet.EnrichNative(ctx, database, data, native)
+	if err != nil {
+		scanErrors = append(scanErrors, err.Error())
+	}
 	output := fleet.ComposeFleet(environment, request.View, data, live, native...)
 	snapshot := buildSnapshot(ctx, environment, request, output)
+	snapshot.ScanError = strings.Join(scanErrors, "; ")
 	snapshot.Refreshing = refreshing
 	return sentRefresh{output: output, snapshot: snapshot}, publishSnapshot(ctx, snapshot, updates)
 }

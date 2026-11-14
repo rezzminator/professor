@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -36,6 +37,7 @@ func TestChatLSAdaptTheTypedVerbs(t *testing.T) {
 			Herdr:   []string{"w6:p2 .professor idle pfm-1", "not in herdr"},
 			Matched: 5, Truncated: true, KilledCount: 1,
 		},
+		inspected: headless.Status{State: headless.StateWorking},
 	}
 	service := newService("test", &backend{chat: verbs})
 	ctx := context.Background()
@@ -56,7 +58,7 @@ func TestChatLSAdaptTheTypedVerbs(t *testing.T) {
 		t.Fatalf("ls counts = %+v", ls)
 	}
 	live, killed := ls.Rows[0], ls.Rows[1]
-	if live.Session != "cx-a" || live.Engine != pfmengine.Codex || live.State != "idle" ||
+	if live.Session != "cx-a" || live.Engine != pfmengine.Codex || live.State != "working" ||
 		live.Account != 2 || live.Pane != "%1" || live.Kind != compose.LiveCodex.String() {
 		t.Fatalf("live row = %+v", live)
 	}
@@ -95,20 +97,21 @@ func TestChatLSRefuseBadInputBeforeTheVerb(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"ls": func() error { _, _, err := unwired.chatLS(ctx, nil, LSInput{}); return err },
 	} {
-		if err := call(); err == nil || !strings.Contains(err.Error(), name+" verb is not configured") {
+		if err := call(); err == nil || err.Error() != "ls verb is not configured" {
 			t.Errorf("%s without verbs error = %v", name, err)
 		}
 	}
 }
 
 func TestChatMCPDispatchesStatefulActionsInProcess(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got []string
 	service, err := NewConfigured("test", nil, Runtime{
+		Store: memoryStore(t),
 		Paths: resolved,
 		Dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
 			got = append(got, filepath.Join(args...))

@@ -46,11 +46,11 @@ func parityRuntime(t *testing.T) Runtime {
 
 func TestParityMainCurrentContext(t *testing.T) {
 	for _, tc := range []struct{ name, transcript, want string }{
-		{"payload", "", "33% 165.0K"},
-		{"empty transcript", "{}\n", "33% 165.0K"},
-		{"latest transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":50000,"cache_read_input_tokens":50000}}}` + "\n", "20% 100.0K"},
-		{"zero transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":0,"cache_read_input_tokens":0}}}` + "\n", "0% 0"},
-		{"model switch streaming", `{"type":"assistant","message":{"model":"gpt-6-luna","usage":{"input_tokens":100000}}}` + "\n" + `{"type":"assistant","message":{"model":"gpt-6.1-sol"}}` + "\n", "33% 165.0K"},
+		{"payload", "", "🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K │ 💰$?/?/?/? │ 💾–"},
+		{"empty transcript", "{}\n", "🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K │ 💰$0.00/0/0/0 │ 💾–"},
+		{"latest transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":50000,"cache_read_input_tokens":50000}}}` + "\n", "🟢 ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱ 20% 100.0K │ 💰$?/100.0K/0/0 API-eq │ 💾∅ 50%"},
+		{"zero transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":0,"cache_read_input_tokens":0}}}` + "\n", "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 0% 0 │ 💰$0.00/0/0/0 API-eq │ 💾–"},
+		{"model switch streaming", `{"type":"assistant","message":{"model":"gpt-6-luna","usage":{"input_tokens":100000}}}` + "\n" + `{"type":"assistant","message":{"model":"gpt-6.1-sol"}}` + "\n", "🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K │ 💰$?/0/0/0 API-eq │ 💾–"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := parityRuntime(t)
@@ -70,8 +70,8 @@ func TestParityMainCurrentContext(t *testing.T) {
 				}
 			}
 			_, line, _ := renderContextLine(r, d, "", r.now())
-			if got := stripANSICodes(line); !strings.Contains(got, tc.want) {
-				t.Fatalf("got %q; want adjacent %q", got, tc.want)
+			if got := stripANSICodes(line); got != tc.want {
+				t.Errorf("line = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -89,25 +89,19 @@ func TestParityClaudePayloadPercentWithoutCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, line, _ := renderContextLine(r, d, "", r.now())
-	if got := stripANSICodes(line); !strings.Contains(got, "33% 165.0K") {
+	if got := stripANSICodes(line); got != "🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K ctx unknown │ 💰$?/?/?/?" {
 		t.Fatalf("same-source payload percentage/count lost: %q", got)
 	}
 }
 
 func TestParitySubagentCatalogOverridesHarnessGuess(t *testing.T) {
 	r := parityRuntime(t)
-	raw := []byte(
-		`{"tasks":[{"id":"a","model":"gpt-6.1-sol-fast[1m]","tokenCount":70300,"contextWindowSize":1000000}]}`,
+	rows, _ := renderFixture(
+		t,
+		rowsFixture{sidDir: r.SIDDir, home: r.Home, noPrices: true, env: &paths.MapEnv{Values: r.Env}, now: r.now()},
+		`{"id":"a","model":"gpt-6.1-sol-fast[1m]","contextWindowSize":1000000}`,
 	)
-	out, err := RenderSubagents(raw, r.now(), r.SIDDir, nil, r.Home, &paths.MapEnv{Values: r.Env}, "", os.Stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var row subagentRow
-	if err := json.Unmarshal([]byte(out), &row); err != nil {
-		t.Fatal(err)
-	}
-	if got := stripANSICodes(row.Content); !strings.Contains(got, "14% 70.3K/500.0K") {
+	if got := stripANSICodes(rows["a"]); got != "?/?│?/500.0K Σ$?/?/?/?│role ?│sol-6.1│running│💾!" {
 		t.Fatalf("wrong provider capacity: %s", got)
 	}
 }
@@ -121,7 +115,7 @@ func TestParityOpenAIMainCacheHasNoClaudeTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, line, _ := renderContextLine(r, d, "", r.now())
-	if got := stripANSICodes(line); !strings.Contains(got, "💾∅ 87%") {
+	if got := stripANSICodes(line); got != "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 5% 14.2K │ 💰$?/21.3K/279/1 API-eq │ 💾∅ 87%" {
 		t.Fatalf("completed OpenAI cache share missing: %q", got)
 	}
 }
@@ -137,9 +131,10 @@ func TestContextCatalogStatesAndLazyRead(t *testing.T) {
 		{name: "unknown model", body: `{"models":[{"slug":"other","context_window":500000}]}`, model: "gpt-6.1-sol", state: "unknown"},
 		{name: "unknown capacity", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":null}]}`, model: "gpt-6.1-sol", state: "unknown"},
 		{name: "malformed", body: `{`, state: catalogError},
-		{name: "trailing JSON", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":500000}]}{}`, state: catalogError},
-		{name: "trailing garbage", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":500000}]}oops`, state: catalogError},
-		{name: "invalid value", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":-1}]}`, state: catalogError},
+		{name: "trailing JSON keeps the decoded catalog", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":500000}]}{}`, model: "gpt-6.1-sol", want: 500000},
+		{name: "trailing garbage keeps the decoded catalog", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":500000}]}oops`, model: "gpt-6.1-sol", want: 500000},
+		{name: "invalid value skips its model", body: `{"models":[{"slug":"gpt-6.1-sol","context_window":-1}]}`, model: "gpt-6.1-sol", state: "unknown"},
+		{name: "bad entries skip only themselves", body: `{"models":[{"context_window":7},{"slug":"gpt-6-luna","context_window":0},{"slug":"gpt-6.1-sol","context_window":500000},{"slug":"gpt-6.1-sol","context_window":1}]}`, model: "gpt-6.1-sol", want: 500000},
 		{name: "missing", state: "missing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

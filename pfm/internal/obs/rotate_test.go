@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,202 +13,40 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
-// TestRotatorCapsOneHomeAtKeepFiles pins the in-tree rotation: the current
-// file never passes maxMB, the generations shift down, and the home never
-// holds more than keep files.
-func TestRotatorCapsOneHomeAtKeepFiles(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, "log", "pfm.jsonl")
-	writer, err := newRotator(path, 3, 1, 0, clock.Real, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// One megabyte is the cap; each record is 64 KiB, so 48 records fill three
-	// generations and drop the oldest twice.
-	record := append([]byte(strings.Repeat("r", 64*1024-1)), '\n')
-	for written := 0; written < 48; written++ {
-		if _, err := writer.Write(record); err != nil {
-			t.Fatalf("write %d: %v", written, err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(filepath.Dir(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		names = append(names, entry.Name())
-	}
-	// The sidecar pfm.jsonl.lock is the cross-process rotation lock, not a generation.
-	if len(entries) != 4 || !slices.Contains(names, "pfm.jsonl.lock") {
-		t.Fatalf("log directory holds %v, want 3 files (pfm.jsonl, .1, .2) and the pfm.jsonl.lock sidecar", names)
-	}
-	for _, name := range []string{"pfm.jsonl", "pfm.jsonl.1", "pfm.jsonl.2"} {
-		info, err := os.Stat(filepath.Join(filepath.Dir(path), name))
-		if err != nil {
-			t.Fatalf("stat %s: %v", name, err)
-		}
-		if info.Size() > 1024*1024 {
-			t.Fatalf("%s = %d bytes, want at most 1 MiB", name, info.Size())
-		}
-	}
-}
+const mebibyte = 1024 * 1024
 
-func TestOpenRotatingLogKeepsDiagnosticAppendsBounded(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "diagnostic.jsonl")
-	for run := range 3 {
-		writer, err := OpenRotatingLog(path, 2, 1, io.Discard)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := writer.Write([]byte(strings.Repeat("r", 600*1024))); err != nil {
-			t.Fatalf("run %d: %v", run, err)
-		}
-		if err := writer.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, name := range []string{path, path + ".1"} {
-		info, err := os.Stat(name)
-		if err != nil || info.Size() != 600*1024 || info.Mode().Perm() != 0o600 {
-			t.Fatalf("diagnostic generation %s: info=%v, err=%v", name, info, err)
-		}
-	}
-	if _, err := os.Stat(path + ".2"); !os.IsNotExist(err) {
-		t.Fatalf("diagnostic exceeded its two-file cap: %v", err)
-	}
-}
+// segmentStart is the fake clock's time in the rotator tests: a segment
+// closed at it is named 2026-11-12T10-00-00.000Z.jsonl.
+var segmentStart = time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
 
-func TestRotatorAppendsToAnExistingFileAndDefaultsItsCaps(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	writer, err := newRotator(path, 0, 0, 0, clock.Real, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if writer.keep != DefaultKeepFiles || writer.maxBytes != int64(DefaultMaxMB)*1024*1024 {
-		t.Fatalf("zero settings gave keep=%d max=%d, want the package defaults", writer.keep, writer.maxBytes)
-	}
-	if _, err := writer.Write([]byte("first\n")); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := newRotator(path, 0, 0, 0, clock.Real, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := reopened.Write([]byte("second\n")); err != nil {
-		t.Fatal(err)
-	}
-	if err := reopened.Close(); err != nil {
-		t.Fatal(err)
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != "first\nsecond\n" {
-		t.Fatalf("content = %q, want both records appended", string(content))
-	}
-}
-
-// TestRotatorReportsAWriteFailureOnceThenRateLimitsThenAnnouncesRecovery is
-// L2-F8: a write/rotate failure after open must not vanish into slog's
-// discarded Handler.Handle error — it is surfaced on stderr once, rate
-// limited after that, and a return to health is announced once too.
-func TestRotatorReportsAWriteFailureOnceThenRateLimitsThenAnnouncesRecovery(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pfm.jsonl")
-	fake := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-	var stderr bytes.Buffer
-	writer, err := newRotator(path, 0, 0, 0, fake, &stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Force every write to fail — the same shape a disk-full or an unlinked
-	// file takes — by closing the underlying file out from under the rotator.
-	if err := writer.file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := writer.Write([]byte("one\n")); err == nil {
-		t.Fatal("write on a closed file unexpectedly succeeded")
-	}
-	if lines := strings.Count(stderr.String(), "\n"); lines != 1 {
-		t.Fatalf("first failure reported %d lines, want exactly 1: %s", lines, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), path) {
-		t.Fatalf("the failure report did not name the path: %s", stderr.String())
-	}
-	reportedOnce := stderr.String()
-
-	if _, err := writer.Write([]byte("two\n")); err == nil {
-		t.Fatal("write on a closed file unexpectedly succeeded")
-	}
-	if stderr.String() != reportedOnce {
-		t.Fatalf("a second failure inside the rate-limit window reported again: %s", stderr.String())
-	}
-
-	fake.Advance(failureReportInterval)
-	if _, err := writer.Write([]byte("three\n")); err == nil {
-		t.Fatal("write on a closed file unexpectedly succeeded")
-	}
-	if lines := strings.Count(stderr.String(), "\n"); lines != 2 {
-		t.Fatalf("a failure past the rate-limit window did not report again: %s", stderr.String())
-	}
-
-	// Recover: reopen the file (what a rotate, or a retried open, does) and
-	// write again — the recovered state is announced exactly once.
-	if err := writer.reopen(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := writer.Write([]byte("four\n")); err != nil {
-		t.Fatal(err)
-	}
-	if lines := strings.Count(stderr.String(), "\n"); lines != 3 {
-		t.Fatalf("a recovered write did not announce once: %s", stderr.String())
-	}
-	if _, err := writer.Write([]byte("five\n")); err != nil {
-		t.Fatal(err)
-	}
-	if lines := strings.Count(stderr.String(), "\n"); lines != 3 {
-		t.Fatalf("a second healthy write repeated the recovery announcement: %s", stderr.String())
-	}
-}
-
-func TestRotatorRefusesAnUnwritableDirectory(t *testing.T) {
-	blocked := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newRotator(filepath.Join(blocked, "log", "pfm.jsonl"), 3, 1, 0, clock.Real, io.Discard); err == nil {
-		t.Fatal("newRotator accepted a path under a regular file")
-	}
-}
-
-// openPair opens two writers on one log, the way two pfm processes do.
-func openPair(t *testing.T, keep, maxMB int, stderr io.Writer) (first, second *rotator, path string) {
+// openLogAt opens a rotator on a fresh log/pfm.jsonl with keep segments of
+// one mebibyte, timed by timing, closed at cleanup.
+func openLogAt(t *testing.T, path string, keep int, reduce bool, timing clock.Clock, stderr io.Writer) *rotator {
 	t.Helper()
-	path = filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	first, err := newRotator(path, keep, maxMB, 0, clock.Real, stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err = newRotator(path, keep, maxMB, 0, clock.Real, stderr)
+	writer, err := newRotator(path, keep, 1, reduce, timing, stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := first.Close(); err != nil {
-			t.Error(err)
-		}
-		if err := second.Close(); err != nil {
+		if err := writer.Close(); err != nil {
 			t.Error(err)
 		}
 	})
-	return first, second, path
+	return writer
+}
+
+// listDir names the files in dir, in order; an absent dir lists nothing.
+func listDir(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
 }
 
 func readFile(t *testing.T, path string) string {
@@ -221,88 +58,149 @@ func readFile(t *testing.T, path string) string {
 	return string(content)
 }
 
-// TestRotatorReopensInsteadOfRotatingAFileAnotherWriterRotated: a writer
-// whose file another process already renamed must attach to the fresh file at
-// the path — never rotate it on its own stale byte count, which renamed a
-// just-started tiny file into .1 and burned a generation slot on it.
-func TestRotatorReopensInsteadOfRotatingAFileAnotherWriterRotated(t *testing.T) {
-	first, _, path := openPair(t, 5, 1, io.Discard)
-	full := strings.Repeat("f", 1024*1024-5) + "\n"
-	if _, err := first.Write([]byte(full)); err != nil {
+func mustWrite(t *testing.T, writer io.Writer, record string) {
+	t.Helper()
+	if _, err := writer.Write([]byte(record)); err != nil {
 		t.Fatal(err)
 	}
-	// The second writer opened later than the first one's full record, so its
-	// own count says the file is nearly full too.
-	late, err := newRotator(path, 5, 1, 0, clock.Real, io.Discard)
+}
+
+// TestRotatorRollsPastTheSegmentSize: the append that carries the segment past
+// its size closes it into pfm.segments/ under the time it closed; one that
+// reaches the size exactly, or stops a byte short, keeps it current.
+func TestRotatorRollsPastTheSegmentSize(t *testing.T) {
+	for _, tc := range []struct {
+		size     int
+		segments []string
+		current  int
+	}{
+		{size: mebibyte - 1, segments: []string{}, current: mebibyte - 1},
+		{size: mebibyte, segments: []string{}, current: mebibyte},
+		{size: mebibyte + 1, segments: []string{"2026-11-12T10-00-00.000Z.jsonl"}, current: 0},
+	} {
+		path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
+		writer := openLogAt(t, path, 10, true, clock.NewFake(segmentStart), io.Discard)
+		record := strings.Repeat("r", tc.size-1) + "\n"
+		mustWrite(t, writer, record)
+		segments := listDir(t, filepath.Join(filepath.Dir(path), "pfm.segments"))
+		if strings.Join(segments, ",") != strings.Join(tc.segments, ",") {
+			t.Fatalf("size %d: pfm.segments = %v, want %v", tc.size, segments, tc.segments)
+		}
+		if got := len(readFile(t, path)); got != tc.current {
+			t.Fatalf("size %d: current segment = %d bytes, want %d", tc.size, got, tc.current)
+		}
+		if len(tc.segments) == 1 {
+			if got := readFile(t, filepath.Join(filepath.Dir(path), "pfm.segments", tc.segments[0])); got != record {
+				t.Fatalf("size %d: the closed segment = %d bytes, want the record (%d)", tc.size, len(got), len(record))
+			}
+		}
+	}
+}
+
+func TestOpenRotatingLogKeepsDiagnosticAppendsBounded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diagnostic.jsonl")
+	writer, err := OpenRotatingLog(path, 2, 1, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := late.Close(); err != nil {
-			t.Error(err)
+	record := strings.Repeat("r", 600*1024-1) + "\n"
+	for range 7 { // rolls after the 2nd, 4th and 6th; at the last, the 1st segment starts past 2 MiB
+		mustWrite(t, writer, record)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(path)
+	if got := listDir(t, dir); strings.Join(got, ",") != "diagnostic.jsonl,diagnostic.jsonl.lock,diagnostic.segments" {
+		t.Fatalf("diagnostic folder = %v, want the current segment, its lock and its segments, nothing kept", got)
+	}
+	segments := listDir(t, filepath.Join(dir, "diagnostic.segments"))
+	if len(segments) != 2 {
+		t.Fatalf("diagnostic.segments = %v, want the two newest segments", segments)
+	}
+	for _, segment := range segments {
+		if got := len(readFile(t, filepath.Join(dir, "diagnostic.segments", segment))); got != 2*len(record) {
+			t.Fatalf("segment %s = %d bytes, want two records (%d)", segment, got, 2*len(record))
 		}
-	})
-	if _, err := first.Write([]byte("tiny-a\n")); err != nil { // rotates: the full file becomes .1
-		t.Fatal(err)
 	}
-	if _, err := late.Write([]byte("tiny-b\n")); err != nil { // stale count says full
-		t.Fatal(err)
-	}
-	if got := readFile(t, path+".1"); got != full {
-		t.Fatalf(
-			".1 holds %d bytes, want the one full generation (%d): a stale writer rotated the fresh file",
-			len(got),
-			len(full),
-		)
-	}
-	if _, err := os.Stat(path + ".2"); !os.IsNotExist(err) {
-		t.Fatalf(".2 exists (stat err %v): the fresh small file was rotated into a slot", err)
-	}
-	if got := readFile(t, path); got != "tiny-a\ntiny-b\n" {
-		t.Fatalf("live file = %q, want both small records", got)
+	if got := len(readFile(t, path)); got != len(record) {
+		t.Fatalf("current segment = %d bytes, want one record", got)
 	}
 }
 
-// TestRotatorNeverWritesIntoARenamedFile: after another writer rotated, a
-// writer still holding the old descriptor appends to the file at the path,
-// not to the renamed generation.
-func TestRotatorNeverWritesIntoARenamedFile(t *testing.T) {
-	first, second, path := openPair(t, 5, 1, io.Discard)
-	record := strings.Repeat("r", 600*1024) + "\n"
-	for written := 0; written < 2; written++ { // the second one rotates
-		if _, err := first.Write([]byte(record)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := second.Write([]byte("from-second\n")); err != nil {
+func TestRotatorRefusesAnUnwritableDirectory(t *testing.T) {
+	blocked := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, path+".1"); got != record {
-		t.Fatalf(
-			".1 holds %d bytes, want exactly the rotated record (%d): a write landed in the renamed file",
-			len(got),
-			len(record),
-		)
-	}
-	if got := readFile(t, path); got != record+"from-second\n" {
-		t.Fatalf("live file = %d bytes, want the first writer's record and the second's line", len(got))
+	if _, err := newRotator(
+		filepath.Join(blocked, "log", "pfm.jsonl"),
+		3,
+		1,
+		true,
+		clock.Real,
+		io.Discard,
+	); err == nil {
+		t.Fatal("newRotator accepted a path under a regular file")
 	}
 }
 
-// TestRotatorWritersSharingAHomeKeepWholeGenerations: several writers racing
-// on one log rotate on the file's real size, so every kept generation is
-// close to the cap and none passes it.
-func TestRotatorWritersSharingAHomeKeepWholeGenerations(t *testing.T) {
+// TestRotatorAttachesToTheSegmentAnotherWriterOpened: a writer another process
+// rolled past appends at most reattachAfter longer to the closed segment —
+// whole and kept — and its next look, or the roll its stale offset asks for,
+// attaches it to the current one.
+func TestRotatorAttachesToTheSegmentAnotherWriterOpened(t *testing.T) {
+	for _, tc := range []struct {
+		idle   time.Duration
+		closed string
+	}{
+		{idle: reattachAfter - time.Millisecond, closed: "full\nlate\n"},
+		{idle: reattachAfter, closed: "full\n"},
+	} {
+		timing := clock.NewFake(segmentStart)
+		path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
+		first := openLogAt(t, path, 10, true, timing, io.Discard)
+		second := openLogAt(t, path, 10, true, timing, io.Discard)
+		full := strings.Repeat("f", mebibyte) + "\n"
+		mustWrite(t, first, full) // rolls
+		timing.Advance(tc.idle)
+		mustWrite(t, second, "late\n")
+		mustWrite(t, second, "next\n")
+		closed := readFile(t, filepath.Join(filepath.Dir(path), "pfm.segments", "2026-11-12T10-00-00.000Z.jsonl"))
+		if want := strings.Replace(tc.closed, "full\n", full, 1); closed != want {
+			t.Fatalf(
+				"idle %v: the closed segment = %q…, want %q…",
+				tc.idle,
+				closed[len(closed)-10:],
+				want[len(want)-10:],
+			)
+		}
+		wantCurrent := "late\nnext\n"
+		if tc.closed != "full\n" {
+			wantCurrent = "next\n"
+		}
+		if got := readFile(t, path); got != wantCurrent {
+			t.Fatalf("idle %v: current segment = %q, want %q", tc.idle, got, wantCurrent)
+		}
+		if got := listDir(t, filepath.Join(filepath.Dir(path), "pfm.segments")); len(got) != 1 {
+			t.Fatalf("idle %v: segments = %v, want only the one the first writer closed", tc.idle, got)
+		}
+	}
+}
+
+// TestRotatorWritersSharingAHomeKeepEveryRecordWhole: writers racing on one
+// log lose no record and split none, and every closed segment passed the size.
+func TestRotatorWritersSharingAHomeKeepEveryRecordWhole(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
 	const writers, perWriter, recordSize = 4, 100, 20 * 1024
-	record := []byte(strings.Repeat("r", recordSize-1) + "\n")
 	var group sync.WaitGroup
 	failures := make(chan error, writers)
-	for range writers {
-		writer, err := newRotator(path, 5, 1, 0, clock.Real, io.Discard)
+	for index := range writers {
+		writer, err := newRotator(path, 10, 1, true, clock.Real, io.Discard)
 		if err != nil {
 			t.Fatal(err)
 		}
+		record := []byte(strings.Repeat(string(rune('a'+index)), recordSize-1) + "\n")
 		group.Add(1)
 		go func() {
 			defer group.Done()
@@ -322,56 +220,103 @@ func TestRotatorWritersSharingAHomeKeepWholeGenerations(t *testing.T) {
 	for err := range failures {
 		t.Fatal(err)
 	}
-	for _, generation := range []string{".1", ".2", ".3", ".4"} {
-		info, err := os.Stat(path + generation)
-		if err != nil {
-			t.Fatalf("generation %s: %v", generation, err)
+	dir := filepath.Join(filepath.Dir(path), "pfm.segments")
+	records := strings.Count(readFile(t, path), "\n")
+	for _, name := range listDir(t, dir) {
+		content := readFile(t, filepath.Join(dir, name))
+		if len(content) <= mebibyte {
+			t.Errorf("segment %s = %d bytes, want past the 1 MiB it rolled at", name, len(content))
 		}
-		if info.Size() > 1024*1024 || info.Size() < 1024*1024-recordSize {
-			t.Errorf(
-				"generation %s = %d bytes, want a whole generation of at most 1 MiB and within one record of it",
-				generation,
-				info.Size(),
-			)
+		for _, line := range strings.Split(strings.TrimSuffix(content, "\n"), "\n") {
+			if len(line) != recordSize-1 || strings.Count(line, line[:1]) != recordSize-1 {
+				t.Fatalf("segment %s holds a split or mixed record of %d bytes", name, len(line))
+			}
+			records++
 		}
 	}
-	if info, err := os.Stat(path); err != nil || info.Size() > 1024*1024 {
-		t.Errorf("live file stat %v err %v, want at most 1 MiB", info, err)
+	if records != writers*perWriter {
+		t.Fatalf("the log holds %d records, want %d", records, writers*perWriter)
 	}
 }
 
-// TestRotatorReportsARotationFailureAndRecovers: a rotation step that fails is
-// reported on stderr and returned, and the next write after the cause is gone
-// attaches to the log again.
-func TestRotatorReportsARotationFailureAndRecovers(t *testing.T) {
+// TestRotatorReportsARollFailureAndRecovers: a roll that cannot close its
+// segment keeps the current one live, so no record is lost; the failure is
+// reported on stderr once inside the rate-limit window, and the first write
+// after the cause is gone rolls and announces the recovery.
+func TestRotatorReportsARollFailureAndRecovers(t *testing.T) {
 	var stderr bytes.Buffer
-	first, _, path := openPair(t, 2, 1, &stderr)
-	// With keep 2 the oldest generation is .1; a non-empty directory there
-	// cannot be dropped, so the rotation fails at its first step.
-	blocker := filepath.Join(path+".1", "held")
-	if err := os.MkdirAll(blocker, 0o700); err != nil {
+	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
+	first := openLogAt(t, path, 10, true, clock.NewFake(segmentStart), &stderr)
+	blocker := filepath.Join(filepath.Dir(path), "pfm.segments")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	record := []byte(strings.Repeat("r", 600*1024) + "\n")
-	if _, err := first.Write(record); err != nil {
+	record := strings.Repeat("r", 600*1024) + "\n"
+	for range 3 {
+		mustWrite(t, first, record)
+	}
+	if got := len(readFile(t, path)); got != 3*len(record) {
+		t.Fatalf("current segment = %d bytes, want all three records (%d)", got, 3*len(record))
+	}
+	failure := "pfm: activity log: create activity log segments " + blocker + ": mkdir " + blocker +
+		": not a directory\n"
+	if stderr.String() != failure {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), failure)
+	}
+	if err := os.Remove(blocker); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.Write(record); err == nil {
-		t.Fatal("a rotation that could not drop the oldest generation reported success")
+	mustWrite(t, first, "after\n")
+	if want := failure + "pfm: activity log: writes to " + path + " recovered\n"; stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
-	if !strings.Contains(stderr.String(), path+".1") {
-		t.Fatalf("the rotation failure did not reach stderr naming the generation: %q", stderr.String())
+	if got := readFile(t, path); got != "" {
+		t.Fatalf("current segment after the recovered roll = %q, want empty", got)
 	}
-	if err := os.RemoveAll(path + ".1"); err != nil {
+}
+
+// TestRotatorReattachesPastAHandleThatIsAlreadyClosed: a handle closed under
+// the writer fails the write that meets it, reported, and is dropped: the next
+// write opens the path afresh.
+func TestRotatorReattachesPastAHandleThatIsAlreadyClosed(t *testing.T) {
+	var stderr bytes.Buffer
+	timing := clock.NewFake(segmentStart)
+	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
+	writer := openLogAt(t, path, 10, true, timing, &stderr)
+	if err := writer.file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.Write([]byte("after\n")); err != nil {
-		t.Fatalf("write after the cause was removed: %v", err)
+	if _, err := writer.Write([]byte("lost\n")); err == nil {
+		t.Fatal("a write over a closed handle reported success")
 	}
-	if !strings.Contains(stderr.String(), "recovered") {
-		t.Fatalf("the recovery was not announced: %q", stderr.String())
+	mustWrite(t, writer, "kept\n")
+	if got := readFile(t, path); got != "kept\n" {
+		t.Fatalf("current segment = %q, want the record after the reattach", got)
 	}
-	if !strings.HasSuffix(readFile(t, path), "after\n") {
-		t.Fatal("the record after recovery is not in the live file")
+	want := "pfm: activity log: write activity log " + path + ": write " + path + ": file already closed\n" +
+		"pfm: activity log: writes to " + path + " recovered\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
+// BenchmarkRotatorWrite is one record's write through the activity log's
+// writer: a record the size of the live log's average (165 bytes), the
+// fleet's segment size, rolls included.
+func BenchmarkRotatorWrite(b *testing.B) {
+	writer, err := newRotator(filepath.Join(b.TempDir(), "log", "pfm.jsonl"), 10, 8, true, clock.Real, io.Discard)
+	if err != nil {
+		b.Fatal(err)
+	}
+	record := []byte(strings.Repeat("r", 164) + "\n")
+	b.ResetTimer()
+	for range b.N {
+		if _, err := writer.Write(record); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	if err := writer.Close(); err != nil {
+		b.Fatal(err)
 	}
 }

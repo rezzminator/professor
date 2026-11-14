@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,73 +10,147 @@ import (
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 )
 
-// Before the first sample, and where a host has no PSI, the header says so
-// instead of printing 0%.
+// Before the first sample, and where a host has no PSI or memory reading, the
+// header says so instead of printing 0%.
 func TestStatsHeaderNeverPrintsAMissingReadingAsZero(t *testing.T) {
-	model := NewModel(fixtureSnapshot(120))
-	model.tab = TabStats
-	pending := ansi.Strip(model.renderStatsHeader(120))
-	for _, want := range []string{"CPU …", "PSI …", "RAM …", "SWAP …"} {
-		if !strings.Contains(pending, want) {
-			t.Fatalf("pending header %q missing %q", pending, want)
-		}
-	}
-	model.stats = pfmstats.Snapshot{SampleTime: 1, Header: pfmstats.Header{PSIUnavailable: true, RAMPercent: 40}}
-	sampled := ansi.Strip(model.renderStatsHeader(120))
-	for _, want := range []string{"PSI n/a", "RAM 40%", "SWAP 0%"} {
-		if !strings.Contains(sampled, want) {
-			t.Fatalf("sampled header %q missing %q", sampled, want)
-		}
-	}
-}
-
-func TestStatsSeatWithoutAProcessRendersDashes(t *testing.T) {
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabStats
-	model.stats = pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{
-		{Seat: "gone", Name: "GONE", Engine: "claude", NoProcess: true},
-	}}
-	panel := ansi.Strip(model.renderStatsPanel(140, 6))
-	row := strings.Split(panel, "\n")[2]
-	if strings.Count(row, "—") != 3 || strings.Contains(row, "0B") || strings.Contains(row, "0.0%") {
-		t.Fatalf("process-less row %q, want CPU, RSS and RAM as dashes", row)
-	}
-}
-
-func TestStatsSeatWhoseProbeFailedRendersAnError(t *testing.T) {
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabStats
-	model.stats = pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{
-		{Seat: "unproved", Name: "UNPROVED", Engine: "claude", NoProcess: true, ProbeFailed: true},
-	}}
-	row := strings.Split(ansi.Strip(model.renderStatsPanel(140, 6)), "\n")[2]
-	if strings.Count(row, "err") != 3 || strings.Contains(row, "—") {
-		t.Fatalf("probe-failed row %q, want CPU, RSS and RAM as err", row)
-	}
-}
-
-// Names identify a row: with room on the line, none is truncated into an
-// ambiguous prefix of its neighbour.
-func TestStatsNameColumnsFitTheirNames(t *testing.T) {
-	model := NewModel(fixtureSnapshot(180))
-	model.tab = TabStats
-	long := "a-chat-name-well-past-the-old-thirty-two-cap"
-	model.stats = pfmstats.Snapshot{
-		Ready: true,
-		Chats: []pfmstats.Chat{{Seat: "long", Name: long, Engine: "claude", CPUValid: true}},
-		Docker: []pfmstats.Container{
-			{ID: "1", Name: "acme-postgres-metrics", Image: "postgres:16"},
-			{ID: "2", Name: "acme-postgres-metrics-test", Image: "postgres:16"},
+	for _, tc := range []struct {
+		name  string
+		stats pfmstats.Snapshot
+		want  string
+	}{
+		{"pending", pfmstats.Snapshot{}, "CPU … · PSI … · RAM … · SWAP …"},
+		{
+			"sampled without PSI",
+			pfmstats.Snapshot{SampleTime: 1, Header: pfmstats.Header{PSIUnavailable: true, RAMPercent: 40}},
+			"CPU … · PSI n/a · RAM 40% · SWAP 0%",
 		},
+		{
+			"memory unread",
+			pfmstats.Snapshot{SampleTime: 1, Header: pfmstats.Header{RAMUnread: true, SwapUnread: true}},
+			"CPU … · PSI 0% · RAM err · SWAP err",
+		},
+	} {
+		model := NewModel(fixtureSnapshot(120))
+		model.tab, model.stats = TabStats, tc.stats
+		if got := strings.TrimSpace(ansi.Strip(model.renderStatsHeader(120))); got != tc.want {
+			t.Errorf("%s: header = %q, want %q", tc.name, got, tc.want)
+		}
 	}
-	if panel := ansi.Strip(model.renderStatsPanel(180, 6)); !strings.Contains(panel, long) {
-		t.Fatalf("chat name truncated with room to spare:\n%s", panel)
+}
+
+// statsPanelLines is a rendered stats panel line by line, the frame and the
+// padding around each line cut away.
+func statsPanelLines(panel string) []string {
+	lines := strings.Split(ansi.Strip(panel), "\n")
+	for index, line := range lines {
+		lines[index] = strings.TrimRight(strings.TrimLeft(line, "│╭╰─ "), "│╮╯─ ")
 	}
-	model.statsSubtab = StatsDocker
-	panel := ansi.Strip(model.renderStatsPanel(180, 6))
-	for _, name := range []string{"acme-postgres-metrics ", "acme-postgres-metrics-test"} {
-		if !strings.Contains(panel, name) {
-			t.Fatalf("Docker name %q truncated:\n%s", name, panel)
+	return lines
+}
+
+// The stats panel in every state it can meet: a seat without a process shows
+// dashes and one whose probe failed shows err (never 0); names are never cut
+// while the line has room; a host without cgroups says so; a sampled empty
+// list is not pending; an unlimited container's MEM% without host RAM is a
+// dash; a fleet longer than the panel scrolls to the cursor's page.
+func TestStatsPanelRendersEveryState(t *testing.T) {
+	const chatHeader = "NAME     ENGINE    CPU%↓      RSS   RAM%    TOKENS  TOK/MIN  GEAR        USAGE"
+	const dockerHeader = "NAME     IMAGE                                                                                            CPU%↓   MEMORY    LIMIT   MEM%"
+	chats := make([]pfmstats.Chat, 10)
+	for index := range chats {
+		chats[index] = pfmstats.Chat{Seat: string(rune('a' + index)), Name: "chat-" + string(rune('a'+index))}
+	}
+	for _, tc := range []struct {
+		name   string
+		width  int
+		docker bool
+		cursor int
+		stats  pfmstats.Snapshot
+		want   []string
+	}{
+		{
+			name: "a seat without a process", width: 140,
+			stats: pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{
+				{Seat: "gone", Name: "GONE", Engine: "claude", NoProcess: true},
+			}},
+			want: []string{"stats", chatHeader, "GONE     claude        —        —      —         …        …     -            …", "", "", ""},
+		},
+		{
+			name: "a seat whose probe failed", width: 140,
+			stats: pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{
+				{Seat: "unproved", Name: "UNPROVED", Engine: "claude", NoProcess: true, ProbeFailed: true},
+			}},
+			want: []string{"stats", chatHeader, "UNPROVED claude      err      err    err         …        …     -            …", "", "", ""},
+		},
+		{
+			name: "a long chat name with room to spare", width: 180,
+			stats: pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{
+				{Seat: "long", Name: "a-chat-name-well-past-the-old-thirty-two-cap", Engine: "claude", CPUValid: true},
+			}},
+			want: []string{
+				"stats",
+				"NAME                                         ENGINE    CPU%↓      RSS   RAM%    TOKENS  TOK/MIN  GEAR        USAGE",
+				"a-chat-name-well-past-the-old-thirty-two-cap claude     0.0%       0B   0.0%         …        …     -            …",
+				"", "", "",
+			},
+		},
+		{
+			name: "two Docker names one the prefix of the other", width: 180, docker: true,
+			stats: pfmstats.Snapshot{Ready: true, Docker: []pfmstats.Container{
+				{ID: "1", Name: "acme-postgres-metrics", Image: "postgres:16"},
+				{ID: "2", Name: "acme-postgres-metrics-test", Image: "postgres:16"},
+			}},
+			want: []string{
+				"stats",
+				"NAME                       IMAGE                                                                                                                  CPU%↓   MEMORY    LIMIT   MEM%",
+				"acme-postgres-metrics      postgres:16                                                                                                                …       0B      max      —",
+				"acme-postgres-metrics-test postgres:16                                                                                                                …       0B      max      —",
+				"", "",
+			},
+		},
+		{
+			name: "a host without cgroups", width: 140, docker: true,
+			stats: pfmstats.Snapshot{Ready: true, DockerUnsupported: true},
+			want:  []string{"stats", dockerHeader, "Docker stats read Linux cgroups; this host has none", "", "", ""},
+		},
+		{
+			name: "an empty list after the first sample", width: 140,
+			stats: pfmstats.Snapshot{SampleTime: 1},
+			want:  []string{"stats", chatHeader, "no live rows", "", "", ""},
+		},
+		{
+			name: "an unlimited container without host RAM", width: 140, docker: true,
+			stats: pfmstats.Snapshot{Ready: true, Docker: []pfmstats.Container{
+				{ID: "a", Name: "free", Image: "img", MemoryBytes: 1 << 20},
+			}},
+			want: []string{
+				"stats", dockerHeader,
+				"free     img                                                                                                  …     1.0M      max      —",
+				"", "", "",
+			},
+		},
+		{
+			name: "cursor 7 of 10 in a three-row panel", width: 140, cursor: 7,
+			stats: pfmstats.Snapshot{Ready: true, Chats: chats},
+			want: []string{
+				"stats 7-9/10", chatHeader,
+				"chat-g                 …       0B   0.0%         …        …     -            …",
+				"› chat-h                 …       0B   0.0%         …        …     -            …",
+				"chat-i                 …       0B   0.0%         …        …     -            …",
+				"",
+			},
+		},
+	} {
+		model := NewModel(fixtureSnapshot(tc.width))
+		model.tab, model.stats, model.statsCursor = TabStats, tc.stats, tc.cursor
+		if tc.cursor > 0 { // a cursor marks its row only with the list focused
+			model.statsFocus = StatsFocusContent
+		}
+		if tc.docker {
+			model.statsSubtab = StatsDocker
+		}
+		if got := statsPanelLines(model.renderStatsPanel(tc.width, 6)); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: panel =\n%q\nwant\n%q", tc.name, got, tc.want)
 		}
 	}
 }
@@ -116,66 +191,10 @@ func TestStatsDockerSortsAndKeepsItsCursor(t *testing.T) {
 	}
 }
 
-func TestStatsDockerSaysWhenTheHostHasNoCgroups(t *testing.T) {
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabStats
-	model.statsSubtab = StatsDocker
-	model.stats = pfmstats.Snapshot{Ready: true, DockerUnsupported: true}
-	if panel := ansi.Strip(model.renderStatsPanel(140, 6)); !strings.Contains(panel, "no cgroups") &&
-		!strings.Contains(panel, "has none") {
-		t.Fatalf("unsupported Docker reads as empty:\n%s", panel)
-	}
-}
-
-// The first sample landed with no live rows: the list says so, as the header
-// already shows real readings, rather than still waiting.
-func TestStatsEmptyListAfterTheFirstSampleIsNotPending(t *testing.T) {
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabStats
-	model.stats = pfmstats.Snapshot{SampleTime: 1}
-	if panel := ansi.Strip(model.renderStatsPanel(140, 6)); !strings.Contains(panel, "no live rows") {
-		t.Fatalf("sampled empty list still pending:\n%s", panel)
-	}
-}
-
-// An unlimited container's MEM% is a share of host RAM; with host RAM unread
-// it is unknown, never a measured 0.0%.
-func TestStatsUnlimitedContainerWithoutHostRAMIsUnknown(t *testing.T) {
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabStats
-	model.statsSubtab = StatsDocker
-	model.stats = pfmstats.Snapshot{Ready: true, Docker: []pfmstats.Container{
-		{ID: "a", Name: "free", Image: "img", MemoryBytes: 1 << 20},
-	}}
-	row := strings.Split(ansi.Strip(model.renderStatsPanel(140, 6)), "\n")[2]
-	if strings.Contains(row, "0.0%") || !strings.HasSuffix(strings.TrimRight(row, " │"), "—") {
-		t.Fatalf("unlimited container without host RAM %q, want MEM%% as a dash", row)
-	}
-}
-
 func dockerOrder(model Model) string {
 	names := make([]string, len(model.stats.Docker))
 	for index := range model.stats.Docker {
 		names[index] = model.stats.Docker[index].Name
 	}
 	return strings.Join(names, " ")
-}
-
-// A fleet longer than the panel scrolls to the cursor's page; rows past the
-// bottom border never vanish under a cursor that moved onto them.
-func TestStatsListsScrollToTheCursor(t *testing.T) {
-	model := NewModel(fixtureSnapshot(140))
-	model.tab = TabStats
-	model.statsFocus = StatsFocusContent
-	chats := make([]pfmstats.Chat, 10)
-	for index := range chats {
-		chats[index] = pfmstats.Chat{Seat: string(rune('a' + index)), Name: "chat-" + string(rune('a'+index))}
-	}
-	model.stats = pfmstats.Snapshot{Ready: true, Chats: chats}
-	model.statsCursor = 7
-	panel := ansi.Strip(model.renderStatsPanel(140, 6))
-	if !strings.Contains(panel, "chat-h") || strings.Contains(panel, "chat-a") ||
-		!strings.Contains(panel, "stats 7-9/10") {
-		t.Fatalf("cursor 7 of 10 in a 3-row panel:\n%s", panel)
-	}
 }

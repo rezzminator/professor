@@ -16,7 +16,7 @@ Two things ship on every release: the blueprint tree (this repo) and the `pfm` b
 
 ## Versioning
 
-[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one tag `v{MAJOR}.{MINOR}.{PATCH}` per release, made on the release pull request's merge commit by the release workflow and never pushed by hand. Tags are immutable — never deleted or moved. Between releases `develop` carries the next development version, `{MAJOR}.{MINOR+1}.0-alpha`; the release commit drops the suffix, and the release's close opens the next `-alpha` line, so a build from `develop` never reports itself as the release it follows. Tags never carry a suffix.
+[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one tag `v{MAJOR}.{MINOR}.{PATCH}` per release, made on the release pull request's merge commit by the `publish` workflow and never pushed by hand. Tags are immutable — never deleted or moved. Between releases `develop` carries the next development version, `{MAJOR}.{MINOR+1}.0-alpha`; the release commit drops the suffix, and the release's close opens the next `-alpha` line, so a build from `develop` never reports itself as the release it follows. Tags never carry a suffix.
 
 The bump has a floor set by the sections the release's note holds. While the major is 0, the minor is the breaking component, as in Cargo:
 
@@ -82,33 +82,41 @@ Notes before `v0.78.0` wrote actions as `#### → For:`, `#### → For adopters 
 
 ### Verification
 
-`## Verification` closes the note: how the release was proven — the gate, the CI run, the leak scan, the preflight, the review — as facts and numbers. It holds prose only, never a bullet or an action.
+`## Verification` closes the note: how the release was proven — the gate, the leak scan, the preflight, the review — as facts and numbers. It holds prose only, never a bullet or an action.
 
 ## Cutting a release
 
 Maintainer command, run in this repo only:
 
-- `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` — releases `develop`'s tip as it stands at the cut, in one pass: the full gate, the leak scan, `release-check preflight`, the `ci.yml` run on that commit, the note and, when the cut changes the update path, one review, all at once; then the release commit (the note, `CHANGELOG.md` and the version stamps, nothing else), `make release-check`, the pull request from `release/v{X.Y.Z}` into `main`, its merge — which tags and publishes — and the merge back into `develop`. Typing it is the maintainer's publish request; `--dry` stops before any push. Every check is a stop: nothing is fixed inside a release, the fix lands on `develop` and the maintainer cuts again.
+- `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` — releases `develop`'s tip as it stands at the cut, in one pass: the full gate, the leak scan, `release-check preflight`, the note and, when the cut changes the update path, one review, all at once; then the release commit (the note, `CHANGELOG.md` and the version stamps, nothing else), `make release-check`, the pull request from `release/v{X.Y.Z}` into `main`, whose `ci.yml` run must pass, its merge — which tags and publishes — and the merge back into `develop`. Typing it is the maintainer's publish request; `--dry` stops before any push. Every check is a stop: nothing is fixed inside a release, the fix lands on `develop` and the maintainer cuts again.
+
+Plugins release first. The cut stops while any plugin `.gitmodules` registers holds a commit past its own latest GitHub release, in professor's gitlink or in the plugin's `develop`. Release each such plugin through its own release pull request (`develop` into `main`, green `ci`, merge; its publish workflow tags it), pin professor's gitlink on `develop` at that released commit, then cut.
 
 The procedure is `.claude/commands/pfm/release.md`; the design and the reasons are `docs/design/release/`.
 
 ## What the release pull request triggers
 
-The workflow is `.github/workflows/release.yml`; it runs only on a pull request into `main` (and a manual `workflow_dispatch`, which builds test artifacts and publishes nothing). `make release-check` runs every pull-request check locally first, after `git fetch origin main`, except the `check` job's Scan step: the HOL AI Plugin Scanner is a GitHub Action with no local install, and the target says so.
+Two workflows run on the pull request into `main`: `.github/workflows/ci.yml` gates it while it is open, and `.github/workflows/publish.yml` runs when it closes merged. No workflow runs on a push. `make release-check` runs the `build` and `release` jobs' checks and the mirror generation the `scan` job scores locally first, after `git fetch origin main`; the HOL AI Plugin Scanner itself is a GitHub Action with no local install, and the target says so.
 
-While the release pull request from `release/v{X.Y.Z}` into `main` is open, its jobs gate the merge — the `main is release-only` ruleset requires `check` and `release`:
+While the release pull request from `release/v{X.Y.Z}` into `main` is open, `ci.yml`'s jobs run in parallel and gate the merge — the `main is release-only` ruleset requires one check, the aggregate `ci`:
 
-1. **`check`** — generates the Codex and OpenCode mirrors and runs the HOL AI Plugin Scanner over the tree.
-2. **Build** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`); each platform binary uploads as its own workflow artifact.
-3. **`release`** — fails unless every build leg passed, `VERSION` moved past `main`'s as a plain `X.Y.Z`, `releases/v{VERSION}.md` exists, and `release-check notes` passes on it.
+1. **`gate (unit|e2e|race|mirrors|rest)`** — the local gate's own step list (`gate_run` in `infra/fence/checks.sh`) natively on `ubuntu-latest` through `bash .claude/scripts/dev.sh gate all`, one slice per job. `PFM_GATE_ONLY` and `PFM_GATE_SKIP` select the slice: extended regexes matched against whole step names in `steps_add` (`infra/fence/steps.sh`); `rest` skips the four named slices, so a new gate step runs in CI with no workflow edit. The pinned shellcheck, rumdl, Node and Herdr come from `infra/fence/pinned-tools.sh`, the same installs the fence image runs.
+2. **`macos (unit|e2e)`** — the composite action `.github/actions/macos-suite` on `macos-15`: `unit` runs the refresh-scope fixture under the system Bash 3.2, the unit tier of only the packages whose files differ on darwin (the gate runs the whole unit tier on Linux) and the jail tier; `e2e` runs the whole tagged e2e suite.
+3. **`fresh-install (ubuntu-latest|macos-15)`** — `scripts/fresh-install-test.sh`: `INSTALL.md` as written in a fresh HOME, then update and rollback across releases.
+4. **`build`** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`) through `make release-binary`; nothing is uploaded.
+5. **`scan`** — generates the Codex and OpenCode mirrors and runs the HOL AI Plugin Scanner over the tree.
+6. **`release`** — `make release`: fails unless `VERSION` moved past `main`'s as a plain `X.Y.Z`, `releases/v{VERSION}.md` exists, and `release-check notes` passes on it, so `main` takes only release pull requests.
+7. **`ci`** — fails unless every other job succeeded; a skipped or cancelled job counts as a failure, unless a hand-started run excluded it.
 
-Merging the pull request is the release. Its `publish` job:
+`gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` runs the same jobs on demand on any branch, skipping the jobs named (`gate fresh-install build scan release` leaves the macOS parts).
+
+Merging the pull request is the release. `publish.yml`'s `publish` job:
 
 1. Fails when the tag `v{VERSION}` already exists.
 2. Builds the four platform binaries again from the merge commit and writes `SHA256SUMS`.
 3. Creates the GitHub Release `v{VERSION}` on the merge commit — the tag is made there, never pushed by hand — attaching the `pfm_*` binaries and `SHA256SUMS`, with `releases/v{VERSION}.md` as the release body verbatim.
 
-Its `verify` job then checks what GitHub serves: it downloads the release's assets, verifies them with `sha256sum -c SHA256SUMS`, requires the `linux/amd64` binary's `version` to print `pfm v{VERSION}`, and requires the release body to equal `releases/v{VERSION}.md` up to a trailing newline.
+`publish.yml`'s `verify` job then checks what GitHub serves: it downloads the release's assets, verifies them with `sha256sum -c SHA256SUMS`, requires the `linux/amd64` binary's `version` to print `pfm v{VERSION}`, and requires the release body to equal `releases/v{VERSION}.md` up to a trailing newline.
 
 ## Pulling an update (adopter)
 

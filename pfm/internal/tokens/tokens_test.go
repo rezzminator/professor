@@ -403,3 +403,20 @@ func writeTranscript(t *testing.T, path string, lines ...string) string {
 	}
 	return path
 }
+
+// golden compares got with testdata/{file}; a mismatch prints the GOLDEN line the fill script writes from.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Errorf(
+			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN internal/tokens/testdata/%s = %q",
+			file,
+			err,
+			want,
+			got,
+			file,
+			got,
+		)
+	}
+}

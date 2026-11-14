@@ -5,14 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -56,7 +53,7 @@ func (proc *bridgeProc) Stat(pid int) (gather.ProcStat, error) {
 }
 
 func TestHerdrBridgeProof(t *testing.T) {
-	const tmuxDir = "/fixture/tmux-501"
+	tmuxDir := testjail.Place("/fixture/tmux-501")
 	clientArgv := []string{"tmux", "-L", "cc-1", "attach", "-t", "cc-1"}
 	for _, tc := range []struct {
 		name          string
@@ -142,7 +139,7 @@ func TestHerdrBridgeProof(t *testing.T) {
 				values: paths.Values{TmuxDir: tmuxDir},
 				proc:   proc,
 				foreground: func(_ context.Context, socket, pane string) ([]int, error) {
-					if socket != "/fixture/herdr.sock" || pane != "w6:p3" {
+					if socket != testjail.Place("/fixture/herdr.sock") || pane != "w6:p3" {
 						t.Errorf("foreground of %s %s", socket, pane)
 					}
 					return foreground, tc.foregroundErr
@@ -164,7 +161,7 @@ func TestHerdrBridgeProof(t *testing.T) {
 					return "", fmt.Errorf("unexpected tmux %q", args)
 				},
 			}
-			got, err := prover.prove(context.Background(), "/fixture/herdr.sock", "w6:p3")
+			got, err := prover.prove(context.Background(), testjail.Place("/fixture/herdr.sock"), "w6:p3")
 			if tc.wantErr == "" {
 				if err != nil || got != tc.want {
 					t.Fatalf("bridge = %+v, %v; want %+v", got, err, tc.want)
@@ -192,7 +189,7 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 	}{
 		{name: "shell", argv: []string{"-zsh"}, notFleet: true},
 		{name: "shell-helper", argv: []string{"id", "-Gn"}, notFleet: true},
-		{name: "default-shell-wrapper", argv: []string{"/fixture/pfm-herdr-shell"}, notFleet: true},
+		{name: "default-shell-wrapper", argv: []string{testjail.Place("/fixture/pfm-herdr-shell")}, notFleet: true},
 		{name: "picker-before-chat", argv: []string{"pfm"}, notFleet: true},
 		{name: "empty-foreground", notFleet: true},
 		{name: "missing-process", argv: []string{"-zsh"}, missing: true},
@@ -205,8 +202,8 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 		{name: "durable-owner-unproved", argv: []string{"-zsh"}, durable: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			const socket = "/fixture/herdr.sock"
-			ownerSocket, pane := "/fixture/other.sock", "w6:p3"
+			socket := testjail.Place("/fixture/herdr.sock")
+			ownerSocket, pane := testjail.Place("/fixture/other.sock"), "w6:p3"
 			if tc.durable {
 				ownerSocket, pane = socket, "w1:p2"
 			}
@@ -219,7 +216,7 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 			}
 			proc.argv[8], proc.starts[8] = []string{"-zsh"}, []uint64{2}
 			prover := bridgeProver{
-				values: paths.Values{TmuxDir: "/fixture/tmux"}, proc: proc,
+				values: paths.Values{TmuxDir: testjail.Place("/fixture/tmux")}, proc: proc,
 				foreground: func(context.Context, string, string) ([]int, error) {
 					if tc.argv == nil {
 						return nil, tc.foregroundErr
@@ -245,7 +242,7 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 }
 
 func TestHerdrPaneProofAcceptsBridge(t *testing.T) {
-	seedNativeOwner(t, Target{SocketPath: "/fixture/other.sock", Engine: "cc"})
+	seedNativeOwner(t, Target{SocketPath: testjail.Place("/fixture/other.sock"), Engine: "cc"})
 	for _, tc := range []struct {
 		name      string
 		bridgeErr error
@@ -261,14 +258,18 @@ func TestHerdrPaneProofAcceptsBridge(t *testing.T) {
 			var asked string
 			err := proveHerdrPaneOrBridge(
 				context.Background(),
-				"/fixture/herdr.sock",
+				testjail.Place("/fixture/herdr.sock"),
 				"w6:p3",
 				func(_ context.Context, socket, pane string) (HerdrBridge, error) {
 					asked = socket + " " + pane
-					return HerdrBridge{TmuxSocket: "/fixture/tmux/cc-1", Session: "cc-1", ClientPID: 7}, tc.bridgeErr
+					return HerdrBridge{
+						TmuxSocket: testjail.Place("/fixture/tmux/cc-1"),
+						Session:    "cc-1",
+						ClientPID:  7,
+					}, tc.bridgeErr
 				},
 			)
-			if asked != "/fixture/herdr.sock w6:p3" {
+			if asked != testjail.Place("/fixture/herdr.sock w6:p3") {
 				t.Fatalf("bridge asked %q", asked)
 			}
 			if len(tc.wantErr) == 0 {
@@ -292,15 +293,7 @@ func TestHerdrBridgeForegroundIsThatPanes(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply, wantErr string
 		want                 []int
-		held                 bool
 	}{
-		// Herdr sees herdr-keep's attach client; the proof seeds from its holder's shell.
-		{
-			name:  "held-pane",
-			reply: `{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","foreground_processes":[{"pid":77,"name":"herdr-keep"}]}}`,
-			want:  []int{20},
-			held:  true,
-		},
 		{
 			name:  "same-pane",
 			reply: `{"type":"pane_process_info","process_info":{"pane_id":"w6:p3","foreground_processes":[{"pid":10730}]}}`,
@@ -314,36 +307,14 @@ func TestHerdrBridgeForegroundIsThatPanes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			call := func(_ context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error) {
-				if socket != "/fixture/herdr.sock" || len(lines) != 1 ||
+				if socket != testjail.Place("/fixture/herdr.sock") || len(lines) != 1 ||
 					!strings.Contains(string(lines[0]), `"w6:p3"`) {
 					t.Errorf("process_info request %s %q", socket, lines)
 				}
 				return []json.RawMessage{json.RawMessage(tc.reply)}, nil
 			}
-			keep := &herdr.Keep{}
-			if tc.held {
-				// Holder 5 runs shell 10, whose terminal's foreground group is 20.
-				proc := t.TempDir()
-				for name, body := range map[string]string{
-					"stat":       "btime 1000000000\n",
-					"5/stat":     "5 (herdr-keep) S 1 5 5 0 0 " + strings.Repeat("0 ", 13) + "2 0\n",
-					"10/stat":    "10 (zsh) S 5 10 10 0 20 " + strings.Repeat("0 ", 13) + "3 0\n",
-					"20/stat":    "20 (claude) S 10 20 10 0 20 " + strings.Repeat("0 ", 13) + "4 0\n",
-					"20/cmdline": "claude\x00",
-				} {
-					path := filepath.Join(proc, name)
-					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-						t.Fatal(err)
-					}
-				}
-				testjail.StageHerdrKeep(t, testjail.HerdrKeepListing(5, 2, 10, 3, "w6:p3", "/fixture/herdr.sock"), 0)
-				keep = gather.HerdrKeep(gather.NewProcFS(proc))
-			}
-			got, err := bridgeForeground(call, func() uint64 { return 1 }, keep)(
-				context.Background(), "/fixture/herdr.sock", "w6:p3")
+			got, err := bridgeForeground(call, func() uint64 { return 1 })(
+				context.Background(), testjail.Place("/fixture/herdr.sock"), "w6:p3")
 			if tc.wantErr == "" {
 				if err != nil || !slices.Equal(got, tc.want) {
 					t.Fatalf("foreground = %v, %v; want %v", got, err, tc.want)
@@ -352,132 +323,5 @@ func TestHerdrBridgeForegroundIsThatPanes(t *testing.T) {
 				t.Fatalf("foreground = %v, %v; want an error naming %q", got, err, tc.wantErr)
 			}
 		})
-	}
-}
-
-// TestHerdrBridgeRecordReadOnARealServer reads the session record through a
-// real tmux server, the producer a fixture cannot stand in for: tmux 3.x reads
-// a bare "=name" target as no session, and -q turned that into an empty
-// record. The exact-session target reads the attached session's own record,
-// never a session its name prefixes, and a failed read is an error naming
-// tmux's reason, never "no record".
-func TestHerdrBridgeRecordReadOnARealServer(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	root := testjail.ShortRoot(t)
-	socketPath := filepath.Join(root, "cc-1")
-	tmux := func(args ...string) {
-		t.Helper()
-		full := append([]string{"-S", socketPath, "-f", "/dev/null"}, args...)
-		if output, err := exec.Command("tmux", full...).CombinedOutput(); err != nil {
-			t.Fatalf("tmux %q: %v: %s", args, err, output)
-		}
-	}
-	tmux("new-session", "-d", "-s", "cc-1", "sleep", "120")
-	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socketPath, "kill-server").Run() })
-	tmux("new-session", "-d", "-s", "cc-10", "sleep", "120")
-	tmux("set-option", "-t", "cc-10:", "@pfm_herdr", `{"session_id":"other"}`)
-	for _, tc := range []struct {
-		name, session, record, wantErr, refuse string
-	}{
-		{name: "proved", session: "cc-1", record: `{"session_id":"s1"}`},
-		{
-			name: "a prefix session's record is not this one's, and re-attach is the fix", session: "cc-1",
-			wantErr: "holds no pfm Herdr record: re-attach",
-		},
-		{
-			name: "a failed read names tmux's reason", session: "gone", wantErr: "read @pfm_herdr of session gone",
-			refuse: "holds no pfm Herdr record",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.record != "" {
-				tmux("set-option", "-t", "cc-1:", "@pfm_herdr", tc.record)
-			} else {
-				tmux("set-option", "-u", "-t", "cc-1:", "@pfm_herdr")
-			}
-			prover := bridgeProver{
-				values: paths.Values{TmuxDir: root},
-				proc: &bridgeProc{
-					argv:   map[int][]string{10730: {"tmux", "-S", socketPath, "attach"}},
-					starts: map[int][]uint64{10730: {9}},
-					reads:  map[int]int{},
-				},
-				foreground: func(context.Context, string, string) ([]int, error) { return []int{10730}, nil },
-				tmux: func(ctx context.Context, server string, args ...string) (string, error) {
-					if args[0] == "list-clients" {
-						return "10730\x1f" + tc.session + "\n", nil
-					}
-					return bridgeTmux(ctx, server, args...)
-				},
-			}
-			got, err := prover.prove(context.Background(), "/fixture/herdr.sock", "w6:p3")
-			if tc.wantErr == "" {
-				want := HerdrBridge{TmuxSocket: socketPath, Session: "cc-1", ClientPID: 10730}
-				if err != nil || got != want {
-					t.Fatalf("bridge = %+v, %v; want %+v", got, err, want)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) ||
-				tc.refuse != "" && strings.Contains(err.Error(), tc.refuse) {
-				t.Fatalf("bridge = %+v, %v; want an error naming %q", got, err, tc.wantErr)
-			}
-		})
-	}
-}
-
-// TestHerdrBridgeTmuxGivesUpOnAFrozenServer pins the bridge read's bound: a
-// pfm tmux server that accepts and never answers fails the proof within
-// gather.ProbeTimeout, so it never stalls the painter that asked.
-func TestHerdrBridgeTmuxGivesUpOnAFrozenServer(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	root := testjail.ShortRoot(t)
-	// tmux's own refusal reason reaches the proof's error, not only its exit status.
-	if _, err := bridgeTmux(context.Background(), filepath.Join(root, "gone"), "list-clients"); err == nil ||
-		(!strings.Contains(err.Error(), "no server running") && !strings.Contains(err.Error(), "error connecting")) {
-		t.Fatalf("read of a missing server = %v, want tmux's refusal reason", err)
-	}
-	socketPath := filepath.Join(root, "cc-1")
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	held := make(chan net.Conn, 16)
-	t.Cleanup(func() {
-		_ = listener.Close()
-		for len(held) > 0 {
-			_ = (<-held).Close()
-		}
-	})
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			held <- conn // held open, never answered
-		}
-	}()
-	done := make(chan error, 1)
-	go func() {
-		_, err := bridgeTmux(context.Background(), socketPath, "list-clients", "-F", "#{client_pid}")
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if !errors.Is(err, gather.ErrServerUnresponsive) {
-			t.Fatalf(
-				"read of a frozen server = %v, want %v within %s",
-				err,
-				gather.ErrServerUnresponsive,
-				gather.ProbeTimeout,
-			)
-		}
-	case <-time.After(gather.ProbeTimeout + 5*time.Second):
-		t.Fatalf("read of a frozen server still waiting after %s", gather.ProbeTimeout+5*time.Second)
 	}
 }

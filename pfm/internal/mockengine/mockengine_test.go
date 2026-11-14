@@ -3,6 +3,7 @@ package mockengine
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,6 +44,9 @@ type fixture struct {
 	recordDir string
 	scenario  string
 	work      string
+	// statusRefresh is the statusLine.refreshInterval installHooks writes, in
+	// seconds: pfm's own 2 unless a test waits on the interval itself.
+	statusRefresh float64
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -60,6 +64,8 @@ func newFixture(t *testing.T) *fixture {
 		recordDir: filepath.Join(root, "record"),
 		scenario:  filepath.Join(root, "scenario.json"),
 		work:      filepath.Join(root, "work", "repo"),
+
+		statusRefresh: 2,
 	}
 	for _, directory := range []string{
 		fix.bin, fix.home, fix.configDir, fix.codexHome, fix.procRoot, fix.sidDir, fix.recordDir, fix.work,
@@ -377,8 +383,13 @@ func TestAMissingScenarioFileIsAnErrorNotTheDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, _, stderr := runOnce(fix, "claude", []string{"--version"}, "")
-	if code != ExitUsage || !strings.Contains(stderr, fix.scenario) {
-		t.Fatalf("exit=%d stderr=%q, want %d naming the scenario path", code, stderr, ExitUsage)
+	if got, want := strings.ReplaceAll(
+		stderr,
+		fix.root,
+		"{root}",
+	), "mock-engine: read scenario {root}/scenario.json: open {root}/scenario.json: no such file or directory\n"; code != ExitUsage ||
+		got != want {
+		t.Fatalf("exit %d stderr = %q, want %q", code, got, want)
 	}
 }
 
@@ -388,4 +399,62 @@ func TestClaudeAgentsListsNoAgents(t *testing.T) {
 	if code != 0 || strings.TrimSpace(stdout) != "[]" {
 		t.Fatalf("agents --json exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
+}
+
+// jsonRecords returns, one per line, every object at any depth of the JSONL content whose field
+// holds value: the whole object as compact JSON, or only its pick member when pick is set.
+func jsonRecords(t *testing.T, content, field string, value any, pick string) string {
+	t.Helper()
+	var found []string
+	var walk func(node any)
+	walk = func(node any) {
+		switch node := node.(type) {
+		case map[string]any:
+			if node[field] == value {
+				var picked any = node
+				if pick != "" {
+					picked = node[pick]
+				}
+				encoded, err := json.Marshal(picked)
+				if err != nil {
+					t.Fatalf("encode %v: %v", picked, err)
+				}
+				found = append(found, string(encoded))
+			}
+			for _, child := range node {
+				walk(child)
+			}
+		case []any:
+			for _, child := range node {
+				walk(child)
+			}
+		}
+	}
+	for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
+		var node any
+		if err := json.Unmarshal([]byte(line), &node); err != nil {
+			t.Fatalf("record %q: %v", line, err)
+		}
+		walk(node)
+	}
+	return strings.Join(found, "\n")
+}
+
+// recordTypes lists each JSONL record's type, with its payload's type after a slash when it has one.
+func recordTypes(t *testing.T, content string) string {
+	t.Helper()
+	var types []string
+	for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
+		var record struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Type string `json:"type"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("record %q: %v", line, err)
+		}
+		types = append(types, strings.TrimSuffix(record.Type+"/"+record.Payload.Type, "/"))
+	}
+	return strings.Join(types, " ")
 }

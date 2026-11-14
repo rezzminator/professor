@@ -19,7 +19,11 @@ func TestManagerKillRecordsATransition(t *testing.T) {
 	database := jail.open(t)
 	manager, err := New(
 		database,
-		Dependencies{Spawner: &captureSpawner{}, Now: func() time.Time { return time.Unix(600, 0) }},
+		Dependencies{
+			Paths:   jail.resolved(),
+			Spawner: &captureSpawner{},
+			Now:     func() time.Time { return time.Unix(600, 0) },
+		},
 	)
 	if err != nil {
 		t.Fatal(err)

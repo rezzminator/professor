@@ -2,6 +2,7 @@ package themesync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -44,16 +45,41 @@ func TestVSCodePendingRestoresWithoutStateOrInstallation(t *testing.T) {
 	}
 }
 
+// One target inside a record that cannot be parsed is pending as unreadable
+// beside the targets that can; it never hides them.
+func TestVSCodePendingRestoresListsAnUnreadableTargetBesideTheRest(t *testing.T) {
+	dir := t.TempDir()
+	chrome := filepath.Join(dir, vscodeChromeRecordFile)
+	if err := os.WriteFile(
+		chrome,
+		[]byte(`{"/a.code-workspace":{"keys":null},"/b.code-workspace":{"keys":{"statusBar.border":{}}}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := VSCodePendingRestores(dir)
+	want := []VSCodeRestore{
+		{Record: chrome, Target: "/a.code-workspace", Keys: []string{
+			"(unreadable: parse " + chrome + " target /a.code-workspace: keys: expected an ownership object, got null)",
+		}},
+		{Record: chrome, Target: "/b.code-workspace", Keys: []string{"statusBar.border"}},
+	}
+	if err != nil || !reflect.DeepEqual(pending, want) || !RestorePending(dir) {
+		t.Fatalf("pending = %+v, %v; want %+v and RestorePending true", pending, err, want)
+	}
+}
+
 func TestVSCodePendingRestoresRejectsUnreadableRecords(t *testing.T) {
-	for _, content := range []string{"{", "null", "[]", `{"keys":null}`, `{"keys":{"[Theme]":{"keys":null}}}`} {
+	for content, want := range map[string]string{"{": "parse VS Code recovery record {dir}/vscode-applied.json: unexpected end of JSON input", "null": "parse VS Code recovery record {dir}/vscode-applied.json: expected an ownership object, got null", "[]": "parse VS Code recovery record {dir}/vscode-applied.json: json: cannot unmarshal array into Go value of type map[string]jsontext.Value"} {
 		t.Run(content, func(t *testing.T) {
 			dir := t.TempDir()
 			file := filepath.Join(dir, "vscode-applied.json")
 			if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := VSCodePendingRestores(dir); err == nil || !strings.Contains(err.Error(), file) {
-				t.Fatalf("bad recovery record read as absence: %v", err)
+			_, err := VSCodePendingRestores(dir)
+			if got := strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"); got != want {
+				t.Fatalf("VSCodePendingRestores = %q, want %q", got, want)
 			}
 			if !RestorePending(dir) {
 				t.Fatal("bad recovery record did not keep restoration pending")
@@ -64,8 +90,13 @@ func TestVSCodePendingRestoresRejectsUnreadableRecords(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "vscode-applied.json"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := VSCodePendingRestores(dir); err == nil {
-		t.Fatal("directory read as absent ownership file")
+	_, err := VSCodePendingRestores(dir)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		dir,
+		"{dir}",
+	), "read VS Code recovery record {dir}/vscode-applied.json: read {dir}/vscode-applied.json: is a directory"; got != want {
+		t.Fatalf("VSCodePendingRestores(directory) = %q, want %q", got, want)
 	}
 }
 
@@ -76,7 +107,13 @@ func TestOffRetainsGlobalOwnershipWithoutStateOrVSCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, report, "vscode", VerdictPending, "Global user settings: window.activeBorder")
+	wantVerdict(
+		t,
+		report,
+		"vscode",
+		VerdictPending,
+		"VS Code colours stay in {tmp}/.local/state/pfm/theme/vscode-applied.json target Global user settings: window.activeBorder until VS Code with the Professor extension consumes the disabled current.json",
+	)
 	if !RestorePending(h.stateDir) ||
 		!strings.Contains(h.read(".local/state/pfm/theme/current.json"), `"enabled": false`) {
 		t.Fatal("off lost deferred Global restore or did not disable the contract")

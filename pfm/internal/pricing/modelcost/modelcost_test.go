@@ -3,6 +3,7 @@ package modelcost
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -142,7 +143,7 @@ func TestFetchErrors(t *testing.T) {
 	}
 	label := strings.Replace(claudePage, "Claude Sonnet 5 |", "Unrecognized publisher label |", 1)
 	if _, err := pagesFetcher(label, openAIPage, 200, nil).Fetch(context.Background()); err == nil ||
-		!strings.Contains(err.Error(), "model label") {
+		err.Error() != "model-cost: parse https://platform.claude.com/docs/en/about-claude/pricing.md: line 10: unsupported model label \"Unrecognized publisher label\"; catalog incomplete" {
 		t.Fatalf("Fetch error = %v, want the unsupported model label", err)
 	}
 }
@@ -164,18 +165,22 @@ func publishedPages(t *testing.T) (claude, openai string) {
 	return pages[0], pages[1]
 }
 
-// The first cell of the Bash tool table's generation-range row and of the
-// Model pricing table's Opus 4.6 row, each the first such cell on the page.
+// The first cell of the Bash tool table's generation-range row, of the Model
+// pricing table's Opus 4.6 row and of the cache hit table's catch-all row, each
+// the first such cell on the page.
 const (
 	bashToolGroupRow = "| Claude 4.6 and earlier models "
 	opusRow          = "| Claude Opus 4.6 "
+	cacheHitOtherRow = "| All other models "
 )
 
 // TestGenerationGroupRows: a generation-range row ("Claude 4.6 and earlier
-// models") outside the Model pricing table names no model: the catalog keeps
-// it in its table and attributes it to no model; TestDeriveThePublishedPages
-// derives its price rows. Any other label naming no model, and a generation
-// range inside the Model pricing table, still fail the catalog.
+// models") or a catch-all row ("All other models", the prompt caching cache hit
+// table's last row) outside the Model pricing table names no model: the catalog
+// keeps it in its table and attributes it to no model;
+// TestDeriveThePublishedPages derives its price rows. Any other label naming no
+// model, and a group label inside the Model pricing table, still fail the
+// catalog.
 func TestGenerationGroupRows(t *testing.T) {
 	claude, openai := publishedPages(t)
 	t.Run("the published pages refresh", func(t *testing.T) {
@@ -196,6 +201,17 @@ func TestGenerationGroupRows(t *testing.T) {
 		if bash.Rows[0][0].Text != "Claude 4.7 and later models and Claude Mythos Preview" {
 			t.Fatalf("Bash tool row 1 = %q, want the generation range and the preview name kept", bash.Rows[0][0].Text)
 		}
+		var cacheHit *Table
+		for i, table := range catalogs[0].Tables {
+			if table.Heading == "Prompt caching" && table.Headers[0] == "Model" {
+				cacheHit = &catalogs[0].Tables[i]
+			}
+		}
+		if cacheHit == nil || len(cacheHit.Rows) != 5 || cacheHit.Rows[4][0].Text != "All other models" ||
+			cacheHit.Rows[4][1].Text != "0.1x" {
+			t.Fatalf("Prompt caching cache hit table = %+v, want its catch-all row kept", cacheHit)
+		}
+		cacheHitModels := map[string]string{}
 		for _, model := range catalogs[0].Models {
 			for _, table := range model.Tables {
 				for _, row := range table.Rows {
@@ -203,8 +219,19 @@ func TestGenerationGroupRows(t *testing.T) {
 						(row[0].Text == bash.Rows[0][0].Text || row[0].Text == bash.Rows[1][0].Text) {
 						t.Fatalf("model %s holds the group row %q", model.ID, row[0].Text)
 					}
+					if table.Line == cacheHit.Line {
+						cacheHitModels[model.ID] = row[2].Text
+					}
 				}
 			}
+		}
+		wantCacheHit := map[string]string{
+			"claude-fable-5-1": "$0.25 USD", "claude-fable-5-2": "$0.20 USD",
+			"claude-mythos-5-1": "$0.25 USD", "claude-mythos-5-2": "$0.20 USD",
+			"claude-opus-5-5": "$0.20 USD", "claude-sonnet-5-5": "$0.10 USD",
+		}
+		if fmt.Sprint(cacheHitModels) != fmt.Sprint(wantCacheHit) {
+			t.Fatalf("cache hit rows by model = %v, want %v", cacheHitModels, wantCacheHit)
 		}
 	})
 	for _, tc := range []struct{ name, label string }{
@@ -241,6 +268,16 @@ func TestGenerationGroupRows(t *testing.T) {
 			"a versioned preview name in the Model pricing table fails",
 			strings.Replace(claude, opusRow, "| Claude Sonnet 4.5 Preview ", 1),
 			`group label "Claude Sonnet 4.5 Preview" in the Model pricing table names no model; catalog incomplete`,
+		},
+		{
+			"an unknown label in the cache hit table still fails",
+			strings.Replace(claude, cacheHitOtherRow, "| Every remaining model ", 1),
+			`unsupported model label "Every remaining model"; catalog incomplete`,
+		},
+		{
+			"a catch-all in the Model pricing table fails",
+			strings.Replace(claude, opusRow, "| All other models ", 1),
+			`group label "All other models" in the Model pricing table names no model; catalog incomplete`,
 		},
 		{
 			"a preview name beside an unknown label still fails",

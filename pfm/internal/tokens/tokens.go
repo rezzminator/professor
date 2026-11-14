@@ -181,11 +181,10 @@ func run0(ctx context.Context, opts Options) (int, error) {
 	a := newAuditor(opts, parsed, host)
 	// the price table loads once, before any transcript is read
 	if parsed.prices != "" {
-		a.prices, err = loadSaved(parsed.prices)
-	} else {
-		a.prices, err = loadServed(ctx, opts.Served)
-	}
-	if err != nil {
+		if a.prices, err = loadSaved(parsed.prices); err != nil {
+			return 1, failure("%v", err)
+		}
+	} else if a.prices, err = loadServed(ctx, opts.Served); err != nil {
 		return 1, failure("%v", err)
 	}
 	if parsed.tree != "" {

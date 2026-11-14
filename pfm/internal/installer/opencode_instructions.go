@@ -58,6 +58,9 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) (returnErr error)
 	// only later in this same run, as at wireShell.
 	var composed string
 	if wanted {
+		if installer.skipFailedPrompt(pfmengine.OpenCode, "OpenCode instructions") {
+			return nil
+		}
 		var err error
 		if repo := strings.TrimSpace(installer.options.SourceRepo); repo != "" {
 			var content []byte
@@ -148,7 +151,6 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) (returnErr error)
 			)
 		}
 	}
-	legacy := filepath.Join(paths.LegacyHarnessPromptsDir(installer.options.Home), "opencode.md")
 	current, err := openCodeInstructionEntries(document, path)
 	if err != nil {
 		return err
@@ -160,7 +162,7 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) (returnErr error)
 		next = append(next, composed)
 	}
 	for _, entry := range current {
-		if entry == legacy || (owned.Config == path && entry == owned.Instruction) || (wanted && entry == composed) {
+		if (owned.Config == path && entry == owned.Instruction) || (wanted && entry == composed) {
 			continue
 		}
 		next = append(next, entry)

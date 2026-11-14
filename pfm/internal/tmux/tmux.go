@@ -2,14 +2,25 @@
 // chat's server is built by Command, so the socket addressing, the binary
 // lookup and the cleared $TMUX live in one place. Each consumer package keeps
 // its own narrow interface over it (its fake is its test seam).
+//
+// Entry points: Command and Invocation (tmux.go) build a call; Exec,
+// ExecWithin and ExecAttached (exec.go) run one with its record; WithClientRunner
+// (runner.go) runs a context's calls through a deps.Runner.
+// Files:
+//   - exec.go: Cmd, the observed call: its deadline, its completion record.
+//   - runner.go: a context's runner, the test-process refusal of a real tmux, ExitError.
+//   - socket.go: Socket, a socket directory's calls: KillPane, KillServer.
+//   - accepts.go: Accepts, whether a server answers a connect, with no exec.
+//   - format.go: FormatSplit, a -F format string's fields.
+//   - launch.go: PrepareLaunch, a pane command inline or as a one-shot script.
 package tmux
 
 import (
 	"context"
 	"errors"
 	"io/fs"
-	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -18,10 +29,53 @@ import (
 // Binary is the executable name shared by every tmux caller.
 const Binary = "tmux"
 
+// valueFlags are tmux's global flags that take a value (its getopt string
+// "2c:CDdf:lL:NqS:T:uUvV").
+const valueFlags = "cfLST"
+
 // SocketPath returns the server socket component of a TMUX value.
 func SocketPath(value string) string {
 	socket, _, _ := strings.Cut(value, ",")
 	return socket
+}
+
+// NamedServer reads the server a tmux command line names, as tmux's own
+// option parser takes it: the -L label and the -S socket path, each "" when
+// absent (-S wins over -L in tmux). isTmux is false when argv[0] is not tmux.
+// A tmux server keeps the command line of the client that started it, so this
+// reads a server's argv as well as a client's.
+func NamedServer(argv []string) (label, socketPath string, isTmux bool) {
+	if len(argv) == 0 || filepath.Base(argv[0]) != Binary {
+		return "", "", false
+	}
+	for index := 1; index < len(argv); index++ {
+		argument := argv[index]
+		if argument == "--" || !strings.HasPrefix(argument, "-") || argument == "-" {
+			break
+		}
+		// Flags group as getopt(3) groups them ("-uL work", "-2S/path"): each
+		// letter is a flag until one taking a value, which takes the rest of
+		// the token or, when none is left, the next argument.
+		for position := 1; position < len(argument); position++ {
+			flag := argument[position]
+			if !strings.ContainsRune(valueFlags, rune(flag)) {
+				continue
+			}
+			value := argument[position+1:]
+			if value == "" && index+1 < len(argv) {
+				index++
+				value = argv[index]
+			}
+			switch flag {
+			case 'L':
+				label = value
+			case 'S':
+				socketPath = value
+			}
+			break
+		}
+	}
+	return label, socketPath, true
 }
 
 // CouldNotRun reports whether err means tmux itself never started — the
@@ -50,6 +104,11 @@ func Command(ctx context.Context, binary, socketPath string, arguments ...string
 	path, argv, environment := Invocation(binary, socketPath, arguments...)
 	command := exec.CommandContext(ctx, path, argv...)
 	command.Env = environment
+	// An armed unit binary starts no tmux: Start returns the refusal as the failed lookup
+	// CouldNotRun reads as "could not run".
+	if err := deps.RefuseUnitNetStart(append([]string{path}, argv...)); err != nil {
+		command.Err = &exec.Error{Name: path, Err: err}
+	}
 	return command
 }
 
@@ -60,5 +119,12 @@ func Invocation(binary, socketPath string, arguments ...string) (string, []strin
 	if binary == "" {
 		binary = deps.Executable(Binary)
 	}
-	return binary, append([]string{"-S", socketPath}, arguments...), append(os.Environ(), "TMUX=")
+	return binary, append([]string{"-S", socketPath}, arguments...), Environment()
+}
+
+// Environment is the environment every tmux run gets: the caller's own, with
+// TMUX set and empty (see Command). A caller replacing pfm with tmux
+// (syscall.Exec of a generated action line) passes it unchanged.
+func Environment() []string {
+	return deps.EnvironmentWith("TMUX", "")
 }

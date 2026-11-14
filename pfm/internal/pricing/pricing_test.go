@@ -2,6 +2,7 @@ package pricing
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"reflect"
@@ -96,33 +97,33 @@ func TestDecodeRejects(t *testing.T) {
 	header := `"version":2,"fetched_at":"2026-10-07T23:02:05Z","sources":[{"provider":"anthropic","url":"https://x.invalid/p.md"}]`
 	doc := func(rows string) string { return "{" + header + `,"rows":[` + rows + "]}" }
 	for _, tc := range []struct{ name, doc, want string }{
-		{"not json", "{", "fixture"},
-		{"version 1", strings.Replace(doc(""), `"version":2`, `"version":1`, 1), "version must be 2, got 1"},
-		{"missing version", `{"fetched_at":"2026-10-07T23:02:05Z","sources":[],"rows":[]}`, "version must be 2"},
-		{"missing fetched_at", strings.Replace(doc(""), `"fetched_at":"2026-10-07T23:02:05Z",`, "", 1), "fetched_at"},
-		{"bad fetched_at", strings.Replace(doc(""), "2026-10-07T23:02:05Z", "yesterday", 1), "fetched_at"},
-		{"no sources", strings.Replace(doc(""), `[{"provider":"anthropic","url":"https://x.invalid/p.md"}]`, "[]", 1), "sources"},
-		{"source without url", strings.Replace(doc(""), `"url":"https://x.invalid/p.md"`, `"url":""`, 1), "source"},
-		{"missing rows", "{" + header + "}", "rows"},
-		{"unknown field", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"match":["x"]}`), "unknown field"},
-		{"missing in", doc(`{"key":"gpt-x","engine":"codex","out":2}`), `gpt-x: in`},
-		{"missing out", doc(`{"key":"gpt-x","engine":"codex","in":1}`), `gpt-x: out`},
-		{"negative rate", doc(`{"key":"gpt-x","engine":"codex","in":-1,"out":2}`), "gpt-x: in"},
-		{"claude row with cached", doc(`{"key":"claude-x","engine":"claude","in":1,"out":2,"cached":1}`), "claude-x: cached"},
-		{"codex row with hit", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"hit":1}`), "gpt-x: hit"},
-		{"long foreign column", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"long":{"above":5,"w5m":1}}`), "gpt-x: long w5m"},
-		{"long above zero", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"long":{"above":0}}`), "gpt-x: long above"},
-		{"duplicate key", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2},{"key":"gpt-x","engine":"codex","in":1,"out":2}`), "duplicate key gpt-x"},
-		{"uppercase key", doc(`{"key":"Claude-X","engine":"claude","in":1,"out":2}`), "key"},
-		{"empty key", doc(`{"key":"","engine":"codex","in":1,"out":2}`), "key"},
-		{"unknown engine", doc(`{"key":"gpt-x","engine":"gemini","in":1,"out":2}`), "engine"},
-		{"row source in a file", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"source":"published"}`), "source"},
-		{"second value", doc("") + "{}", "fixture"},
+		{"not json", "{", "prices fixture: unexpected EOF"},
+		{"version 1", strings.Replace(doc(""), `"version":2`, `"version":1`, 1), "prices fixture: version must be 2, got 1"},
+		{"missing version", `{"fetched_at":"2026-10-07T23:02:05Z","sources":[],"rows":[]}`, "prices fixture: version must be 2, got missing"},
+		{"missing fetched_at", strings.Replace(doc(""), `"fetched_at":"2026-10-07T23:02:05Z",`, "", 1), "prices fixture: fetched_at is missing"},
+		{"bad fetched_at", strings.Replace(doc(""), "2026-10-07T23:02:05Z", "yesterday", 1), "prices fixture: fetched_at \"yesterday\" is not an RFC 3339 time"},
+		{"no sources", strings.Replace(doc(""), `[{"provider":"anthropic","url":"https://x.invalid/p.md"}]`, "[]", 1), "prices fixture: sources must name at least one publisher page"},
+		{"source without url", strings.Replace(doc(""), `"url":"https://x.invalid/p.md"`, `"url":""`, 1), "prices fixture: source 0: a provider and an https url are required"},
+		{"missing rows", "{" + header + "}", "prices fixture: rows must be an array, got missing"},
+		{"unknown field", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"match":["x"]}`), "prices fixture: json: unknown field \"match\""},
+		{"missing in", doc(`{"key":"gpt-x","engine":"codex","out":2}`), "prices fixture: gpt-x: in is required"},
+		{"missing out", doc(`{"key":"gpt-x","engine":"codex","in":1}`), "prices fixture: gpt-x: out is required"},
+		{"negative rate", doc(`{"key":"gpt-x","engine":"codex","in":-1,"out":2}`), "prices fixture: gpt-x: in must be a non-negative number"},
+		{"claude row with cached", doc(`{"key":"claude-x","engine":"claude","in":1,"out":2,"cached":1}`), "prices fixture: claude-x: cached is not a claude column"},
+		{"codex row with hit", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"hit":1}`), "prices fixture: gpt-x: hit is not a codex column"},
+		{"long foreign column", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"long":{"above":5,"w5m":1}}`), "prices fixture: gpt-x: long w5m is not a codex column"},
+		{"long above zero", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"long":{"above":0}}`), "prices fixture: gpt-x: long above must be a positive token count"},
+		{"duplicate key", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2},{"key":"gpt-x","engine":"codex","in":1,"out":2}`), "prices fixture: duplicate key gpt-x"},
+		{"uppercase key", doc(`{"key":"Claude-X","engine":"claude","in":1,"out":2}`), "prices fixture: row 0: key \"Claude-X\" must be lowercase without surrounding spaces"},
+		{"empty key", doc(`{"key":"","engine":"codex","in":1,"out":2}`), "prices fixture: row 0: key is missing"},
+		{"unknown engine", doc(`{"key":"gpt-x","engine":"gemini","in":1,"out":2}`), "prices fixture: gpt-x: engine \"gemini\" is not claude or codex"},
+		{"row source in a file", doc(`{"key":"gpt-x","engine":"codex","in":1,"out":2,"source":"published"}`), "prices fixture: gpt-x: source is set by pfm, never written in a file"},
+		{"second value", doc("") + "{}", "prices fixture: multiple JSON values"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := DecodeTable([]byte(tc.doc), "fixture")
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "fixture") {
-				t.Fatalf("DecodeTable error = %v, want one naming fixture and %q", err, tc.want)
+			if got := fmt.Sprint(err); got != tc.want {
+				t.Fatalf("DecodeTable error = %q, want %q", got, tc.want)
 			}
 		})
 	}

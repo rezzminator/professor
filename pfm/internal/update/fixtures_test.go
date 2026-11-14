@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -42,7 +43,7 @@ func updateFixtureTemplate(
 	t.Helper()
 	updateFixtureTemplates.Lock()
 	if updateFixtureTemplates.root == "" {
-		base, err := os.MkdirTemp("", "update-fixtures-")
+		base, err := os.MkdirTemp(paths.TempRoot(), "update-fixtures-")
 		if err != nil {
 			updateFixtureTemplates.Unlock()
 			t.Fatalf("create the fixture template root: %v", err)
@@ -105,7 +106,7 @@ func copyUpdateFixtureTree(t *testing.T, source, target string) {
 			if err != nil {
 				return err
 			}
-			return testjail.WriteExecutable(destination, body, mode.Perm())
+			return testjail.WriteExecutableNeverRun(destination, body, mode.Perm())
 		case mode&fs.ModeSymlink != 0:
 			link, err := os.Readlink(path)
 			if err != nil {
@@ -164,15 +165,10 @@ func TestUpdateGitFixtureCopiesOwnTheirRemote(t *testing.T) {
 	gitTemp(t, first, "tag", "v0.11.0")
 	gitTemp(t, first, "push", "-q", "origin", "v0.11.0")
 	second := newUpdateGitFixture(t)
-	for repo, want := range map[string]bool{first: true, second: false} {
-		command := exec.Command("git", "ls-remote", "--tags", "origin", "refs/tags/v0.11.0")
-		command.Dir = repo
-		output, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git ls-remote in %s: %v\n%s", repo, err, output)
-		}
-		if got := strings.Contains(string(output), "refs/tags/v0.11.0"); got != want {
-			t.Errorf("origin of %s holds v0.11.0 = %v, want %v: %q", repo, got, want, output)
+	for repo, want := range map[string]string{first: "{sha}\trefs/tags/v0.11.0", second: ""} {
+		output := updateGit.Must(t, repo, "ls-remote", "--tags", "origin", "refs/tags/v0.11.0")
+		if got := regexp.MustCompile(`[0-9a-f]{40}`).ReplaceAllString(output, "{sha}"); got != want {
+			t.Errorf("ls-remote of %s = %q, want %q", repo, got, want)
 		}
 	}
 }
@@ -392,6 +388,12 @@ func buildAdoptAtStoreFixture(t *testing.T, root string) []string {
 
 	writeProjectFixtureFile(t, root, "templates/project/commands/dev.md", "new\n")
 	writeProjectFixtureFile(t, root, "templates/project/commands/later.md", "later\n")
+	writeProjectFixtureFile(
+		t,
+		root,
+		"templates/project/rules/git-writes-through-gitter.md",
+		"# Only gitter writes git\n",
+	)
 	gitTemp(t, root, "add", "-A")
 	gitTemp(t, root, "commit", "-qm", "new templates")
 	return []string{oldSHA, projectGitShortSHA(t, root)}
@@ -443,14 +445,15 @@ func buildScaffoldStoreFixture(t *testing.T, root string) []string {
 			content: "# Gitter History\n",
 			mode:    0o600,
 		},
-		"templates/project/docs-hub/_index.md": {content: "# Documentation Hub\n", mode: 0o600},
+		"templates/project/docs-hub/_index.md":                 {content: "# Documentation Hub\n", mode: 0o600},
+		"templates/project/rules/git-writes-through-gitter.md": {content: "# Only gitter writes git\n", mode: 0o600},
 	}
 	for relative, fixture := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := testjail.WriteExecutable(path, []byte(fixture.content), fixture.mode); err != nil {
+		if err := testjail.WriteExecutableNeverRun(path, []byte(fixture.content), fixture.mode); err != nil {
 			t.Fatal(err)
 		}
 	}

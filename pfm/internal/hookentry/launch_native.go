@@ -21,6 +21,15 @@ import (
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
+// launchContext is the context Launch starts from; a test hands its tmux
+// calls a fake runner through it (tmux.WithClientRunner).
+var launchContext = context.Background
+
+// Launch is the managed Claude launcher entry.
+func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env paths.Env) int {
+	return LaunchWith(args, stdout, stderr, runtime, env, nil)
+}
+
 // launcherSeatAccount picks the fleet primary unless the shell explicitly chose
 // a different account; the login default is not an operator choice.
 func launcherSeatAccount(runtime config.Runtime, primary int, env paths.Env) (string, int) {
@@ -54,6 +63,15 @@ func launchNative(
 	_, stderr io.Writer,
 	runtime config.Runtime,
 ) int {
+	session, resuming, continuing := action.LauncherIdentity(request.Args)
+	if resuming && !continuing && session != "" {
+		// The rebound seat's host replaces this process through the pane's own terminal, as the
+		// exec below does: the hook's captured stdout would only print its dispatch line.
+		handled, code := chat.ResumeRestoredSeat(context.Background(), session, os.Stdout, stderr, runtime)
+		if handled {
+			return code
+		}
+	}
 	accountID := request.Account
 	prefs := runtime.Config.EffectiveClaude(accountID)
 	machine := config.Config{Claude: prefs, MCPServers: runtime.Config.MCPServers, MCP: runtime.Config.MCP}

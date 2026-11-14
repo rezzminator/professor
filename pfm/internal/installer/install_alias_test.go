@@ -13,9 +13,10 @@ import (
 
 func TestInstallFromAliasUsesPhysicalCloneForShellAndGlobalLinks(t *testing.T) {
 	home, clone, alias := aliasInstallFixture(t)
-	record := testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t), SourceRepo: alias,
+		EngineSyncRunner: engineSync,
+		MCPConfigPath:    testConfigPath(t), SourceRepo: alias,
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
@@ -56,18 +57,18 @@ func TestInstallFromAliasAfterPhysicalCloneDoesNotRewriteShellOrGlobalLinks(t *t
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatalf("alias reinstall: %v\n%s", err, output.String())
 	}
-	for _, path := range []string{
+	unchanged := []string{
 		filepath.Join(home, ".zshrc"),
 		filepath.Join(home, ".claude", "commands", "fixture.md"),
 		filepath.Join(home, ".claude", "skills", "fixture"),
 		filepath.Join(home, ".claude", "agents", "fixture.md"),
-	} {
-		for _, line := range strings.Split(output.String(), "\n") {
-			if strings.Contains(line, "change") && strings.Contains(line, path) {
-				t.Fatalf("alias reinstall changed %s:\n%s", path, output.String())
-			}
-		}
 	}
+	// The agents link is not re-reported: the alias install leaves it as it is.
+	wantOutputLines(t, output.String(), []string{
+		"  ok      " + unchanged[1],
+		"  ok      " + unchanged[2],
+		"  ok      " + unchanged[0] + " source line",
+	}, unchanged...)
 	if backups, err := filepath.Glob(filepath.Join(home, ".zshrc.pre-professor-*")); err != nil || len(backups) != 0 {
 		t.Fatalf("alias reinstall left zshrc backups: %v, %v", backups, err)
 	}

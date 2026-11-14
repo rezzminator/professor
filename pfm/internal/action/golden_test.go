@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -147,4 +148,23 @@ func personaGoldenRequests(t *testing.T, home string) ([]Request, string) {
 		requests = append(requests, request)
 	}
 	return requests, prompt
+}
+
+// actionGolden compares got with testdata/golden/{file}; a mismatch prints the
+// actual as a GOLDEN line the regeneration reads.
+func actionGolden(t *testing.T, file, got string) {
+	t.Helper()
+	got = uuidPattern.ReplaceAllString(got, "{uuid}")
+	want, err := os.ReadFile(filepath.Join("..", "..", "testdata", "golden", file))
+	if err != nil || string(want) != got {
+		t.Errorf("testdata/golden/%s: %v\nGOLDEN testdata/golden/%s = %q", file, err, file, got)
+	}
+}
+
+// uuidPattern matches the fresh session ids a launch draws.
+var uuidPattern = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+
+// rooted writes the test's temp root as {root}, so output naming a t.TempDir() compares exactly.
+func rooted(t *testing.T, s string) string {
+	return strings.ReplaceAll(s, filepath.Dir(t.TempDir()), "{root}")
 }

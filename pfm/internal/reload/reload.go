@@ -1,4 +1,8 @@
 // Package reload reboots one Claude seat in its existing tmux pane.
+//
+// arguments.go: the /reload flags, their cache-spelling normalization and the worker's parse.
+// owner_exit.go: the pane mutex, the exit mark and the yield to an owner's /exit.
+// after_reboot.go: once the reborn chat is up, its native --then turn and the "(before --new)" label.
 package reload
 
 import (
@@ -9,7 +13,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,11 +23,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Usage leads with the flags because a caller who guesses is guessing
@@ -60,6 +63,7 @@ type Tmux interface {
 	ListPanes(context.Context, string) ([]Pane, error)
 	SetRemain(context.Context, string, string, bool) error
 	Respawn(context.Context, string, string, string, string) error
+	KillPane(context.Context, string, string) error
 	Display(context.Context, string, string, string) error
 }
 
@@ -106,6 +110,7 @@ type Request struct {
 	// system-prompt file path for Claude, or the complete developer
 	// instructions value for Codex. Empty preserves an ordinary reload.
 	PromptChannel string
+	Envs          map[string]string // the adopter settings' envs (workbench.Persona.Envs)
 	// Home and Machine are the Claude respawn's whole policy: the account's
 	// config dir, its autonomy posture and its system-prompt choice all come
 	// from them through action.ClaudeSpawn. A reload used to synthesize its
@@ -135,6 +140,9 @@ type Options struct {
 	ThenTries      int
 	// Clock is the time seam every wait crosses; nil defaults to clock.Real.
 	Clock clock.Clock
+	// EngineSyncRunner runs the engine-sync child that builds a Codex
+	// persona's mirror (applyReloadWorkbench); nil is the real process table.
+	EngineSyncRunner deps.Runner
 }
 
 type Result struct {
@@ -144,6 +152,8 @@ type Result struct {
 	// New reports whether the reborn seat started a brand-new session id
 	// (--new was requested, or no transcript existed yet to resume).
 	New bool
+	// Ended: the chat ended before the reload's own /exit; nothing respawned.
+	Ended bool
 }
 
 // target is the tmux pane this request reboots, as call's Screen door
@@ -180,41 +190,6 @@ func (o *Options) defaults() {
 	}
 }
 
-// LockPath is the persistent pane mutex; its flock spans the whole reboot.
-func LockPath(sidDir, socketName, pane string) string {
-	return filepath.Join(sidDir, "."+socketName+"."+pane+".reloadlock")
-}
-
-// InFlight reports whether a reload currently holds the pane mutex, so a
-// SessionEnd hook can tell a reload's /exit (the pane is being rebooted —
-// leave its terminal alone) from a human's. A missing lock file is a plain
-// "no"; a lock that cannot be probed is an error, never a "no".
-func InFlight(sidDir, socketName, pane string) (inFlight bool, returnErr error) {
-	lock, err := os.OpenFile(LockPath(sidDir, socketName, pane), os.O_RDWR, 0o600)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("open reload lock: %w", err)
-	}
-	defer func() {
-		if err := lock.Close(); err != nil {
-			returnErr = errors.Join(
-				returnErr,
-				fmt.Errorf("close reload lock %s: %w", LockPath(sidDir, socketName, pane), err),
-			)
-		}
-	}()
-	// A shared probe conflicts with Run's exclusive lock, never with another probe.
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return true, nil
-		}
-		return false, fmt.Errorf("probe reload lock: %w", err)
-	}
-	return false, nil
-}
-
 // Run performs the graceful in-place reboot. The caller has already resolved
 // the target identity and account/cache birth values; this package owns every
 // tmux mutation and the pane lock.
@@ -231,7 +206,7 @@ func Run(
 	defer func() { trail.End(err) }()
 	options.defaults()
 	entry := options.Clock.Now()
-	if request, err = applyReloadWorkbench(request); err != nil {
+	if request, err = applyReloadWorkbench(request, options.EngineSyncRunner, stderr); err != nil {
 		return Result{}, err
 	}
 	request, run, wasNew, err := prepareReload(request)
@@ -289,10 +264,7 @@ func Run(
 			return Result{}, err
 		}
 	}
-	if err := tmux.SetRemain(ctx, request.SocketPath, request.Pane, true); err != nil {
-		return Result{}, fmt.Errorf("set pane remain-on-exit: %w", err)
-	}
-	clearRemain := true
+	clearRemain := false
 	defer func() {
 		if clearRemain {
 			if err := tmux.SetRemain(context.Background(), request.SocketPath, request.Pane, false); err != nil {
@@ -300,12 +272,29 @@ func Run(
 			}
 		}
 	}()
+	// Before its own /exit the chat is still its owner's: one ended meanwhile is left ended.
+	yield := func(stepErr error) (Result, error) {
+		ended, probeErr := yieldToOwner(context.WithoutCancel(ctx), tmux, request)
+		if !ended && probeErr == nil {
+			return Result{}, stepErr
+		}
+		if !ended {
+			return Result{}, errors.Join(stepErr, probeErr)
+		}
+		clearRemain = false
+		trail.Reach("ended", "the chat ended before the reload's /exit: nothing respawned")
+		return Result{Ended: true}, probeErr
+	}
+	if err := tmux.SetRemain(ctx, request.SocketPath, request.Pane, true); err != nil {
+		return yield(fmt.Errorf("set pane remain-on-exit: %w", err))
+	}
+	clearRemain = true
 	if _, err := tmux.LeaveCopyMode(ctx, request.target()); err != nil {
-		return Result{}, err
+		return yield(err)
 	}
 	capture, err := waitCallerIdle(ctx, request, options, tmux, stderr)
 	if err != nil {
-		return Result{}, err
+		return yield(err)
 	}
 	trail.Reach("idle", "caller turn ended")
 	pane := tmuxPane(request, tmux)
@@ -313,10 +302,22 @@ func Run(
 		return Result{}, err
 	}
 	if err := stashDraft(ctx, pane, options.Clock, capture, stderr); err != nil {
+		return yield(err)
+	}
+	if result, err := yield(nil); result.Ended || err != nil {
+		return result, err
+	}
+	unmark, err := markExit(ExitMarkPath(options.SIDDir, filepath.Base(request.SocketPath), request.Pane))
+	if err != nil {
 		return Result{}, err
 	}
-	if _, err := typeExit(ctx, pane, options.Clock, stderr); err != nil {
-		return Result{}, err
+	defer unmark(stderr)
+	if entered, err := typeExit(ctx, pane, options.Clock, stderr); err != nil && !entered {
+		return yield(err)
+	} else if err != nil {
+		// Enter may have gone out: from here the pane's end is the reload's own,
+		// read by the exit wait below, never yielded to its owner.
+		fmt.Fprintf(stderr, "pfm chat reload: %v; waiting for the chat to exit\n", err)
 	}
 	trail.Reach("exit-typed", "/exit submitted")
 
@@ -386,22 +387,12 @@ func Run(
 		return Result{}, exitIncomplete(ctx, pane, tries+grace)
 	}
 	trail.Reach("dead", "pane exited")
-	if request.Engine == pfmengine.Claude && request.SessionID != "" {
-		values, recordErr := pfmconfig.ResolvePaths()
-		if recordErr == nil {
-			recordErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
-				SessionID: request.SessionID, Engine: pfmengine.Claude,
-				Account: request.Account, Cache1H: request.Cache1H,
-			}, clock.Real.Now().Unix())
-		}
-		if recordErr != nil {
-			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, recordErr)
-		}
-	}
+	recordReloadLaunch(ctx, request, stderr)
 	promptWarning := warnPromptMissing(request, stderr)
 	if err := respawnClaimedPane(ctx, tmux, request, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
+	unmark(stderr)
 	if promptWarning != "" {
 		announcePane(ctx, request, tmux, stderr, "pfm chat reload: "+promptWarning)
 	}
@@ -560,13 +551,9 @@ func codexRun(request Request) (string, error) {
 	for _, name := range claudelaunch.Hygiene() {
 		parts = append(parts, "-u", name)
 	}
-	if extensionEnv := strings.TrimSpace(
-		action.ExtensionShellEnv(request.Machine, pfmengine.MustLookup(pfmengine.Codex).LongName),
-	); extensionEnv != "" {
-		parts = append(parts, extensionEnv)
-	}
-	if request.CodexHome != "" {
-		parts = append(parts, "CODEX_HOME="+cmdparse.Quote(request.CodexHome))
+	for _, assignment := range claudelaunch.WithEnvs(request.Envs, codexHomeEnv(request.CodexHome)) {
+		name, value, _ := strings.Cut(assignment, "=")
+		parts = append(parts, name+"="+cmdparse.Quote(value))
 	}
 	binary := request.CodexBinary
 	if binary == "" {
@@ -864,11 +851,20 @@ func readSessionCrumb(path string) (id, transcript string, found bool, err error
 	return id, transcript, true, nil
 }
 
-// ParseIntEnv reads name through env and returns fallback when it is unset
-// or not a positive integer.
-func ParseIntEnv(env paths.Env, name string, fallback int) int {
-	if value, err := strconv.Atoi(env.Get(name)); err == nil && value > 0 {
-		return value
+// recordReloadLaunch writes the launch record of a reloaded Claude session, so
+// the picker row and every later resume read the account and cache it runs on.
+func recordReloadLaunch(ctx context.Context, request Request, stderr io.Writer) {
+	if request.Engine != pfmengine.Claude || request.SessionID == "" {
+		return
 	}
-	return fallback
+	values, err := pfmconfig.ResolvePaths()
+	if err == nil {
+		err = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
+			SessionID: request.SessionID, Engine: pfmengine.Claude,
+			Account: request.Account, Cache1H: request.Cache1H,
+		}, clock.Real.Now().Unix())
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, err)
+	}
 }

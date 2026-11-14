@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 )
 
 func TestToolErrorsKeepHandlerOutput(t *testing.T) {
@@ -24,51 +23,16 @@ func TestToolErrorsKeepHandlerOutput(t *testing.T) {
 		fields     map[string]any
 	}{
 		{
-			name: "keys dying pane", tool: "keys",
+			name: "keys could not run", tool: "keys",
 			arguments: map[string]any{"target": "gone", "keys": []string{"Escape", "Enter"}},
-			backend:   &backend{callEngine: captureCodeCaller{}, allowAmbientIdentity: true},
-			prefix:    `send "Escape": `,
-			fields: map[string]any{
-				"status": statusDead, "code": float64(pfmcall.CodeDead), "count": float64(0),
-				"pane": "%0", "keys": []any{"Escape", "Enter"},
-			},
+			backend:   &backend{chat: &fakeChatVerbs{err: errors.New(detail)}, allowAmbientIdentity: true},
+			prefix:    "keys: " + detail,
 		},
 		{
-			name: "keys unsupported backend capability", tool: "keys",
-			arguments: map[string]any{"target": "native", "keys": []string{"Enter", "Home"}},
-			backend: &backend{
-				callEngine: resolveGateCaller{
-					target: pfmcall.Target{Backend: "herdr", SocketPath: "/missing/native.sock", Pane: "w6:p3"},
-				},
-				allowAmbientIdentity: true,
-			},
-			prefix: "keys: ",
-			fields: map[string]any{"status": statusError, "code": float64(10), "count": float64(0)},
-		},
-		{
-			name: "keys unknown target", tool: "keys",
-			arguments: map[string]any{"target": "gone", "keys": []string{"Escape"}},
-			backend: &backend{
-				callEngine:           captureCodeCaller{code: pfmcall.CodeUnknown, detail: detail},
-				allowAmbientIdentity: true,
-			},
-			prefix: `resolve "gone": ` + detail,
-			fields: map[string]any{"status": statusNotFound, "code": float64(pfmcall.CodeUnknown)},
-		},
-		{
-			name:      "capture failed",
-			tool:      "capture",
+			name: "capture could not run", tool: "capture",
 			arguments: map[string]any{"target": "gone"},
-			backend: &backend{
-				callEngine:           captureCodeCaller{code: pfmcall.CodeCaptureFailed, detail: detail},
-				allowAmbientIdentity: true,
-			},
-			prefix: "capture: " + detail,
-			fields: map[string]any{
-				"status":  statusError,
-				"code":    float64(pfmcall.CodeCaptureFailed),
-				"message": detail,
-			},
+			backend:   &backend{chat: &fakeChatVerbs{err: errors.New(detail)}, allowAmbientIdentity: true},
+			prefix:    "capture: " + detail,
 		},
 		{
 			name: "name action failed", tool: "name",

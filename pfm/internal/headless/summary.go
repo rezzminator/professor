@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/ask"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -20,6 +21,8 @@ type SummaryOptions struct {
 	TempDir  string
 	Engine   pfmengine.ID
 	Model    string
+	// Runner starts the ask engine child (nil: the real one).
+	Runner deps.Runner
 }
 
 type SummaryResult struct {
@@ -30,7 +33,9 @@ type SummaryResult struct {
 
 // Summarize isolates one exchange, consults its exact-offset cache, and pays
 // an ask runner only on a miss. Every failure becomes visible summary text so
-// an unavailable or crashed engine can never look like an empty exchange.
+// an unavailable or crashed engine can never look like an empty exchange. A
+// cache that cannot be read or written costs only the cache: the summary is
+// run (or kept) and the cache error comes back as Warning.
 func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryResult {
 	if options.Database == nil {
 		return failedSummary(fmt.Errorf("summary cache is not configured"))
@@ -42,12 +47,13 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 	if !ok {
 		return SummaryResult{Text: "unavailable (no human exchange)"}
 	}
+	var cacheErr error
 	if exchange.complete {
-		cached, found, cacheErr := options.Database.ChatSummary(ctx, chat.Path, exchange.offset)
-		if cacheErr != nil {
-			return failedSummary(cacheErr)
+		cached, found, err := options.Database.ChatSummary(ctx, chat.Path, exchange.offset)
+		if err != nil {
+			cacheErr = fmt.Errorf("read summary cache: %w", err)
 		}
-		if found {
+		if found && err == nil {
 			return SummaryResult{Text: cached, Cached: true}
 		}
 	}
@@ -67,6 +73,7 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 		}
 		return failedSummary(err)
 	}
+	runner = ask.WithRunner(runner, options.Runner)
 
 	prepared, err := writePreparedExchange(options.TempDir, exchange.prompt, exchange.response, exchange.complete)
 	if err != nil {
@@ -99,10 +106,10 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 	text = limitWords(text, 40)
 	if exchange.complete {
 		if err := options.Database.PutChatSummary(ctx, chat.Path, exchange.offset, text); err != nil {
-			return failedSummary(errors.Join(err, removeErr))
+			cacheErr = errors.Join(cacheErr, fmt.Errorf("write summary cache: %w", err))
 		}
 	}
-	return SummaryResult{Text: text, Warning: removeErr}
+	return SummaryResult{Text: text, Warning: errors.Join(cacheErr, removeErr)}
 }
 
 func failedSummary(err error) SummaryResult {

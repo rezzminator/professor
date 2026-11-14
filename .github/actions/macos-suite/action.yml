@@ -1,0 +1,61 @@
+name: macOS suite
+description: >-
+  One part of pfm's macOS suite on a macOS runner: `unit` runs the refresh-scope
+  fixture under the system Bash 3.2, the unit tier of only the packages whose files differ on darwin (the gate runs the whole unit tier once, on Linux) and `go test -tags jail ./...` (the jail tier); `e2e` runs the whole
+  tagged e2e suite serially, the Darwin installer and the release-upgrade e2e
+  included. ci.yml runs both parts on every pull request into main and on a
+  hand-started run (`-f exclude=` the other jobs for macOS alone). Needs the repository checked out with full history and Go set up;
+  a failing install or test fails the job naming it.
+
+inputs:
+  part:
+    description: unit or e2e
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The agent source inventory the installer tests read imports yaml.
+    - name: Install test tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        brew install tmux jq
+        python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
+        python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+
+    - name: Build engine-sync
+      uses: ./.github/actions/engine-sync
+
+    - name: Run the ${{ inputs.part }} part
+      shell: bash
+      env:
+        PART: ${{ inputs.part }}
+        PFM_DEV_FENCE: "1"
+      run: |
+        set -euo pipefail
+        case "$PART" in
+          unit)
+            # The refresh-scope fixture under the system Bash 3.2, as on a user's Mac.
+            python3 scripts/test-refresh-scope.py
+            # The unit tier runs once, on Linux, in the gate (with its proof); here only the
+            # packages whose files differ on darwin, the code no Linux run compiles. The Go
+            # toolchain names them: each package's file lists under GOOS=linux and natively.
+            files='{{.ImportPath}} {{join .GoFiles ","}} {{join .TestGoFiles ","}} {{join .XTestGoFiles ","}}'
+            GOOS=linux go -C pfm list -f "$files" ./... | sort > "$RUNNER_TEMP/packages-linux"
+            go -C pfm list -f "$files" ./... | sort > "$RUNNER_TEMP/packages-darwin"
+            darwin_packages=$(comm -13 "$RUNNER_TEMP/packages-linux" "$RUNNER_TEMP/packages-darwin" | cut -d' ' -f1 | sort -u)
+            [ -n "$darwin_packages" ] || { echo "::error::no package differs on darwin — the package listing did not run"; exit 1; }
+            # shellcheck disable=SC2086 # one import path per word
+            go -C pfm test -count=1 $darwin_packages
+            # Then the jail tier (*_jail_test.go), whose tagged binaries internal/testjail
+            # admits on this hosted runner: real processes, so every one runs here.
+            go -C pfm test -count=1 -tags jail ./... ;;
+          e2e)
+            export PFM_E2E_SOURCE_REPO="$GITHUB_WORKSPACE"
+            export PFM_DEV_REPO_WORK_TREE="$GITHUB_WORKSPACE"
+            PFM_DEV_REPO_GIT_DIR="$(git rev-parse --absolute-git-dir)"
+            export PFM_DEV_REPO_GIT_DIR
+            go -C pfm test -count=1 -tags e2e -p 1 -timeout 60m ./e2e/... ;;
+          *) echo "::error::macos-suite part must be unit or e2e, got '$PART'"; exit 1 ;;
+        esac

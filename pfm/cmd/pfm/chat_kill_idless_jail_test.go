@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -8,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // startIdlessSession starts one real tmux session named name on its own jailed
@@ -49,6 +53,7 @@ func paneAlive(socket, pane string) bool {
 // raw tmux rung finds a bare pane by its session name) is closed by name: the
 // pane goes, no tombstone is written, and the outcome line says "closed".
 func TestChatKillByNameClosesALivePaneThatCarriesNoSessionID(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -75,6 +80,7 @@ func TestChatKillByNameClosesALivePaneThatCarriesNoSessionID(t *testing.T) {
 // Two live seats answering to one name: nothing is killed by guess. The refusal
 // names both candidates and both panes keep running.
 func TestChatKillByAmbiguousNameRefusesAndKillsNothing(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -103,6 +109,7 @@ func TestChatKillByAmbiguousNameRefusesAndKillsNothing(t *testing.T) {
 // against it, so unkill says so instead of lifting a tombstone that cannot
 // exist.
 func TestChatUnkillByNameOfAnIdlessChatRefuses(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

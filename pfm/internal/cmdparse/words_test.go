@@ -1,7 +1,6 @@
 package cmdparse
 
 import (
-	"os/exec"
 	"reflect"
 	"testing"
 )
@@ -43,15 +42,99 @@ func TestBraceExpansion(t *testing.T) {
 	}
 }
 
-// TestQuoteSurvivesAShell: what Quote emits, bash reads back as the one word
-// it was, and so does SplitShellWords.
-func TestQuoteSurvivesAShell(t *testing.T) {
+func TestScriptSelfDir(t *testing.T) {
+	t.Parallel()
+	const script = "/repo/scripts/run.sh"
+	cases := []struct {
+		name, command string
+		want          []step
+	}{
+		{
+			"dirname of $0", `python3 "$(dirname "$0")/x.py"`,
+			[]step{{"dirname", []string{script}}, {"python3", []string{"/repo/scripts/x.py"}}},
+		},
+		{
+			"dirname -- of BASH_SOURCE", `cat "$(dirname -- "${BASH_SOURCE[0]}")/a"`,
+			[]step{{"dirname", []string{"--", script}}, {"cat", []string{"/repo/scripts/a"}}},
+		},
+		{
+			"cd into it and pwd", `cat "$(cd "$(dirname "$0")/.." && pwd -P)/b"`,
+			[]step{
+				{"dirname", []string{script}},
+				{"cd", []string{"/repo/scripts/.."}},
+				{"pwd", []string{"-P"}},
+				{"cat", []string{"/repo/b"}},
+			},
+		},
+		{
+			"a relative cd stays unknown", `cat "$(cd lib && pwd)/c"`,
+			[]step{{"cd", []string{"lib"}}, {"pwd", nil}, {"cat", []string{"$(cd lib && pwd)/c"}}},
+		},
+		{
+			"any other substitution stays unknown", `cat "$(basename "$0")"`,
+			[]step{{"basename", []string{script}}, {"cat", []string{`$(basename "$0")`}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Script: Script{Path: script}}})
+			if err != nil {
+				t.Fatalf("ParseBatch(%q): %v", tc.command, err)
+			}
+			assertSteps(t, got["c1"], tc.want)
+		})
+	}
+	typed := parseOne(t, `cat "$(dirname "$0")/x"`)
+	assertSteps(t, typed, []step{{"dirname", []string{`"$0"`}}, {"cat", []string{`"$(dirname "$0")/x"`}}})
+}
+
+func TestScriptPositionalArgs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, command string
+		want          []step
+	}{
+		{
+			"an argument and an unset one", `cp a "$D/acks/$1.md" x$2`,
+			[]step{{"cp", []string{"a", "$D/acks/chat.md", "x"}}},
+		},
+		{"the script's own", `cp a "/s/$1"`, []step{{"cp", []string{"a", "/s/chat"}}}},
+		{
+			"a function's are its own", `f() { cp a "/s/$1"; }; cp b "/s/$1"`,
+			[]step{{"cp", []string{"a", "/s/$1"}}, {"cp", []string{"b", "/s/chat"}}},
+		},
+		{
+			"shift reassigns them", `shift; cp a "/s/$1"`,
+			[]step{{"shift", nil}, {"cp", []string{"a", "/s/$1"}}},
+		},
+		{
+			"set -- reassigns them", `set -- x; cp a "/s/$1"`,
+			[]step{{"set", []string{"--", "x"}}, {"cp", []string{"a", "/s/$1"}}},
+		},
+		{
+			"set -e keeps them", `set -e; cp a "/s/$1"`,
+			[]step{{"set", []string{"-e"}}, {"cp", []string{"a", "/s/chat"}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			script := Script{Path: "/s/run.sh", Args: []string{"chat"}}
+			got, err := ParseBatch([]Call{{ID: "c1", Command: tc.command, Script: script}})
+			if err != nil {
+				t.Fatalf("ParseBatch(%q): %v", tc.command, err)
+			}
+			assertSteps(t, got["c1"], tc.want)
+		})
+	}
+	assertSteps(t, parseOne(t, `cp a "/s/$1"`), []step{{"cp", []string{"a", `"/s/$1"`}}})
+}
+
+// TestQuoteSplitsBackToTheWord: what Quote emits, SplitShellWords reads back as the one word it was.
+func TestQuoteSplitsBackToTheWord(t *testing.T) {
 	t.Parallel()
 	for _, s := range []string{"plain", "it's", `^Test(A|B)$`, "a b", `$HOME;rm -rf x`, "two\nlines", ""} {
-		out, err := exec.Command("bash", "-c", "printf %s "+Quote(s)).Output()
-		if err != nil || string(out) != s {
-			t.Fatalf("Quote(%q) = %s round-trips through bash to %q (%v)", s, Quote(s), out, err)
-		}
 		if words, err := SplitShellWords(Quote(s)); err != nil || !reflect.DeepEqual(words, []string{s}) {
 			t.Fatalf("SplitShellWords(%s) = %q (%v), want [%q]", Quote(s), words, err, s)
 		}

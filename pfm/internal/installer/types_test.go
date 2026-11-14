@@ -44,8 +44,8 @@ func TestNormalizedInstallerSleepErrorIsReportedWithoutPanic(t *testing.T) {
 	if panicked {
 		t.Fatal("normalized installer sleep must report a clock error, not panic")
 	}
-	if !strings.Contains(output.String(), "installer: launchd retry sleep failed: fixture clock cancelled") {
-		t.Fatalf("output=%q, want the clock error", output.String())
+	if got, want := output.String(), "installer: launchd retry sleep failed: fixture clock cancelled\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
 
@@ -54,7 +54,9 @@ func TestExecCommandRunnerAbsentBinaryIsALookupNotARun(t *testing.T) {
 	for _, output := range []bool{false, true} {
 		t.Run(map[bool]string{false: "Run", true: "Output"}[output], func(t *testing.T) {
 			ctx, recorder := obs.Test(t)
-			const name = "systemctl"
+			// Absent on every platform and in no dependency registry row, so
+			// no platform gate answers before the lookup this test pins.
+			const name = "pfm-absent-command"
 			var err error
 			if output {
 				_, err = (execCommandRunner{}).Output(ctx, name)
@@ -67,41 +69,6 @@ func TestExecCommandRunnerAbsentBinaryIsALookupNotARun(t *testing.T) {
 			records := recorder.Records()
 			if len(records) != 1 || records[0].Message != "runner.lookpath" || records[0].Level != "WARN" {
 				t.Fatalf("records: %s", recorder.Raw())
-			}
-		})
-	}
-}
-
-func TestExecCommandRunnerPresentBinaryRecordsItsExit(t *testing.T) {
-	for _, output := range []bool{false, true} {
-		t.Run(map[bool]string{false: "Run", true: "Output"}[output], func(t *testing.T) {
-			ctx, recorder := obs.Test(t)
-			var err error
-			if output {
-				var result []byte
-				result, err = (execCommandRunner{}).Output(ctx, "sh", "-c", "printf fixture; exit 7")
-				if string(result) != "fixture" {
-					t.Fatalf("output=%q", result)
-				}
-			} else {
-				err = (execCommandRunner{}).Run(ctx, "sh", "-c", "exit 7")
-			}
-			var exit commandExitError
-			if !errors.As(err, &exit) || exit.code != 7 {
-				t.Fatalf("err=%v", err)
-			}
-			runs := 0
-			for _, record := range recorder.Records() {
-				if record.Message == "runner.run" {
-					runs++
-					code, _ := record.Field(obs.FieldExit)
-					if record.Level != "INFO" || code != float64(7) {
-						t.Fatalf("record=%+v", record)
-					}
-				}
-			}
-			if runs != 1 {
-				t.Fatalf("runs=%d: %s", runs, recorder.Raw())
 			}
 		})
 	}

@@ -84,7 +84,8 @@ func readCodexWeekly(path string, now time.Time) (*codexWindow, time.Duration, b
 		}
 		window = &candidate.codexWindow
 		window.UsedPercent = *candidate.UsedPercent
-		if window.UsedPercent < 0 || window.UsedPercent > 100 || window.ResetsAt <= 0 {
+		// An unknown reset only drops the countdown (resetCountdown).
+		if window.UsedPercent < 0 || window.UsedPercent > 100 {
 			return nil, 0, false, fmt.Errorf("invalid weekly window")
 		}
 		break

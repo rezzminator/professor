@@ -62,8 +62,9 @@ func TestCodexSinceExcludesPreWindowUsage(t *testing.T) {
 		{"stamped repeat of undated first counter", []int64{150, 150}, []string{"", "2026-09-21T05:00:00Z"}, 150, 1},
 		{"stamped repeat of undated increase", []int64{500, 1000, 1000}, []string{"2026-09-21T05:00:00Z", "", "2026-09-21T05:02:00Z"}, 1000, 1},
 		{"undated reset", []int64{1000, 0, 1200}, []string{"2026-09-21T05:00:00Z", "", "2026-09-21T05:02:00Z"}, 2200, 2},
-		{"undated tail", []int64{500, 1000}, []string{"2026-09-21T05:00:00Z", ""}, 500, 1},
-		{"consecutive undated resets", []int64{1000, 100, 0, 1200}, []string{"2026-09-21T05:00:00Z", "", "", "2026-09-21T05:02:00Z"}, 2200, 2},
+		{"undated tail", []int64{500, 1000}, []string{"2026-09-21T05:00:00Z", ""}, 1000, 1},
+		{"undated tail after a pre-window stamp", []int64{1000, 1500}, []string{"2026-09-20T04:00:00Z", ""}, 0, 0},
+		{"consecutive undated resets", []int64{1000, 100, 0, 1200}, []string{"2026-09-21T05:00:00Z", "", "", "2026-09-21T05:02:00Z"}, 2300, 3},
 		{"at cutoff", []int64{100, 200}, []string{"2026-09-20T05:59:59Z", "2026-09-20T06:00:00Z"}, 100, 1},
 		{"reset before cutoff", []int64{1000, 100, 200}, []string{"2026-09-19T05:00:00Z", "2026-09-20T05:00:00Z", "2026-09-21T05:00:00Z"}, 100, 1},
 		{"reset to zero inside", []int64{1000, 1100, 0, 50}, []string{"2026-09-20T05:00:00Z", "2026-09-21T05:00:00Z", "2026-09-21T05:01:00Z", "2026-09-21T05:02:00Z"}, 150, 2},
@@ -183,7 +184,8 @@ func TestCodexNamesTheReadErrorBehindAnEmptyHome(t *testing.T) {
 // working directory's sessions/.
 func TestCodexRefusesAnEmptyHome(t *testing.T) {
 	code, _, stderr := auditWith(t, Options{}, "--codex", "--prices", fixture(t, "model-cost.json"))
-	if code != 1 || !strings.Contains(stderr, "READ ERRORS: no Codex home is configured; pass --codex-root DIR") {
+	if code != 1 ||
+		stderr != "pfm tokens: no Codex rollouts under ; READ ERRORS: no Codex home is configured; pass --codex-root DIR\n" {
 		t.Fatalf("exit %d stderr %q, want 1 naming the missing home", code, stderr)
 	}
 }
@@ -221,14 +223,13 @@ func TestCodexReadsEveryCodexHome(t *testing.T) {
 		&stderr,
 		runtime,
 	)
-	if code != 0 || !strings.Contains(stdout.String(), homes[1]) ||
-		!strings.Contains(stdout.String(), " · 2 threads of 2 rollouts") ||
-		!strings.Contains(stdout.String(), "cx-thread-9") {
-		t.Fatalf(
-			"exit %d\nstdout:\n%s\nstderr:\n%s\nwant both homes' rollouts read",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
+	golden(
+		t,
+		"codex_homes.txt",
+		strings.NewReplacer(homes[0], "{home0}", homes[1], "{home1}", absTestdata(t), "testdata").
+			Replace(stdout.String()),
+	)
 }

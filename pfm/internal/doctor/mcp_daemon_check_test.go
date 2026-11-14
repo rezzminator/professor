@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -204,13 +205,13 @@ func TestDoctorPrintsDaemonAndServeRowsWhenMCPConfigIsDisabled(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	runDoctor(nil, &stdout, &stderr, runtime)
-	for _, want := range []string{
-		"doctor: mcp daemon=unreachable disabled-in-config",
-		"doctor: mcp-serve clean checked=0",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
-		}
+	got := doctorRows(stdout.String(), "doctor: mcp daemon") + doctorRows(stdout.String(), "doctor: mcp-serve")
+	if got, want := strings.ReplaceAll(
+		got,
+		fmt.Sprint(port),
+		"{port}",
+	), "doctor: mcp daemon=unreachable disabled-in-config error=no service answered at 127.0.0.1:{port}: Get \"http://127.0.0.1:{port}/status\": dial tcp 127.0.0.1:{port}: connect: connection refused\ndoctor: mcp-serve clean checked=0\n"; got != want {
+		t.Errorf("daemon and serve rows = %q, want %q", got, want)
 	}
 }
 
@@ -293,11 +294,11 @@ func TestMCPDaemonDoctorComparesMountedChatWithConfig(t *testing.T) {
 	runtime := runtimeForPort(1)
 	runtime.Config.MCPServers[pfmconfig.MCPServerChat] = pfmconfig.MCPServer{Enabled: false}
 	var output bytes.Buffer
-	if warnings := printMCPDaemonDoctor(&output, runtime); warnings != 1 ||
-		!strings.Contains(
-			output.String(),
-			"doctor: mcp daemon families mounted=chat enabled= — the daemon predates the config",
-		) {
-		t.Fatalf("warnings=%d output=%q, want the disabled chat registration to be reported", warnings, output.String())
+	if warnings, want := printMCPDaemonDoctor(
+		&output,
+		runtime,
+	), "doctor: mcp daemon=running pid=1234 since= endpoint=\ndoctor: mcp daemon families mounted=chat enabled= — the daemon predates the config; restart it: pfm install --yes\n"; warnings != 1 ||
+		output.String() != want {
+		t.Errorf("warnings=%d output = %q, want %q", warnings, output.String(), want)
 	}
 }

@@ -96,7 +96,7 @@ func (model Model) enterLabel(row compose.Row, hasRow bool) string {
 		return "upgrade"
 	case hasRow && isLaunchFailureNotice(row.Kind):
 		return "—"
-	case hasRow && isNewChatActionKind(row.Kind) && model.wizardOn(row):
+	case hasRow && model.wizardOn(row):
 		if _, more := model.wizardNext(row, model.wizard.step, model.wizard.engine); more {
 			return "next"
 		}
@@ -125,7 +125,7 @@ func (model Model) chatsFooterKeys(compact bool) (first, second []span) {
 	case live:
 		kill = "kill"
 	}
-	stepping := hasRow && isNewChatActionKind(row.Kind) && model.wizardOn(row)
+	stepping := hasRow && model.wizardOn(row)
 	arrows, escape := "action", "close"
 	if stepping {
 		arrows, escape = "choose", "back"

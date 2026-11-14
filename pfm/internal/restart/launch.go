@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +27,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -201,10 +201,10 @@ func launchFront(ctx context.Context, stdout, stderr io.Writer, runtime config.R
 	return launcher.Follow(ctx, pid, logPath, stdout, stderr)
 }
 
-// restartLogDir is where restart logs and the logs of what it starts go:
-// beside the state database, so a jail, a fence and the host keep their own.
+// restartLogDir is where restart logs and the logs of what it starts go: the
+// home's log root (paths.LogRoot), so a jail, a fence and the host keep their own.
 func restartLogDir(values paths.Values) string {
-	return filepath.Join(filepath.Dir(values.StateDB), "restart")
+	return paths.LogRoot(paths.OSEnv{}, values.Home).Restart()
 }
 
 // Launcher spawns the worker outside every chat and follows its log.
@@ -256,6 +256,8 @@ func (launcher Launcher) Follow(ctx context.Context, pid int, logPath string, st
 			if code, ok := strings.CutPrefix(string(line), ExitMarker); ok {
 				parsed, err := strconv.Atoi(strings.TrimSpace(code))
 				if err != nil {
+					fmt.Fprintf(stderr, "pfm restart: worker pid %d: unreadable exit marker %q: %v; log %s\n",
+						pid, strings.TrimSpace(code), err, logPath)
 					return 1
 				}
 				return parsed
@@ -345,13 +347,22 @@ func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom 
 	if err != nil {
 		fmt.Fprintf(warn, "pfm restart: resolve this binary (pfm processes are matched by name only): %v\n", err)
 	}
+	services := nativeServiceManager(
+		servicemanager.Native(),
+		runner,
+		clock.Real,
+		runtime.Paths.Home,
+		servicemanager.UID(),
+	)
 	dependencies := Deps{
 		Runner:       runner,
 		Procs:        gather.NewProcFS(runtime.Paths.ProcRoot),
-		Signal:       syscall.Kill,
+		Kernel:       gather.NativeKernel(),
+		Probe:        gather.ProbeProcess,
+		Install:      gather.InstallAt(runtime.Paths.Home),
 		Clock:        clock.Real,
 		Fleet:        liveFleet{runtime: runtime, warn: warn},
-		Services:     nativeServiceManager(goruntime.GOOS, runner, clock.Real, runtime.Paths.Home, os.Getuid()),
+		Services:     services,
 		Self:         os.Getpid(),
 		EffectiveUID: uint32(os.Geteuid()),
 		Spare:        spare,

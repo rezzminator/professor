@@ -15,6 +15,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -68,7 +69,7 @@ func TestHerdrSpawnReservesStructuredRecipeAndCleansRefusal(t *testing.T) {
 				)
 			}()
 			binary := filepath.Join(values.Home, "native-claude")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			request := HerdrRequest{
@@ -210,7 +211,7 @@ func TestHerdrBirthResolvesRealEngineBeforeReservation(t *testing.T) {
 					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 						t.Fatal(err)
 					}
-					if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+					if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -311,13 +312,13 @@ func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
 					t.Fatal(err)
 				}
 				if mode != "missing" {
-					if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+					if err := testjail.WriteExecutableNeverRun(
+						binary,
+						[]byte("#!/bin/sh\nexit 0\n"),
+						0o700,
+					); err != nil {
 						t.Fatal(err)
 					}
-				}
-				t.Setenv("PATH", filepath.Dir(binary))
-				if mode == "outside-path" {
-					t.Setenv("PATH", t.TempDir())
 				}
 				word := binary
 				if mode != "configured" && mode != "outside-path" {
@@ -337,6 +338,14 @@ func TestHerdrRawBirthResolvesActualEngineBeforeReservation(t *testing.T) {
 					Seat: fleetdb.Seat{SeatID: "raw-seat", SessionID: "provisional", Engine: string(engineID)},
 					Run:  fleetdb.SeatRun{Binary: word, CWD: values.Home, Args: []string{"a b", "a'quote"}},
 				}
+				// The runner finds the engine as the host would: the configured path, the bare name
+				// on PATH and a path outside PATH all resolve to the file; a missing file or a bad
+				// override resolves to nothing.
+				fake := &deps.FakeRunner{}
+				if mode != "missing" && mode != "bad-override" {
+					fake.ScriptLookPath(word, binary, nil)
+				}
+				request.Runner = fake
 				result, err := PrepareHerdr(context.Background(), request)
 				db := fleetdb.OpenSharedState(context.Background(), values)
 				defer func() { _ = db.Close() }()
@@ -392,7 +401,7 @@ func TestHerdrBirthRefusesProtocolBeforeReservation(t *testing.T) {
 		)
 	}()
 	binary := filepath.Join(values.Home, "real-engine")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	_, err = PrepareHerdr(
@@ -513,7 +522,7 @@ func TestHerdrSpawnTabLabelIsNeverEmpty(t *testing.T) {
 				)
 			}()
 			binary := filepath.Join(values.Home, "native-claude")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			choice := BackendChoice{
@@ -564,10 +573,10 @@ func TestHerdrBirthOutlivesAFailedRetire(t *testing.T) {
 		)
 	}()
 	binary := filepath.Join(values.Home, "native-claude")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// A SID directory that is a regular file: the dead seat's reload files cannot be removed.
+	// A SID directory that is a regular file: the dead seat's reload record cannot be removed.
 	blocked := filepath.Join(values.Home, "sid-is-a-file")
 	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
 		t.Fatal(err)

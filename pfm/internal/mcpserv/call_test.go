@@ -2,7 +2,6 @@ package mcpserv
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -14,7 +13,7 @@ func TestChatCallRefusesWithoutTarget(t *testing.T) {
 		{Target: "  ", Targets: []string{"", " "}, Message: "body"},
 	} {
 		_, _, err := (&Service{}).chatCall(context.Background(), nil, input)
-		if err == nil || !strings.Contains(err.Error(), "needs a target or targets") {
+		if err == nil || err.Error() != "call needs a target or targets" {
 			t.Fatalf("%+v: err=%v, want the missing-target refusal", input, err)
 		}
 	}

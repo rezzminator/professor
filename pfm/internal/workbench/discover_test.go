@@ -2,6 +2,7 @@ package workbench
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -101,6 +102,33 @@ func TestDiscoverUnreadableDirectory(t *testing.T) {
 	}
 }
 
+// A directory this user cannot read holds no bench of theirs: below the root it is
+// skipped, never a fault; the root itself still reports it.
+func TestDiscoverSkipsPermissionDeniedBelowRoot(t *testing.T) {
+	root, scribe := benchFixture(t)
+	locked := filepath.Join(root, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	osReadDir := readDir
+	t.Cleanup(func() { readDir = osReadDir })
+	readDir = func(dir string) ([]os.DirEntry, error) {
+		if dir == locked {
+			return nil, &fs.PathError{Op: "open", Path: dir, Err: fs.ErrPermission}
+		}
+		return osReadDir(dir)
+	}
+	benches, walkErrors := Discover([]string{root})
+	if len(benches) != 1 || benches[0].Dir != scribe || len(walkErrors) != 0 {
+		t.Fatalf("below root: Discover = %#v, %v; want bench %s and no error", benches, walkErrors, scribe)
+	}
+	_, walkErrors = Discover([]string{locked})
+	want := "workbench discovery under " + locked + " could not read " + locked + ": open " + locked + ": permission denied"
+	if len(walkErrors) != 1 || walkErrors[0].Error() != want {
+		t.Fatalf("root: walkErrors = %v; want one %q", walkErrors, want)
+	}
+}
+
 // A regular file named .professor holds no baseline and no manifest: it is
 // absence, never a failure that refuses every launch below it.
 func TestProfessorFileIsNotAWorkbench(t *testing.T) {
@@ -113,7 +141,7 @@ func TestProfessorFileIsNotAWorkbench(t *testing.T) {
 	if bench, found, err := Nearest(cwd); err != nil || found {
 		t.Fatalf("Nearest = %#v, %v, %v; want not found, nil", bench, found, err)
 	}
-	if persona, err := ForLaunch(cwd, pfmengine.Claude, New); err != nil || persona.Applies() {
+	if persona, err := ForLaunch(cwd, "", pfmengine.Claude, New); err != nil || persona.Applies() {
 		t.Fatalf("ForLaunch = %#v, %v; want the fleet persona", persona, err)
 	}
 	benches, walkErrors := Discover([]string{root})

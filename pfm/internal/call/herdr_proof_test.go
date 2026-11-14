@@ -11,10 +11,20 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHerdrDoorsRequireDurableOwnership(t *testing.T) {
-	for _, door := range []string{"capture", "raw", "literal", "keys", "wait", "prompt"} {
+	const unproved = "herdr pane w1:p2 ownership unproved: no durable owner"
+	for _, testCase := range []struct{ door, want string }{
+		{"capture", unproved},
+		{"raw", unproved},
+		{"literal", unproved},
+		{"keys", unproved},
+		{"wait", unproved},
+		{"prompt", "ABORT: Herdr ownership could not be proved; nothing was typed: " + unproved},
+	} {
+		door := testCase.door
 		t.Run(door, func(t *testing.T) {
 			socket := newNativeSocket(t, func(req nativeRequest) (any, string) {
 				switch req.Method {
@@ -51,8 +61,8 @@ func TestHerdrDoorsRequireDurableOwnership(t *testing.T) {
 					err = fmt.Errorf("%s", result.Message)
 				}
 			}
-			if err == nil || !strings.Contains(err.Error(), "ownership unproved") {
-				t.Fatalf("%s without owner: %v; want explicit ownership unproved", door, err)
+			if err == nil || err.Error() != testCase.want {
+				t.Fatalf("%s without owner: %v; want %q", door, err, testCase.want)
 			}
 		})
 	}
@@ -117,14 +127,14 @@ func seedNativeOwner(t *testing.T, target Target) {
 // A lost seat keeps the pane it last held: a dead supervisor's record never
 // makes that pane's live owner ambiguous, a live one still does.
 func TestHerdrPaneOwnerIgnoresARetiredSeat(t *testing.T) {
-	const socket = "/fixture/herdr.sock"
+	socket := testjail.Place("/fixture/herdr.sock")
 	for _, tc := range []struct {
-		name      string
-		pid       int
-		ambiguous bool
+		name string
+		pid  int
+		want string
 	}{
-		{name: "dead supervisor", pid: 77},
-		{name: "live supervisor", pid: 41, ambiguous: true},
+		{name: "dead supervisor", pid: 77, want: "herdr seat native-fixture ownership unproved: prove seat native-fixture pane.list: herdr socket {socket}: dial for pane.list pfm-seat: dial unix {socket}: connect: no such file or directory"},
+		{name: "live supervisor", pid: 41, want: "herdr pane w1:p2 ownership unproved: multiple durable owners"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			seedNativeOwner(t, Target{SocketPath: socket, Engine: "cc"})
@@ -144,8 +154,8 @@ func TestHerdrPaneOwnerIgnoresARetiredSeat(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = ProveHerdrTarget(context.Background(), Target{SocketPath: socket, Pane: "w1:p2"})
-			if got := err != nil && strings.Contains(err.Error(), "multiple durable owners"); got != tc.ambiguous {
-				t.Fatalf("proof = %v; ambiguous=%t, want %t", err, got, tc.ambiguous)
+			if got := strings.ReplaceAll(fmt.Sprint(err), socket, "{socket}"); got != tc.want {
+				t.Fatalf("proof = %q, want %q", got, tc.want)
 			}
 		})
 	}

@@ -66,7 +66,7 @@ func TestCodexArgsForkVerbBadVerbAndInstructionsPointer(t *testing.T) {
 func TestCodexArgsRefusesAnUnsafeResumeID(t *testing.T) {
 	for _, id := range []string{"a\nb", "a\rb", "a\x00b"} {
 		_, err := CodexArgs("", "", "", nil, CodexResume, id)
-		if err == nil || !strings.Contains(err.Error(), "safe session id") {
+		if err == nil || err.Error() != "codex resume requires one safe session id" {
 			t.Fatalf("id %q err = %v", id, err)
 		}
 	}

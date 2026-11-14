@@ -10,10 +10,6 @@ import (
 // phase is a fix's place in the upgrade order. The rule: a fix runs only
 // after every fix whose result it reads.
 //
-//   - config: the pfm config names the paths, the accounts and the MCP port
-//     every later check and fix reads, so it moves first.
-//   - database: the state and cache databases move with pfm's services
-//     stopped, before any later step restarts them.
 //   - store: the Claude store and each account dir must be real and hold
 //     their own entries before the settings and MCP entries inside them are
 //     edited.
@@ -31,9 +27,7 @@ import (
 type phase int
 
 const (
-	phaseConfig phase = iota
-	phaseDatabase
-	phaseStore
+	phaseStore phase = iota
 	phaseWiring
 	phaseCleanup
 	phaseUnknown
@@ -46,13 +40,9 @@ const (
 // prerequisite. Every name here is a registered detector's check (a test
 // pins it), so a renamed check cannot leave a stale entry behind.
 var phaseClasses = map[phase]string{
-	phaseConfig:   "legacy-config pre-split-config",
-	phaseDatabase: "legacy-state-db legacy-cache-db",
-	phaseStore:    "account-is-store store-identity account-entry-real home-state-file",
-	phaseWiring: "pfm-settings pfm-mcp staged-shim third-party-mcp " +
-		"function-hook-modules shell-claude-env",
-	phaseCleanup: "staged-prompts shared-db retired-harvester-config stray-dir unclassified " +
-		"stale-state-tmp beside-backup",
+	phaseStore:   "account-is-store store-identity account-entry-real home-state-file",
+	phaseWiring:  "pfm-settings third-party-mcp function-hook-modules shell-claude-env",
+	phaseCleanup: "stray-dir unclassified stale-state-tmp beside-backup",
 	phaseInstall: "retired-store-entry",
 }
 
@@ -64,7 +54,7 @@ type classPhase struct {
 // fixOrder is phaseClasses in phase order, one entry per class.
 var fixOrder = func() []classPhase {
 	var order []classPhase
-	for place := phaseConfig; place <= phaseInstall; place++ {
+	for place := phaseStore; place <= phaseInstall; place++ {
 		for _, class := range strings.Fields(phaseClasses[place]) {
 			order = append(order, classPhase{class, place})
 		}

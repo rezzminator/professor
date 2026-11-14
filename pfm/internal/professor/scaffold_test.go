@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -35,7 +37,7 @@ func newScaffoldFixtureStore(t *testing.T) string {
 		}
 	}
 	for _, dir := range []string{
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub", "rules",
 	} {
 		if err := os.MkdirAll(filepath.Join(root, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)
@@ -80,20 +82,35 @@ func TestScaffoldRecordsATransition(t *testing.T) {
 	}
 }
 
-// TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure pins L3-F8: plan
-// entries sort ".claude/settings.json" before ".rumdl.toml" (byte order),
-// so the first entry is durably written and pinnable before the second
-// entry's write fails (a pre-existing non-empty directory sits where
-// atomicfile.Write needs to rename a regular file). Before the fix, Scaffold
-// returned the error without ever calling Save — the first entry's pin was
-// lost, and a retry would hit `CONFLICT … exists` on it and never pin it.
-// After the fix, the partial baseline is durably saved so a retry (`pfm init
-// --force`) converges to a fully pinned install.
+// TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure: one entry that
+// cannot be deployed (a non-empty directory sits where .rumdl.toml goes) or
+// read (an unreadable command template) is named SKIPPED and left unpinned;
+// every other entry, before or after it, still deploys and pins, and the
+// error counts both sides.
 func TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure(t *testing.T) {
 	source := newScaffoldFixtureStore(t)
+	locked := filepath.Join(source, "templates", "project", "commands", "locked.md")
+	if err := os.WriteFile(locked, []byte("# locked\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(source, "templates", "project", "agents", "after.md"),
+		[]byte("# after\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(source, "templates", "project", "rules", "after.md"),
+		[]byte("# after rule\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
 	target := t.TempDir()
-	// Force a hard failure on ".rumdl.toml": a non-empty directory where
-	// atomicfile.Write needs to rename a regular file over it.
 	blocked := filepath.Join(target, ".rumdl.toml")
 	if err := os.MkdirAll(blocked, 0o700); err != nil {
 		t.Fatal(err)
@@ -104,35 +121,31 @@ func TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure(t *testing.T) {
 
 	var stdout bytes.Buffer
 	count, err := Scaffold(source, target, true, &stdout)
-	if err == nil {
-		t.Fatalf(
-			"Scaffold() err = nil, want the blocked-directory write to fail; count=%d stdout=%q",
-			count,
-			stdout.String(),
-		)
+	wantErr := "2 template(s) not deployed (SKIPPED above); the other 3 are deployed and pinned"
+	if err == nil || err.Error() != wantErr || count != 3 {
+		t.Fatalf("Scaffold() count=%d err=%v, want 3 and %q; stdout=%q", count, err, wantErr, stdout.String())
 	}
-
+	wantRead := "SKIPPED read template project/commands/locked.md: read " + locked + ": permission denied\n"
+	if !strings.Contains(stdout.String(), wantRead) ||
+		!strings.Contains(stdout.String(), "SKIPPED deploy project/rumdl-policy.toml to .rumdl.toml: ") {
+		t.Fatalf("stdout = %q, want both SKIPPED lines (%q)", stdout.String(), wantRead)
+	}
 	baseline, loadErr := Load(target)
 	if loadErr != nil {
-		t.Fatalf(
-			"a failed Scaffold pass orphaned the entries it already wrote — baseline was never persisted: %v (scaffold error: %v)",
-			loadErr,
-			err,
-		)
+		t.Fatalf("baseline was never persisted: %v (scaffold error: %v)", loadErr, err)
 	}
-	pin, ok := baseline.Files[".claude/settings.json"]
-	if !ok {
-		t.Fatalf(
-			"baseline.json does not pin .claude/settings.json, written before the failure: %#v (scaffold error: %v)",
-			baseline.Files,
-			err,
-		)
+	var pinned []string
+	for local, pin := range baseline.Files {
+		pinned = append(pinned, local+"="+pin.Template)
 	}
-	if pin.Template != "project/settings.json" {
-		t.Fatalf("pin for .claude/settings.json = %#v, want template project/settings.json", pin)
+	sort.Strings(pinned)
+	want := []string{
+		".claude/agents/after.md=project/agents/after.md",
+		".claude/rules/after.md=project/rules/after.md",
+		".claude/settings.json=project/settings.json",
 	}
-	if _, ok := baseline.Files[".rumdl.toml"]; ok {
-		t.Fatalf("baseline.json pins .rumdl.toml, which never wrote successfully: %#v", baseline.Files)
+	if !reflect.DeepEqual(pinned, want) {
+		t.Fatalf("pins = %v, want %v", pinned, want)
 	}
 }
 

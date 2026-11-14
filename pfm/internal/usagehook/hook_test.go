@@ -195,7 +195,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	// exhausted: finish the in-flight step, then /reload" on every prompt while the 5-hour
 	// window was 1% used. Severity by max() is correct; asserting it about the LIVE window was
 	// not. A model-scoped cap must name the model and report the real 5-hour headroom.
-	seedNamed := func(five, seven int, fable string) {
+	seedNamed := func(five, seven int, fable, fableReset string) {
 		t.Helper()
 		body := []byte(`{"config_dir":` + `"` + configDir + `",` + `"five_hour":{"utilization":` + itoa(five) +
 			`,"resets_at":"2030-01-01T10:00:00Z"},` +
@@ -203,7 +203,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 			`,"resets_at":"2030-01-03T08:00:00Z"},` +
 			`"seven_day_opus":{"utilization":null},` +
 			`"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},` +
-			`"percent":` + fable + `,"resets_at":"2030-01-03T08:00:00Z","is_active":true}]}`)
+			`"percent":` + fable + `,"resets_at":"` + fableReset + `","is_active":true}]}`)
 		if err := os.WriteFile(filepath.Join(cacheDir, "acct-1.json"), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +216,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	if _, err := Evaluate(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
-	seedNamed(1, 76, "95")
+	seedNamed(1, 76, "95", "2030-01-03T08:00:00Z")
 	scoped, err := Evaluate(context.Background(), options)
 	if err != nil || !strings.Contains(scoped, "USAGE LIMIT IMMINENT") {
 		t.Fatalf("scoped=%q err=%v", scoped, err)
@@ -229,11 +229,26 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	if strings.Contains(scoped, "finish the in-flight step") {
 		t.Fatalf("model-scoped cap must NOT order a session-wide stop: %q", scoped)
 	}
-	seedNamed(97, 76, "20")
+	seedNamed(97, 76, "20", "2030-01-03T08:00:00Z")
 	fiveCrit, err := Evaluate(context.Background(), options)
 	if err != nil || !strings.Contains(fiveCrit, "The 5-hour window is nearly exhausted") {
 		t.Fatalf("fiveCrit=%q err=%v", fiveCrit, err)
 	}
+	// A Fable reading whose reset will not parse is still a reading: the
+	// warning names it, and the hook's log names the unknown reset.
+	var log bytes.Buffer
+	options.Log = &log
+	seedNamed(1, 20, "96", "soon")
+	unknownReset, err := Evaluate(context.Background(), options)
+	if err != nil || !strings.Contains(unknownReset, " · 7d-fable 96%. ") {
+		t.Fatalf("unknown Fable reset: warning=%q err=%v, want the 7d-fable 96%% clause", unknownReset, err)
+	}
+	wantLog := "pfm usage-hook: Fable reset unknown: decode cached Fable reset \"soon\": " +
+		"parsing time \"soon\" as \"2006-01-02T15:04:05Z07:00\": cannot parse \"soon\" as \"2006\"\n"
+	if log.String() != wantLog {
+		t.Fatalf("unknown Fable reset log=%q, want %q", log.String(), wantLog)
+	}
+	options.Log = nil
 
 	seed(5, 5)
 	secondRecovery, err := Evaluate(context.Background(), options)
@@ -250,101 +265,112 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 	}
 }
 
-// TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero is the regression for
-// the recovery-banner bug: five/seven come from currentUtilization(window,
-// now, 0), which returns the fallback 0 for a window whose resets_at has
-// already passed — "unknown, awaiting refetch", not "measured 0%". The old
-// banner rendered that as a truthful-looking "back to 5h 0% · 7d 0%", and an
-// expired window collapsing to 0 is exactly what drags `maximum` under
-// options.Warn and enters this branch in the first place, so it is the likely
-// reading, not a corner case. Reaching the recovery branch requires the
-// warned-<account> flag to already exist (TestEvaluateIgnoresWindowsPastTheir
-// Reset never sets it, which is why this survived); this test pre-arms it.
-func TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero(t *testing.T) {
-	root := t.TempDir()
-	configDir := filepath.Join(root, ".cc", "9")
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(configDir, ".credentials.json"),
-		[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().Truncate(time.Second)
-	cacheDir := filepath.Join(root, "cache")
-	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	// Pre-arm the warned flag: without it, a low-utilization cache never
-	// enters the recovery branch at all — it is simply quiet.
-	if err := atomicfile.Write(filepath.Join(cacheDir, "warned-9"), []byte(configDir), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	passed := now.Add(-90 * time.Minute)
-	if err := WriteCacheRecord(CachePath(cacheDir, 9), CacheRecord{
-		Usage: Usage{
-			FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: passed.Format(time.RFC3339)},
-			SevenDay: Window{
-				Utilization: usageFloatPtr(12),
-				ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
+// TestEvaluateKeepsItsNoticeWhenTheWarnedFlagFails: the warned flag only
+// dedupes the recovery notice, so a flag that cannot be written or removed
+// costs a log line, never the warning or the notice it travels with. A config
+// directory nothing names reports as account 1, and says so.
+func TestEvaluateKeepsItsNoticeWhenTheWarnedFlagFails(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		fiveUsed    float64
+		arm         func(t *testing.T, flagPath, configDir string)
+		wantMessage string
+		wantLog     string
+	}{
+		{
+			name:     "flag write fails",
+			fiveUsed: 85,
+			arm: func(t *testing.T, flagPath, _ string) {
+				if err := os.MkdirAll(filepath.Join(flagPath, "occupied"), 0o700); err != nil {
+					t.Fatal(err)
+				}
 			},
+			wantMessage: "⚠ usage limit approaching — account 1: 5h 85% (resets 05:00) · 7d 12% (resets Mon 05:00). " +
+				"Plan around it: wrap up soon or /reload to another account before the cap hits.\n",
+			wantLog: "record warned flag {flag}: ",
 		},
-		ConfigDir: configDir, FetchedAt: &now,
-	}); err != nil {
-		t.Fatal(err)
+		{
+			name:     "flag removal fails",
+			fiveUsed: 10,
+			arm: func(t *testing.T, flagPath, configDir string) {
+				if err := atomicfile.Write(flagPath, []byte(configDir), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				previous := removeWarnedFlag
+				t.Cleanup(func() { removeWarnedFlag = previous })
+				removeWarnedFlag = func(string) error { return os.ErrPermission }
+			},
+			wantMessage: "✅ usage recovered — account 1 is back to 5h 10% · 7d 12%. Any earlier limit warning in " +
+				"this conversation is STALE — ignore it and work normally.\n",
+			wantLog: "clear warned flag {flag}: permission denied\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			configDir := filepath.Join(root, "work-seat")
+			if err := os.MkdirAll(configDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(configDir, ".credentials.json"),
+				[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2030, 1, 7, 1, 0, 0, 0, time.UTC)
+			cacheDir := filepath.Join(root, "cache")
+			if err := WriteCacheRecord(CachePath(cacheDir, 1), CacheRecord{
+				Usage: Usage{
+					FiveHour: Window{Utilization: usageFloatPtr(test.fiveUsed), ResetsAt: "2030-01-07T05:00:00Z"},
+					SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: "2030-01-07T05:00:00Z"},
+				},
+				ConfigDir: configDir, FetchedAt: &now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			flagPath := filepath.Join(cacheDir, "warned-1")
+			test.arm(t, flagPath, configDir)
+			var log bytes.Buffer
+			message, err := Evaluate(context.Background(), Options{
+				Now: func() time.Time { return now }, Env: &paths.MapEnv{Values: map[string]string{}},
+				Home: root, ConfigDir: configDir, CacheDir: cacheDir,
+				Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: &log,
+			})
+			if err != nil || message != test.wantMessage {
+				t.Fatalf("message=%q err=%v, want %q", message, err, test.wantMessage)
+			}
+			flagLog := strings.ReplaceAll(test.wantLog, "{flag}", flagPath)
+			wantLog := "pfm usage-hook: no account number for config dir " + configDir + "; reporting it as account 1\n" +
+				"pfm usage-hook: " + flagLog
+			if !strings.HasPrefix(log.String(), wantLog) {
+				t.Fatalf("log=%q, want it to start %q", log.String(), wantLog)
+			}
+		})
 	}
-	message, err := Evaluate(context.Background(), Options{
-		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
-		AccountDirs: map[string]int{configDir: 9}, CacheDir: cacheDir,
-		Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(message, "usage recovered") {
-		t.Fatalf("expected the recovery banner, got %q", message)
-	}
-	if strings.Contains(message, "0%") {
-		t.Fatalf("recovery banner asserted a measured 0%% for an expired window: %q", message)
-	}
-	if !strings.Contains(message, "reset passed") {
-		t.Fatalf("recovery banner did not say the expired window's reset passed: %q", message)
-	}
+}
 
-	// Mirror case: a window whose reset is still in the future, at a genuine
-	// low percentage, must still render its real number rather than the
-	// "reset passed" phrase.
-	if err := atomicfile.Write(filepath.Join(cacheDir, "warned-9"), []byte(configDir), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteCacheRecord(CachePath(cacheDir, 9), CacheRecord{
-		Usage: Usage{
-			FiveHour: Window{Utilization: usageFloatPtr(5), ResetsAt: now.Add(2 * time.Hour).Format(time.RFC3339)},
-			SevenDay: Window{
-				Utilization: usageFloatPtr(12),
-				ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
-			},
+// TestEnvIntNamesAMalformedValue: an unset knob takes its default quietly; a
+// malformed one takes it too, and the log names the value refused.
+func TestEnvIntNamesAMalformedValue(t *testing.T) {
+	for _, test := range []struct {
+		name, value, wantLog string
+		want                 int
+	}{
+		{name: "unset", want: 80},
+		{name: "whole number", value: "70", want: 70},
+		{
+			name: "malformed", value: "8O", want: 80,
+			wantLog: "pfm usage-hook: CC_USAGE_WARN=\"8O\" is not a whole number; using 80\n",
 		},
-		ConfigDir: configDir, FetchedAt: &now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	liveMessage, err := Evaluate(context.Background(), Options{
-		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
-		AccountDirs: map[string]int{configDir: 9}, CacheDir: cacheDir,
-		Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(liveMessage, "5h 5%") {
-		t.Fatalf("recovery banner for a live window lost its real percentage: %q", liveMessage)
-	}
-	if strings.Contains(liveMessage, "reset passed") {
-		t.Fatalf("recovery banner for a live window wrongly said reset passed: %q", liveMessage)
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var log bytes.Buffer
+			env := &paths.MapEnv{Values: map[string]string{"CC_USAGE_WARN": test.value}}
+			if got := envInt(env, &log, "CC_USAGE_WARN", 80); got != test.want || log.String() != test.wantLog {
+				t.Fatalf("envInt=%d log=%q, want %d %q", got, log.String(), test.want, test.wantLog)
+			}
+		})
 	}
 }
 
@@ -401,7 +427,6 @@ func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
 				record.Backoff = &CacheBackoff{
 					Message:    "429 Too Many Requests",
 					RetryAfter: now.Add(time.Hour),
-					RecordedAt: now,
 				}
 			}
 			cachePath := CachePath(cacheDir, 2)
@@ -654,7 +679,6 @@ func TestEvaluateAgesTheCacheByFetchedAtNotFileMtime(t *testing.T) {
 				record.Backoff = &CacheBackoff{
 					Message:    "429 Too Many Requests",
 					RetryAfter: now.Add(time.Hour),
-					RecordedAt: now,
 				}
 			}
 			// WriteCacheRecord leaves mtime at "now" — exactly the state a
@@ -691,114 +715,5 @@ func TestEvaluateAgesTheCacheByFetchedAtNotFileMtime(t *testing.T) {
 				t.Fatalf("provider requests=%d, want %d", hits, testcase.wantHits)
 			}
 		})
-	}
-}
-
-// TestEvaluateIgnoresWindowsPastTheirReset applies fableWindow's rule to the
-// 5h and 7d windows: a cached reading whose resets_at has already passed
-// describes quota that has since rolled over and must never raise the warning.
-func TestEvaluateIgnoresWindowsPastTheirReset(t *testing.T) {
-	for _, testcase := range []struct {
-		name         string
-		fiveResetsAt time.Duration
-		wantWarning  bool
-	}{
-		{name: "passed reset stays silent", fiveResetsAt: -time.Minute},
-		{name: "live reset still warns", fiveResetsAt: time.Hour, wantWarning: true},
-	} {
-		t.Run(testcase.name, func(t *testing.T) {
-			root := t.TempDir()
-			configDir := filepath.Join(root, ".cc", "3")
-			if err := os.MkdirAll(configDir, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(
-				filepath.Join(configDir, ".credentials.json"),
-				[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
-				0o600,
-			); err != nil {
-				t.Fatal(err)
-			}
-			now := time.Now().Truncate(time.Second)
-			cacheDir := filepath.Join(root, "cache")
-			if err := WriteCacheRecord(CachePath(cacheDir, 3), CacheRecord{
-				Usage: Usage{
-					FiveHour: Window{
-						Utilization: usageFloatPtr(98),
-						ResetsAt:    now.Add(testcase.fiveResetsAt).Format(time.RFC3339),
-					},
-					SevenDay: Window{
-						Utilization: usageFloatPtr(12),
-						ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
-					},
-				},
-				ConfigDir: configDir, FetchedAt: &now,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			message, err := Evaluate(context.Background(), Options{
-				Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
-				AccountDirs: map[string]int{configDir: 3}, CacheDir: cacheDir,
-				Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if warned := strings.Contains(message, "USAGE LIMIT IMMINENT"); warned != testcase.wantWarning {
-				t.Fatalf("warning=%v want %v: message=%q", warned, testcase.wantWarning, message)
-			}
-		})
-	}
-}
-
-// TestWarnLineSaysResetPassedInsteadOfAStalePercentage covers the warn line
-// itself: when one window is expired and a LIVE one raises the warning, the
-// expired clause must not advertise its rolled-over percentage or a reset
-// moment already in the past — it reads "5h — (reset passed)".
-func TestWarnLineSaysResetPassedInsteadOfAStalePercentage(t *testing.T) {
-	root := t.TempDir()
-	configDir := filepath.Join(root, ".cc", "8")
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(configDir, ".credentials.json"),
-		[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().Truncate(time.Second)
-	cacheDir := filepath.Join(root, "cache")
-	passed := now.Add(-90 * time.Minute)
-	if err := WriteCacheRecord(CachePath(cacheDir, 8), CacheRecord{
-		Usage: Usage{
-			FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: passed.Format(time.RFC3339)},
-			SevenDay: Window{
-				Utilization: usageFloatPtr(88),
-				ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
-			},
-		},
-		ConfigDir: configDir, FetchedAt: &now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	message, err := Evaluate(context.Background(), Options{
-		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
-		AccountDirs: map[string]int{configDir: 8}, CacheDir: cacheDir,
-		Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(message, "5h — (reset passed)") {
-		t.Fatalf("expired 5h clause did not say the reset passed: %q", message)
-	}
-	if strings.Contains(message, "5h 0%") || strings.Contains(message, "5h 97%") ||
-		strings.Contains(message, "resets "+passed.Format("15:04")) {
-		t.Fatalf("expired 5h clause kept a stale number or a past reset time: %q", message)
-	}
-	if !strings.Contains(message, "7d 88% (resets ") {
-		t.Fatalf("live 7d clause lost its percentage and reset: %q", message)
 	}
 }

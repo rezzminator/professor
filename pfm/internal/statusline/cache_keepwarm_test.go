@@ -114,6 +114,13 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			change: func(r map[string]any) { r["enabled"] = false; r["reason"] = "off" },
 		},
 		{
+			name:   "unread reason",
+			state:  "warming",
+			want:   "🛡 waiting",
+			color:  cWarn,
+			change: func(r map[string]any) { delete(r, "reason") },
+		},
+		{
 			name:   "unknown optional measurements",
 			state:  "warming",
 			want:   "🛡 waiting",
@@ -152,31 +159,31 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			change: func(r map[string]any) { r["pid"] = 1.5 },
 		},
 		{
-			name:   "invalid source",
-			state:  "on",
-			want:   "🛡 ERR",
-			color:  cBad,
+			name:   "unread source",
+			state:  "warming",
+			want:   "🛡 waiting",
+			color:  cWarn,
 			change: func(r map[string]any) { r["source"] = "unknown" },
 		},
 		{
-			name:   "missing enabled",
-			state:  "on",
-			want:   "🛡 ERR",
-			color:  cBad,
+			name:   "unread enabled flag",
+			state:  "warming",
+			want:   "🛡 waiting",
+			color:  cWarn,
 			change: func(r map[string]any) { delete(r, "enabled") },
 		},
 		{
-			name:   "negative measurement",
+			name:   "unread negative measurement",
 			state:  "warming",
-			want:   "🛡 ERR",
-			color:  cBad,
+			want:   "🛡 waiting",
+			color:  cWarn,
 			change: func(r map[string]any) { r["protectingTokensEq"] = -1 },
 		},
 		{
-			name:   "bad counters",
+			name:   "unread poke counters",
 			state:  "warming",
-			want:   "🛡 ERR",
-			color:  cBad,
+			want:   "🛡 waiting",
+			color:  cWarn,
 			change: func(r map[string]any) { r["pokes"] = map[string]any{"count": 5, "max": 4} },
 		},
 	}
@@ -278,7 +285,7 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 				t.Fatalf("cache prefix lost: %q", plain)
 			}
 			if tc.want == "" {
-				if strings.Contains(plain, "🛡") {
+				if plain != " │ 💾5m✓5m:0s 94%" {
 					t.Fatalf("unexpected shield: %q", plain)
 				}
 			} else if !strings.HasSuffix(got, tc.color+tc.want+reset) {
@@ -287,8 +294,8 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			lines := strings.Split(strings.TrimSpace(warn.String()), "\n")
 			switch {
 			case tc.relativeDir:
-				if len(lines) != 1 || !strings.Contains(lines[0], `"relative/state" is not absolute`) ||
-					strings.Contains(lines[0], "state  (") {
+				if len(lines) != 1 ||
+					lines[0] != "statusline: cache-keepwarm state directory \"relative/state\" is not absolute (shield shows ERR)" {
 					t.Fatalf("want one warning naming the unresolved directory, got %q", warn.String())
 				}
 			case tc.want == "🛡 ERR":

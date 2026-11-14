@@ -1,9 +1,10 @@
+//go:build jail
+
 package main
 
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +19,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // startCodexStatusPane brings up a real tmux server on a scratch socket
@@ -33,6 +36,7 @@ import (
 // claude half of the same mechanism.
 func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 	t.Helper()
+	testjail.TmuxServer(t)
 	if err := os.MkdirAll(tmuxTmpDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +901,7 @@ func codexJailStateTitle(t *testing.T, codexHome, id, title, cwd string) {
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, "state_1.sqlite"))
+	state, err := sqlitedb.OpenReadWrite(filepath.Join(codexHome, "state_1.sqlite"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

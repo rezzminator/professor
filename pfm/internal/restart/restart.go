@@ -4,6 +4,17 @@
 // upstream first, only what was running before: never a chat, never a unit
 // found stopped. Every step is verified and reported on its own line; a
 // failed step is named and the rest still run.
+//
+// Entry points: Main and Worker (launch.go) run it; BuildPlan (discover.go) finds what it stops;
+// StaleHerdrIndicators and ConvergeHerdrIndicators (herdr_indicators.go) serve doctor and install.
+// Files:
+//   - discover.go: the plan, family by family: chats, helpers, services, the MCP daemon, pfm.
+//   - herdr.go: the Herdr server family: its status, stop and start.
+//   - herdr_tree.go: what one Herdr session's server runs, and the outlivers its stop proves gone.
+//   - herdr_indicators.go: the stale Herdr indicator painters.
+//   - launch.go: the front that launches the detached worker and follows its log.
+//   - processes.go: the process table and the stops of the processes found in it.
+//   - services.go: the service managers (systemd, launchd) and their units.
 package restart
 
 import (

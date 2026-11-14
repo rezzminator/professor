@@ -119,3 +119,27 @@ func TestRunChecksContextBeforeLocatingRollout(t *testing.T) {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
 }
+
+// A rollout line past the old 32 MiB scanner cap costs nothing: every turn
+// before and after it is recovered and the line itself is a message too.
+func TestRunRecoversTurnsAroundALineOverThirtyTwoMiB(t *testing.T) {
+	threadID := "22222222-2222-4222-8222-222222222222"
+	huge := strings.Repeat("y", 33*1024*1024)
+	root := t.TempDir()
+	body := strings.Join([]string{
+		`{"type":"response_item","timestamp":"2026-08-17T10:00:00Z","payload":{"type":"message","role":"user","content":[{"text":"before"}]}}`,
+		`{"type":"response_item","timestamp":"2026-08-17T10:01:00Z","payload":{"type":"message","role":"assistant","content":[{"text":"` + huge + `"}]}}`,
+		`{"type":"response_item","timestamp":"2026-08-17T10:02:00Z","payload":{"type":"message","role":"user","content":[{"text":"after"}]}}`,
+	}, "\n") + "\n"
+	rollout := filepath.Join(root, "rollout-"+threadID+".jsonl")
+	if err := os.WriteFile(rollout, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(context.Background(), root, rollout)
+	if err != nil {
+		t.Fatalf("Run() over a %d MiB line: %v", len(huge)>>20, err)
+	}
+	if result.Messages != 3 || result.Malformed != 0 {
+		t.Fatalf("Run() = %+v, want 3 messages and 0 malformed", result)
+	}
+}

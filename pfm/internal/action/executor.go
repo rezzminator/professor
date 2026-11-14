@@ -17,6 +17,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -59,14 +60,15 @@ func New(dependencies Dependencies) (*Executor, error) {
 		}
 	}
 	return &Executor{
-		place:     place,
-		tmux:      tmux,
-		processes: processes,
-		gate:      gate,
-		runner:    runner,
-		stderr:    stderr,
-		sidDir:    resolved.SIDDir,
-		heal:      dependencies.Heal,
+		place:      place,
+		tmux:       tmux,
+		processes:  processes,
+		gate:       gate,
+		runner:     runner,
+		stderr:     stderr,
+		sidDir:     resolved.SIDDir,
+		heal:       dependencies.Heal,
+		engineSync: dependencies.EngineSyncRunner,
 	}, nil
 }
 
@@ -152,7 +154,8 @@ func (executor *Executor) Open(
 	}
 
 	// A workbench refusal comes before Solo closes any seat holding the chat.
-	if err := applyWorkbench(&request); err != nil {
+	personaWarnings, err := applyWorkbench(&request, executor.engineSync)
+	if err != nil {
 		return result, err
 	}
 	if err := checkCodexLaunch(request); err != nil {
@@ -181,6 +184,7 @@ func (executor *Executor) Open(
 	if err != nil {
 		return result, err
 	}
+	plan.Warnings = slices.Concat(personaWarnings, plan.Warnings)
 	if plan.ChatServer == nil && request.Detached {
 		// Live and booting rows already have a running session: there is
 		// nothing to spawn, and the eval line Synthesize built is an attach
@@ -239,8 +243,11 @@ func born(kind compose.Kind) bool {
 }
 
 // openHerdr births the planned chat on the placement's Herdr host: a new
-// tab, or (interactive, when placed in place) the caller's own pane, whose
-// shell then execs the seat host through the returned eval line.
+// tab, or (interactive, when placed in place and the caller's workspace is the
+// chat's place's: spawn.HerdrOpensInPlace) the caller's own pane, whose shell
+// then execs the seat host through the returned eval line. Asked from another
+// place's pane, the chat is born in a new tab of its place's workspace and
+// focus follows it there; the caller's pane stays as it was.
 func (executor *Executor) openHerdr(
 	ctx context.Context,
 	request Request,
@@ -262,6 +269,12 @@ func (executor *Executor) openHerdr(
 			return OpenResult{}, err
 		}
 	}
+	inPlace := choice.InPlace && !request.Detached
+	if inPlace {
+		if inPlace, err = spawn.HerdrOpensInPlace(ctx, values, &choice, plan.SeatRun.CWD); err != nil {
+			return OpenResult{}, fmt.Errorf("place the open of chat %s: %w", sessionID, err)
+		}
+	}
 	birth := spawn.HerdrRequest{
 		Choice: choice,
 		Paths:  values,
@@ -273,7 +286,7 @@ func (executor *Executor) openHerdr(
 		},
 		Launch: plan.Record,
 	}
-	if !choice.InPlace || request.Detached {
+	if !inPlace {
 		birth.Choice.InPlace = false
 		born, err := spawn.SpawnHerdr(ctx, birth)
 		if err != nil {
@@ -287,6 +300,12 @@ func (executor *Executor) openHerdr(
 				Name: seat.Name, Socket: seat.HerdrSocket, State: "opened",
 				Detail: spawn.HerdrLocation(seat), Warnings: warnings,
 			}, nil
+		}
+		if choice.InPlace {
+			// Asked from the user's own pane: focus follows the chat to its place.
+			if err := herdr.FocusPane(ctx, born.Seat.HerdrSocket, born.Seat.HerdrPane); err != nil {
+				warnings = append(warnings, err.Error())
+			}
 		}
 		launchnotice.Print(executor.stderr, "pfm", warnings)
 		return OpenResult{}, nil

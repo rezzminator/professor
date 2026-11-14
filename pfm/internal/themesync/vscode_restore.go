@@ -11,7 +11,10 @@ import (
 )
 
 // VSCodeRestore names extension-owned settings that only VS Code can restore.
-// Record retains the prior values; Target is Global or the full workspace identity.
+// Record retains the prior values; Target is Global or the full workspace
+// identity. A target whose record cannot be parsed is pending with one key
+// naming why ("(unreadable: ...)"): its keys cannot be listed, never assumed
+// restored.
 type VSCodeRestore struct {
 	Record string
 	Target string
@@ -20,7 +23,10 @@ type VSCodeRestore struct {
 
 // VSCodePendingRestores reads both ownership records, even without state.json or
 // a VS Code installation. Missing settings/windows are not proof of restoration.
-// It never edits recovery data, including when uninstall deliberately leaves colours.
+// A record file that cannot be read or parsed is the error; one target inside it
+// that cannot be parsed is pending as unreadable and every other target is still
+// listed. It never edits recovery data, including when uninstall deliberately
+// leaves colours.
 func VSCodePendingRestores(stateDir string) ([]VSCodeRestore, error) {
 	var pending []VSCodeRestore
 	for _, name := range []string{"vscode-applied.json", vscodeChromeRecordFile} {
@@ -45,17 +51,9 @@ func VSCodePendingRestores(stateDir string) ([]VSCodeRestore, error) {
 		}
 		sort.Strings(targets)
 		for _, target := range targets {
-			record, err := vscodeRecordObject(records[target])
+			keys, err := vscodeTargetKeys(records[target])
 			if err != nil {
-				return nil, fmt.Errorf("parse %s target %s: %w", recordPath, target, err)
-			}
-			owned, err := vscodeRecordObject(record["keys"])
-			if err != nil {
-				return nil, fmt.Errorf("parse %s target %s keys: %w", recordPath, target, err)
-			}
-			keys, err := vscodeOwnedKeys(owned)
-			if err != nil {
-				return nil, fmt.Errorf("parse %s target %s keys: %w", recordPath, target, err)
+				keys = []string{"(unreadable: parse " + recordPath + " target " + target + ": " + err.Error() + ")"}
 			}
 			if len(keys) > 0 {
 				pending = append(pending, VSCodeRestore{Record: recordPath, Target: target, Keys: keys})
@@ -63,6 +61,23 @@ func VSCodePendingRestores(stateDir string) ([]VSCodeRestore, error) {
 		}
 	}
 	return pending, nil
+}
+
+// vscodeTargetKeys lists the keys one target's record owns.
+func vscodeTargetKeys(raw []byte) ([]string, error) {
+	record, err := vscodeRecordObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	owned, err := vscodeRecordObject(record["keys"])
+	if err != nil {
+		return nil, fmt.Errorf("keys: %w", err)
+	}
+	keys, err := vscodeOwnedKeys(owned)
+	if err != nil {
+		return nil, fmt.Errorf("keys: %w", err)
+	}
+	return keys, nil
 }
 
 func vscodeRecordObject(raw []byte) (map[string]json.RawMessage, error) {

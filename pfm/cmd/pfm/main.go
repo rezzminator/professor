@@ -1,4 +1,6 @@
 // Command pfm manages live and resumable Claude and Codex chats.
+//
+// namesync_halves.go: name-sync's order, the native Herdr seats before the tmux windows.
 package main
 
 import (
@@ -14,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/costsink"
+	_ "github.com/rezzminator/professor/pfm/internal/coverflush" // an instrumented build's counter flush
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -54,6 +57,7 @@ const (
 	doctorCommand     = "doctor"
 	checkAction       = "check"
 	statuslineCommand = "statusline"
+	usageHookCommand  = "usage-hook"
 	staleCommand      = "stale"
 	transcriptCommand = "transcript"
 	restartCommand    = "restart"
@@ -65,9 +69,8 @@ var version = config.DevelopmentVersion
 var topLevelSubcommands = []string{
 	versionCommand, "ls", chatCommand, headlessCommand, indexCommand, doctorCommand,
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
-	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
-	"usage-hook", installCommand, "uninstall", "generate", updateCommand, initCommand, whoamiCommand,
-	mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
+	usageHookCommand, installCommand, "uninstall", "generate", updateCommand, initCommand, whoamiCommand,
+	mcpCommand, internalCommand, "log",
 	"model-cost", "tokens", transcriptCommand, "theme", restartCommand,
 }
 
@@ -102,7 +105,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	}
 	load := config.LoadRuntime
 	if len(args) > 0 && args[0] == installCommand {
-		load = config.LoadInstallRuntime // the install gate names the legacy config and doctor's fix
+		load = config.LoadInstallRuntime // install names the marker fallback
 	}
 	runtime, err := load(configPath)
 	if err != nil {
@@ -112,9 +115,10 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		}
 		// A retired command's answer reads no config: it names its successor
 		// whatever state the machine config is in.
-		if len(args) > 0 && (args[0] == pfmengine.MustLookup(pfmengine.Codex).LongName ||
-			args[0] == pfmengine.MustLookup(pfmengine.OpenCode).LongName) {
-			return runRetiredCommand(args[0], stderr)
+		if len(args) > 0 {
+			if code, retired := answerRetiredCommand(args[0], stderr, false); retired {
+				return code
+			}
 		}
 		// Stale reads no config while the operator applies doctor's fix.
 		if len(args) > 1 && args[0] == internalCommand && args[1] == staleCommand {
@@ -132,6 +136,18 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 			return 1
 		}
+		statusline := args[0] == internalCommand && len(args) > 1 && args[1] == statuslineCommand
+		if args[0] == usageHookCommand || args[0] == internalCommand && !statusline {
+			// A hook or launcher refused here would stop Claude starting and fail every guard open.
+			fmt.Fprintf(stderr, "pfm: config: %v; running on defaults until it is fixed (pfm doctor)\n",
+				runtime.ConfigError)
+		}
+	}
+	// Before anything launches: every process pfm starts carries this
+	// install's mark, the proof a later stop needs that pfm launched it.
+	if err := paths.MarkProcess(runtime.Paths.Home); err != nil {
+		fmt.Fprintf(stderr, "pfm: %v\n", err)
+		return 1
 	}
 	defer config.UseConfigPath(runtime.Config.Path, runtime.Config.State)()
 	runtime.Version = version
@@ -201,14 +217,15 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runWhoami(args[1:], stdout, stderr, runtime)
 	case "mcp":
 		return runMCP(args[1:], stdout, stderr, runtime)
-	case pfmengine.MustLookup(pfmengine.Codex).LongName, pfmengine.MustLookup(pfmengine.OpenCode).LongName:
-		return runRetiredCommand(args[0], stderr)
 	case "internal":
 		return runInternal(args[1:], stdout, stderr, runtime)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
 	default:
+		if code, retired := answerRetiredCommand(args[0], stderr, true); retired {
+			return code
+		}
 		fmt.Fprintf(stderr, "pfm: unknown command %q\n", args[0])
 		printUsage(stderr)
 		return 2
@@ -236,7 +253,7 @@ func printUsage(w io.Writer) {
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
 		"  model-cost the model price table, refreshed daily: MODEL_ID --all --check --json --force",
-		"  tokens    audit transcripts: where did the tokens go (--codex, --opencode, --tree DIR)",
+		"  tokens    audit transcripts: where did the tokens go (--codex, --opencode, --tree SESSION|AGENT)",
 		"  theme     Claude Code's theme rendered into tmux, Herdr and VS Code: status, sync, on, off",
 		"  transcript digest one Claude, Codex or OpenCode transcript: show, locate, agents",
 		"  version   print the pfm version", "", "wiring commands:",
@@ -251,9 +268,9 @@ func diagnosticCommand(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	if args[0] == doctorCommand || args[0] == statuslineCommand ||
-		args[0] == internalCommand && len(args) > 1 && args[1] == statuslineCommand {
-		return true // the statusline renders a broken config on its cache segment
+	switch args[0] {
+	case doctorCommand, statuslineCommand, internalCommand, usageHookCommand:
+		return true // the statusline renders a broken config on its cache segment; hooks and launchers warn
 	}
 	return args[0] == configCommand && len(args) > 1 && (args[1] == "show" || args[1] == "validate")
 }
@@ -424,7 +441,7 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 }
 
 func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
-	stdout, finishHook := obs.Hook(context.Background(), obs.Verb(args), stdout)
+	stdout, stderr, finishHook := obs.Hook(context.Background(), obs.Verb(args), stdout, stderr)
 	defer func() { finishHook(exitCode) }()
 	if len(args) != 0 && (args[0] == "clear-kill" || args[0] == "clear-name" || args[0] == "resume-unkill") {
 		return hookentry.ClearHook(args, os.Stdin, stdout, stderr, runtime)
@@ -573,8 +590,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// registered (a rollback, a stale binary on PATH) would erase every
 		// prompt or deny every tool call. An unknown name is a non-blocking
 		// error that says what happened and how to converge.
-		if installer.RetiredInternalHook(args[0]) {
-			// Install refuses while account settings carry it (host check pfm-settings); a session's start-time hook
+		retiredHook, listsErr := installer.RetiredInternalHook(runtime.Paths.Home, args[0])
+		if retiredHook {
+			// Install strips it from account settings; a session's start-time hook
 			// snapshot still runs it, and no install can clear that. Silent
 			// success: hook stdout becomes prompt context, stderr a warning.
 			return 0
@@ -585,6 +603,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 			args[0],
 			config.DisplayVersion(version),
 		)
+		if listsErr != nil {
+			fmt.Fprintf(stderr, "pfm internal: retired hooks unread: %v\n", listsErr)
+		}
 		return 1
 	}
 	flags := cli.NewFlagSet(

@@ -3,14 +3,15 @@ package restart
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"slices"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func unitNames(units []Unit) []string {
@@ -33,8 +34,24 @@ func TestFindHelpersAndPFMFindEachKindOnce(t *testing.T) {
 		process{PID: 15, Argv: []string{"/opt/pfm/bin/pfm", "chat", "watch"}},
 		process{PID: 16, Argv: []string{"/opt/pfm/bin/pfm", "restart"}}, // the front: Spare
 		process{PID: 17, Argv: []string{"/work/pfm-dev", "--config=/c.json", "internal", "cost-sink"}},
+		process{PID: 18, Argv: []string{"/opt/pfm/bin/pfm", "chat", "watch"}}, // another install's
+		process{
+			PID:  19,
+			Argv: []string{"/opt/pfm/bin/pfm", "ls", "--watch"},
+		}, // unmarked, this install's binary
+		process{PID: 20, Argv: []string{"/work/other/pfm", "chat", "watch"}},          // unmarked, another binary
+		process{PID: 21, Argv: []string{"/opt/pfm/bin/pfm", "internal", "cost-sink"}}, // another install's
 	)
+	kernel.marks[18] = map[string]string{paths.EnvInstallMark: "another-install-mark"}
+	kernel.marks[19] = map[string]string{"HOME": "/srv/operator"}
+	kernel.marks[20] = map[string]string{"HOME": "/srv/operator"}
+	kernel.marks[21] = map[string]string{paths.EnvInstallMark: "another-install-mark"}
 	dependencies := testDeps(t, &hostRunner{}, kernel, &fakeFleet{})
+	// Only the unmarked processes are asked for their executable.
+	dependencies.Procs = &executableKernel{
+		fakeKernel:  kernel,
+		executables: map[int]string{19: testBinary, 20: "/work/other/pfm"},
+	}
 	dependencies.Spare = []int{16}
 	dependencies.Executable = "/work/pfm-dev"
 	finder := &discoverer{deps: dependencies, claimed: map[int]bool{}}
@@ -50,16 +67,105 @@ func TestFindHelpersAndPFMFindEachKindOnce(t *testing.T) {
 		"chat-helpers: stdio MCP server pid 11",
 		"chat-helpers: cost sink pid 17",
 		"pfm: pfm process pid 15",
+		"pfm: pfm process pid 19",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("units =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if detail := finder.plan.Findings[0].Detail; !strings.Contains(detail, "3 helper process(es) of 9 listed") {
-		t.Fatalf("helpers finding = %q, want the count and what the table listed", detail)
+	var details []string
+	for _, finding := range finder.plan.Findings {
+		if finding.Err != nil {
+			t.Fatalf("%s find failed: %v", finding.Family, finding.Err)
+		}
+		details = append(details, finding.Detail)
+	}
+	wantDetails := []string{
+		"3 helper process(es) of 13 listed — process table: pfm internal cost-sink, pfm mcp serve --stdio" +
+			"; 1 of another install kept",
+		"2 other pfm process(es) of 13 listed — process table, argv[0] named pfm; this worker (pid 1) is last" +
+			"; 3 of another install kept",
+	}
+	if !slices.Equal(details, wantDetails) {
+		t.Fatalf("findings =\n%s\nwant\n%s", strings.Join(details, "\n"), strings.Join(wantDetails, "\n"))
 	}
 	if len(kernel.sent()) != 0 {
 		t.Fatalf("finding signalled: %v", kernel.sent())
 	}
+}
+
+// TestFindMCPDaemonKeepsAnotherInstallsDaemon: an unsupervised daemon of this
+// install is planned for its stop; another install's is kept running and
+// claimed, so the pfm family never plans it either.
+func TestFindMCPDaemonKeepsAnotherInstallsDaemon(t *testing.T) {
+	kernel := newKernel(
+		process{PID: 30, Argv: []string{"/opt/pfm/bin/pfm", "mcp", "serve"}},
+		process{PID: 31, Argv: []string{"/opt/pfm/bin/pfm", "mcp", "serve"}}, // another install's
+	)
+	kernel.marks[31] = map[string]string{paths.EnvInstallMark: "another-install-mark"}
+	finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{}), claimed: map[int]bool{}}
+	table, err := finder.readTable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finder.findMCPDaemon(table, false, nil)
+	finder.findPFM(table)
+	got := unitNames(finder.plan.Units)
+	if want := []string{"mcp-daemon: pfm mcp serve pid 30"}; !slices.Equal(got, want) {
+		t.Fatalf("units = %q, want %q", got, want)
+	}
+	var details []string
+	for _, finding := range finder.plan.Findings {
+		if finding.Err != nil {
+			t.Fatalf("%s find failed: %v", finding.Family, finding.Err)
+		}
+		details = append(details, finding.Detail)
+	}
+	wantDetails := []string{
+		"1 unsupervised pfm mcp serve process(es) of 2 listed — process table; 1 of another install kept",
+		"0 other pfm process(es) of 2 listed — process table, argv[0] named pfm; this worker (pid 1) is last",
+	}
+	if !slices.Equal(details, wantDetails) {
+		t.Fatalf("findings =\n%s\nwant\n%s", strings.Join(details, "\n"), strings.Join(wantDetails, "\n"))
+	}
+}
+
+// TestFindMCPDaemonCountsAnExitingDaemonAsNoInstalls pins a daemon that exits
+// between the table read and its ownership read: its environment reads torn,
+// the install mark gone with the rest, and its executable is gone. It is
+// neither this install's daemon nor another install's kept one.
+func TestFindMCPDaemonCountsAnExitingDaemonAsNoInstalls(t *testing.T) {
+	kernel := newKernel(process{PID: 30, Argv: []string{"/opt/pfm/bin/pfm", "mcp", "serve"}})
+	kernel.marks[30] = map[string]string{"HOME": "/srv/operator"}
+	deps := testDeps(t, &hostRunner{}, kernel, &fakeFleet{})
+	deps.Procs = &executableKernel{fakeKernel: kernel, executables: map[int]string{}}
+	finder := &discoverer{deps: deps, claimed: map[int]bool{}}
+	table, err := finder.readTable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finder.findMCPDaemon(table, false, nil)
+	if got := unitNames(finder.plan.Units); len(got) != 0 {
+		t.Fatalf("units = %q, want none for an exiting daemon", got)
+	}
+	want := "0 unsupervised pfm mcp serve process(es) of 1 listed — process table"
+	if len(finder.plan.Findings) != 1 || finder.plan.Findings[0].Err != nil ||
+		finder.plan.Findings[0].Detail != want {
+		t.Fatalf("findings = %+v, want one %q", finder.plan.Findings, want)
+	}
+}
+
+// executableKernel is a fakeKernel that also reads executables, ESRCH for a
+// pid it has none for.
+type executableKernel struct {
+	*fakeKernel
+	executables map[int]string
+}
+
+func (kernel *executableKernel) Executable(pid int) (string, error) {
+	if executable, ok := kernel.executables[pid]; ok {
+		return executable, nil
+	}
+	return "", syscall.ESRCH
 }
 
 func TestProcessStopExitsOnSIGTERM(t *testing.T) {
@@ -89,14 +195,30 @@ func TestProcessStopKillsWhatIgnoresSIGTERM(t *testing.T) {
 	}
 }
 
+// A process that outlives SIGKILL, or whose live pid cannot be read, fails its stop by name, never reads as gone.
 func TestProcessStopNamesAProcessThatSurvivesSIGKILL(t *testing.T) {
-	proc := process{PID: 22, Argv: []string{"pfm", "chat", "watch"}, Start: 5}
-	kernel := newKernel(proc)
-	kernel.stubborn[22], kernel.unkillable[22] = true, true
-	finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{})}
-	_, err := finder.processUnit(FamilyPFM, "pfm process", proc).Stop(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "pid 22 still runs pfm chat watch after SIGKILL") {
-		t.Fatalf("stop error = %v, want the survivor named", err)
+	for _, row := range []struct {
+		name       string
+		proc       process
+		unreadable bool
+		want       string
+	}{
+		{"survives SIGKILL", process{PID: 22, Argv: []string{"pfm", "chat", "watch"}, Start: 5}, false, "pid 22 still runs pfm chat watch after SIGKILL"},
+		{"unreadable live pid", process{PID: 24, Argv: []string{"pfm", "internal", "cost-sink"}, Start: 5}, true, "read pid 24 from the process table: permission denied\npermission denied"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			kernel := newKernel(row.proc)
+			if row.unreadable {
+				kernel.unreadable[row.proc.PID] = true
+			} else {
+				kernel.stubborn[row.proc.PID], kernel.unkillable[row.proc.PID] = true, true
+			}
+			finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{})}
+			_, err := finder.processUnit(FamilyPFM, "pfm process", row.proc).Stop(context.Background())
+			if got := fmt.Sprint(err); got != row.want {
+				t.Fatalf("stop error = %q, want %q", got, row.want)
+			}
+		})
 	}
 }
 
@@ -110,17 +232,6 @@ func TestProcessStopNeverSignalsARecycledPid(t *testing.T) {
 	}
 	if len(kernel.sent()) != 0 {
 		t.Fatalf("a recycled pid was signalled: %v", kernel.sent())
-	}
-}
-
-func TestProcessStopAnUnreadableLivePidIsAnErrorNotGone(t *testing.T) {
-	proc := process{PID: 24, Argv: []string{"pfm", "internal", "cost-sink"}, Start: 5}
-	kernel := newKernel(proc)
-	kernel.unreadable[24] = true
-	finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{})}
-	_, err := finder.processUnit(FamilyHelpers, "cost sink", proc).Stop(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "read pid 24 from the process table") {
-		t.Fatalf("stop error = %v, want the unreadable pid named", err)
 	}
 }
 
@@ -191,472 +302,36 @@ func TestClipArgvKeepsAPlanLineShort(t *testing.T) {
 	}
 }
 
+// TestProcessStopNeverSignalsAChangedOwner: a planned process that, by the
+// stop, runs as another user or carries another install's mark is never
+// signalled; the stop names the change.
 func TestProcessStopNeverSignalsAChangedOwner(t *testing.T) {
-	proc := process{PID: 29, Argv: []string{"/opt/pfm/bin/pfm", "mcp", "serve"}, Start: 5}
-	kernel := newKernel(proc)
-	kernel.foreign[29] = true
-	finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{})}
-	_, err := finder.processUnit(FamilyMCPDaemon, "pfm mcp serve", proc).Stop(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "identity changed") || len(kernel.sent()) != 0 {
-		t.Fatalf("error=%v signals=%v, want changed ownership rejected before signalling", err, kernel.sent())
-	}
-}
-
-type handoffKernel struct {
-	*fakeKernel
-	executable    string
-	configPath    string
-	executableErr error
-	envErr        error
-	identityErr   error
-	recycle       bool
-	reads         int
-}
-
-func (kernel *handoffKernel) Executable(int) (string, error) {
-	return kernel.executable, kernel.executableErr
-}
-
-func (kernel *handoffKernel) Environ(int) (map[string]string, error) {
-	return map[string]string{"PFM_CONFIG": kernel.configPath, "HOME": "/fixture/home"}, kernel.envErr
-}
-
-func (kernel *handoffKernel) ProcessIdentity(pid int) (gather.ProcessIdentity, error) {
-	if kernel.identityErr != nil {
-		return gather.ProcessIdentity{}, kernel.identityErr
-	}
-	return kernel.fakeKernel.ProcessIdentity(pid)
-}
-
-func (kernel *handoffKernel) Stat(pid int) (gather.ProcStat, error) {
-	kernel.reads++
-	if kernel.recycle && kernel.reads == 2 {
-		kernel.mu.Lock()
-		row := kernel.procs[pid]
-		row.Start++
-		kernel.procs[pid] = row
-		kernel.mu.Unlock()
-	}
-	return kernel.fakeKernel.Stat(pid)
-}
-
-func TestConvergeMCPDaemonUnmanagedOwnershipAndLifecycle(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		enabled     bool
-		argv        []string
-		change      func(*handoffKernel, *hostRunner)
-		wantSignals []string
-		starts      int
-		wantErr     string
+		name   string
+		change func(kernel *fakeKernel)
+		want   string
 	}{
-		{name: "disabled stops owned bare argv", wantSignals: []string{"29 terminated"}},
-		{name: "enabled restarts after stopping", enabled: true, wantSignals: []string{"29 terminated"}, starts: 1},
-		{name: "explicit config", argv: []string{"/opt/pfm/bin/pfm", "--config", "/fixture/config", "mcp", "serve"}, wantSignals: []string{"29 terminated"}},
-		{name: "equals config overrides environment", argv: []string{"pfm", "--config=/fixture/config", "mcp", "serve"}, change: func(k *handoffKernel, _ *hostRunner) { k.configPath = "/foreign/config" }, wantSignals: []string{"29 terminated"}},
-		{name: "foreign executable", change: func(k *handoffKernel, _ *hostRunner) { k.executable = "/foreign/pfm" }},
-		{name: "foreign config", change: func(k *handoffKernel, _ *hostRunner) { k.configPath = "/foreign/config" }},
-		{name: "foreign owner", change: func(k *handoffKernel, _ *hostRunner) { k.foreign[29] = true }},
-		{name: "extra arguments", argv: []string{"pfm", "mcp", "serve", "--extra"}},
-		{name: "recycled pid", change: func(k *handoffKernel, _ *hostRunner) { k.recycle = true }},
-		{name: "identity failure", change: func(k *handoffKernel, _ *hostRunner) { k.identityErr = errors.New("identity refused") }, wantErr: "identity refused"},
-		{name: "executable failure", change: func(k *handoffKernel, _ *hostRunner) { k.executableErr = errors.New("executable refused") }, wantErr: "executable refused"},
-		{name: "environment failure", change: func(k *handoffKernel, _ *hostRunner) { k.envErr = errors.New("environment refused") }, wantErr: "environment refused"},
-		{name: "enumeration failure", change: func(k *handoffKernel, _ *hostRunner) { k.listErr = errors.New("enumeration refused") }, wantErr: "enumeration refused"},
-		{name: "unreadable process", change: func(k *handoffKernel, _ *hostRunner) { k.unreadable[29] = true }, wantErr: "pid 29"},
-		{name: "missing start identity", change: func(k *handoffKernel, _ *hostRunner) { row := k.procs[29]; row.Start = 0; k.procs[29] = row }, wantErr: "start identity unavailable"},
-		{name: "term ignored", change: func(k *handoffKernel, _ *hostRunner) { k.stubborn[29] = true }, wantSignals: []string{"29 terminated", "29 killed"}},
-		{name: "survives kill", enabled: true, change: func(k *handoffKernel, _ *hostRunner) { k.stubborn[29], k.unkillable[29] = true, true }, wantSignals: []string{"29 terminated", "29 killed"}, wantErr: "after SIGKILL"},
-		{name: "start fails", enabled: true, change: func(_ *handoffKernel, r *hostRunner) { r.startErr = errors.New("start refused") }, wantSignals: []string{"29 terminated"}, starts: 1, wantErr: "start refused"},
+		{
+			name:   "another user",
+			change: func(kernel *fakeKernel) { kernel.foreign[29] = true },
+			want:   "pid 29 identity changed before signal",
+		},
+		{
+			name: "another install",
+			change: func(kernel *fakeKernel) {
+				kernel.marks[29] = map[string]string{paths.EnvInstallMark: "another-install-mark"}
+			},
+			want: "pid 29 identity changed before signal",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			argv := tc.argv
-			if argv == nil {
-				argv = []string{"pfm", "mcp", "serve"}
-			}
-			kernel := &handoffKernel{
-				fakeKernel: newKernel(process{PID: 29, Argv: argv, Start: 5}),
-				executable: "/opt/pfm/bin/pfm",
-				configPath: "/fixture/config",
-			}
-			runner := &hostRunner{}
-			dependencies := testDeps(t, runner, kernel.fakeKernel, &fakeFleet{})
-			dependencies.Procs = kernel
-			dependencies.ConfigPath = "/fixture/config"
-			dependencies.DaemonProbe = func(context.Context) error { return nil }
-			runner.onStart = func(argv []string) {
-				if len(kernel.sent()) == 0 {
-					t.Error("started before stopping old owned daemon")
-				}
-				if !slices.Equal(
-					argv,
-					[]string{dependencies.Executable, "--config", dependencies.ConfigPath, "mcp", "serve"},
-				) {
-					t.Errorf("start argv=%v", argv)
-				}
-			}
-			if tc.change != nil {
-				tc.change(kernel, runner)
-			}
-			_, err := ConvergeMCPDaemon(context.Background(), dependencies, tc.enabled)
-			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("error=%v want=%s", err, tc.wantErr)
-				}
-			} else if err != nil {
-				t.Fatal(err)
-			}
-			if !slices.Equal(kernel.sent(), tc.wantSignals) || len(runner.starts) != tc.starts {
-				t.Fatalf(
-					"signals=%v starts=%d want=%v/%d",
-					kernel.sent(),
-					len(runner.starts),
-					tc.wantSignals,
-					tc.starts,
-				)
-			}
-		})
-	}
-}
-
-type daemonRaceIdentity struct {
-	identity gather.ProcessIdentity
-	err      error
-}
-
-type daemonRaceKernel struct {
-	*handoffKernel
-	identities        map[int]daemonRaceIdentity
-	executableErrors  map[int]error
-	environmentErrors map[int]error
-	emptyEnvironments map[int]bool
-	// partialEnvironments read back without PFM_CONFIG, as a torn read of an
-	// exiting process's /proc/{pid}/environ can.
-	partialEnvironments map[int]bool
-	executablePaths     map[int]string
-	configPaths         map[int]string
-	identityCalls       int
-	executableCalls     int
-	environmentCalls    int
-}
-
-func (kernel *daemonRaceKernel) ProcessIdentity(pid int) (gather.ProcessIdentity, error) {
-	kernel.identityCalls++
-	if scripted, ok := kernel.identities[kernel.identityCalls]; ok {
-		return scripted.identity, scripted.err
-	}
-	return kernel.handoffKernel.ProcessIdentity(pid)
-}
-
-func (kernel *daemonRaceKernel) Executable(pid int) (string, error) {
-	kernel.executableCalls++
-	if err := kernel.executableErrors[kernel.executableCalls]; err != nil {
-		return "", err
-	}
-	if path, ok := kernel.executablePaths[kernel.executableCalls]; ok {
-		return path, nil
-	}
-	return kernel.handoffKernel.Executable(pid)
-}
-
-func (kernel *daemonRaceKernel) Environ(pid int) (map[string]string, error) {
-	kernel.environmentCalls++
-	if err := kernel.environmentErrors[kernel.environmentCalls]; err != nil {
-		return nil, err
-	}
-	if kernel.emptyEnvironments[kernel.environmentCalls] {
-		// An exiting process's /proc/{pid}/environ reads empty, without an error.
-		return map[string]string{}, nil
-	}
-	if kernel.partialEnvironments[kernel.environmentCalls] {
-		return map[string]string{"HOME": "/nonexistent/partial-home"}, nil
-	}
-	if path, ok := kernel.configPaths[kernel.environmentCalls]; ok {
-		return map[string]string{"PFM_CONFIG": path}, nil
-	}
-	return kernel.handoffKernel.Environ(pid)
-}
-
-func TestConvergeMCPDaemonExitRacesPreserveLiveFailures(t *testing.T) {
-	for _, tc := range []struct {
-		name                string
-		identities          map[int]daemonRaceIdentity
-		executableErrors    map[int]error
-		environmentErrors   map[int]error
-		emptyEnvironments   map[int]bool
-		partialEnvironments map[int]bool
-		executablePaths     map[int]string
-		configPaths         map[int]string
-		recycle             bool
-		stubborn            bool
-		enabled             bool
-		wantSignals         []string
-		starts              int
-		wantErr             string
-	}{
-		{name: "owned snapshot exits before stop still restarts", enabled: true, starts: 1, identities: map[int]daemonRaceIdentity{3: {err: syscall.ESRCH}}},
-		{name: "post TERM zombie restarts enabled chat", stubborn: true, enabled: true, starts: 1, wantSignals: []string{"29 terminated"}, identities: map[int]daemonRaceIdentity{5: {identity: gather.ProcessIdentity{Zombie: true}}}},
-		{name: "post TERM exit stops disabled chat", stubborn: true, wantSignals: []string{"29 terminated"}, identities: map[int]daemonRaceIdentity{5: {err: syscall.ESRCH}}},
-		{name: "post TERM executable disappears after exit", stubborn: true, enabled: true, starts: 1, wantSignals: []string{"29 terminated"}, executableErrors: map[int]error{3: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{6: {err: syscall.ESRCH}}},
-		{name: "zombie between stopper and ownership checks", identities: map[int]daemonRaceIdentity{3: {identity: gather.ProcessIdentity{Zombie: true}}}},
-		{name: "ESRCH between stopper and ownership checks", identities: map[int]daemonRaceIdentity{3: {err: syscall.ESRCH}}},
-		{name: "identity missing between checks", identities: map[int]daemonRaceIdentity{3: {err: fs.ErrNotExist}}},
-		{name: "executable missing during discovery after exit", executableErrors: map[int]error{1: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{2: {err: syscall.ESRCH}}},
-		{name: "executable missing during verify after exit", executableErrors: map[int]error{2: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
-		{name: "executable missing during verify after zombie", executableErrors: map[int]error{2: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{4: {identity: gather.ProcessIdentity{Zombie: true}}}},
-		{name: "environment missing during verify after exit", environmentErrors: map[int]error{2: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
-		{name: "environment empty during verify after exit", emptyEnvironments: map[int]bool{2: true}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
-		{name: "transient empty environment recovers", emptyEnvironments: map[int]bool{2: true}, wantSignals: []string{"29 terminated"}},
-		{name: "environment partial during verify after exit", partialEnvironments: map[int]bool{2: true}, identities: map[int]daemonRaceIdentity{4: {err: syscall.ESRCH}}},
-		{name: "transient partial environment recovers", partialEnvironments: map[int]bool{2: true}, wantSignals: []string{"29 terminated"}},
-		{name: "transient executable missing recovers", executableErrors: map[int]error{2: fs.ErrNotExist}, wantSignals: []string{"29 terminated"}},
-		{name: "transient environment missing recovers", environmentErrors: map[int]error{2: fs.ErrNotExist}, wantSignals: []string{"29 terminated"}},
-		{name: "identity permission remains error", identities: map[int]daemonRaceIdentity{3: {err: fs.ErrPermission}}, wantErr: "permission"},
-		{name: "executable permission remains error", executableErrors: map[int]error{2: fs.ErrPermission}, wantErr: "permission"},
-		{name: "environment permission remains error", environmentErrors: map[int]error{2: fs.ErrPermission}, wantErr: "permission"},
-		{name: "gone proof unreadable remains error", executableErrors: map[int]error{2: fs.ErrNotExist}, identities: map[int]daemonRaceIdentity{4: {err: fs.ErrPermission}}, wantErr: "permission"},
-		{name: "live UID change refused", identities: map[int]daemonRaceIdentity{3: {identity: gather.ProcessIdentity{EffectiveUID: foreignUID}}}, wantErr: "identity changed"},
-		{name: "live executable change refused", executablePaths: map[int]string{2: "/foreign/pfm"}, wantErr: "identity changed"},
-		{name: "live config change refused", configPaths: map[int]string{2: "/foreign/config"}, wantErr: "identity changed"},
-		{name: "PID reuse does not signal", recycle: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			kernel := &daemonRaceKernel{
-				handoffKernel: &handoffKernel{
-					fakeKernel: newKernel(process{PID: 29, Argv: []string{"pfm", "mcp", "serve"}, Start: 5}),
-					executable: "/opt/pfm/bin/pfm",
-					configPath: "/fixture/config",
-					recycle:    tc.recycle,
-				},
-				identities:          tc.identities,
-				executableErrors:    tc.executableErrors,
-				environmentErrors:   tc.environmentErrors,
-				emptyEnvironments:   tc.emptyEnvironments,
-				partialEnvironments: tc.partialEnvironments,
-				executablePaths:     tc.executablePaths,
-				configPaths:         tc.configPaths,
-			}
-			runner := &hostRunner{}
-			dependencies := testDeps(t, runner, kernel.fakeKernel, &fakeFleet{})
-			dependencies.Procs = kernel
-			dependencies.ConfigPath = "/fixture/config"
-			kernel.stubborn[29] = tc.stubborn
-			dependencies.DaemonProbe = func(context.Context) error { return nil }
-			_, err := ConvergeMCPDaemon(context.Background(), dependencies, tc.enabled)
-			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("error=%v want=%s", err, tc.wantErr)
-				}
-			} else if err != nil {
-				t.Fatal(err)
-			}
-			if !slices.Equal(kernel.sent(), tc.wantSignals) || len(runner.starts) != tc.starts {
-				t.Fatalf(
-					"signals=%v starts=%d want=%v/%d",
-					kernel.sent(),
-					len(runner.starts),
-					tc.wantSignals,
-					tc.starts,
-				)
-			}
-		})
-	}
-}
-
-type delayedDaemonKernel struct {
-	*handoffKernel
-	door          string
-	missingErr    error
-	missingAt     int
-	calls         int
-	missing       bool
-	terminal      bool
-	gone          bool
-	proofErr      error
-	afterReadable func()
-}
-
-func (kernel *delayedDaemonKernel) missingRead(door string) error {
-	if kernel.door != door {
-		return nil
-	}
-	kernel.calls++
-	if kernel.calls == kernel.missingAt {
-		kernel.missing = true
-	}
-	if kernel.missing {
-		return kernel.missingErr
-	}
-	return nil
-}
-
-func (kernel *delayedDaemonKernel) Cmdline(pid int) ([]string, error) {
-	if err := kernel.missingRead("command line"); err != nil {
-		return nil, nil
-	}
-	return kernel.handoffKernel.Cmdline(pid)
-}
-
-func (kernel *delayedDaemonKernel) Executable(pid int) (string, error) {
-	if err := kernel.missingRead("executable"); err != nil {
-		return "", err
-	}
-	return kernel.handoffKernel.Executable(pid)
-}
-
-func (kernel *delayedDaemonKernel) Environ(pid int) (map[string]string, error) {
-	if err := kernel.missingRead("environment"); err != nil {
-		return nil, err
-	}
-	env, err := kernel.handoffKernel.Environ(pid)
-	if !kernel.missing && kernel.afterReadable != nil {
-		after := kernel.afterReadable
-		kernel.afterReadable = nil
-		after()
-	}
-	return env, err
-}
-
-func (kernel *delayedDaemonKernel) ProcessIdentity(pid int) (gather.ProcessIdentity, error) {
-	if kernel.missing && kernel.proofErr != nil {
-		return gather.ProcessIdentity{}, kernel.proofErr
-	}
-	if kernel.gone {
-		return gather.ProcessIdentity{}, syscall.ESRCH
-	}
-	if kernel.terminal {
-		return gather.ProcessIdentity{Zombie: true}, nil
-	}
-	return kernel.handoffKernel.ProcessIdentity(pid)
-}
-
-type daemonProofClock struct {
-	tickClock
-	afterSleep func()
-	sleeps     int
-}
-
-func (clk *daemonProofClock) Sleep(ctx context.Context, duration time.Duration) error {
-	clk.sleeps++
-	if clk.afterSleep != nil {
-		clk.afterSleep()
-	}
-	return clk.tickClock.Sleep(ctx, duration)
-}
-
-func TestConvergeMCPDaemonWaitsForLateExitWithoutRefreshingIdentity(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		door        string
-		enabled     bool
-		discovery   bool
-		readErr     error
-		proofErr    error
-		afterSleep  func(*delayedDaemonKernel, context.CancelFunc)
-		wantErr     string
-		wantSignals []string
-		starts      int
-		immediate   bool
-	}{
-		{name: "empty argv live must wait", door: "command line", enabled: true, starts: 1, afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.gone = true }},
-		{name: "empty argv persists live times out", door: "command line", wantErr: "deadline"},
-		{name: "empty argv becomes readable", door: "command line", wantSignals: []string{"29 terminated"}, afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.missing = false }},
-		{name: "missing executable then exited restarts", enabled: true, starts: 1, afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.gone = true }},
-		{name: "missing executable then zombie stops", afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.terminal = true }},
-		{name: "missing environment then terminal restarts", door: "environment", enabled: true, starts: 1, afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.terminal = true }},
-		{name: "missing executable becomes readable", wantSignals: []string{"29 terminated"}, afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.missing = false }},
-		{name: "missing environment becomes readable", door: "environment", wantSignals: []string{"29 terminated"}, afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.missing = false }},
-		{name: "discovery missing then gone", discovery: true, afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.gone = true }},
-		{name: "persistent missing executable live times out", wantErr: "deadline"},
-		{name: "persistent missing environment live times out", door: "environment", wantErr: "deadline"},
-		{name: "cancellation", wantErr: "canceled", afterSleep: func(_ *delayedDaemonKernel, cancel context.CancelFunc) { cancel() }},
-		{name: "permission immediate", readErr: fs.ErrPermission, wantErr: "permission", immediate: true},
-		{name: "IO immediate", readErr: syscall.EIO, wantErr: "input/output", immediate: true},
-		{name: "identity proof failure immediate", proofErr: fs.ErrPermission, wantErr: "permission", immediate: true},
-		{name: "PID reused before executable readable", afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) {
-			k.missing = false
-			row := k.procs[29]
-			row.Start++
-			k.procs[29] = row
-		}},
-		{name: "argv replaced before executable readable", wantErr: "identity changed", afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) {
-			k.missing = false
-			row := k.procs[29]
-			row.Argv = []string{"pfm", "mcp", "serve", "--extra"}
-			k.procs[29] = row
-		}},
-		{name: "UID replaced before executable readable", wantErr: "identity changed", afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.missing = false; k.foreign[29] = true }},
-		{name: "executable replaced after wait", wantErr: "identity changed", afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) { k.missing = false; k.executable = "/foreign/pfm" }},
-		{name: "executable replaced during final probe after wait", wantErr: "identity changed", afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) {
-			k.missing = false
-			k.afterReadable = func() { k.executable = "/foreign/pfm" }
-		}},
-		{name: "config replaced during final probe after wait", wantErr: "identity changed", afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) {
-			k.missing = false
-			k.afterReadable = func() { k.configPath = "/foreign/config" }
-		}},
-		{name: "config replaced after wait", wantErr: "identity changed", afterSleep: func(k *delayedDaemonKernel, _ context.CancelFunc) {
-			k.missing = false
-			k.configPath = "/foreign/config"
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			kernel := &delayedDaemonKernel{
-				handoffKernel: &handoffKernel{
-					fakeKernel: newKernel(process{PID: 29, Argv: []string{"pfm", "mcp", "serve"}, Start: 5}),
-					executable: "/opt/pfm/bin/pfm",
-					configPath: "/fixture/config",
-				},
-				door:       tc.door,
-				missingErr: tc.readErr,
-				missingAt:  2,
-				proofErr:   tc.proofErr,
-			}
-			if kernel.door == "" {
-				kernel.door = "executable"
-			}
-			if kernel.door == "command line" {
-				kernel.missingAt = 3
-			}
-			if kernel.missingErr == nil {
-				kernel.missingErr = fs.ErrNotExist
-			}
-			if tc.discovery {
-				kernel.missingAt = 1
-			}
-			clk := &daemonProofClock{tickClock: newTickClock()}
-			if tc.afterSleep != nil {
-				clk.afterSleep = func() { tc.afterSleep(kernel, cancel) }
-			}
-			runner := &hostRunner{}
-			dependencies := testDeps(t, runner, kernel.fakeKernel, &fakeFleet{})
-			dependencies.Procs, dependencies.Clock = kernel, clk
-			dependencies.ConfigPath = "/fixture/config"
-			dependencies.DaemonProbe = func(context.Context) error { return nil }
-			_, err := ConvergeMCPDaemon(ctx, dependencies, tc.enabled)
-			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("error=%v want=%s", err, tc.wantErr)
-				}
-			} else if err != nil {
-				t.Fatal(err)
-			}
-			if !slices.Equal(kernel.sent(), tc.wantSignals) || len(runner.starts) != tc.starts {
-				t.Fatalf(
-					"signals=%v starts=%d want=%v/%d",
-					kernel.sent(),
-					len(runner.starts),
-					tc.wantSignals,
-					tc.starts,
-				)
-			}
-			if !tc.immediate && tc.afterSleep != nil && clk.sleeps == 0 {
-				t.Fatal("transient missing state bypassed bounded proof")
-			}
-			if tc.immediate && clk.sleeps != 0 {
-				t.Fatalf("immediate error slept %d times", clk.sleeps)
+			proc := process{PID: 29, Argv: []string{"/opt/pfm/bin/pfm", "mcp", "serve"}, Start: 5}
+			kernel := newKernel(proc)
+			tc.change(kernel)
+			finder := &discoverer{deps: testDeps(t, &hostRunner{}, kernel, &fakeFleet{})}
+			_, err := finder.processUnit(FamilyMCPDaemon, "pfm mcp serve", proc).Stop(context.Background())
+			if err == nil || err.Error() != tc.want || len(kernel.sent()) != 0 {
+				t.Fatalf("error=%v signals=%v, want %q and no signal", err, kernel.sent(), tc.want)
 			}
 		})
 	}
@@ -666,9 +341,8 @@ func TestProcessStopRechecksSnapshotAfterOwnershipProbe(t *testing.T) {
 	proc := process{PID: 29, Argv: []string{"pfm", "mcp", "serve"}, Start: 5}
 	kernel := newKernel(proc)
 	stopper := processStopper{
-		procs:  kernel,
-		signal: kernel.signal,
-		clock:  newTickClock(),
+		door:  gather.Door{Procs: kernel, Kernel: kernel, Clock: newTickClock()},
+		probe: kernel.probe,
 		verify: func(process) (bool, error) {
 			replacement := proc
 			replacement.Start++

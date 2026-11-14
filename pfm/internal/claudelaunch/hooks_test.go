@@ -1,6 +1,9 @@
 package claudelaunch
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -8,18 +11,14 @@ import (
 
 func TestHookTemplates(t *testing.T) {
 	home := t.TempDir()
-	hooks := HookTemplates(home)
-	if len(hooks) != 24 {
-		t.Fatalf("registrations=%d, want 24", len(hooks))
+	var lines strings.Builder
+	for _, hook := range HookTemplates(home) {
+		fmt.Fprintf(&lines, "%+v\n", hook)
 	}
-	for _, hook := range hooks {
-		if !strings.HasPrefix(hook.Command, home+"/.local/bin/pfm ") {
-			t.Errorf("command=%q", hook.Command)
-		}
-	}
+	golden(t, "hook_templates.txt", strings.ReplaceAll(lines.String(), home, "{home}"))
 }
 
-func TestStoreGuardRidesBesideGitGuardOnBash(t *testing.T) {
+func TestBashGuardsRideEveryLaunch(t *testing.T) {
 	home := t.TempDir()
 	var got []Hook
 	for _, hook := range HookTemplates(home) {
@@ -27,9 +26,13 @@ func TestStoreGuardRidesBesideGitGuardOnBash(t *testing.T) {
 			got = append(got, hook)
 		}
 	}
-	want := []string{home + "/.local/bin/pfm internal git-guard", home + "/.local/bin/pfm internal store-guard"}
+	want := []string{
+		home + "/.local/bin/pfm internal git-guard",
+		home + "/.local/bin/pfm internal store-guard",
+		home + "/.local/bin/pfm internal orchestrator-wait",
+	}
 	if len(got) != len(want) {
-		t.Fatalf("PreToolUse Bash hooks=%+v, want git-guard and store-guard", got)
+		t.Fatalf("PreToolUse Bash hooks=%+v, want git-guard, store-guard and orchestrator-wait", got)
 	}
 	for i, hook := range got {
 		if hook.Command != want[i] {
@@ -113,5 +116,22 @@ func TestClearNamingHooksUseSupportedLifecycleSurfaces(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("clear naming hooks=%+v want %+v", got, want)
+	}
+}
+
+// golden compares got with testdata/{file}; a mismatch prints the GOLDEN line the fill script writes from.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Errorf(
+			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN internal/claudelaunch/testdata/%s = %q",
+			file,
+			err,
+			want,
+			got,
+			file,
+			got,
+		)
 	}
 }

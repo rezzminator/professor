@@ -1,3 +1,5 @@
+//go:build jail
+
 package gather_test
 
 import (
@@ -19,6 +21,7 @@ import (
 )
 
 func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

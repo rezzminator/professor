@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -124,6 +125,7 @@ type parsed struct {
 	pending         map[string]*event
 	calls           map[string]*event
 	wrappers        []*event
+	warnings        []string
 }
 
 func (p *parsed) mark(line int, state, label string) {
@@ -210,12 +212,21 @@ func (r contextReader) Read(buffer []byte) (int, error) {
 }
 
 // parseTranscript streams path into events. A line holding no JSON object is
-// an unparseable record; an empty transcript, one with no object at all, or
-// one whose first records name no engine is a failure. A done ctx stops the
-// read and is returned as it is.
+// an unparseable record; an empty transcript or one with no object at all is a
+// failure. The engine is the first record's that names one; a transcript no
+// record names is digested as Claude's, the default parser, with a warning. A
+// done ctx stops the read and is returned as it is.
 func parseTranscript(ctx context.Context, path string) (*parsed, error) {
+	return parseTranscriptAs(ctx, path, "")
+}
+
+// parseTranscriptAs is parseTranscript with engine, when not empty, named
+// already. A record past the detectWindow that names the engine, or the end of
+// a file none names, reads the file again under that engine, so the records
+// before it are not lost.
+func parseTranscriptAs(ctx context.Context, path, engine string) (*parsed, error) {
 	p := &parsed{
-		path: path, disp: map[int]disposition{}, meta: map[string]string{}, nulls: map[string]bool{},
+		path: path, engine: engine, disp: map[int]disposition{}, meta: map[string]string{}, nulls: map[string]bool{},
 		pending: map[string]*event{}, calls: map[string]*event{},
 	}
 	var (
@@ -223,6 +234,7 @@ func parseTranscript(ctx context.Context, path string) (*parsed, error) {
 		number  int
 		objects int
 		unacc   []int
+		late    string
 	)
 	handle := func(line int, raw []byte) {
 		switch {
@@ -270,6 +282,10 @@ func parseTranscript(ctx context.Context, path string) (*parsed, error) {
 				}
 				buffer = nil
 			}
+			return
+		}
+		if late == "" {
+			late = detectEngine(raw)
 		}
 	})
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -285,7 +301,18 @@ func parseTranscript(ctx context.Context, path string) (*parsed, error) {
 		return nil, runtimeFailure("no line of %s parsed as a JSON object (%d lines)", path, p.records)
 	}
 	if p.engine == "" {
-		return nil, runtimeFailure("no record names its engine: neither a Claude nor a Codex transcript")
+		warning := ""
+		if late == "" {
+			late = engineClaude
+			warning = fmt.Sprintf("%sno record of %s names its engine: digested as %s, the default",
+				warningPrefix, path, engineClaude)
+		}
+		again, err := parseTranscriptAs(ctx, path, late)
+		if err != nil || warning == "" {
+			return again, err
+		}
+		again.warnings = append(again.warnings, warning)
+		return again, nil
 	}
 	for _, line := range unacc {
 		p.mark(line, dispSkipped, "unaccounted")
@@ -537,8 +564,10 @@ func (p *parsed) claudeUser(n int, ts string, record *transcript.ClaudeRecord, m
 			key := pyvalue.Repr(block.ToolUseID)
 			ev := p.pending[key]
 			if ev == nil {
-				label = "user.tool_result (no matching call)"
-				continue
+				// The call is in another file (a resumed, forked or compacted transcript):
+				// its output still shows, under an unknown call.
+				ev = &event{line: n, ts: ts, kind: kindCall, name: "?"}
+				p.events = append(p.events, ev)
 			}
 			delete(p.pending, key)
 			ev.setResult(transcript.FlatContent(block.Content), pyvalue.Bool(block.IsError), ts)

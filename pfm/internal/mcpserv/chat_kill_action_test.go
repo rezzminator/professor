@@ -87,7 +87,7 @@ func TestChatKillMessageCarriesTheDeListedMechanism(t *testing.T) {
 	if err != nil {
 		t.Fatalf("chatKill: %v", err)
 	}
-	if !strings.Contains(output.Message, "de-listed only, no live pane closed") {
+	if output.Message != "killed ses_cold\tde-listed only, no live pane closed" {
 		t.Fatalf("chatKill message = %q, want the de-listing named", output.Message)
 	}
 }

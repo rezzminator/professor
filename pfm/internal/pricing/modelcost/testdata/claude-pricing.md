@@ -149,6 +149,16 @@ Prompt caching uses the following pricing multipliers relative to base input tok
 | 1-hour cache write   | 2x base input price                                                                                                      | Cache valid for 1 hour               |
 | Cache read (hit)     | 0.1x base input price (0.025x on Claude Fable 5.1 and Claude Mythos 5.1; 0.05x on Claude Opus 5.5 and Claude Sonnet 5.5) | Same duration as the preceding write |
 
+What a cache hit costs depends on the model:
+
+| Model                                  | Cache hit multiplier | Cache hit price per million tokens                                                          |
+| -------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
+| Claude Fable 5.2 and Claude Mythos 5.2 | 0.025x               | $0.20 USD                                                                                   |
+| Claude Fable 5.1 and Claude Mythos 5.1 | 0.025x               | $0.25 USD                                                                                   |
+| Claude Opus 5.5                        | 0.05x                | $0.20 USD                                                                                   |
+| Claude Sonnet 5.5                      | 0.05x                | $0.10 USD                                                                                   |
+| All other models                       | 0.1x                 | See [Model pricing](https://platform.claude.com/docs/en/about-claude/pricing#model-pricing) |
+
 Cache write tokens are charged when content is first stored. Cache read tokens are charged when a subsequent request retrieves the cached content. A cache hit costs 10% of the standard input price, which means caching pays off after one cache read for the 5-minute duration (1.25x write), or after two cache reads for the 1-hour duration (2x write). On Claude Fable 5.1 and Claude Mythos 5.1, a cache hit costs 2.5% of the standard input price ($0.25 USD per million tokens). On Claude Opus 5.5 and Claude Sonnet 5.5, a cache hit costs 5% of the standard input price ($0.20 USD per million tokens on Claude Opus 5.5, $0.10 USD on Claude Sonnet 5.5).
 
 These multipliers stack with other pricing modifiers, including the Batch API discount and data residency.

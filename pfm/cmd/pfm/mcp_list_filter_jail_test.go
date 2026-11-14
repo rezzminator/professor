@@ -1,14 +1,24 @@
+//go:build jail
+
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestMCPListProjectFilterIsASubstringNotAQuery is the F4 regression:
@@ -77,6 +87,7 @@ func TestMCPListLimitReportsFullMatchedCountAndTruncated(t *testing.T) {
 // first minute of life. The fix lists it with state "booting" instead of
 // excluding it.
 func TestMCPListAdmitsBootingRow(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -150,4 +161,70 @@ func indexResumableChat(t *testing.T, root, projectSlug, id string) {
 	if code := run([]string{"index", "--full"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("index %s code=%d stderr=%q", projectSlug, code, stderr.String())
 	}
+}
+
+// A chat's MCP server keeps the chat's working directory, often a worktree
+// removed while the chat runs on; ls must still answer, since its scope is the
+// caller's repo, never the server's own directory.
+func TestMCPListAnswersFromARemovedWorkingDirectory(t *testing.T) {
+	root := jailTest(t)
+	indexResumableChat(t, root, "alpha-project", "11111111-1111-4111-8111-111111111112")
+	removed := filepath.Join(t.TempDir(), "worktree")
+	if err := os.Mkdir(removed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(removed)
+	if err := os.Remove(removed); err != nil {
+		t.Fatal(err)
+	}
+	output := callChatTool[mcpserv.LSOutput](t, "ls", mcpserv.LSInput{All: true})
+	if output.Matched != 1 {
+		t.Fatalf("ls from a removed working directory = %+v, want the one indexed chat", output)
+	}
+}
+
+// callChatTool drives one tool of the production MCP surface — mcpRuntime over
+// the jailed runtime, the bridge `pfm mcp serve --stdio` serves — through an in-memory
+// protocol session, and decodes its structured answer.
+func callChatTool[T any](t *testing.T, name string, arguments any) T {
+	t.Helper()
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := mcpserv.NewConfigured("test", io.Discard, mcpRuntime(commandRuntime{Paths: resolved}, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := service.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments})
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	if result.IsError {
+		t.Fatalf("%s returned tool error: %s", name, toolResultText(result))
+	}
+	content, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output T
+	if err := json.Unmarshal(content, &output); err != nil {
+		t.Fatalf("%s structured output %s: %v", name, content, err)
+	}
+	return output
 }

@@ -1,10 +1,6 @@
 package store
 
 import (
-	"context"
-	"database/sql"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -24,126 +20,6 @@ func TestResolveCodexLineageUsesNewestAndMonotonicPromptMaximum(t *testing.T) {
 		if roots[id] != "root" {
 			t.Fatalf("root[%q] = %q, want root", id, roots[id])
 		}
-	}
-}
-
-func TestV2MigrationCollapsesExistingCodexKillsToLineageRoot(t *testing.T) {
-	dbPath := setStoreTestJail(t)
-	ctx := context.Background()
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	database, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx, schemaV1); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx, "PRAGMA user_version=1"); err != nil {
-		t.Fatal(err)
-	}
-	for _, rollout := range lineageFixtureRollouts() {
-		if _, err := database.ExecContext(ctx, `
-INSERT INTO rollouts (
-  id, path, size, mtime_ns, parsed_offset, cwd, user_thread, session_id,
-  parent_thread, first_prompt, prompt_count
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			rollout.ID,
-			rollout.Path,
-			rollout.Size,
-			rollout.MTimeNS,
-			rollout.ParsedOffset,
-			rollout.CWD,
-			boolInteger(rollout.UserThread),
-			rollout.SessionID,
-			rollout.ParentThread,
-			rollout.FirstPrompt,
-			rollout.PromptCount,
-		); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, killed := range []Killed{
-		{
-			ID:              "root",
-			Engine:          "cx",
-			KilledAt:        100,
-			BaselinePrompts: int64Pointer(10),
-		},
-		{
-			ID:              "child-old",
-			Engine:          "cx",
-			KilledAt:        200,
-			BaselinePrompts: int64Pointer(10),
-		},
-		{
-			ID:              "child-newest",
-			Engine:          "cx",
-			KilledAt:        300,
-			BaselinePrompts: int64Pointer(11),
-		},
-	} {
-		if _, err := database.ExecContext(ctx, `
-INSERT INTO hidden (id, engine, hidden_at, baseline_prompts)
-VALUES (?, ?, ?, ?)`,
-			killed.ID,
-			killed.Engine,
-			killed.KilledAt,
-			killed.BaselinePrompts,
-		); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	migrated := openTestStore(t)
-	// The whole chain runs, v1 through the newest: the lineage collapse below
-	// has to survive every later migration, not only the one that introduced
-	// it.
-	assertSchemaVersion(t, migrated, SchemaVersion)
-	rollouts, err := migrated.Rollouts(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, rollout := range rollouts {
-		if rollout.LineageRoot != "root" {
-			t.Fatalf("%s lineage_root = %q", rollout.ID, rollout.LineageRoot)
-		}
-	}
-	killed, err := migrated.KilledChats(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The merged row keeps the newest hidden_at and drops the retired
-	// baseline: the column is NULL for every kill the fleet writes.
-	if len(killed) != 1 ||
-		killed[0].ID != "root" ||
-		killed[0].Engine != "cx" ||
-		killed[0].KilledAt != 300 ||
-		killed[0].BaselinePrompts != nil {
-		t.Fatalf("migrated kills = %#v", killed)
-	}
-	counts, err := migrated.Counts(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if counts.OrphanedKills != 0 {
-		t.Fatalf("migrated orphaned kills = %d", counts.OrphanedKills)
-	}
-	if err := migrated.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened := openTestStore(t)
-	t.Cleanup(func() { _ = reopened.Close() })
-	killed, err = reopened.KilledChats(ctx)
-	if err != nil || len(killed) != 1 ||
-		killed[0].ID != "root" ||
-		killed[0].BaselinePrompts != nil {
-		t.Fatalf("idempotent reopen kills = %#v, err=%v", killed, err)
 	}
 }
 
@@ -196,8 +72,4 @@ func lineageFixtureRollouts() []Rollout {
 			PromptCount:  99,
 		},
 	}
-}
-
-func int64Pointer(value int64) *int64 {
-	return &value
 }

@@ -43,8 +43,8 @@ func readLogBlock(t *testing.T, path string) (map[string]any, bool) {
 }
 
 // TestInstallWritesTheLogDefaultWhereNoneExists pins § Control's visible safe
-// default: a pfm.config.json without a `log` key gains {"level": "info",
-// "keepDays": 30} through the ledger (a `change` row), and nothing else moves.
+// default: a pfm.config.json without a `log` key gains {"level": "info"}
+// through the ledger (a `change` row), and nothing else moves.
 func TestInstallWritesTheLogDefaultWhereNoneExists(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "pfm.config.json")
@@ -60,8 +60,8 @@ func TestInstallWritesTheLogDefaultWhereNoneExists(t *testing.T) {
 	if !present {
 		t.Fatalf("no log key written:\n%s", stdout.String())
 	}
-	if block["level"] != pfmconfig.InstallLogLevel || block["keepDays"] != float64(30) || len(block) != 2 {
-		t.Fatalf("log block = %v, want level info + keepDays 30", block)
+	if block["level"] != pfmconfig.InstallLogLevel || len(block) != 1 {
+		t.Fatalf("log block = %v, want level info alone", block)
 	}
 	if installer.report.Changed != 1 || !strings.Contains(stdout.String(), "change") ||
 		!strings.Contains(stdout.String(), path) {

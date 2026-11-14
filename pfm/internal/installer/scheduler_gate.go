@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/schedule"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const (
@@ -54,43 +55,9 @@ func CheckScheduler(
 	}
 	probed, err := awaitSchedulerGate(ctx, options)
 	if !probed {
-		if schedulerIsLaunchd {
-			return launchGateUnprobedNote, err
-		}
-		return nameSyncGateUnprobedNote, err
+		return options.jobScheduler().unprobedNote(), err
 	}
 	return "", err
-}
-
-func schedulerGate(ctx context.Context, runner CommandRunner) (probed bool, err error) {
-	if schedulerIsLaunchd {
-		syncRunning, syncAnswered := launchAgentRunning(ctx, runner, launchdLabel)
-		if syncRunning {
-			return true, ErrLaunchAgentRunning
-		}
-		scheduleRunning, scheduleAnswered := launchAgentRunning(ctx, runner, scheduleLaunchdLabel)
-		if scheduleRunning {
-			return true, ErrScheduleAgentRunning
-		}
-		reminderRunning, reminderAnswered := launchAgentRunning(ctx, runner, retiredScheduleLaunchdLabel)
-		if reminderRunning {
-			return true, ErrScheduleAgentRunning
-		}
-		return syncAnswered && scheduleAnswered && reminderAnswered, nil
-	}
-	syncRunning, syncAnswered := schedulerServiceRunning(ctx, runner, "pfm-name-sync.service")
-	if syncRunning {
-		return true, ErrNameSyncRunning
-	}
-	scheduleRunning, scheduleAnswered := schedulerServiceRunning(ctx, runner, scheduleServiceUnit)
-	if scheduleRunning {
-		return true, ErrScheduleRunning
-	}
-	reminderRunning, reminderAnswered := schedulerServiceRunning(ctx, runner, retiredScheduleServiceUnit)
-	if reminderRunning {
-		return true, ErrScheduleRunning
-	}
-	return syncAnswered && scheduleAnswered && reminderAnswered, nil
 }
 
 func SchedulerRefusal(command string, err error) string {
@@ -103,16 +70,18 @@ func SchedulerRefusal(command string, err error) string {
 			": the pfm schedule service is running; wait for it to finish or run `systemctl --user stop pfm-schedule.service`, then retry"
 	case errors.Is(err, ErrScheduleAgentRunning):
 		return "pfm " + command +
-			": the pfm schedule launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.schedule` first"
+			": the pfm schedule launch agent is running; wait for it to finish or `launchctl bootout " +
+			servicemanager.ShellTarget(scheduleLaunchdLabel) + "` first"
 	case errors.Is(err, ErrLaunchAgentRunning):
 		return "pfm " + command +
-			": the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first"
+			": the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout " +
+			servicemanager.ShellTarget(launchdLabel) + "` first"
 	}
 	return ""
 }
 
 func awaitSchedulerGate(ctx context.Context, options Options) (probed bool, err error) {
-	probed, err = schedulerGate(ctx, options.Runner)
+	probed, err = options.jobScheduler().gate(ctx, options.Runner)
 	if !errors.Is(err, ErrScheduleRunning) && !errors.Is(err, ErrScheduleAgentRunning) {
 		return probed, err
 	}
@@ -120,7 +89,7 @@ func awaitSchedulerGate(ctx context.Context, options Options) (probed bool, err 
 	waiter.say("  wait    the pfm schedule is delivering; waiting up to %s for it to finish", schedule.ComposerWait)
 	for waited := time.Duration(0); waited < schedule.ComposerWait; waited += scheduleGatePoll {
 		waiter.pause(scheduleGatePoll)
-		probed, err = schedulerGate(ctx, options.Runner)
+		probed, err = options.jobScheduler().gate(ctx, options.Runner)
 		if !errors.Is(err, ErrScheduleRunning) && !errors.Is(err, ErrScheduleAgentRunning) {
 			return probed, err
 		}

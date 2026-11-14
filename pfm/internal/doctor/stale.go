@@ -52,12 +52,24 @@ func (s staleFlags) dispatch(
 		flags.Usage()
 		return 2, true
 	case *s.enabled:
+		env := hostcheck.EnvFor(runtime, now)
 		if runtime.ConfigError != nil {
-			fmt.Fprintf(stdout, "stale: config error=%v — the accounts are unknown, so no path is judged\n",
-				runtime.ConfigError)
-			return 3, true
+			// The accounts are unknown, so only --purge, which moves what the
+			// walk calls dead, is refused; the listing runs on no accounts and
+			// its dead-account-dir row says it cannot judge.
+			if *s.purge {
+				fmt.Fprintf(stdout, "stale: config error=%v — the accounts are unknown, so --purge moves nothing\n",
+					runtime.ConfigError)
+				return 3, true
+			}
+			fmt.Fprintf(
+				stdout,
+				"stale: config error=%v — the accounts are unknown, so account-dependent rows are unknown\n",
+				runtime.ConfigError,
+			)
+			env.Accounts = nil
 		}
-		return runStalePaths(hostcheck.EnvFor(runtime, now), *s.purge, now, stdout), true
+		return runStalePaths(env, *s.purge, now, stdout), true
 	}
 	return 0, false
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -44,6 +45,7 @@ type fixture struct {
 	home, file, configPath string
 	calls                  int
 	fail                   error
+	claude                 string // the Claude page served in place of claudePage
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -94,6 +96,9 @@ func (f *fixture) run(at time.Time, offline bool, args ...string) (int, string, 
 			body := openAIPage
 			if r.URL.Host == "platform.claude.com" {
 				body = claudePage
+				if f.claude != "" {
+					body = f.claude
+				}
 			}
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})},
@@ -277,31 +282,55 @@ func TestModelCostForceRefreshesInsideTheWindowAndResolvesASnapshot(t *testing.T
 	}
 }
 
-func TestModelCostFetchFailureWarnsAndFailsOnlyWhenForced(t *testing.T) {
-	f := newFixture(t)
-	f.fail = errors.New("fixture network failure")
-	code, stdout, stderr := f.run(t0.Add(25*time.Hour), false, "--all")
-	if code != 0 || !strings.Contains(stdout, "refresh failed") ||
-		!strings.Contains(
-			stderr,
-			"pfm model-cost: warning: refresh failed, serving the table fetched "+t0.Format(time.RFC3339),
-		) ||
-		!strings.Contains(stderr, "fixture network failure") {
-		t.Fatalf(
-			"unforced failure: code %d stdout %q stderr %q; want 0, the summary and a named warning",
-			code,
-			stdout,
-			stderr,
-		)
+func TestModelCostRunAnswersEachRefreshState(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		fail, override, offline bool
+		age                     time.Duration
+		args                    []string
+		want                    string
+	}{
+		{"unforced fetch failure", true, false, false, 25 * time.Hour, []string{"--all"}, "exit 0 · 1 fetches\nprices: 1 rows · fetched 2099-01-01T00:00:00Z · checked 2099-01-01T00:00:00Z · from file {file} · refresh failed · billing: direct/global (default; cloud rates may differ) · override: none\nKEY              ENGINE  IN  OUT  HIT  CACHED  W5M  W1H  LONG  SOURCE\nclaude-opus-4-1  claude  15  75   -    -       -    -    -     published\n--- stderr\npfm model-cost: warning: refresh failed, serving the table fetched 2099-01-01T00:00:00Z: model-cost: fetch https://platform.claude.com/docs/en/about-claude/pricing.md: Get \"https://platform.claude.com/docs/en/about-claude/pricing.md\": fixture network failure\n"},
+		{"forced fetch failure", true, false, false, 25 * time.Hour, []string{"--force", "--all"}, "exit 1 · 1 fetches\n--- stderr\npfm model-cost: warning: refresh failed, serving the table fetched 2099-01-01T00:00:00Z: model-cost: fetch https://platform.claude.com/docs/en/about-claude/pricing.md: Get \"https://platform.claude.com/docs/en/about-claude/pricing.md\": fixture network failure\n"},
+		{"check", false, false, false, time.Hour, []string{"--check"}, "exit 0 · 0 fetches\nprices: 1 rows · fetched 2099-01-01T00:00:00Z · checked 2099-01-01T00:00:00Z · from file {file} · refresh current · billing: direct/global (default; cloud rates may differ) · override: none\n--- stderr\n"},
+		{"check beside an invalid override", false, true, false, time.Hour, []string{"--check"}, "exit 1 · 0 fetches\nprices: 1 rows · fetched 2099-01-01T00:00:00Z · checked 2099-01-01T00:00:00Z · from file {file} · refresh current · billing: direct/global (default; cloud rates may differ) · override: none\n--- stderr\npfm model-cost: warning: prices {dir}/pfm.prices.json: version must be 2, got 1; serving the published table without it\n"},
+		{"lookup beside an invalid override", false, true, false, time.Hour, []string{"--all"}, "exit 0 · 0 fetches\nprices: 1 rows · fetched 2099-01-01T00:00:00Z · checked 2099-01-01T00:00:00Z · from file {file} · refresh current · billing: direct/global (default; cloud rates may differ) · override: none\nKEY              ENGINE  IN  OUT  HIT  CACHED  W5M  W1H  LONG  SOURCE\nclaude-opus-4-1  claude  15  75   -    -       -    -    -     published\n--- stderr\npfm model-cost: warning: prices {dir}/pfm.prices.json: version must be 2, got 1; serving the published table without it\n"},
+		{"offline forced check", false, false, true, 48 * time.Hour, []string{"--force", "--check"}, "exit 0 · 0 fetches\nprices: 1 rows · fetched 2099-01-01T00:00:00Z · checked 2099-01-01T00:00:00Z · from file {file} · refresh offline · billing: direct/global (default; cloud rates may differ) · override: none\n--- stderr\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			if tc.fail {
+				f.fail = errors.New("fixture network failure")
+			}
+			if tc.override {
+				if err := os.WriteFile(
+					config.PricesPath(f.configPath),
+					[]byte(`{"version":1,"rows":[]}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code, stdout, stderr := f.run(t0.Add(tc.age), tc.offline, tc.args...)
+			got := strings.NewReplacer(filepath.Dir(f.configPath), "{dir}", f.file, "{file}").
+				Replace(fmt.Sprintf("exit %d · %d fetches\n%s--- stderr\n%s", code, f.calls, stdout, stderr))
+			if got != tc.want {
+				t.Errorf("run = %q, want %q", got, tc.want)
+			}
+		})
 	}
-	if code, _, stderr := f.run(
-		t0.Add(25*time.Hour),
-		false,
-		"--force",
-		"--all",
-	); code != 1 ||
-		!strings.Contains(stderr, "fixture network failure") {
-		t.Fatalf("forced failure: code %d stderr %q; want 1 naming the cause", code, stderr)
+}
+
+func TestModelCostWarnsOfAModelItKeptThePreviousRowOf(t *testing.T) {
+	f := newFixture(t)
+	f.claude = strings.Replace(claudePage, "| Claude Opus 4.1 | $15 / MTok |",
+		"| Claude Opus 4.1 | $16 / MTok | $18.75 / MTok | $30 / MTok | $1.50 / MTok | $75 / MTok |\n"+
+			"| Claude Opus 4.1 | $15 / MTok |", 1)
+	code, _, stderr := f.run(t0.Add(25*time.Hour), false, "claude-opus-4-1")
+	want := "pfm model-cost: warning: the fetched pages price these models in a way the parser cannot fold, " +
+		"keeping their previous rows: claude-opus-4-1\n"
+	if code != 0 || stderr != want {
+		t.Fatalf("code %d stderr %q; want 0 and %q", code, stderr, want)
 	}
 }
 
@@ -312,28 +341,5 @@ func TestModelCostUnknownModelNamesTheListCommand(t *testing.T) {
 		"; pfm model-cost --all lists every priced key\n"
 	if code != 1 || stdout != "" || stderr != want {
 		t.Fatalf("code %d stdout %q stderr %q; want 1 and %q", code, stdout, stderr, want)
-	}
-}
-
-func TestModelCostCheckPrintsTheSummaryAndFailsOnAnInvalidOverride(t *testing.T) {
-	f := newFixture(t)
-	code, stdout, _ := f.run(t0.Add(time.Hour), false, "--check")
-	if code != 0 || strings.Count(stdout, "\n") != 1 || !strings.HasPrefix(stdout, "prices: 1 rows · ") {
-		t.Fatalf("--check: code %d stdout %q; want 0 and one summary line", code, stdout)
-	}
-	if err := os.WriteFile(config.PricesPath(f.configPath), []byte(`{"version":1,"rows":[]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	code, _, stderr := f.run(t0.Add(time.Hour), false, "--check")
-	if code != 1 || !strings.Contains(stderr, config.PricesPath(f.configPath)) {
-		t.Fatalf("invalid override: code %d stderr %q; want 1 naming %s", code, stderr, config.PricesPath(f.configPath))
-	}
-}
-
-func TestModelCostOfflineFetchesNothingEvenWhenForced(t *testing.T) {
-	f := newFixture(t)
-	code, stdout, _ := f.run(t0.Add(48*time.Hour), true, "--force", "--check")
-	if code != 0 || f.calls != 0 || !strings.Contains(stdout, "refresh offline") {
-		t.Fatalf("offline: code %d, %d fetches, stdout %q", code, f.calls, stdout)
 	}
 }

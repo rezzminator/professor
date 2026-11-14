@@ -41,8 +41,11 @@ func TestLaunchNativeBackendRefusal(t *testing.T) {
 		config.Runtime{},
 		env,
 	)
-	if rc != 1 || !strings.Contains(stderr.String(), "herdr backend needs a caller in a Herdr pane") {
-		t.Fatalf("explicit native backend = %d %q", rc, &stderr)
+	dead := filepath.Join(root, "dead.sock")
+	want := "pfm internal launch: host refused at hook.launch: herdr backend asked for, but no Herdr server runs at " +
+		dead + ": stat " + dead + ": no such file or directory\n"
+	if rc != 10 || stderr.String() != want {
+		t.Fatalf("explicit native backend = %d %q, want 10 %q", rc, &stderr, want)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("refusal emitted a birth: %s", &stdout)
@@ -148,7 +151,8 @@ func TestLaunchNativeNewTabRefusesBirthFailure(t *testing.T) {
 		&stderr,
 		config.Runtime{Paths: values},
 	)
-	if code != 1 || !strings.Contains(stderr.String(), "birth native chat:") {
+	if code != 1 ||
+		stderr.String() != "pfm internal launch: birth native chat: herdr birth has no fleet places to file the chat under\n" {
 		t.Fatalf("new tab failure code=%d stderr=%s", code, &stderr)
 	}
 }

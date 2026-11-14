@@ -1,1 +1,1 @@
-TRANSCRIPT FAILED — INCOMPLETE name lookup for 'Audit Desk' — 1 discovery/read errors: {HOME}/.claude/projects/unreadable-project (stat {HOME}/.claude/projects/unreadable-project: no such file or directory)
+TRANSCRIPT WARNING — 1 places unreadable while resolving Audit Desk, which names one chat: {HOME}/.claude/projects/unreadable-project (stat {HOME}/.claude/projects/unreadable-project: no such file or directory)

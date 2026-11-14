@@ -7,6 +7,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestCodexAttributionUsesThirdAliasAndLongestNestedRoot(t *testing.T) {
@@ -28,7 +29,7 @@ func TestCodexAttributionUsesThirdAliasAndLongestNestedRoot(t *testing.T) {
 	rolloutPath := filepath.Join(aliasThree, "projects", "nested", "rollout-codex.jsonl")
 	output := Compose(Input{
 		Rollouts: []store.Rollout{{
-			ID: "codex-alias", Path: rolloutPath, CWD: "/work/codex",
+			ID: "codex-alias", Path: rolloutPath, CWD: testjail.Place("/work/codex"),
 			FirstPrompt: "Codex alias", PromptCount: 1, Size: 10, MTimeNS: 2,
 			UserThread: true,
 		}},
@@ -65,7 +66,7 @@ func TestLiveAgentAccountFollowsItsConfigDir(t *testing.T) {
 	transcriptPath := filepath.Join(projects, "shared.jsonl")
 	output := Compose(Input{
 		Transcripts: []store.Transcript{{
-			UUID: "shared", Path: transcriptPath, CWD: "/work",
+			UUID: "shared", Path: transcriptPath, CWD: testjail.Place("/work"),
 			FirstPrompt: "shared store", PromptCount: 1, Size: 10, MTimeNS: 1,
 		}},
 		Snapshot: gather.Snapshot{Agents: []gather.Agent{{

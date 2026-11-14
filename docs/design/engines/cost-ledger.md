@@ -103,11 +103,12 @@ A passthrough start (for example a `claude` run inside an existing pfm tmux sock
 - **Endpoints.** `POST /v1/logs` and `POST /v1/traces` answer `200 {}`; any other path answers `404`, any other method `405`. A body over 8 MiB, compressed or decompressed, answers `413`; `Content-Encoding: gzip` is accepted.
 - **What it keeps.** Only `api_request` log records and `claude_code.llm_request` spans; every other event and span is dropped before it is stored.
 - **Session ids.** A record whose session id is non-empty and outside the ledger's character class (`costledger.ValidSessionID`) is refused, counted in the answer's `partialSuccess` and logged, never joined into a path. A record with no session id is not refused: it is stored unattributed ([The ledger](#the-ledger)).
+- **Undecodable records.** A record of a shape the decoder cannot read is counted in the answer's `partialSuccess` (`N records undecodable`) and logged; the batch's other records still join.
 - **Unattributed warning.** A record missing its session id or its correlation identity counts in `Sink.Unattributed()` and is kept. The sink log gets one warning per sink endpoint (`/v1/logs`, `/v1/traces`), not one per record; the counter and the ledger rows keep every observation visible.
 - **Identity of the chat.** The launcher's pid plus that process's start time, read through `gather` at arm time. A reused pid has another start time and counts as gone.
 - **Exit.** When the chat is gone the sink keeps accepting until three seconds pass without a POST (at most fifteen), writes every pending half and exits; Claude's exporters flush on exit and a late batch must still land. Thirty consecutive unreadable process-table reads also end it, with the cause logged.
 - **Prune.** At start (`costledger.Prune`) it deletes `*.jsonl` files older than 90 days from the ledger directory and from `observations/` alike, never the `unattributed/` directory's file.
-- **Failure.** Nothing in the sink can stop the chat. A refused POST, a ledger write that failed, a panic while serving, a failed prune: one line in the sink log, `~/.local/state/pfm/log/cost-sink.log` (`paths.CostSinkLog`), which the launcher also writes its own decisions to. `pfm doctor` shows its tail ([Doctor](#doctor)).
+- **Failure.** Nothing in the sink can stop the chat. A refused POST (its log line carries the first 256 bytes of the body), a ledger write that failed, a panic while serving, a failed prune: one line in the sink log, `cost-sink.log` in the log root (`paths.LogRoot(…).CostSink()`: `{clone}/tmp/logs/pfm/` for a clone-installed pfm, else `~/.local/state/pfm/log/`), which the launcher also writes its own decisions to. `pfm doctor` shows its tail ([Doctor](#doctor)).
 
 ## The join
 
@@ -140,7 +141,7 @@ A half with an empty identity is not held for a partner: it is written at once a
 
 ## The ledger
 
-`{dir}/{session_id}.jsonl`, `dir` = `paths.CostLedgerDir(env, home)`: `$PFM_COST_LEDGER_DIR` when set, else `~/.local/state/pfm/cost-ledger`. While callmeter is installed, `pfm install` hands callmeter the same directory as `CALLMETER_COST_LEDGER_DIR` in `claude.env` (`config.ExtensionClaudeEnv`); callmeter reads no ledger without it. One file per chat session, a resumed session appending to the same file; directory mode 0700, file mode 0600. The root file holds only rows with a real `request_id`, so callmeter, which reads that file standalone, never meets a request-less row. A session-attributed row without a `request_id` goes to `{dir}/observations/{session_id}.jsonl` (`costledger.ObservationsDir(dir)`), the same row format under the same session. A session-less observation (no `session.id` or `session_id`) goes to `{dir}/unattributed/records.jsonl` (`costledger.Unattributed(dir)` reads it) and is assigned to no chat. A line is one JSON object, one `write(2)` on an `O_APPEND` descriptor, keys in this order:
+`{dir}/{session_id}.jsonl`, `dir` = `paths.CostLedgerDir(env, home)`: `$PFM_COST_LEDGER_DIR` when set, else `~/.local/state/pfm/cost-ledger`. While callmeter is installed, `pfm install` hands callmeter the same directory as `CALLMETER_COST_LEDGER_DIR` in `claude.env` (`config.EffectiveClaudeEnv`); callmeter reads no ledger without it. One file per chat session, a resumed session appending to the same file; directory mode 0700, file mode 0600. The root file holds only rows with a real `request_id`, so callmeter, which reads that file standalone, never meets a request-less row. A session-attributed row without a `request_id` goes to `{dir}/observations/{session_id}.jsonl` (`costledger.ObservationsDir(dir)`), the same row format under the same session. A session-less observation (no `session.id` or `session_id`) goes to `{dir}/unattributed/records.jsonl` (`costledger.Unattributed(dir)` reads it) and is assigned to no chat. A line is one JSON object, one `write(2)` on an `O_APPEND` descriptor, keys in this order:
 
 | Key | Type | Meaning |
 | --- | --- | --- |
@@ -162,7 +163,7 @@ A half with an empty identity is not held for a partner: it is written at once a
 
 ### Readers
 
-`costledger.ForSession(dir, sessionID)` (`pfm/internal/costledger/costledger.go`) parses line by line and dedupes by `Row.Identity()` ([Identity](#identity)): the best `join` wins (`log+span` over `log` over `span`), the later line among equals. A row with an empty identity is kept as its own observation, never deduped. A line that is not a JSON object (a torn tail), names a session other than the file's, or has no `request_id` and an invalid `join` is a counted `Faults`, never silent; a row with a request id and an empty historical `join` stays readable; a missing file is `Present == false`, not an error. `ForSession` reads both the root `{session_id}.jsonl` and `observations/{session_id}.jsonl` and combines their rows and faults, so a session with only request-less rows is `Present`. `costledger.SessionIDs(dir)` lists the sessions of both directories, each id once. `costledger.Sum` totals rows; a `null` cost is counted in `UnknownCost` and named, never a zero. callmeter reads the same files standalone as optional data and never writes or deletes there.
+`costledger.ForSession(dir, sessionID)` (`pfm/internal/costledger/costledger.go`) parses line by line and dedupes by `Row.Identity()` ([Identity](#identity)): the best `join` wins (`log+span` over `log` over `span`), the later line among equals. A row with an empty identity is kept as its own observation, never deduped. A line that is not a JSON object (a torn tail) or names a session other than the file's is a counted `Faults`, never silent; a `join` outside the three, empty included, ranks below every real one and refuses no row, written or read; a missing file is `Present == false`, not an error. `ForSession` reads both the root `{session_id}.jsonl` and `observations/{session_id}.jsonl` and combines their rows and faults, so a session with only request-less rows is `Present`. `costledger.SessionIDs(dir)` lists the sessions of both directories, each id once, and returns by path every `.jsonl` file whose name is no session id, which `pfm tokens` names in its data gaps (`scan.notes`). `costledger.Sum` totals rows; a `null` cost is counted in `UnknownCost` and named, never a zero. callmeter reads the same files standalone as optional data and never writes or deletes there.
 
 ### Side calls
 
@@ -211,7 +212,7 @@ A row's spend field `Σ$1.24/3.1M/42K/12` (`spendSegment`; the muted `Σ` marks 
 
 | Number | Source |
 | --- | --- |
-| dollars | with a ledger: `cost_usd_micros` of the rows of that `agent_id` and of every agent below it, at any depth, its side calls included; the tree is the rows' `parent_agent_id` edges joined with the meta files' `parentAgentId`. An agent the ledger holds no row of yet (rows reach it up to 20 s late) keeps its transcripts' price. Without a ledger: the transcripts' price at pfm's price table |
+| dollars | with a ledger: `cost_usd_micros` of the rows of that `agent_id` and of every agent below it, at any depth, its side calls included; the tree is the rows' `parent_agent_id` edges joined with the meta files' `parentAgentId`. An agent the ledger holds no row of yet (rows reach it up to 20 s late), or whose rows all lack a cost (a span-only join leaves `cost_usd_micros` null), keeps its transcripts' price, unless its own transcript cannot be read: then the ledger's tokens stand with `$?`. Without a ledger: the transcripts' price at pfm's price table |
 | prompt tokens | with a ledger: `input + cache_read + cache_creation` of the same rows; else the transcripts' |
 | output tokens | with a ledger: `output_tokens` of the same rows; else the transcripts' |
 | tool calls | the agent's transcript and every agent below it, always |
@@ -311,7 +312,7 @@ A chat with no ledger keeps today's output and one line, `side calls not measure
 
 ```text
 doctor: cost ledger state=on source=default dir=~/.local/state/pfm/cost-ledger
-doctor: cost sink log path=~/.local/state/pfm/log/cost-sink.log bytes=412
+doctor: cost sink log path={log root}/cost-sink.log bytes=412
 doctor: cost sink log: 2026-10-09T18:27:28.025Z cost-launch: armed a sink on 127.0.0.1:54321 for pid 4242
 ```
 
@@ -329,7 +330,7 @@ No prompt, message, tool, path or identity field is ever written: the sink copie
 - `TestDecodeResourceIdentityAndResponseID` (`costsink/otlp_test.go`) pins resource-inherited attributes, record overrides, `gen_ai.response.id` and `session_id` as fallbacks.
 - `TestSinkKeepsUnattributedObservationsWithoutFabricatingIDsOrSpamming` and `TestSinkDoesNotTreatLogTraceContextAsCallIdentity` (`costsink/sink_test.go`) pin the unattributed file, the one warning per endpoint, and the identity rule: a span's own pair and a real request id dedupe a repeat, while a request-less log's trace context never dedupes anything.
 - `TestUnattributedKeepsObservationsAndDeduplicatesOnlyRealIdentity` (`costledger`) pins the reader's dedupe and the invalid trace ids.
-- `TestCostLedgerReportsBackgroundWithoutAnyTranscript` and `TestCostLedgerReportsUnattributedWindowSeparatelyInTextAndJSON` (`tokens/costreport_test.go`) pin the transcriptless session and the separate unattributed block in text and `--out`.
+- `TestCostLedgerReportsWhatOnlyTheLedgerHolds` and `TestCostLedgerReportsUnattributedWindowSeparatelyInTextAndJSON` (`tokens/costreport_test.go`) pin the transcriptless session and the separate unattributed block in text and `--out`.
 - No suite runs a live engine; the live check after landing is a chat started on the host.
 
 ## Surfaces that stay in sync

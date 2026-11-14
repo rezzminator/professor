@@ -217,7 +217,7 @@ func TestVSCodeExtensionManifestMarkerIsFilledExactlyOnce(t *testing.T) {
 		t.Fatalf("rendered package.json does not parse: %v\n%s", err, rendered)
 	}
 	if _, err := renderVSCodeExtensionManifest([]byte(`{}`), nil); err == nil ||
-		!strings.Contains(err.Error(), "occurs 0 times") {
+		err.Error() != `asset marker "\"themes\": []" occurs 0 times, want exactly once` {
 		t.Fatalf("a manifest without the marker must be refused, got %v", err)
 	}
 }

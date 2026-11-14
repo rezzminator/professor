@@ -2,12 +2,14 @@ package herdr
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -88,12 +90,11 @@ func (report Report) Line() ([]byte, error) {
 	})
 }
 
-// SessionReport publishes restore metadata without taking ownership of lifecycle
-// state. Native Claude panes leave that state to Herdr's screen detection.
+// SessionReport publishes a pane's session without taking ownership of its
+// lifecycle state, which a native Claude pane leaves to Herdr's screen detection.
 type SessionReport struct {
-	Pane, Source, Agent, SessionID, SessionPath, StartSource string
-	ResumeArgv                                               []string
-	Seq                                                      uint64
+	Pane, Source, Agent, SessionID string
+	Seq                            uint64
 }
 
 // Line renders pane.report_agent_session; state and message are not in its schema.
@@ -108,15 +109,12 @@ func (report SessionReport) Line() ([]byte, error) {
 	return json.Marshal(request{
 		ID: fmt.Sprintf("pfm-%d", report.Seq), Method: "pane.report_agent_session",
 		Params: struct {
-			Pane        string   `json:"pane_id"`
-			Source      string   `json:"source"`
-			Agent       string   `json:"agent"`
-			SessionID   string   `json:"agent_session_id,omitempty"`
-			SessionPath string   `json:"agent_session_path,omitempty"`
-			StartSource string   `json:"session_start_source,omitempty"`
-			ResumeArgv  []string `json:"resume_argv,omitempty"`
-			Seq         uint64   `json:"seq"`
-		}{report.Pane, sourceOr(report.Source), report.Agent, report.SessionID, report.SessionPath, report.StartSource, report.ResumeArgv, report.Seq},
+			Pane      string `json:"pane_id"`
+			Source    string `json:"source"`
+			Agent     string `json:"agent"`
+			SessionID string `json:"agent_session_id,omitempty"`
+			Seq       uint64 `json:"seq"`
+		}{report.Pane, sourceOr(report.Source), report.Agent, report.SessionID, report.Seq},
 	})
 }
 
@@ -325,6 +323,78 @@ func (rename TabRename) Line() ([]byte, error) {
 	})
 }
 
+// WorkspaceRename is one workspace.rename request: the workspace's label
+// becomes Label.
+type WorkspaceRename struct {
+	Workspace string
+	Label     string
+	Seq       uint64
+}
+
+// Line renders the workspace.rename request line (no trailing newline); a
+// missing workspace or label is an error.
+func (rename WorkspaceRename) Line() ([]byte, error) {
+	if rename.Workspace == "" || rename.Label == "" {
+		return nil, fmt.Errorf(
+			"herdr workspace.rename: workspace %q and label %q are both required", rename.Workspace, rename.Label,
+		)
+	}
+	return json.Marshal(request{
+		ID:     fmt.Sprintf("pfm-%d", rename.Seq),
+		Method: "workspace.rename",
+		Params: struct {
+			WorkspaceID string `json:"workspace_id"`
+			Label       string `json:"label"`
+		}{rename.Workspace, rename.Label},
+	})
+}
+
+// Workspace is one workspace_info answer: the workspace and its label.
+type Workspace struct {
+	WorkspaceID string
+	Label       string
+}
+
+// ParseWorkspace decodes a workspace_info result
+// ({"type":"workspace_info","workspace":{…}}), what workspace.rename answers.
+func ParseWorkspace(result json.RawMessage) (Workspace, error) {
+	var decoded struct {
+		Type      string `json:"type"`
+		Workspace struct {
+			WorkspaceID string `json:"workspace_id"`
+			Label       string `json:"label"`
+		} `json:"workspace"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		return Workspace{}, fmt.Errorf("herdr workspace_info: decode result %q: %w", result, err)
+	}
+	if decoded.Type != "workspace_info" || decoded.Workspace.WorkspaceID == "" {
+		return Workspace{}, fmt.Errorf("herdr workspace_info: unexpected result %s", result)
+	}
+	return Workspace(decoded.Workspace), nil
+}
+
+// RenameWorkspace relabels workspace on the Herdr server at socket, the one
+// workspace.rename door; an answer naming another workspace or label is an error.
+func RenameWorkspace(ctx context.Context, socket, workspace, label string) error {
+	line, err := (WorkspaceRename{Workspace: workspace, Label: label, Seq: 1}).Line()
+	if err != nil {
+		return err
+	}
+	results, err := Call(ctx, socket, line)
+	if err != nil {
+		return fmt.Errorf("rename Herdr workspace %s to %q: %w", workspace, label, err)
+	}
+	renamed, err := ParseWorkspace(results[0])
+	if err != nil {
+		return fmt.Errorf("herdr workspace %s may be renamed to %q: %w", workspace, label, err)
+	}
+	if renamed != (Workspace{WorkspaceID: workspace, Label: label}) {
+		return fmt.Errorf("herdr workspace %s may be renamed to %q: it answered %+v", workspace, label, renamed)
+	}
+	return nil
+}
+
 // PaneList is one pane.list request with no workspace filter: every pane Herdr
 // holds, each with the terminal that outlives a pane move.
 type PaneList struct {
@@ -354,6 +424,12 @@ type Pane struct {
 	Tokens        map[string]string
 	CWD           string
 	ForegroundCWD string
+}
+
+// Directory is the directory pane works in: its foreground process's, else its
+// shell's.
+func (pane Pane) Directory() string {
+	return cmp.Or(pane.ForegroundCWD, pane.CWD)
 }
 
 // paneWire is Pane under Herdr's wire names, converted field for field.
@@ -513,6 +589,12 @@ func (refusal *Refusal) Error() string {
 func RefusedResume(err error) bool {
 	var refusal *Refusal
 	return errors.As(err, &refusal) && (refusal.Code == "invalid_resume_argv" || refusal.Code == "resume_not_accepted")
+}
+
+// SocketGone reports whether err is a dial to a Herdr socket nothing serves:
+// its file is gone, or no server listens on it. No Herdr holds a report there.
+func SocketGone(err error) bool {
+	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }
 
 // Send writes each request line to the Herdr socket in turn, one connection

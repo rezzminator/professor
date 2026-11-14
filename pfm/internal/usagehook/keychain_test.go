@@ -4,40 +4,31 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-func writeKeychainFixture(t *testing.T, body string, exitCode int) string {
+// fakeSecurity points the usage runner at a fake that answers the keychain tool with result.
+func fakeSecurity(t *testing.T, result deps.RunResult) *deps.FakeRunner {
 	t.Helper()
-	binary := filepath.Join(t.TempDir(), "security-fixture")
-	script := "#!/bin/sh\n"
-	if body != "" {
-		script += "printf '%s' " + shellQuote(body) + "\n"
-	}
-	if exitCode != 0 {
-		script += "exit " + strconv.Itoa(exitCode) + "\n"
-	}
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o755); err != nil {
-		t.Fatalf("write keychain fixture: %v", err)
-	}
-	return binary
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{keychainBinary, "find-generic-password"}, result, nil)
+	previous := usageRunner
+	usageRunner = fake
+	t.Cleanup(func() { usageRunner = previous })
+	return fake
 }
 
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
+// keychainBinary is the tool's path as the registry resolves it on macOS; the fake answers it on every kernel.
+const keychainBinary = "/usr/bin/security"
 
 func TestRunKeychainTrimsSuccessfulOutput(t *testing.T) {
-	binary := writeKeychainFixture(t, "  keychain-token \n", 0)
+	fakeSecurity(t, deps.RunResult{Stdout: []byte("  keychain-token \n")})
 
-	got, err := runKeychain(context.Background(), binary, "service-name")
+	got, err := runKeychain(context.Background(), keychainBinary, "service-name")
 	if err != nil {
 		t.Fatalf("runKeychain(): %v", err)
 	}
@@ -47,23 +38,19 @@ func TestRunKeychainTrimsSuccessfulOutput(t *testing.T) {
 }
 
 func TestRunKeychainMapsSecurityNotFoundToCredentialAbsence(t *testing.T) {
-	binary := writeKeychainFixture(t, "", keychainNotFoundStatus)
+	fakeSecurity(t, deps.RunResult{ExitCode: keychainNotFoundStatus})
 
-	_, err := runKeychain(context.Background(), binary, "missing-service")
+	_, err := runKeychain(context.Background(), keychainBinary, "missing-service")
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("runKeychain() error = %v, want os.ErrNotExist for security exit %d", err, keychainNotFoundStatus)
 	}
 }
 
 func TestRunKeychainPreservesDeniedKeychainAsAnError(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "security-fixture")
 	const detail = "User interaction is not allowed"
-	script := "#!/bin/sh\nprintf '%s' '" + detail + "' >&2\nexit 36\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o755); err != nil {
-		t.Fatalf("write denied keychain fixture: %v", err)
-	}
+	fakeSecurity(t, deps.RunResult{Stderr: []byte(detail), ExitCode: 36})
 
-	_, err := runKeychain(context.Background(), binary, "locked-service")
+	_, err := runKeychain(context.Background(), keychainBinary, "locked-service")
 	if err == nil {
 		t.Fatal("runKeychain() succeeded for a denied keychain")
 	}
@@ -76,14 +63,17 @@ func TestRunKeychainPreservesDeniedKeychainAsAnError(t *testing.T) {
 }
 
 func TestRunKeychainHonorsCallerCancellation(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "security-fixture")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nsleep 0.1\n"), 0o755); err != nil {
-		t.Fatalf("write hanging keychain fixture: %v", err)
-	}
+	fake := &deps.FakeRunner{}
+	fake.Handle([]string{keychainBinary}, func(ctx context.Context, _ deps.RunCall) (deps.RunResult, error) {
+		return deps.RunResult{ExitCode: -1}, ctx.Err()
+	})
+	previous := usageRunner
+	usageRunner = fake
+	t.Cleanup(func() { usageRunner = previous })
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := runKeychain(ctx, binary, "cancelled-service")
+	_, err := runKeychain(ctx, keychainBinary, "cancelled-service")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("runKeychain() error = %v, want context.Canceled", err)
 	}

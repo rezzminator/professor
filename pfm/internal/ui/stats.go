@@ -41,10 +41,17 @@ func (model Model) renderStatsHeader(width int) string {
 	if sampled && header.PSIUnavailable {
 		psi = "n/a"
 	}
+	// A counter that could not be read is unknown (its warning says why), never 0%.
+	unread := func(reading string, unreadable bool) string {
+		if sampled && unreadable {
+			return "err"
+		}
+		return reading
+	}
 	line := " " + statsCPUStyle.Render("CPU "+value(header.CPUPercent, header.CPUValid)) +
 		" · " + statsTokenStyle.Render("PSI "+psi) +
-		" · " + statsMemoryStyle.Render("RAM "+value(header.RAMPercent, sampled)) +
-		" · " + statsImageStyle.Render("SWAP "+value(header.SwapPercent, sampled))
+		" · " + statsMemoryStyle.Render("RAM "+unread(value(header.RAMPercent, sampled), header.RAMUnread)) +
+		" · " + statsImageStyle.Render("SWAP "+unread(value(header.SwapPercent, sampled), header.SwapUnread))
 	if model.statsError != "" {
 		line += " · " + warnStyle.Render("sample failed: "+model.statsError)
 	} else {

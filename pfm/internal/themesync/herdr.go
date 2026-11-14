@@ -32,7 +32,7 @@ var (
 	// herdrNotRunning matches the texts `herdr server reload-config` prints when no server is up.
 	herdrNotRunning = []string{
 		"not running", "no server", "no running", "connection refused", "no such file", "could not connect",
-		"couldn't connect", "failed to connect",
+		"couldn't connect", "failed to connect", "server_not_running",
 	}
 )
 
@@ -322,7 +322,8 @@ func (s *session) applyHerdr(ctx context.Context) SurfaceResult {
 			return s.failed(surfaceHerdr, path, err)
 		}
 	}
-	if updated, err = herdrRowsStyled(updated, s.herdrHues()); err != nil {
+	var rowNotes []string
+	if updated, rowNotes, err = herdrRowsStyled(updated, s.herdrHues()); err != nil {
 		return s.failed(surfaceHerdr, path, err)
 	}
 	changed := updated != string(original) || missing
@@ -342,7 +343,8 @@ func (s *session) applyHerdr(ctx context.Context) SurfaceResult {
 	if err := errors.Join(reloadErr, pluginErr); err != nil {
 		return s.failed(surfaceHerdr, path, err)
 	}
-	return s.result(surfaceHerdr, VerdictApplied, path, strings.TrimSpace(reloadNote+" "+pluginNote))
+	return s.result(surfaceHerdr, VerdictApplied, path,
+		strings.TrimSpace(reloadNote+" "+pluginNote+" "+strings.Join(rowNotes, "; ")))
 }
 
 // herdrHues are the hexes the sidebar rows' pfm tokens are styled with: the
@@ -388,10 +390,7 @@ func (s *session) readHerdr(_ context.Context) SurfaceResult {
 			generation,
 		)
 	}
-	styled, err := herdrRowsStyled(string(content), s.herdrHues())
-	if errors.Is(err, errHerdrNoHue) {
-		return s.in(surfaceHerdr, VerdictDrift, path, err.Error(), generation)
-	}
+	styled, rowNotes, err := herdrRowsStyled(string(content), s.herdrHues())
 	if err != nil {
 		return s.failed(surfaceHerdr, path, err)
 	}
@@ -411,7 +410,7 @@ func (s *session) readHerdr(_ context.Context) SurfaceResult {
 	if drift != "" {
 		return s.in(surfaceHerdr, VerdictDrift, path, drift, generation)
 	}
-	return s.in(surfaceHerdr, VerdictInSync, path, "", generation)
+	return s.in(surfaceHerdr, VerdictInSync, path, strings.Join(rowNotes, "; "), generation)
 }
 
 func (s *session) restoreHerdr(ctx context.Context) SurfaceResult {
@@ -482,13 +481,21 @@ func herdrReloadAcknowledgement(stdout, stderr []byte) (string, error) {
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(stdout, &response); err != nil {
-		return "", fmt.Errorf("themesync: decode Herdr config reload: %w", err)
+		// The reload exited 0: it applied. A reply this build cannot read (another
+		// Herdr version's) is the note, never a failure that reloads on every run.
+		reply := strings.TrimSpace(string(stdout))
+		if len(reply) > 200 {
+			reply = reply[:200] + "…"
+		}
+		return fmt.Sprintf("reload applied (exit 0); reply unreadable (%v): %s", err, reply), nil
 	}
 	if len(response.Error) != 0 {
 		return "", fmt.Errorf("themesync: Herdr config reload refused: %s", response.Error)
 	}
 	ack := response.Result
-	if ack.Type != "config_reload" || ack.Diagnostics == nil {
+	// Diagnostics only feed the detail: a reply that omits or nulls them says the
+	// same as an empty list.
+	if ack.Type != "config_reload" {
 		return "", fmt.Errorf("themesync: unexpected Herdr config reload acknowledgement: %s", stdout)
 	}
 	detail := strings.TrimSpace(strings.Join(ack.Diagnostics, "; ") + " " + string(stderr))

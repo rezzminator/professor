@@ -10,25 +10,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const nativeHerdrBackend = "herdr"
-
-// HerdrKeep is the herdr-keep door over proc.
-func HerdrKeep(proc ProcFS) *herdr.Keep {
-	return &herdr.Keep{Runner: deps.RealRunner{}, Proc: keepProc{proc}}
-}
-
-type keepProc struct{ ProcFS }
-
-func (proc keepProc) Stat(pid int) (herdr.ProcStat, error) {
-	stat, err := proc.ProcFS.Stat(pid)
-	return herdr.ProcStat{Start: stat.StartTime, Group: stat.Group, TerminalGroup: stat.TerminalGroup}, err
-}
 
 // HerdrSeat is a durable native seat and its visible probe failure, if any.
 type HerdrSeat struct {
@@ -107,11 +94,7 @@ func probeHerdrPanes(ctx context.Context, socket string) (map[string]string, jso
 		if _, duplicate := cwd[pane.PaneID]; duplicate {
 			return nil, nil, fmt.Errorf("pane.list: duplicate pane_id %q", pane.PaneID)
 		}
-		directory := pane.ForegroundCWD
-		if directory == "" {
-			directory = pane.CWD
-		}
-		cwd[pane.PaneID] = directory
+		cwd[pane.PaneID] = pane.Directory()
 	}
 	return cwd, body, nil
 }
@@ -140,13 +123,9 @@ func proveHerdrSeatSnapshot(
 	snapshot json.RawMessage,
 	observe bool,
 ) (fleetdb.Seat, bool, error) {
-	current, found, readErr := db.Seat(ctx, seat.SeatID)
+	current, readErr := currentHerdrSeat(ctx, db, seat)
 	if readErr != nil {
-		return seat, false, fmt.Errorf("read current ownership: %w", readErr)
-	}
-	if !found || current.Backend != nativeHerdrBackend ||
-		current.Engine != seat.Engine {
-		return seat, false, fmt.Errorf("seat %s ownership changed or disappeared", seat.SeatID)
+		return seat, false, readErr
 	}
 	if snapshot != nil && current.HerdrSocket != seat.HerdrSocket {
 		return seat, false, fmt.Errorf("seat %s snapshot socket changed during proof", seat.SeatID)
@@ -169,6 +148,9 @@ func proveHerdrSeatSnapshot(
 		var err error
 		body, err = herdr.SeatRequest(ctx, seat.HerdrSocket, "pane.list", struct{}{})
 		if err != nil {
+			if err = unlistedHerdrSeat(ctx, proc, seat, err); err == nil {
+				return seat, false, nil
+			}
 			return seat, false, fmt.Errorf("prove seat %s pane.list: %w", seat.SeatID, err)
 		}
 	}
@@ -176,22 +158,15 @@ func proveHerdrSeatSnapshot(
 	if err != nil {
 		return seat, false, fmt.Errorf("prove seat %s ownership: %w", seat.SeatID, err)
 	}
-	var candidate *herdr.Pane
-	for i := range panes {
-		pane := &panes[i]
-		matches := pane.PaneID == seat.HerdrPane
-		if seat.HerdrTerminalID != "" {
-			matches = pane.TerminalID == seat.HerdrTerminalID
-		}
-		if matches {
-			if candidate != nil {
-				return seat, false, fmt.Errorf("ownership pane.list: duplicate terminal identity")
-			}
-			candidate = pane
-		}
+	candidate, err := herdrSeatPane(seat, panes)
+	if err != nil {
+		return seat, false, err
 	}
 	if candidate == nil {
 		if seat.SeatHostPID == 0 {
+			if err := herdrReservationErr(seat); err != nil {
+				return seat, false, err
+			}
 			retired, err := HerdrSeatRetired(ctx, proc, seat)
 			if err != nil {
 				return seat, false, err
@@ -200,7 +175,7 @@ func proveHerdrSeatSnapshot(
 				return seat, false, nil
 			}
 		}
-		return seat, false, fmt.Errorf("seat %s ownership unproved: terminal not present in pane.list", seat.SeatID)
+		return seat, false, fmt.Errorf("seat %s ownership unproved: %w", seat.SeatID, errHerdrPaneAbsent)
 	}
 	body, err = herdr.SeatRequest(
 		ctx,
@@ -211,12 +186,12 @@ func proveHerdrSeatSnapshot(
 	if err != nil {
 		return seat, false, fmt.Errorf("prove seat %s shell: %w", seat.SeatID, err)
 	}
-	processes, err := HerdrKeep(proc).Processes(ctx, seat.HerdrSocket, body)
+	processes, err := herdr.ParsePaneProcesses(body)
 	if err != nil {
 		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable: %w", seat.SeatID, err)
 	}
 	if processes.Pane != candidate.PaneID || processes.Shell <= 1 {
-		return seat, false, fmt.Errorf("seat %s ownership shell identity unavailable", seat.SeatID)
+		return seat, false, herdrShellGone(proc, seat, processes.Pane == candidate.PaneID)
 	}
 	pid := seat.SeatHostPID
 	if pid == 0 {
@@ -248,7 +223,7 @@ func proveHerdrSeatSnapshot(
 		}
 	}
 	if pid == 0 {
-		return seat, false, fmt.Errorf("seat %s supervisor ownership unproved", seat.SeatID)
+		return seat, false, herdrSupervisorUnproved(seat)
 	}
 
 	argvRole, roleErr := proc.Cmdline(pid)
@@ -329,7 +304,10 @@ func proveHerdrSeatSnapshot(
 	if observe {
 		expected = seat
 	}
-	if !found || latest.SeatID != expected.SeatID ||
+	if !found {
+		return seat, false, fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatGone)
+	}
+	if latest.SeatID != expected.SeatID ||
 		latest.Engine != expected.Engine ||
 		latest.Backend != expected.Backend ||
 		latest.HerdrSocket != expected.HerdrSocket ||
@@ -351,18 +329,6 @@ func proveHerdrSeatSnapshot(
 		latest.SeatHostBirth = next.SeatHostBirth
 	}
 	return latest, true, nil
-}
-
-// ResolveHerdrSeat proves and persists the current address using the jail-aware
-// process reader. Callers must refuse mutation on either an error or !owned.
-func ResolveHerdrSeat(
-	ctx context.Context,
-	values paths.Values,
-	seat fleetdb.Seat,
-) (result fleetdb.Seat, owned bool, returnErr error) {
-	db := fleetdb.OpenSharedState(ctx, values)
-	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
-	return ProveHerdrSeat(ctx, db, NewProcFS(values.ProcRoot), seat)
 }
 
 // HerdrHostDead positively identifies the disappearance of the saved host, not
@@ -465,7 +431,8 @@ func ProbeHerdrSeats(ctx context.Context, values paths.Values, seats []fleetdb.S
 		open = fleetdb.OpenSharedStateReadOnly
 	}
 	db := open(ctx, values)
-	rows := proveHerdrSeats(ctx, db, NewProcFS(values.ProcRoot), probeHerdrSeatRows(ctx, seats), readOnly)
+	proc := NewProcFS(values.ProcRoot)
+	rows := proveHerdrSeats(ctx, db, proc, probeHerdrSeatRows(ctx, seats), readOnly)
 	if err := db.Close(); err != nil {
 		for i := range rows {
 			rows[i].Err = errors.Join(rows[i].Err, fmt.Errorf("close seat listing state: %w", err))
@@ -474,38 +441,65 @@ func ProbeHerdrSeats(ctx context.Context, values paths.Values, seats []fleetdb.S
 	return rows
 }
 
-func proveHerdrSeats(ctx context.Context, db *fleetdb.Store, proc ProcFS, rows []HerdrSeat, readOnly bool) []HerdrSeat {
+func proveHerdrSeats(
+	ctx context.Context,
+	db *fleetdb.Store,
+	proc ProcFS,
+	rows []HerdrSeat,
+	readOnly bool,
+) []HerdrSeat {
+	kept := rows[:0]
 	for i := range rows {
-		row := &rows[i]
+		row := rows[i]
 		if row.snapshot == nil {
-			continue
-		}
-		canonical, owned, err := proveHerdrSeatSnapshot(ctx, db, proc, row.Seat, row.snapshot, readOnly)
-		row.CWD = ""
-		if err != nil {
-			row.Err = fmt.Errorf("HERDR ERROR %s: %w", row.Seat.HerdrSocket, err)
-			continue
-		}
-		if !owned {
-			// Positive death only: the row stays visible as a lost seat, never
-			// live and never the recycled pane's occupant. A writable listing
-			// retires the durable row once, so later scans never probe it again.
-			row.Err = fmt.Errorf("HERDR DEAD %s: saved supervisor exited", row.Seat.SeatID)
-			if !readOnly {
-				retired, retireErr := retireDeadHerdrSeat(ctx, db, canonical)
-				row.Err = errors.Join(row.Err, retireErr)
-				if retireErr == nil {
-					row.Seat = retired
+			// The socket did not answer (row.Err says how): the row stays that
+			// failure unless the seat is gone or its supervisor positively dead.
+			canonical, gone, reason, err := unansweredHerdrSeat(ctx, db, proc, row.Seat, herdr.SocketFileGone(row.Err))
+			switch {
+			case errors.Is(err, errHerdrSeatGone):
+				continue
+			case err != nil:
+				row.Err = errors.Join(row.Err, err)
+			case gone && canonical.HerdrPane == "":
+				if row.Err = retireFailedHerdrBirth(ctx, db, canonical, readOnly); row.Err == nil {
+					continue // a reservation that never named a pane: a failed birth, never a chat
 				}
+			case gone:
+				listDeadHerdrSeat(ctx, db, &row, canonical, readOnly, reason)
 			}
-			row.Seat.State = "lost"
+			kept = append(kept, row)
 			continue
 		}
-		row.Seat = canonical
-		row.CWD = row.directories[canonical.HerdrPane]
-		row.Err = nil
+		prove := func(seat fleetdb.Seat) (fleetdb.Seat, bool, error) {
+			return proveHerdrSeatSnapshot(ctx, db, proc, seat, row.snapshot, readOnly)
+		}
+		canonical, owned, err := settleHerdrRow(ctx, db, &row, prove)
+		row.CWD = ""
+		switch {
+		case errors.Is(err, errHerdrSeatGone):
+			continue // ended or replaced while this listing read it: not listed
+		case errors.Is(err, errHerdrBirthFailed):
+			if row.Err = retireFailedHerdrBirth(ctx, db, canonical, readOnly); row.Err == nil {
+				continue // a reservation that never named a pane: a failed birth, never a chat
+			}
+		case errors.Is(err, errHerdrSeatUnbound):
+			continue // a reservation with no pane or no supervisor yet: not a chat yet
+		case err != nil && canonical.EndPending && (herdr.PaneGone(err) || errors.Is(err, errHerdrPaneAbsent)):
+			continue // its end worker closed the pane during this listing: the end is landing
+		case errors.Is(err, errHerdrPaneAbsent) && canonical.SeatHostPID > 0:
+			listClosedHerdrSeat(&row, canonical)
+		case err != nil:
+			row.Err = fmt.Errorf("HERDR ERROR %s: %w", row.Seat.HerdrSocket, err)
+		case !owned:
+			listDeadHerdrSeat(ctx, db, &row, canonical, readOnly, herdrHostExited)
+		default:
+			row.Seat = canonical
+			row.CWD = row.directories[canonical.HerdrPane]
+			row.Err = nil
+		}
+		kept = append(kept, row)
 	}
-	return rows
+	return kept
 }
 
 // Older native launches supervised in-process; their generated seat id is not argv.
@@ -522,38 +516,6 @@ func legacyHerdrLauncher(argv []string) bool {
 		args = args[2:]
 	}
 	return len(args) >= 2 && args[0] == "internal" && args[1] == "launch"
-}
-
-// HerdrSeatRetired also handles pre-upgrade/never-bound rows. Missing process
-// identity alone is unknown: require a complete absent listing, explicit alias
-// refusal and no matching old supervisor anywhere in the process table.
-func HerdrSeatRetired(ctx context.Context, proc ProcFS, seat fleetdb.Seat) (bool, error) {
-	if seat.SeatHostPID > 0 {
-		return HerdrHostDead(proc, seat)
-	}
-	fail := func(err error) (bool, error) {
-		return false, fmt.Errorf("seat %s has no saved supervisor birth; absence unproved: %w", seat.SeatID, err)
-	}
-	body, err := herdr.SeatRequest(ctx, seat.HerdrSocket, "pane.list", struct{}{})
-	if err != nil {
-		return fail(err)
-	}
-	panes, err := decodeHerdrPanes(body)
-	if err != nil {
-		return fail(err)
-	}
-	for index := range panes {
-		pane := &panes[index]
-		if pane.PaneID == seat.HerdrPane || (seat.HerdrTerminalID != "" && pane.TerminalID == seat.HerdrTerminalID) {
-			return false, nil
-		}
-	}
-	_, err = herdr.SeatRequest(ctx, seat.HerdrSocket, "pane.get", map[string]string{"pane_id": seat.HerdrPane})
-	var refusal *herdr.Refusal
-	if !errors.As(err, &refusal) || (refusal.Code != "pane_not_found" && refusal.Code != "not_found") {
-		return fail(errors.Join(err, errors.New("old pane absence not explicitly acknowledged")))
-	}
-	return HerdrSupervisorAbsent(proc, seat)
 }
 
 // HerdrSupervisorAbsent proves only completed process absence, not pane ownership.
@@ -614,7 +576,8 @@ func HerdrSupervisorArgv(argv []string, id string) bool {
 // HerdrWorkspace are the chat's current address, envPane only the pane's birth
 // id. A legacy seat (no saved supervisor; pfm never moves one) is found by
 // envPane and the supervisor argv of an ancestor. An ancestor that exited is no
-// supervisor; one whose argv cannot be read is an error, never "no seat".
+// supervisor, nor one born after the seat's saved supervisor (a reused pid);
+// one whose argv or birth cannot be read is an error, never "no seat".
 func HerdrChatSeat(
 	seats []fleetdb.Seat,
 	proc ProcFS,
@@ -628,7 +591,18 @@ func HerdrChatSeat(
 				continue
 			}
 			if seat.SeatHostPID > 0 && seat.SeatHostPID == pid {
-				return *seat, true, nil
+				if seat.SeatHostStart == 0 {
+					return *seat, true, nil
+				}
+				// An ended chat's seat keeps its supervisor pid: a reused pid is not its host.
+				dead, err := HerdrHostDead(proc, *seat)
+				if err != nil {
+					return fleetdb.Seat{}, false, err
+				}
+				if !dead {
+					return *seat, true, nil
+				}
+				continue
 			}
 			if seat.SeatHostPID != 0 || seat.HerdrPane != envPane {
 				continue

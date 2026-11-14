@@ -16,7 +16,9 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -43,6 +45,9 @@ type backend struct {
 	warnings             io.Writer
 	allowAmbientIdentity bool
 	runtimeIdentity      string
+	// borrowedStore says database and sharedState belong to the caller
+	// (Runtime.Store), so close leaves them open.
+	borrowedStore bool
 }
 
 func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error) {
@@ -69,18 +74,29 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 	if err != nil {
 		return nil, fmt.Errorf("configure chat MCP backend: %w", err)
 	}
-	database, err := store.Open(store.WithWarningWriter(warnings))
-	if err != nil {
-		return nil, err
+	database, sharedState := runtime.Store, (*fleetdb.Store)(nil)
+	borrowedStore := database != nil
+	if borrowedStore {
+		sharedState = database.Shared()
+	} else {
+		database, err = store.Open(store.WithWarningWriter(warnings))
+		if err != nil {
+			return nil, err
+		}
+		sharedState = fleetdb.OpenSharedState(context.Background(), runtime.Paths)
 	}
-	sharedState := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
+	closeOwned := func() {
+		if !borrowedStore {
+			_ = database.Close()
+			_ = sharedState.Close()
+		}
+	}
 	resolver, err := resolve.New(nil, resolve.Binaries{
 		Values:        engineBinaries(runtime),
 		AccountEmojis: accountEmojis(runtime.Accounts),
 	})
 	if err != nil {
-		_ = database.Close()
-		_ = sharedState.Close()
+		closeOwned()
 		return nil, err
 	}
 	caller, err := chat.NewCallEngineWith(chat.CallDependencies{
@@ -95,8 +111,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		WarningWriter:  warnings,
 	})
 	if err != nil {
-		_ = database.Close()
-		_ = sharedState.Close()
+		closeOwned()
 		return nil, err
 	}
 	return &backend{
@@ -111,10 +126,14 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		warnings:             warnings,
 		allowAmbientIdentity: runtime.AllowAmbientIdentity,
 		runtimeIdentity:      runtimeIdentity,
+		borrowedStore:        borrowedStore,
 	}, nil
 }
 
 func (current *backend) close() error {
+	if current.borrowedStore {
+		return nil
+	}
 	return errors.Join(current.database.Close(), current.sharedState.Close())
 }
 
@@ -153,7 +172,7 @@ const (
 // list is ls: chat.List under the tool's payload contract, projected
 // onto the wire row.
 func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, error) {
-	return current.listProjected(ctx, input, true, "")
+	return current.listProjected(ctx, input, true, "", false)
 }
 
 // lsScope is public ls's repository scope: the repository of the caller
@@ -185,7 +204,7 @@ func (current *backend) lsScope(
 // ls keeps its payload cap; resolving a caller must not turn a row beyond
 // that presentation boundary into an absence.
 func (current *backend) listUnbounded(ctx context.Context, input LSInput) (LSOutput, error) {
-	return current.listProjected(ctx, input, false, "")
+	return current.listProjected(ctx, input, false, "", false)
 }
 
 func (current *backend) listProjected(
@@ -193,6 +212,7 @@ func (current *backend) listProjected(
 	input LSInput,
 	defaultLimit bool,
 	repo string,
+	inspect bool,
 ) (LSOutput, error) {
 	if current.chat == nil {
 		return LSOutput{}, fmt.Errorf("ls verb is not configured")
@@ -240,7 +260,7 @@ func (current *backend) listProjected(
 			Session:        session,
 			ID:             row.ID,
 			Engine:         compose.EngineForKind(row.Kind),
-			State:          chatRowState(*row),
+			State:          projectedState(ctx, current.chat, *row, inspect),
 			Dir:            row.CWD,
 			Project:        row.Project,
 			Name:           row.Name,
@@ -265,33 +285,13 @@ func (current *backend) listProjected(
 	}, nil
 }
 
-// chatRowState is the one place a ls row's state is decided.
-//
-// The killed-but-live arm is the honesty half of the kill fix: a kill that
-// closed nothing still wrote its tombstone, so a row came back asserting BOTH
-// things at once — killed:true beside state "idle" and kind "live-claude" —
-// and no caller could tell a real kill from a de-listing. A contradiction is
-// reported as a contradiction, never smoothed into one of its two halves.
-func chatRowState(row compose.Row) string {
-	if row.BackendError != "" {
-		return "error"
+// projectedState is a projected row's state: with inspect, what the chat listing shows its reader at both ls doors
+// (chat.ListedState); without, the row's liveness word alone (chat.RowState), what caller matching reads.
+func projectedState(ctx context.Context, verbs ChatVerbs, row compose.Row, inspect bool) string {
+	if !inspect {
+		return chat.RowState(row)
 	}
-	if row.Backend == "herdr" && row.LostNote != "" && !row.Kind.IsAddressable() {
-		return "lost"
-	}
-	switch {
-	case row.Killed && row.Kind.IsAddressable():
-		return "killed-but-live"
-	case row.Kind == compose.Booting:
-		// A booting chat HAS a socket and already answers call by
-		// name. Excluding it made ls report a chat that exists as
-		// simply absent for its first minute.
-		return "booting"
-	case row.Kind.IsAddressable():
-		return "idle"
-	default:
-		return "resumable"
-	}
+	return chat.ListedState(row, func() (headless.Status, error) { return verbs.Inspect(ctx, row) })
 }
 
 type callerIdentity struct {
@@ -302,6 +302,15 @@ type callerIdentity struct {
 	detail   string
 	err      error
 	absent   bool
+}
+
+// lookupFailed is a caller whose identity could not be looked up: present and
+// invalid, never absent, so a self target refuses naming the failure and an
+// explicit target goes on as for any identity that did not bind.
+func (caller callerIdentity) lookupFailed(err error) callerIdentity {
+	caller.row, caller.identity, caller.valid = ChatRow{}, resolve.Identity{}, false
+	caller.err, caller.detail = err, err.Error()
+	return caller
 }
 
 func (current *backend) proxySeatMatches(proxy ProxyIdentity, row ChatRow) (selected bool, detail string) {
@@ -476,18 +485,19 @@ func (current *backend) callerForRequest(
 		if proxy.Engine != "" {
 			parsedEngine, parseErr := pfmengine.Parse(proxy.Engine)
 			if parseErr != nil {
-				caller.detail = fmt.Sprintf("MCP _meta.pfmProxy engine %q is invalid: %v", proxy.Engine, parseErr)
-				return caller, nil
+				// The engine only feeds the conflict check: unreadable, it is skipped, never the caller.
+				obs.Logger(ctx).Warn("mcp.caller_engine_invalid", "session", proxy.Session,
+					obs.FieldEngine, proxy.Engine, obs.FieldErr, parseErr.Error())
 			}
 			proxyEngine = parsedEngine
 		}
 		listed, err := current.listUnbounded(ctx, LSInput{All: true})
 		if err != nil {
-			return caller, fmt.Errorf(
+			return caller.lookupFailed(fmt.Errorf(
 				"resolve MCP proxy session %q: list live chats: %w",
 				proxy.Session,
 				err,
-			)
+			)), nil
 		}
 		matches := make([]ChatRow, 0, 1)
 		conflictDetail := ""
@@ -548,10 +558,10 @@ func (current *backend) callerForRequest(
 				return caller, nil
 			}
 			if !filepath.IsAbs(current.paths.SIDDir) {
-				return caller, fmt.Errorf(
+				return caller.lookupFailed(fmt.Errorf(
 					"resolve MCP proxy split pane %q: breadcrumb directory is not absolute",
 					proxy.Pane,
-				)
+				)), nil
 			}
 			boundID, _, bindErr := reload.SessionFromPaneCrumb(
 				current.paths.SIDDir,
@@ -567,11 +577,11 @@ func (current *backend) callerForRequest(
 					)
 					return caller, nil
 				}
-				return caller, fmt.Errorf(
+				return caller.lookupFailed(fmt.Errorf(
 					"resolve MCP proxy split pane %q breadcrumb: %w",
 					proxy.Pane,
 					bindErr,
-				)
+				)), nil
 			}
 			if boundID == "" {
 				caller.row = ChatRow{}
@@ -591,37 +601,38 @@ func (current *backend) callerForRequest(
 				)
 				return caller, nil
 			}
-			if current.database == nil {
-				return caller, fmt.Errorf("resolve MCP proxy split transcript %q: store is not configured", proxy.ID)
+			// The breadcrumb bound the pane exactly; the indexed transcript only
+			// adds its directory, path and name. Not indexed yet (or unreadable),
+			// directory and path stay unknown, never the split row's (another
+			// pane's), and the name stays the row's.
+			var transcript store.Transcript
+			found, lookupErr := false, errors.New("store is not configured")
+			if current.database != nil {
+				transcript, found, lookupErr = current.database.Transcript(ctx, proxy.ID)
 			}
-			transcript, found, err := current.database.Transcript(ctx, proxy.ID)
-			if err != nil {
-				return caller, fmt.Errorf("resolve MCP proxy split transcript %q: %w", proxy.ID, err)
+			if lookupErr != nil {
+				obs.Logger(ctx).Warn("mcp.caller_transcript_unread", "session", proxy.Session,
+					obs.FieldChat, proxy.ID, obs.FieldErr, lookupErr.Error())
 			}
-			if !found || strings.TrimSpace(transcript.CWD) == "" {
-				caller.row = ChatRow{}
-				caller.detail = fmt.Sprintf(
-					"MCP _meta.pfmProxy split transcript %q has no indexed working directory",
-					proxy.ID,
-				)
-				return caller, nil
-			}
-			caller.row.ID = transcript.UUID
+			caller.row.ID = proxy.ID
 			caller.row.Session = proxy.Session
 			caller.row.Dir = transcript.CWD
-			caller.row.Name = naming.LiveFallback(
-				naming.DisplayName(transcript.CustomTitle, transcript.AITitle, transcript.FirstPrompt),
-				"",
-				"",
-				"",
-				transcript.LastPrompt,
-				true,
-			)
+			caller.row.transcriptPath = transcript.Path
+			if found {
+				caller.row.Name = naming.LiveFallback(
+					naming.DisplayName(transcript.CustomTitle, transcript.AITitle, transcript.FirstPrompt),
+					"",
+					"",
+					"",
+					transcript.LastPrompt,
+					true,
+				)
+			}
 			caller.row.Pane = proxy.Pane
 		}
 		caller.identity, err = current.identityFromRow(caller.row)
 		if err != nil {
-			return caller, fmt.Errorf("resolve MCP proxy session %q: %w", proxy.Session, err)
+			return caller.lookupFailed(fmt.Errorf("resolve MCP proxy session %q: %w", proxy.Session, err)), nil
 		}
 		if proxy.ID != "" {
 			caller.identity.ID = proxy.ID
@@ -640,7 +651,7 @@ func (current *backend) callerForRequest(
 	}
 	listed, err := current.listUnbounded(ctx, LSInput{All: true})
 	if err != nil {
-		return caller, fmt.Errorf("resolve MCP caller thread %q: list live chats: %w", threadID, err)
+		return caller.lookupFailed(fmt.Errorf("resolve MCP caller thread %q: list live chats: %w", threadID, err)), nil
 	}
 	seats := current.codexSeatsFromRows(listed.Rows)
 	identity, seatErr := resolve.CodexThreadSeat(threadID, seats)
@@ -659,7 +670,7 @@ func (current *backend) callerForRequest(
 	}
 	caller.identity, err = current.identityFromRow(caller.row)
 	if err != nil {
-		return caller, fmt.Errorf("resolve MCP caller thread %q: %w", threadID, err)
+		return caller.lookupFailed(fmt.Errorf("resolve MCP caller thread %q: %w", threadID, err)), nil
 	}
 	caller.identity.Recovered = identity.Recovered
 	caller.identity.Source = "mcp-thread-meta"
@@ -687,7 +698,12 @@ func (current *backend) identityFromRow(row ChatRow) (resolve.Identity, error) {
 		backend = spawn.BackendTmux
 	}
 	session := row.Session
-	if session == "" {
+	if backend == spawn.BackendHerdr && row.SeatID != "" {
+		if session == row.ID {
+			session = "" // listProjected's id for a row with no name: the seat's handle stands instead
+		}
+		session = resolve.SeatHandle(session, row.SeatID)
+	} else if session == "" {
 		session = row.SeatID
 	}
 	return resolve.Identity{

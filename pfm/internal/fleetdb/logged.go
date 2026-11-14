@@ -47,3 +47,9 @@ func rowsAffected(result sql.Result, err error) int64 {
 	}
 	return affected
 }
+
+// skipRow reports one stored row a list read could not decode. The read keeps
+// every other row: one bad row costs itself, never the list it sits in.
+func skipRow(ctx context.Context, table string, err error) {
+	obs.Logger(ctx).Warn("fleet.row.skipped", "table", table, obs.FieldErr, err.Error())
+}

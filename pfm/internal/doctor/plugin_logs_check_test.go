@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -179,13 +180,13 @@ func TestPluginLogsDoctor(t *testing.T) {
 			name: "file-derived text prints escaped, never a forged line",
 			mutate: func(t *testing.T, fixture pluginLogsFixture) {
 				t.Helper()
-				forged := "/absent\ndoctor: plugin_logs ok"
+				forged := filepath.Join(fixture.store, "absent") + "\ndoctor: plugin_logs ok"
 				pluginLogSettings(t, filepath.Join(fixture.store, "settings.json"), forged)
 				pluginLogSettings(t, filepath.Join(fixture.own, "settings.json"), forged)
 			},
-			want: func(pluginLogsFixture) string {
-				return `doctor: plugin_logs no log folder at /absent\ndoctor: plugin_logs ok — create it: mkdir -p ` +
-					`/absent\ndoctor: plugin_logs ok` + "\n"
+			want: func(fixture pluginLogsFixture) string {
+				escaped := filepath.Join(fixture.store, "absent") + `\ndoctor: plugin_logs ok`
+				return `doctor: plugin_logs no log folder at ` + escaped + ` — create it: mkdir -p ` + escaped + "\n"
 			},
 			warnings: 1,
 		},
@@ -401,13 +402,14 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 	for _, dir := range []string{fixture.store, fixture.own} {
 		writePluginLogsFile(t, filepath.Join(dir, "settings.json"), `{"env":{"OTHER":"keep"}}`)
 	}
-	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	// The ambient table holds another suite's painter, as the fence's /proc does
 	// under a parallel gate; the install reads only the empty table it is given.
 	t.Setenv(paths.EnvProcRoot, ambientHerdrIndicatorTable(t))
 	if _, err := installer.Run(
 		context.Background(),
 		installer.Options{
+			EngineSyncRunner: engineSync,
 			Home:             fixture.home,
 			ConfigDir:        fixture.store,
 			RosterConfigDirs: []string{fixture.linked, fixture.own},
@@ -415,6 +417,7 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 			Version:          "0.82.0-alpha",
 			Mode:             installer.ModeApply,
 			ProcRoot:         t.TempDir(),
+			Runner:           healthyServiceManager{},
 			Stdout:           io.Discard,
 		},
 	); err != nil {
@@ -429,10 +432,36 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 		unix.Access,
 		tally,
 	)
-	if tally.failures != 0 || tally.warnings != 0 ||
-		!strings.Contains(out.String(), "plugin_logs ok: PLUGIN_LOG_DIR=") {
-		t.Fatalf("installer leaves doctor unhealthy: %s", out.String())
+	if got, want := rooted(
+		out.String(),
+		fixture.home,
+	), "doctor: plugin_logs ok: PLUGIN_LOG_DIR={root}/.local/state/pfm/plugin-logs in every config dir\n"; tally.failures != 0 || tally.warnings != 0 ||
+		got != want {
+		t.Errorf("failures=%d warnings=%d output = %q, want %q", tally.failures, tally.warnings, got, want)
 	}
+}
+
+// healthyServiceManager answers the installer's systemctl and launchctl calls
+// as a healthy user manager would, so an apply never bootstraps a fixture
+// agent into the real launchd gui domain or systemd user manager.
+type healthyServiceManager struct{}
+
+func (healthyServiceManager) Run(_ context.Context, name string, args ...string) error {
+	_, err := healthyServiceManager{}.Output(context.Background(), name, args...)
+	return err
+}
+
+func (healthyServiceManager) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	switch {
+	case name == "systemctl" && len(args) > 0 && strings.HasSuffix(args[len(args)-1], ".service"):
+		// A oneshot between runs: the install gate refuses while one runs.
+		return []byte("inactive\n"), nil
+	case name == "systemctl":
+		return []byte("active\n"), nil
+	case name == "launchctl":
+		return []byte("state = not running\n"), nil
+	}
+	return nil, fmt.Errorf("%s %s: not a service manager command this fixture answers", name, strings.Join(args, " "))
 }
 
 // ambientHerdrIndicatorTable stages a process table holding one running

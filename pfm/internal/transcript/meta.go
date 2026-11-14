@@ -2,20 +2,24 @@ package transcript
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 // metaMaxLine bounds memory while leaving room for large tool and prompt
 // records. ReadMeta must scan the whole file because HumanPrompts is a lifetime
-// count, but it never needs to retain more than one JSONL record.
+// count, but it never needs to retain more than one JSONL record; a line past
+// the bound is skipped and counted in Meta.SkippedLines, never ends the scan.
 const metaMaxLine = 32 << 20
 
 // Meta is what a transcript says about the run itself, as opposed to what was
@@ -32,6 +36,9 @@ type Meta struct {
 	HumanPrompts        int
 	CompactedAfterUsage bool
 	PostCompactTokens   int64
+	// SkippedLines counts the lines ReadMeta did not read because each was
+	// longer than metaMaxLine; 0 means every line was read.
+	SkippedLines int
 	// CodexTurn is where the newest Codex turn record leaves the rollout:
 	// inside a turn or after one ended. Codex writes assistant commentary
 	// between the tool calls of one turn, so only these records tell a turn
@@ -126,18 +133,56 @@ func ReadMeta(path, engine string) (meta Meta, returnErr error) {
 		}
 	}()
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64<<10), metaMaxLine)
 	var fold MetaFold
-	for scanner.Scan() {
-		fold.Line(scanner.Bytes(), engine)
-	}
+	skipped, scanErr := foldMetaLines(file, &fold, engine)
 	meta = fold.Meta
+	meta.SkippedLines = skipped
+	if skipped > 0 {
+		// A line past the bound is a loss, never silence: every reader's
+		// facts come from what was read, and the log names what was not.
+		obs.Logger(context.Background()).Warn(
+			"transcript.meta.lines_skipped", "path", path, "rows", skipped,
+			obs.FieldErr, fmt.Sprintf("%d line(s) over the %d-byte bound left unread", skipped, metaMaxLine),
+		)
+	}
 	meta.SizeBytes, meta.ModifiedUnixNS = info.Size(), info.ModTime().UnixNano()
-	if err := scanner.Err(); err != nil {
-		return meta, fmt.Errorf("scan transcript %s: %w", path, err)
+	if scanErr != nil {
+		return meta, fmt.Errorf("scan transcript %s: %w", path, scanErr)
 	}
 	return meta, nil
+}
+
+// foldMetaLines folds every line of r into fold. A line over metaMaxLine is
+// dropped as it is read, never held, and counted: it costs itself, not the
+// lines after it.
+func foldMetaLines(r io.Reader, fold *MetaFold, engine string) (skipped int, err error) {
+	reader := bufio.NewReaderSize(r, 64<<10)
+	var line []byte
+	oversized := false
+	for {
+		chunk, readErr := reader.ReadSlice('\n')
+		if !oversized {
+			line = append(line, chunk...)
+			if len(line) > metaMaxLine {
+				oversized, line = true, nil
+				skipped++
+			}
+		}
+		if errors.Is(readErr, bufio.ErrBufferFull) {
+			continue
+		}
+		if len(line) > 0 {
+			fold.Line(scannedLine(line), engine)
+		}
+		line, oversized = line[:0], false
+		if readErr == nil {
+			continue
+		}
+		if errors.Is(readErr, io.EOF) {
+			return skipped, nil
+		}
+		return skipped, readErr
+	}
 }
 
 // MetaFold is ReadMeta's fold, one line at a time, with every piece of its
@@ -159,7 +204,7 @@ func (fold *MetaFold) Line(line []byte, engine string) {
 
 func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 	var parsed metaRecord
-	if err := json.Unmarshal(line, &parsed); err != nil {
+	if DecodeTolerant(line, &parsed) != nil {
 		return
 	}
 	if engine == string(pfmengine.Codex) {

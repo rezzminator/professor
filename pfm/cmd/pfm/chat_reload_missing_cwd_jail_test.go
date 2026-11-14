@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -16,6 +18,7 @@ import (
 
 // A reload whose recorded directory is gone opens in the fleet home and says so.
 func TestChatReloadWorkerMissingCWDOpensInFleetHomeWithNotice(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	for _, tool := range []string{"tmux", "python3"} {
 		if _, err := exec.LookPath(tool); err != nil {

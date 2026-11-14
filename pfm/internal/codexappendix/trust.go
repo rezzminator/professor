@@ -7,21 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
 	rpcMethodKey = "method"
 	rpcParamsKey = "params"
+	rpcCWDsKey   = "cwds"
 	trustedState = "trusted"
 )
 
@@ -462,38 +461,37 @@ func saveHookReceipt(account string, receipt map[string]string, h hook) error {
 }
 
 // rpc bounds the complete helper exchange, including shells whose descendants
-// keep pipes open. Cancellation kills its private process group and closes pipes.
+// keep pipes open: however it ends, its private process group is killed and
+// the pipes closed before the helper is reaped.
 func rpc(parent context.Context, binary, account, method string, params any) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "app-server")
-	cmd.Dir = account
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 250 * time.Millisecond
 	// The helper runs no turn: it is never the chat bound to the parent's Herdr pane.
+	var env []string
 	for _, entry := range herdr.StripPane(os.Environ()) {
 		if !strings.HasPrefix(entry, "CODEX_HOME=") {
-			cmd.Env = append(cmd.Env, entry)
+			env = append(env, entry)
 		}
 	}
-	cmd.Env = append(cmd.Env, "CODEX_HOME="+account)
-	stdin, err := cmd.StdinPipe()
+	env = append(env, "CODEX_HOME="+account)
+	process, err := appServerRunner(parent).Start(ctx, []string{binary, "app-server"}, deps.StartOptions{
+		Dir: account, Env: env, ProcessGroup: true, StdinPipe: true, StdoutPipe: true,
+		WaitDelay: 250 * time.Millisecond,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("open app-server stdin: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("open app-server stdout: %w", err)
-	}
-	if err = cmd.Start(); err != nil {
-		obs.StartFailed(ctx, cmd.Args, err)
 		return nil, fmt.Errorf("start hook trust registration: %w", err)
 	}
-	// A direct process door (spec § Middleware, runner): recorded here until
-	// the helper migrates behind deps.Runner.
-	finish := obs.Started(ctx, cmd.Args, cmd.Process.Pid)
-	defer func() { cancel(); _ = stdin.Close(); _ = stdout.Close(); finish(cmd.Wait()) }()
+	stdin, err := process.StdinPipe()
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("open app-server stdin: %w", err), process.KillGroup(), process.Wait())
+	}
+	stdout, err := process.StdoutPipe()
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("open app-server stdout: %w", err), process.KillGroup(), process.Wait())
+	}
+	// The group is killed while the helper is still unreaped, so its id cannot
+	// have been reused by the time the signal is sent.
+	defer func() { cancel(); _ = process.KillGroup(); _ = stdin.Close(); _ = stdout.Close(); _ = process.Wait() }()
 	type result struct {
 		data json.RawMessage
 		err  error

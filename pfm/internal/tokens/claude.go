@@ -99,8 +99,9 @@ var bands = [...]struct {
 	name  string
 }{{50, "under 50K"}, {100, "50–100K"}, {150, "100–150K"}, {200, "150–200K"}, {400, "200–400K"}, {math.Inf(1), "over 400K"}}
 
-// claudeMessage decodes a message's usage. A malformed usage skips the whole
-// message, content included, and returns its error for the collect gap counter.
+// claudeMessage decodes a message's usage. A malformed usage returns its error
+// for the collect gap counter beside the message, so its content (tool_use
+// blocks, tool results, user text) still reads; the call has no usage to book.
 func claudeMessage(line *transcript.ClaudeRecord) (*transcript.ClaudeMessage, *pricing.UsageBlock, error) {
 	message := line.DecodeMessage()
 	if message == nil {
@@ -108,7 +109,7 @@ func claudeMessage(line *transcript.ClaudeRecord) (*transcript.ClaudeMessage, *p
 	}
 	usage, err := message.UsageBlock()
 	if err != nil {
-		return nil, nil, err
+		return message, nil, err
 	}
 	return message, usage, nil
 }
@@ -323,6 +324,9 @@ type collected struct {
 	isSub      bool
 	sid        string
 	meta       transcript.SubagentMeta
+	// lastTS is the newest timestamp this file's records have carried, NaN
+	// until one has: the time an undated call is placed at.
+	lastTS float64
 }
 
 // costState hands anchors a cost-state line's total and clock fields. read is false when the line
@@ -352,7 +356,7 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 	c := &collected{
 		usage: map[string]*callUsage{}, seenReads: map[string]bool{}, allCmd: map[string]float64{},
 		isSub: transcript.IsSubagentTranscript(file), sid: transcript.TranscriptSession(file),
-		stats: briefStats{testCmd: newObject(), editFiles: newObject()},
+		stats: briefStats{testCmd: newObject(), editFiles: newObject()}, lastTS: math.NaN(),
 	}
 	if c.isSub {
 		meta, err := transcript.ReadSubagentMeta(transcript.SubagentMetaPath(file))
@@ -375,6 +379,9 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 		if truthy(line.Timestamp) {
 			ts, _ = dateParse(keyString(line.Timestamp), a.loc)
 			c.anchors.Stamp(keyString(line.Timestamp))
+		}
+		if !math.IsNaN(ts) {
+			c.lastTS = ts
 		}
 		if c.cwd == "" && truthy(line.CWD) {
 			c.cwd = keyString(line.CWD)
@@ -408,11 +415,14 @@ func (a *auditor) collect(file string, owners map[string]string) (*collected, er
 		}
 		message, usage, usageErr := claudeMessage(&line)
 		if usageErr != nil {
+			// The usage is the only thing lost: the line is counted, and its
+			// content below still registers tool uses and reads user events.
 			a.scan.badLines++
 			c.bad++
-			return
 		}
 		switch {
+		case kind == transcript.RoleAssistant && usageErr != nil:
+			registerToolUses(toolUses, message, ts)
 		case kind == "assistant" && usage != nil:
 			a.collectCall(c, &line, message, usage, file, ts, toolUses, owners)
 		case kind == "user":
@@ -456,8 +466,12 @@ func (a *auditor) collectCall(
 		return
 	}
 	if math.IsNaN(ts) {
-		a.scan.noTimestamp++
-		return
+		// A call with no time of its own is placed at the previous record's:
+		// the stamp only places a call in the window and its hour, it never
+		// decides whether the call was billed.
+		if ts = a.undatedAt(file, c.lastTS); math.IsNaN(ts) {
+			return
+		}
 	}
 	if !truthy(message.ID) && !truthy(line.RequestID) {
 		a.scan.identityUnknownRecords++
@@ -489,6 +503,12 @@ func (a *auditor) collectCall(
 		thinking: block.Thinking(), model: model,
 		noModel: len(message.Model) == 0 || string(message.Model) == jsNull, ts: ts, effort: effort, copied: copied,
 	}
+	registerToolUses(toolUses, message, ts)
+}
+
+// registerToolUses records each tool_use block of an assistant message, so a
+// later tool_result names its tool.
+func registerToolUses(toolUses map[string]toolUse, message *transcript.ClaudeMessage, ts float64) {
 	list, _ := transcript.DecodeContent(message.Content)
 	for k := range list {
 		use := &list[k]

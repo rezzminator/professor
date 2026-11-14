@@ -18,6 +18,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The plain-shell reporter: the shim's Herdr hook hands it a long command a
@@ -52,7 +53,8 @@ func (missing errNoShellPane) Error() string {
 }
 
 // HerdrShell is `pfm internal herdr-shell done --pid P [--at T] --command C
-// --exit RC --seconds S | release --pid P [--at T]`. done reports working, then
+// --exit RC --seconds S | release --pid P [--at T] | resume-pending`
+// (herdr_shell_resume.go). done reports working, then
 // idle with "{command} exit {RC} · {S}s", and sets the same text as the pane's
 // title (Herdr drops the agent report within a second on a bare shell and keeps
 // the title); release releases the agent and clears the title, and a done whose
@@ -64,6 +66,9 @@ func (missing errNoShellPane) Error() string {
 // every failure is a line in the pfm-shell error log `pfm doctor` reads; a
 // release that finds no pane running the shell has nothing left to release.
 func HerdrShell(args []string, stderr io.Writer) int {
+	if len(args) != 0 && args[0] == herdrShellResumePending {
+		return herdrShellResume(context.Background(), args[1:], os.Stdout, stderr, paths.OSEnv{})
+	}
 	return reportShellRun(args, stderr, realHerdrDeps())
 }
 
@@ -171,7 +176,7 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions,
 		return seq
 	}
 	record := filepath.Join(deps.lockDir, fmt.Sprintf("%s-%d.pane", herdrShellSource, options.pid))
-	pane, nested, err := shellPane(ctx, deps.keep, socket, options.pid, identity.HerdrPane, next)
+	pane, nested, err := shellPane(ctx, socket, options.pid, identity.HerdrPane, next)
 	if options.verb == herdrShellRelease {
 		var missing errNoShellPane
 		if errors.As(err, &missing) {
@@ -251,7 +256,7 @@ func reportShell(ctx context.Context, deps herdrDeps, options herdrShellOptions,
 	// Herdr shows a lone idle report on a pane with no agent as nothing, and
 	// drops any report within a second once the bare shell holds the
 	// foreground again: working then idle mark the run finished, and the
-	// title, which Herdr keeps on a bare shell, carries it to the next command.
+	// title, which Herdr retains on a bare shell, carries it to the next command.
 	// The record comes first and outlives a send error: a send that timed out
 	// may have reached Herdr, and an older release must never erase a title
 	// that may be showing; a refused one leaves at worst an older title up.
@@ -449,14 +454,13 @@ func shellTitlePath(lockDir, pane string) string {
 // pane that closed between the listing and its question is skipped.
 func shellPane(
 	ctx context.Context,
-	keep *herdr.Keep,
 	socket string,
 	pid int,
 	born string,
 	next func() uint64,
 ) (string, bool, error) {
 	if born != "" {
-		canonical, nested, err := paneRunsShell(ctx, keep, socket, born, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, socket, born, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
@@ -472,7 +476,7 @@ func shellPane(
 		if pane.PaneID == born {
 			continue
 		}
-		canonical, nested, err := paneRunsShell(ctx, keep, socket, pane.PaneID, pid, next())
+		canonical, nested, err := paneRunsShell(ctx, socket, pane.PaneID, pid, next())
 		if err != nil && !isHerdrNotFound(err) {
 			return "", false, err
 		}
@@ -484,12 +488,10 @@ func shellPane(
 }
 
 // paneRunsShell returns the producer's canonical pane id when its own shell,
-// or one of its foreground processes (nested true), is pid; a pane herdr-keep
-// holds runs its holder's shell (keep). A moved pane's inherited id may be an
-// alias that pane.list never emits.
+// or one of its foreground processes (nested true), is pid. A moved pane's
+// inherited id may be an alias that pane.list never emits.
 func paneRunsShell(
 	ctx context.Context,
-	keep *herdr.Keep,
 	socket, pane string,
 	pid int,
 	seq uint64,
@@ -502,7 +504,7 @@ func paneRunsShell(
 	if err != nil {
 		return "", false, err
 	}
-	processes, err := keep.Processes(ctx, socket, results[0])
+	processes, err := herdr.ParsePaneProcesses(results[0])
 	if err != nil {
 		return "", false, err
 	}

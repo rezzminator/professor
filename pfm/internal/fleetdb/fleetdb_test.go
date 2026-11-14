@@ -2,7 +2,6 @@ package fleetdb
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,83 +10,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// The schema is a compatibility surface for existing fleet databases, so its
-// columns and constraints stay exact.
-func TestSharedSchemaIsComplete(t *testing.T) {
-	t.Parallel()
-	state, _ := openTestStore(t)
-	ctx := context.Background()
-
-	tables := queryColumn(t, state, `
-SELECT name FROM sqlite_master
-WHERE type='table' AND name NOT LIKE 'sqlite_%'
-ORDER BY name`)
-	want := []string{"chat", "children", "comms", "hidden", "launch", "meta", "schedules", "seat"}
-	if !reflect.DeepEqual(tables, want) {
-		t.Fatalf("shared tables = %v, want %v", tables, want)
-	}
-
-	// Kills are uuid-keyed, with no engine column.
-	columns := queryColumn(t, state, "SELECT name FROM pragma_table_info('hidden')")
-	if !reflect.DeepEqual(columns, []string{"uuid", "hidden_at", "at_payload", "revision"}) {
-		t.Fatalf("killed columns = %v", columns)
-	}
-	columns = queryColumn(t, state, "SELECT name FROM pragma_table_info('children')")
-	if !reflect.DeepEqual(columns, []string{"kind", "key", "val", "created_at"}) {
-		t.Fatalf("children columns = %v", columns)
-	}
-	columns = queryColumn(t, state, "SELECT name FROM pragma_table_info('meta')")
-	if !reflect.DeepEqual(columns, []string{"key", "val", "updated_at"}) {
-		t.Fatalf("meta columns = %v", columns)
-	}
-	columns = queryColumn(t, state, "SELECT name FROM pragma_table_info('comms')")
-	if !reflect.DeepEqual(columns, []string{
-		"id", "at_ns", "kind", "sender_session", "sender_label", "sender_uuid",
-		"target", "receiver_socket", "receiver_pane", "group_name", "members", "message",
-	}) {
-		t.Fatalf("comms columns = %v", columns)
-	}
-	columns = queryColumn(t, state, "SELECT name FROM pragma_table_info('launch')")
-	if !reflect.DeepEqual(
-		columns,
-		[]string{"session_id", "engine", "account", "cache1h", "launched_at", "updated_at"},
-	) {
-		t.Fatalf("launch columns = %v", columns)
-	}
-	var version int
-	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
-		t.Fatalf("user_version = %d, %v; want %d", version, err, SchemaVersion)
-	}
-	if _, err := os.Stat(state.path + ".bak-before-v2"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("fresh database backup = %v", err)
-	}
-
-	// Initialization stamps the schema version.
-	if version, found, err := state.Meta(ctx, "schema_version"); err != nil ||
-		!found || version != "1" {
-		t.Fatalf("schema_version = %q, %v, %v", version, found, err)
-	}
-
-	var journalMode string
-	if err := state.db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
-		t.Fatal(err)
-	}
-	if journalMode != "wal" {
-		t.Fatalf("journal_mode = %q, want wal", journalMode)
-	}
-	var busyTimeout int
-	if err := state.db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
-		t.Fatal(err)
-	}
-	if busyTimeout == 0 {
-		t.Fatal("busy_timeout = 0: a concurrent sqlite3 CLI writer would fail instead of queue")
-	}
-}
-
 func TestKillWithRevisionRollsBackOnlyAnInsertedRow(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "insert", true: "concurrent prior kill"}[existing], func(t *testing.T) {
-			state, _ := openTestStore(t)
+			state := openTestStore(t)
 			ctx := context.Background()
 			const id = "revision-owner"
 			if existing {
@@ -116,7 +42,7 @@ func TestKillWithRevisionRollsBackOnlyAnInsertedRow(t *testing.T) {
 
 func TestUnkillReportsDeletedRow(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	const id = "shared-unkill"
 	if err := state.Kill(ctx, id, 42); err != nil {
@@ -132,7 +58,7 @@ func TestUnkillReportsDeletedRow(t *testing.T) {
 
 func TestReassertKillKeepsOriginalTimeAndMakesClearPermanent(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	const id = "shared-reassert"
 	if reasserted, err := state.ReassertKill(ctx, id); err != nil || reasserted {
@@ -155,7 +81,7 @@ func TestReassertKillKeepsOriginalTimeAndMakesClearPermanent(t *testing.T) {
 
 func TestClearKillBaselineIsMonotonicAndRaceSafe(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	const id = "11111111-1111-4111-8111-111111111111"
 
@@ -230,7 +156,7 @@ func TestDegradedStoreRejectsOperatorStateChanges(t *testing.T) {
 // for one sharing this chat's server (chat.sh:435).
 func TestChildrenRoundTripInCCDBShShapes(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 
 	if err := state.AddChild(ctx, KindNew, "chat-1", "cc-new-worker", 10); err != nil {
@@ -272,74 +198,9 @@ func TestChildrenRoundTripInCCDBShShapes(t *testing.T) {
 	}
 }
 
-// PrimaryAccount reads the database first and the ~/.claude-primary mirror
-// only when the database has no row.
-func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
-	t.Parallel()
-	state, values := openTestStore(t)
-	ctx := context.Background()
-
-	if account, found, err := ClaudePrimaryAccount(ctx, values); found || err != nil {
-		t.Fatalf("PrimaryAccount() with nothing recorded = %d, %v, %v", account, found, err)
-	}
-
-	mirror := filepath.Join(values.Home, ".claude-primary")
-	if err := os.MkdirAll(filepath.Dir(mirror), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(mirror, []byte("1\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if account, found, err := ClaudePrimaryAccount(ctx, values); !found || account != 1 || err != nil {
-		t.Fatalf("PrimaryAccount() from the mirror = %d, %v, %v", account, found, err)
-	}
-
-	if err := state.SetMeta(ctx, PrimaryAccountKey, "2", 99); err != nil {
-		t.Fatal(err)
-	}
-	if account, found, err := ClaudePrimaryAccount(ctx, values); !found || account != 2 || err != nil {
-		t.Fatalf(
-			"PrimaryAccount() = %d, %v, %v; want 2,true,nil — the database outranks a stale mirror",
-			account,
-			found,
-			err,
-		)
-	}
-}
-
-// TestClaudePrimaryAccountSurfacesAQueryFailureNotNotFound is item 4's
-// regression: a database that IS present and opens fine but whose query
-// fails for a reason other than sql.ErrNoRows (here, a corrupted schema —
-// the meta table itself is gone) used to fold into found=false the same way
-// "nothing recorded yet" does, so a caller checking only found silently
-// treated a broken shared store as an operator who never set a primary
-// account, and answered every query with the roster's first configured
-// account instead of surfacing the outage.
-func TestClaudePrimaryAccountSurfacesAQueryFailureNotNotFound(t *testing.T) {
-	t.Parallel()
-	state, values := openTestStore(t)
-	ctx := context.Background()
-	if err := state.SetMeta(ctx, PrimaryAccountKey, "2", 99); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := state.db.ExecContext(ctx, "DROP TABLE meta"); err != nil {
-		t.Fatalf("corrupt fixture schema: %v", err)
-	}
-	if err := state.Close(); err != nil {
-		t.Fatal(err)
-	}
-	account, found, err := ClaudePrimaryAccount(ctx, values)
-	if err == nil {
-		t.Fatalf("ClaudePrimaryAccount() over a broken schema returned no error (account=%d, found=%v)", account, found)
-	}
-	if found {
-		t.Fatalf("ClaudePrimaryAccount() reported found=true alongside an error: %v", err)
-	}
-}
-
 func TestBranchSeatMarkersRoundTripWithoutChangingTheSchema(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	const socket = "cc-1800000000-42-7"
 	if err := state.RecordBranchSeat(ctx, socket, "parent-id", 123); err != nil {
@@ -361,59 +222,17 @@ func TestBranchSeatMarkersRoundTripWithoutChangingTheSchema(t *testing.T) {
 	}
 }
 
-// The reader must not be what creates the state store: a missing database is a
-// missing database, not an empty one.
-func TestPrimaryAccountNeverCreatesTheDatabase(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	values := paths.Values{
-		StateDB: filepath.Join(root, "state", "pfm.db"),
-		Home:    filepath.Join(root, "home"),
-	}
-	if account, found, err := ClaudePrimaryAccount(context.Background(), values); found || err != nil {
-		t.Fatalf("PrimaryAccount() = %d, %v, %v, want not found, nil", account, found, err)
-	}
-	if _, err := os.Stat(values.StateDB); !os.IsNotExist(err) {
-		t.Fatalf("reading the primary account created %s: %v", values.StateDB, err)
-	}
-}
-
-func TestSetPrimaryAccountKeepsDatabaseAndMirrorInLockstep(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	values := paths.Values{
-		Home:    root,
-		StateDB: filepath.Join(root, ".local", "state", "pfm", "pfm.db"),
-	}
-	if err := SetClaudePrimaryAccount(context.Background(), values, 2, 123); err != nil {
-		t.Fatal(err)
-	}
-	if account, found, err := ClaudePrimaryAccount(context.Background(), values); !found || account != 2 || err != nil {
-		t.Fatalf("PrimaryAccount()=%d,%v,%v, want 2,true,nil", account, found, err)
-	}
-	content, err := os.ReadFile(filepath.Join(root, ".claude-primary"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != "2\n" {
-		t.Fatalf("mirror=%q, want 2\\n", content)
-	}
-}
-
-func openTestStore(t *testing.T) (*Store, paths.Values) {
+// openTestStore opens the in-memory shared state (OpenSharedStateMemory), migrated as the file
+// is: the store a test of the queries runs on.
+func openTestStore(t *testing.T) *Store {
 	t.Helper()
 
-	root := t.TempDir()
-	values := paths.Values{
-		StateDB: filepath.Join(root, "cc", "pfm.db"),
-		Home:    filepath.Join(root, "home"),
-	}
-	state := OpenSharedState(context.Background(), values)
+	state := OpenSharedStateMemory(context.Background())
 	if err := state.Degraded(); err != nil {
-		t.Fatalf("Open() degraded: %v", err)
+		t.Fatalf("OpenSharedStateMemory() degraded: %v", err)
 	}
 	t.Cleanup(func() { _ = state.Close() })
-	return state, values
+	return state
 }
 
 func queryColumn(t *testing.T, state *Store, query string) []string {

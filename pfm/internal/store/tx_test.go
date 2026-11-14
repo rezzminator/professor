@@ -12,7 +12,6 @@ import (
 )
 
 func TestBatchUsesFiveHundredRecordTransactions(t *testing.T) {
-	setStoreTestJail(t)
 	store := openTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
@@ -46,7 +45,6 @@ func TestBatchUsesFiveHundredRecordTransactions(t *testing.T) {
 }
 
 func TestImmediateTransactionRollsBack(t *testing.T) {
-	setStoreTestJail(t)
 	store := openTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
@@ -72,7 +70,6 @@ func TestImmediateTransactionRollsBack(t *testing.T) {
 // BEGIN IMMEDIATE op — and the error WithImmediateTx returns — both name the
 // rollback failure, not just fn's own error (F3).
 func TestImmediateTransactionRecordsRollbackFailure(t *testing.T) {
-	setStoreTestJail(t)
 	store := openTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })
 	ctx, recorder := obs.Test(t)

@@ -129,8 +129,7 @@ skip_gate() {
 
 # timing_run_dir <base>: create <base> if absent and a fresh run.XXXXXX under
 # it, mode 0755 whatever the umask — the fence writes as root under the bind
-# mount and the host's non-root reader (`make -C pfm timing`, the CI artifact
-# upload) must still open it. Prints the run dir's absolute path. BROKEN STATE:
+# mount and the host's non-root reader (`make -C pfm timing`) must still open it. Prints the run dir's absolute path. BROKEN STATE:
 # a base or run dir that cannot be made is non-zero with a stderr line naming
 # the base and prints no path, so a caller never runs a suite into nowhere.
 timing_run_dir() {
@@ -297,10 +296,15 @@ cmd_status() { # cmd_status [project|all]
 # node_test_suite LABEL TAP FILE... — runs node's test runner into TAP and
 # names every way it can fail to prove anything: a missing file, a red or
 # unrunnable suite, zero passing tests, a skipped or todo test.
+# NODE_TEST_SHARDS={n} runs the files as n processes at once, process i with
+# NODE_TEST_SHARD={i}/{n}: scripts/node-test-helpers.mjs then registers every
+# n-th top-level test, so a suite whose tests block on child processes no
+# longer runs them one at a time. TAP holds every shard's stream, in order;
+# only a suite importing `test` from that helper is split.
 node_test_suite() {
   local label="$1" tap="$2"
   shift 2
-  local file
+  local file shards="${NODE_TEST_SHARDS:-1}" shard pid rc=0 pids=()
   for file in "$@"; do
     if [[ ! -f "$file" ]]; then
       fail_step "$label tests NOT RUN — $file is missing; the suite was never executed"
@@ -312,17 +316,36 @@ node_test_suite() {
     fail_step "$label tests NOT RUN — the TAP directory for $tap could not be created"
     return
   fi
-  if ! node --test --test-reporter=tap "$@" >"$tap" 2>&1; then
+  if [[ ! "$shards" =~ ^[1-9][0-9]*$ ]]; then
+    fail_step "$label tests NOT RUN — NODE_TEST_SHARDS must be a positive integer: $shards"
+    return
+  fi
+  if (( shards == 1 )); then
+    node --test --test-reporter=tap "$@" >"$tap" 2>&1 || rc=$?
+  else
+    for ((shard = 1; shard <= shards; shard++)); do
+      NODE_TEST_SHARD="$shard/$shards" node --test --test-reporter=tap "$@" >"$tap.$shard" 2>&1 &
+      pids+=("$!")
+    done
+    for pid in "${pids[@]}"; do wait "$pid" || rc=$?; done
+    for ((shard = 1; shard <= shards; shard++)); do
+      printf '# shard %s/%s\n' "$shard" "$shards"
+      cat "$tap.$shard"
+      rm -f "$tap.$shard"
+    done >"$tap"
+  fi
+  # Every stream reports its own `# pass`: one with none ran nothing, whatever the others ran.
+  if (( rc != 0 )); then
     cat "$tap"
     fail_step "$label tests FAILED — a test regressed, or node could not run the suite (see output)"
-  elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$tap"; then
+  elif ! awk -v want="$shards" '/^# pass /{ if ($3 > 0) found++ } END{ exit found != want }' "$tap"; then
     cat "$tap"
     fail_step "$label tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
   elif ! awk '/^# (skipped|todo) /{ if ($3 > 0) bad=1 } END{ exit bad }' "$tap"; then
     cat "$tap"
     fail_step "$label tests SKIPPED — a skipped or todo test is a named gap, never a pass"
   else
-    ok "$label tests hold ($(awk '/^# pass /{print $3}' "$tap") passing)"
+    ok "$label tests hold ($(awk '/^# pass /{n += $3} END{print n}' "$tap") passing)"
   fi
 }
 
@@ -353,12 +376,12 @@ act_pfm() {
       # hash identically. BROKEN STATE: no sha256 tool is TOOLCHAIN-MISSING and
       # red, never a pass; a failed build or scratch dir is red naming the label.
       local goos goarch label build_dir h1 h2 n
-      local sum_cmd=()
       goos="$(go env GOOS)"; goarch="$(go env GOARCH)"
       label="pfm: reproducible build ($goos/$goarch)"
-      if command -v sha256sum >/dev/null 2>&1; then sum_cmd=(sha256sum)
-      elif command -v shasum >/dev/null 2>&1; then sum_cmd=(shasum -a 256)
-      else fail_step "$label — TOOLCHAIN-MISSING: neither sha256sum nor shasum on PATH; the builds could not be compared"; return; fi
+      # Sourced here, not at the top: only this step needs the door, and fixtures copy dev.sh alone.
+      . "$REPO_ROOT/scripts/platform.sh" || { fail_step "$label — cannot source $REPO_ROOT/scripts/platform.sh"; return; }
+      # Probe the tool before building: the door returns 127 when neither sha256 tool exists.
+      if ! platform_sha256 /dev/null >/dev/null; then fail_step "$label — TOOLCHAIN-MISSING: neither $(platform_sha256_tools nor) on PATH; the builds could not be compared"; return; fi
       if ! mkdir -p "$TMP_BASE/build" || ! build_dir="$(mktemp -d "$TMP_BASE/build/repro.XXXXXX")"; then
         fail_step "$label — no scratch directory could be created under $TMP_BASE/build"; return
       fi
@@ -370,8 +393,8 @@ act_pfm() {
       if [[ ! -f "$build_dir/pfm.1" || ! -f "$build_dir/pfm.2" ]]; then
         fail_step "$label — go build ./cmd/pfm failed (see output)"
       else
-        h1="$("${sum_cmd[@]}" "$build_dir/pfm.1" | awk '{print $1}')"
-        h2="$("${sum_cmd[@]}" "$build_dir/pfm.2" | awk '{print $1}')"
+        h1="$(platform_sha256 "$build_dir/pfm.1" | awk '{print $1}')"
+        h2="$(platform_sha256 "$build_dir/pfm.2" | awk '{print $1}')"
         if [[ -n "$h1" && "$h1" == "$h2" ]]; then
           ok "$label — sha256 = $h1"
         else
@@ -379,7 +402,7 @@ act_pfm() {
         fi
       fi
       rm -rf "$build_dir" ;;
-    typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
+    typecheck) run "pfm: go vet" -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" ;;
     verify) checks_pfm_verify "$d" ;;
     # The rows (unit sharded by pfm/scripts/test-shard.sh, then the e2e rows):
     # checks_pfm_test in infra/fence/checks.sh.
@@ -464,8 +487,8 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   . "$REPO_ROOT/infra/fence/housekeeping.sh"
 
   # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
-  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the demo
-  # fence sources the same file, so the two never drift.
+  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh; shared.sh
+  # and docker-compose.yml read its exports, so they never drift.
   local git_common
   ROOT="$REPO_ROOT" FENCE_CALLER="iso" . "$REPO_ROOT/infra/fence/fence-env.sh"
   git_common="$PFM_DEV_GIT_COMMON"
@@ -483,10 +506,10 @@ cmd_iso() { # cmd_iso <action> [project | command…]
     fence_image_prepare "$compose" "$service" || { fail_step "iso: the $service image could not be keyed — see the line above"; exit 1; }
   fi
   local -a extra=()
-  # Profiling and step-scheduling knobs reach the fence when the caller set them, TESTFLAGS too.
+  # Profiling, step-scheduling and gate-slice knobs reach the fence when the caller set them, TESTFLAGS too.
   if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
   local knob
-  for knob in STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES; do
+  for knob in STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES PFM_GATE_ONLY PFM_GATE_SKIP; do
     if [[ -n "${!knob+x}" ]]; then extra+=(-e "$knob=${!knob}"); fi
   done
   # Every exported PFM_FENCE_* knob reaches the fence, except the per-run names
@@ -612,9 +635,9 @@ its default and its validation; iso and the in-fence test, e2e, all and gate pat
 run it first, and an invalid value exits non-zero before any run. Among them:
   PFM_FENCE_PROFILE      desktop | native | auto (auto reads the Docker daemon's OS and
                          resources, never the hostname); native overrides four desktop
-                         defaults: PFM_FENCE_CPUS 12 (desktop 6), PFM_FENCE_MEM 12g
-                         (5g), PFM_FENCE_TEST_P 6 and STEPS_JOBS 6 (desktop empty,
-                         sized from the CPUs); every other knob is shared
+                         defaults: PFM_FENCE_CPUS 20 (desktop 6), PFM_FENCE_MEM 24g
+                         (5g), PFM_FENCE_TEST_P 6 (desktop empty, sized from the CPUs)
+                         and STEPS_HEAVY_JOBS 4 (2); every other knob is shared
   PFM_FENCE_CPUS         the container's CPU cap; 0 sets no quota
   PFM_FENCE_CPUSET       the container's pinned CPUs; empty leaves it unpinned
   PFM_FENCE_MEM          the container's memory cap, memory + swap
@@ -641,12 +664,17 @@ TARGET="${2:-all}"
 
 # A suite never runs on the host: its tests spawn tmux sessions, git repos and
 # processes against whatever machine they run on. The fence sets
-# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, lanes/container.sh) inside a
-# container (/.dockerenv): an exported variable alone never passes. On the host
-# the suite runs in the fence instead (pfm/internal/testjail/fence.go likewise).
+# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, infra/fence/shared.sh) inside a
+# container (/.dockerenv): an exported variable alone never passes. A
+# GitHub-hosted runner (GITHUB_ACTIONS=true, RUNNER_ENVIRONMENT=github-hosted)
+# passes too: it is a throwaway machine, so ci.yml runs the gate on it natively.
+# Everywhere else the suite runs in the fence instead. scripts/platform.sh
+# (platform_in_fence) is the rule; pfm/internal/testjail/fence.go (admitted) applies it to Go.
 case "$CMD" in
-  test|cover|all|verify|gate)
-    if [[ "${PFM_DEV_FENCE:-}" != 1 || ! -e /.dockerenv ]]; then
+  test|e2e|cover|all|verify|gate)
+    # shellcheck source=../../scripts/platform.sh
+    . "$REPO_ROOT/scripts/platform.sh" || { echo "dev.sh: cannot source $REPO_ROOT/scripts/platform.sh" >&2; exit 2; }
+    if ! platform_in_fence; then
       echo "FENCE-ONLY: dev.sh $CMD never runs on the host — running: dev.sh iso $CMD ${2:-}" >&2
       exec bash "${BASH_SOURCE[0]}" iso "$CMD" ${2:+"$2"}
     fi ;;

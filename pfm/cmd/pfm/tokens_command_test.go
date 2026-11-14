@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,25 +14,22 @@ import (
 func TestTokensCLIEntry(t *testing.T) {
 	jailTest(t)
 	var out, errs bytes.Buffer
-	if code := run([]string{"tokens", "--help"}, &out, &errs); code != 0 ||
-		!strings.Contains(out.String(), "--codex") || !strings.Contains(out.String(), "--tree") {
-		t.Fatalf("tokens --help code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
-	}
-	out.Reset()
-	errs.Reset()
-	// The jail sets PFM_PRICES_OFFLINE=1: the served table loads without a fetch.
-	if code := run([]string{"tokens", "--root", t.TempDir()}, &out, &errs); code != 0 ||
-		!strings.HasPrefix(out.String(), "TOKEN AUDIT · last 24h · ") {
-		t.Fatalf("tokens over an empty root code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
-	}
-	out.Reset()
-	errs.Reset()
 	// an id no transcript carries is a failure naming it, never an empty tree
-	if code := run([]string{"tokens", "--tree", "no-such-id", "--root", t.TempDir()}, &out, &errs); code != 1 ||
-		out.Len() != 0 || !strings.Contains(errs.String(), "--tree no-such-id: no session or agent transcript") {
-		t.Fatalf("tokens --tree over an empty root code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+	empty := t.TempDir()
+	code := run([]string{"tokens", "--tree", "no-such-id", "--root", empty}, &out, &errs)
+	if got, want := rooted(
+		errs.String(),
+		empty,
+	), "pfm tokens: --tree no-such-id: no session or agent transcript of that id under {root}\n"; code != 1 || out.Len() != 0 ||
+		got != want {
+		t.Fatalf(
+			"tokens --tree over an empty root code=%d stdout=%q stderr = %q, want %q",
+			code,
+			out.String(),
+			got,
+			want,
+		)
 	}
-	out.Reset()
 	errs.Reset()
 	// the cost ledger directory is the one the sink writes: PFM_COST_LEDGER_DIR names it
 	const session = "00000000-0000-4000-8000-0000000000c3"
@@ -57,20 +53,22 @@ func TestTokensCLIEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(paths.EnvCostLedgerDir, ledgerDir)
-	if code := run([]string{"tokens", "--root", root}, &out, &errs); code != 0 ||
-		!strings.Contains(
-			out.String(),
-			"chat "+session,
-		) || !strings.Contains(out.String(), "session total $2.50 (1 call)") {
-		t.Fatalf("tokens over a chat with a cost ledger code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+	if code := run([]string{"tokens", "--root", root}, &out, &errs); code != 0 || errs.Len() != 0 {
+		t.Fatalf("tokens over a chat with a cost ledger code=%d stderr=%q", code, errs.String())
 	}
+	golden(t, "tokens_cost_ledger.txt", scrub(out.String(), root))
 	out.Reset()
-	if code := run([]string{"tokens", "--since", "3x"}, &out, &errs); code != 2 ||
-		!strings.Contains(errs.String(), "pfm tokens: --since wants a number plus h or d") {
-		t.Fatalf("tokens --since 3x code=%d stderr=%q", code, errs.String())
-	}
-	out.Reset()
-	if code := run([]string{"help"}, &out, &errs); code != 0 || !strings.Contains(out.String(), "  tokens ") {
-		t.Fatalf("help code=%d lacks tokens: %s", code, out.String())
+	if code := run(
+		[]string{"tokens", "--since", "3x"},
+		&out,
+		&errs,
+	); code != 2 ||
+		errs.String() != "pfm tokens: --since wants a number plus h or d, e.g. 24h or 3d\n" {
+		t.Errorf(
+			"tokens --since 3x code=%d stderr = %q, want %q",
+			code,
+			errs.String(),
+			"pfm tokens: --since wants a number plus h or d, e.g. 24h or 3d\n",
+		)
 	}
 }

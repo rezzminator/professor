@@ -103,6 +103,9 @@ type Socket struct {
 	// socket crumb is last-writer-wins, so the busy one may not own it.
 	CrumbUUIDs []string
 	HasCrumb   bool
+	// CrumbUnread is a breadcrumb of this socket's that exists but could not
+	// be read: which session it carries, and so whether it is busy, is unknown.
+	CrumbUnread bool
 	// DetachedFork is backed by the shared branch-seat marker. It identifies
 	// provenance only; busy, recent, attached and hosted-work guards still win.
 	DetachedFork bool
@@ -149,6 +152,9 @@ type VSCTSession struct {
 	Name     string
 	Attached bool
 	Idle     time.Duration
+	// Unreadable is why tmux's line for this session could not be read when it
+	// is not empty: Idle is then unknown, and an unknown idle is never reaped.
+	Unreadable string
 }
 
 // Input is one sweep's complete, already-probed world.
@@ -302,6 +308,12 @@ func planSocket(input Input, socket Socket) Decision {
 		return decision
 	}
 
+	if socket.CrumbUnread {
+		decision.State = StateSkip
+		decision.Reason = "busy-unknown (breadcrumb unreadable)"
+		return decision
+	}
+
 	if socket.Attached {
 		return planAttached(input, socket, decision)
 	}
@@ -392,6 +404,12 @@ func planVSCT(input Input, session VSCTSession) Decision {
 	decision := Decision{
 		Socket: "vsct:" + session.Name,
 		Label:  "plain terminal",
+	}
+	if session.Unreadable != "" {
+		decision.State = StateUnknown
+		decision.Reason = "tmux's session line could not be read — " + session.Unreadable +
+			"; absence of a measurement is not a measurement of idleness"
+		return decision
 	}
 	if session.Attached || session.Idle < input.VSCTMaxIdle {
 		decision.State = StateKeep

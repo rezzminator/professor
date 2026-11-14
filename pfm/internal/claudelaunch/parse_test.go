@@ -14,7 +14,6 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 	home, machine := renderMachine(t)
 	machine.Claude.Theme = "dark"
 	machine.Claude.NativeCursor = true
-	machine.Claude.SubagentStatuslineTrace = true
 	machine.Claude.MaxConcurrentSubagents = 3
 	machine.Claude.SystemPrompt = "professor"
 	prompt := filepath.Join(t.TempDir(), "prompt.md")
@@ -99,10 +98,6 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.SettingsEnv["CLAUDE_CODE_NATIVE_CURSOR"] != "1" {
 					t.Error("cursor missing")
 				}
-			case "subagentStatuslineTrace":
-				if parsed.SettingsEnv["PFM_SUBAGENT_STATUSLINE_TRACE"] != "1" {
-					t.Error("sub-agent status line trace missing")
-				}
 			case "maxSubagentSpawnDepth":
 				if parsed.SettingsEnv["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] != "8" {
 					t.Error("depth missing")
@@ -164,7 +159,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if !slices.Equal(got, want) {
 					t.Errorf("parsed hook names %q, want the registry's %q", got, want)
 				}
-			case "statusLine", "subagentStatusLine":
+			case "statusLine":
 				if parsed.Settings[knob.Name] == nil {
 					t.Error("status line missing")
 				}
@@ -205,12 +200,60 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 	}
 }
 
-func TestParseMalformedJSONNamesFlag(t *testing.T) {
-	for _, flag := range []string{"--settings", "--mcp-config"} {
-		_, err := Parse([]string{"claude", flag, "{"})
-		if err == nil || !strings.Contains(err.Error(), flag) {
-			t.Errorf("%s error=%v", flag, err)
-		}
+// An inline --settings or --mcp-config that is not valid JSON costs only itself:
+// the rest of the line still parses and Warnings names what was left out.
+func TestParseMalformedInlineJSONIsKeptAndNamed(t *testing.T) {
+	settings, err := Parse([]string{"claude", "--model", "opus", "--settings", "{"})
+	wantSettings := Parsed{
+		Model: "opus",
+		Rest:  []string{"--settings", "{"},
+		Warnings: []string{
+			"--settings: unexpected end of JSON input; left to Claude as written",
+		},
+	}
+	if err != nil || !reflect.DeepEqual(settings, wantSettings) {
+		t.Errorf("--settings: Parse=%#v, error=%v; want %#v", settings, err, wantSettings)
+	}
+	mcp, err := Parse([]string{"claude", "--name", "seat", "--mcp-config", "{"})
+	wantMCP := Parsed{
+		Name:      "seat",
+		MCPConfig: "{",
+		Warnings:  []string{"--mcp-config: unexpected end of JSON input; kept as written"},
+	}
+	if err != nil || !reflect.DeepEqual(mcp, wantMCP) {
+		t.Errorf("--mcp-config: Parse=%#v, error=%v; want %#v", mcp, err, wantMCP)
+	}
+}
+
+// One malformed hook, env value or hooks object costs only itself: every other
+// hook and env value of the same --settings is kept and the loss is named.
+func TestParseOneBadHookOrEnvValueKeepsTheRest(t *testing.T) {
+	good := `{"hooks":[{"type":"command","command":"/bin/pfm hook stop"}]}`
+	badCommand := `{"hooks":[{"type":"command"}]}`
+	parsed, err := Parse([]string{
+		"claude", "--settings",
+		`{"env":{"KEPT":"1","BAD":2},"hooks":{"Stop":[` + good + `,` + badCommand + `,"junk"],"Start":"junk"}}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Hooks) != 1 || parsed.Hooks[0].Event != "Stop" || parsed.Hooks[0].Command != "/bin/pfm hook stop" {
+		t.Errorf("hooks = %+v, want the one good Stop hook", parsed.Hooks)
+	}
+	if !reflect.DeepEqual(parsed.SettingsEnv, map[string]string{"KEPT": "1"}) {
+		t.Errorf("env = %v, want only KEPT", parsed.SettingsEnv)
+	}
+	want := []string{
+		"--settings env.BAD: expected string; left out",
+		"--settings hooks: Stop: expected command string; left out",
+		"--settings hooks: Stop: expected group object; left out",
+		"--settings hooks: Start: expected groups; its hooks left out",
+	}
+	slices.Sort(want)
+	got := slices.Clone(parsed.Warnings)
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("warnings = %q, want %q", got, want)
 	}
 }
 
@@ -260,6 +303,17 @@ func TestParseValueFlags(t *testing.T) {
 			argv: []string{"claude", "--session-id=sid", "--name=seat", "--model=sonnet", "--effort=high", "--mcp-config=/srv/mcp.json"},
 			want: Parsed{SessionID: "sid", Name: "seat", Model: "sonnet", Effort: "high", MCPConfig: "/srv/mcp.json"},
 		},
+		{
+			name: "auto permission mode",
+			argv: []string{"claude", "--allow-dangerously-skip-permissions", "--permission-mode", "auto"},
+			want: Parsed{PermissionMode: "auto"},
+		},
+		{
+			name: "permission mode equals",
+			argv: []string{"claude", "--permission-mode=auto"},
+			want: Parsed{PermissionMode: "auto"},
+		},
+		{name: "permission mode last", argv: []string{"claude", "--permission-mode"}, err: "--permission-mode requires a value"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := Parse(test.argv)

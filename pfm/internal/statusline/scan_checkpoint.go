@@ -17,13 +17,13 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
-	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 // scanCheckpointVersion names the checkpoint format; a file of any other
 // version is read as no checkpoint, so the fold starts from the top.
-const scanCheckpointVersion = 1
+const scanCheckpointVersion = 2
 
 // scanBudget is the wall time one render spends folding transcript bytes it
 // has not folded before, every transcript of the render together, checked
@@ -36,7 +36,7 @@ const scanBudget = 2 * time.Second
 
 // scanCheckpointDir is the directory under the cache dir holding one
 // checkpoint per transcript and fold, suffixed with the uid that owns it; it
-// must be that uid's own real directory (usagehook.EnsurePrivateDir), else no
+// must be that uid's own real directory (paths.EnsurePrivateDir), else no
 // checkpoint is read or kept.
 const scanCheckpointDir = "cc-sl-scan"
 
@@ -78,7 +78,7 @@ func newTranscriptScans(cacheDir string, warn io.Writer) transcriptScans {
 	now := clock.Real.Now()
 	scans := transcriptScans{deadline: now.Add(scanBudget), warn: warn}
 	dir := filepath.Join(cacheDir, scanCheckpointDir+"-"+strconv.Itoa(os.Getuid()))
-	if err := usagehook.EnsurePrivateDir(dir); err != nil {
+	if err := paths.EnsurePrivateDir("scan checkpoint directory", dir); err != nil {
 		fmt.Fprintf(warn, "statusline: scan checkpoint directory refused (reading transcripts from the top): %v\n", err)
 		return scans
 	}

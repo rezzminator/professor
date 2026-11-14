@@ -12,6 +12,8 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -30,6 +32,12 @@ var Exec = syscall.Exec
 // Dispatch preserves the K1 one-line protocol for captured stdout. With a
 // human-facing terminal, pfm becomes the selected action instead.
 func Dispatch(stdout io.Writer, line string) error {
+	if _, tmuxAction, _ := directTmuxArguments(line); tmuxAction {
+		// A tmux client, run here or by the shell evaluating the line, never starts in a Herdr pane.
+		if err := spawn.RefuseTmuxClient("tmux attach", resolve.CallerEnvironment()); err != nil {
+			return err
+		}
+	}
 	if !OutputIsTerminal(stdout) {
 		_, err := fmt.Fprintln(stdout, line)
 		return err
@@ -47,7 +55,7 @@ func execute(line string) error {
 		if err != nil {
 			return fmt.Errorf("find tmux: %w", err)
 		}
-		return Exec(path, append([]string{pfmtmux.Binary}, arguments...), deps.EnvironmentWith("TMUX", ""))
+		return Exec(path, append([]string{pfmtmux.Binary}, arguments...), pfmtmux.Environment())
 	}
 
 	path, err := LookPath("zsh")
@@ -64,7 +72,9 @@ func directTmuxArguments(line string) ([]string, bool, error) {
 	}
 	words, err := cmdparse.SplitShellWords(line)
 	if err != nil {
-		return nil, false, fmt.Errorf("decode tmux action: %w", err)
+		// A line the splitter cannot read is zsh's to run, like any other
+		// line; zsh names its own syntax error when it cannot either.
+		return nil, false, nil
 	}
 	if len(words) == 0 || words[0] != "TMUX=" {
 		return nil, false, nil

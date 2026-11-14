@@ -1,8 +1,11 @@
+//go:build jail
+
 package main
 
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,49 +24,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// reload is a public chat operation; keep the contract pinned at the CLI
-// boundary.
-func TestChatReloadAcceptsCacheOnlyRequest(t *testing.T) {
-	jailTest(t)
-	var stdout, stderr bytes.Buffer
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	code := runChatWithRuntime(
-		[]string{"reload", "--cache", "1h"},
-		strings.NewReader(""),
-		&stdout,
-		&stderr,
-		runtime,
-		context.Background(),
-	)
-	if code == 2 && strings.Contains(stderr.String(), `unknown command "reload"`) {
-		t.Fatalf("reload dispatch is still missing: rc=%d stderr=%q", code, stderr.String())
-	}
-}
-
-func TestChatReloadHelpIsPublicAndSuccessful(t *testing.T) {
-	jailTest(t)
-	var stdout, stderr bytes.Buffer
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	code := runChatWithRuntime(
-		[]string{"reload", "--help"},
-		strings.NewReader(""),
-		&stdout,
-		&stderr,
-		runtime,
-		context.Background(),
-	)
-	if code != 0 || !strings.Contains(stdout.String(), "usage: pfm chat reload") {
-		t.Fatalf("reload help rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-}
-
 func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
+	testjail.TmuxServer(t)
 	jailTest(t)
 	t.Setenv("PFM_RELOAD_DELAY_MS", "1")
 	t.Setenv("PFM_RELOAD_POLL_MS", "1")
@@ -130,6 +92,7 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 }
 
 func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -195,6 +158,7 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 // left to re-derive it from (this is the couldn't-identify-this-chat bug a
 // bg-spare-served chat hit in production).
 func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -269,6 +233,7 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 // since the caller's own args already carry a --pane — must NOT also append
 // its own, which would leave two --pane flags in the worker's argv.
 func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -379,6 +344,7 @@ while True:
 // live probe socket plus a substitute "claude" binary that records its own
 // argv and working directory is this package's actual stand-in for a fake.
 func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := jailTest(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -394,6 +360,12 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 		t.Fatal(err)
 	}
 	targetCWD := t.TempDir()
+	// Both --account and --cache given: the launch record decides nothing, so an unreadable one costs nothing.
+	stateBlocker := filepath.Join(root, "state-blocker")
+	if err := os.WriteFile(stateBlocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvStateDB, filepath.Join(stateBlocker, "state.db"))
 
 	if err := os.MkdirAll(filepath.Join(root, "account-1"), 0o700); err != nil {
 		t.Fatal(err)
@@ -462,7 +434,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := runChatReloadWorkerWithRuntime(
-		[]string{"--sock", socket, "--new", "--account", "1"}, &stdout, &stderr, runtime, nil,
+		[]string{"--sock", socket, "--new", "--account", "1", "--cache", "5m"}, &stdout, &stderr, runtime, nil,
 	)
 	if code != 0 {
 		t.Fatalf("fresh reload rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -503,7 +475,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 
 func probeReloadSocket(t *testing.T, suffix string) string {
 	t.Helper()
-	dir := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	dir := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -528,6 +500,49 @@ func cleanupProbeReloadSocket(t *testing.T, socket string) {
 	})
 }
 
+// A continuation index that cannot open costs the reload its newest segment,
+// never the reload: the crumb's own session resumes with a warning.
+func TestReloadSessionResumesTheCrumbWhenTheIndexCannotOpen(t *testing.T) {
+	root := jailTest(t)
+	blocker := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "cache.db"))
+	const id = "22222222-2222-4222-8222-222222222222"
+	transcript := filepath.Join(root, "claude", "project", id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(transcript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transcript, []byte(`{"cwd":"/jail"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved := paths.Values{
+		SIDDir: filepath.Join(root, "sid"),
+		Roots:  map[pfmengine.ID][]string{pfmengine.Claude: {filepath.Join(root, "claude")}},
+	}
+	socket := "/tmp/tmux-1000/cc-reload-index"
+	if err := os.MkdirAll(resolved.SIDDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	crumb := filepath.Join(resolved.SIDDir, filepath.Base(socket)+".%3")
+	if err := os.WriteFile(crumb, []byte(transcript+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	gotID, gotTranscript, err := resolveReloadSession(
+		resolved, pfmconfig.Defaults(root, resolved.Roots[pfmengine.Claude]), socket, "%3", false, nil, &stderr,
+	)
+	if err != nil || gotID != id || gotTranscript != transcript {
+		t.Fatalf("resolveReloadSession = (%q, %q, %v), want (%q, %q, nil); stderr=%q",
+			gotID, gotTranscript, err, id, transcript, stderr.String())
+	}
+	want := "; a newer continued segment may exist, resuming " + id + "\n"
+	if !strings.HasSuffix(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want the warning ending %q", stderr.String(), want)
+	}
+}
+
 func TestReloadTargetIdentityNeverFallsBackToTheCallerSession(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "11111111-1111-4111-8111-111111111111")
@@ -542,8 +557,9 @@ func TestReloadTargetIdentityNeverFallsBackToTheCallerSession(t *testing.T) {
 		"%7",
 		false,
 		nil,
+		io.Discard,
 	)
-	if err == nil || !strings.Contains(err.Error(), "couldn't identify") {
+	if err == nil || err.Error() != "couldn't identify this chat — run the statusline before reloading" {
 		t.Fatalf("target without its own breadcrumb borrowed caller identity: %v", err)
 	}
 }
@@ -606,6 +622,7 @@ func TestExplicitCodexReloadUsesPaneBindingWithoutBreadcrumb(t *testing.T) {
 		pane,
 		false,
 		nil,
+		io.Discard,
 	)
 	if err != nil || gotID != wantID || gotTranscript != rollout {
 		t.Fatalf(

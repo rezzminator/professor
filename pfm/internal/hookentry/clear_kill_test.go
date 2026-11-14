@@ -2,9 +2,16 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // failingReader always returns an error, for pinning a hook's handling of a
@@ -55,5 +62,35 @@ func TestClearKillEmptySessionIDStaysSilent(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want silence for a routine absent session id", stderr.String())
+	}
+}
+
+// A chat /cleared before any index pass saw it is indexed from the hook's own
+// cwd and recorded as killed, never left listed as live.
+func TestClearKillRecordsAChatClearedBeforeItsFirstIndexPass(t *testing.T) {
+	root := testjail.Fleet(t)
+	const id = "33333333-3333-4333-8333-333333333333"
+	cwd := filepath.Join(root, "work", "desk")
+	project := filepath.Join(root, pfmengine.MustLookup(pfmengine.Claude).LongName, strings.ReplaceAll(cwd, "/", "-"))
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	record := `{"type":"user","cwd":"` + cwd + `","sessionId":"` + id + `","message":{"content":"hello"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(project, id+".jsonl"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"hook_event_name":"SessionEnd","reason":"clear","session_id":"` + id + `","cwd":"` + cwd + `"}`
+	var stderr bytes.Buffer
+	if code := ClearKill(nil, strings.NewReader(payload), &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("ClearKill() = %d stderr=%q, want 0 and silence", code, stderr.String())
+	}
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	killed, found, err := database.Killed(context.Background(), id)
+	if err != nil || !found || killed.ID != id {
+		t.Fatalf("kill record = %+v found=%v err=%v, want session %s killed", killed, found, err, id)
 	}
 }

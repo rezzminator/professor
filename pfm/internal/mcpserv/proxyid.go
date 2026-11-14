@@ -1,11 +1,14 @@
 package mcpserv
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // ProxyWireVersion is the version shared by a per-chat stdio proxy and the
@@ -34,7 +37,6 @@ type ProxyIdentity struct {
 	Pane           string              `json:"pane,omitempty"`
 	Engine         string              `json:"engine,omitempty"`
 	ID             string              `json:"id,omitempty"`
-	Source         string              `json:"source,omitempty"`
 }
 
 // parseProxyIdentity decodes the untyped JSON object carried in
@@ -86,7 +88,6 @@ func parseProxyIdentity(raw any) (ProxyIdentity, string, error) {
 		{name: "pane", value: &payload.Pane},
 		{name: "engine", value: &payload.Engine},
 		{name: "id", value: &payload.ID},
-		{name: "source", value: &payload.Source},
 	}
 	for _, field := range fields {
 		value, exists := object[field.name]
@@ -104,15 +105,17 @@ func parseProxyIdentity(raw any) (ProxyIdentity, string, error) {
 		if !ok {
 			return ProxyIdentity{}, "MCP _meta.pfmProxy error must be an object", nil
 		}
-		kind, kindOK := errorObject["kind"].(string)
-		message, messageOK := errorObject["message"].(string)
-		if !kindOK || !messageOK || strings.TrimSpace(message) == "" {
-			return ProxyIdentity{}, "MCP _meta.pfmProxy error must carry string kind and non-empty message", nil
+		// The kind decides; the message only displays: a bad one never voids the kind.
+		kind, _ := errorObject["kind"].(string)
+		message, _ := errorObject["message"].(string)
+		if strings.TrimSpace(message) == "" {
+			message = "caller identity lookup failed without a message"
 		}
 		switch kind {
-		case proxyNotInChat, statusNotRegistered, statusAmbiguous, proxyFailed:
+		case proxyNotInChat, statusNotRegistered, chat.StatusAmbiguous, proxyFailed:
 		default:
-			return ProxyIdentity{}, fmt.Sprintf("MCP _meta.pfmProxy error kind %q is unknown", kind), nil
+			message = fmt.Sprintf("%s (unknown error kind %#v)", message, errorObject["kind"])
+			kind = proxyFailed
 		}
 		payload.Error = &ProxyIdentityError{Kind: kind, Message: message}
 	}
@@ -141,7 +144,7 @@ func proxyErrorKind(err error) string {
 	case errors.Is(err, resolve.ErrNotRegistered):
 		return statusNotRegistered
 	case errors.Is(err, resolve.ErrAmbiguous):
-		return statusAmbiguous
+		return chat.StatusAmbiguous
 	default:
 		return proxyFailed
 	}
@@ -155,9 +158,31 @@ func (failure ProxyIdentityError) Unwrap() error {
 		return resolve.ErrNotInChat
 	case statusNotRegistered:
 		return resolve.ErrNotRegistered
-	case statusAmbiguous:
+	case chat.StatusAmbiguous:
 		return resolve.ErrAmbiguous
 	default:
 		return nil
 	}
+}
+
+// withBirthCaller carries a request's caller to a door that may place a chat
+// (new, open). A proven caller travels as itself; a stdio server's own process
+// is identified at placement, as a CLI run is; every caller the request could
+// not prove travels as spawn.ErrCallerUnproven, which never reads as "outside
+// Herdr": its chat is hosted in Herdr whenever a Herdr server runs.
+func (service *Service) withBirthCaller(ctx context.Context, door string, caller callerIdentity) context.Context {
+	var unproven error
+	switch {
+	case !caller.present && service.backend.allowAmbientIdentity:
+		return chat.WithLocalCaller(ctx, door)
+	case !caller.present:
+		unproven = errors.New("the MCP request carried no caller identity")
+	case caller.absent:
+		unproven = fmt.Errorf("the MCP client's process is in no pfm chat pane (%v)", caller.err)
+	case !caller.valid && !errors.Is(caller.err, resolve.ErrNotRegistered):
+		unproven = fmt.Errorf("the MCP caller did not resolve: %s", caller.detail)
+	default:
+		return chat.WithCaller(ctx, door, caller.identity, caller.err)
+	}
+	return chat.WithCaller(ctx, door, resolve.Identity{}, fmt.Errorf("%w: %w", spawn.ErrCallerUnproven, unproven))
 }

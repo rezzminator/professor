@@ -34,6 +34,6 @@ Report plainly. The first line is how to see it: the URL, the command to run, or
 
 A reaction to the delivered work is read by its content, never by its tone; an ambiguous one keeps the boldest element and asks which way.
 
-- ✗ On a self-portrait built around one giant eye: "What the fuck is this!? Did you make yourself the Eye of Sauron!?" → read as anger, the eye deleted as a composition error. The user wanted it back, then the whole piece rebuilt around it.
+- ✗ On a self-portrait built around one giant eye: "What the fuck is this!? Did you make yourself the Eye of Sauron!?" → reading the tone as anger and deleting the eye as a composition error; the message asks for no removal.
 - ✓ Same message → the eye stays; one question: push it further, or take it out?
 - ✓ "Take the eye out." → out, with everything that existed only for it.

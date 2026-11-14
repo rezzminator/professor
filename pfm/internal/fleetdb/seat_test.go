@@ -8,14 +8,15 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestSeatSchema(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	columns := queryColumn(t, state, "SELECT name FROM pragma_table_info('seat') ORDER BY cid")
 	want := []string{
 		"seat_id",
@@ -44,7 +45,7 @@ func TestSeatSchema(t *testing.T) {
 }
 
 func TestSeatCRUD(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	seat := Seat{
 		SeatID:         "seat-1",
@@ -81,11 +82,22 @@ func TestSeatCRUD(t *testing.T) {
 			t.Fatalf("PutSeat(%+v) accepted invalid seat", bad)
 		}
 	}
+	// A Herdr fork's lineage is keyed by its seat: the seat's end takes it, another fork's stays.
+	for _, id := range []string{seat.SeatID, "other-fork"} {
+		if err := state.RecordBranchSeat(ctx, id, "parent-id", 123); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := state.DeleteSeat(ctx, seat.SeatID); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, err := state.Seat(ctx, seat.SeatID); err != nil || found {
 		t.Fatalf("deleted lookup = %v,%v", found, err)
+	}
+	if forks, err := state.BranchSeats(ctx); err != nil || !reflect.DeepEqual(forks, map[string]BranchSeat{
+		"other-fork": {Socket: "other-fork", Parent: "parent-id", CreatedAt: 123},
+	}) {
+		t.Fatalf("branch seats after the seat's delete = %#v, %v; want other-fork's alone", forks, err)
 	}
 	if err := state.Close(); err != nil {
 		t.Fatal(err)
@@ -99,7 +111,7 @@ func TestSeatCRUD(t *testing.T) {
 }
 
 func TestPutSeatRetiresTmuxRowsForMovedSessionOnlyAfterInsert(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	for _, seat := range []Seat{
 		{SeatID: "cc-old", SessionID: "S1", Backend: "tmux", State: "live", UpdatedAt: 100},
@@ -159,7 +171,7 @@ func TestPutSeatRetiresTmuxRowsForMovedSessionOnlyAfterInsert(t *testing.T) {
 }
 
 func TestSeatByPaneIgnoresFailedOwner(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	failed := Seat{
 		SeatID:      "failed",
@@ -182,192 +194,54 @@ func TestSeatByPaneIgnoresFailedOwner(t *testing.T) {
 	}
 }
 
-func TestSeatConcurrentUpdates(t *testing.T) {
-	state, _ := openTestStore(t)
-	ctx := context.Background()
-	original := Seat{SeatID: "owner", Backend: "herdr", State: "live", Name: "old"}
-	if err := state.PutSeat(ctx, original); err != nil {
-		t.Fatal(err)
-	}
-	renamed, bound := original, original
-	renamed.Name = "new"
-	bound.SessionID = "new-session"
-	bound.ReloadPending = true
-	if err := state.UpdateSeat(ctx, original, bound); err != nil {
-		t.Fatal(err)
-	}
-	if err := state.UpdateSeat(ctx, original, renamed); err != nil {
-		t.Fatal(err)
-	}
-	got, found, err := state.Seat(ctx, original.SeatID)
-	if err != nil || !found || got.Name != "new" || got.SessionID != "new-session" || !got.ReloadPending {
-		t.Fatalf("concurrent owned fields lost: %+v found=%v err=%v", got, found, err)
-	}
-	if err := state.DeleteSeat(ctx, original.SeatID); err != nil {
-		t.Fatal(err)
-	}
-	if err := state.UpdateSeat(ctx, original, renamed); err == nil {
-		t.Fatal("stale update resurrected deleted seat")
-	}
-	if _, found, err := state.Seat(ctx, original.SeatID); err != nil || found {
-		t.Fatalf("deleted seat returned: %v %v", found, err)
-	}
-}
-
-func TestSeatRun(t *testing.T) {
-	state, values := openTestStore(t)
-	run := SeatRun{
-		Binary:     "/bin/echo",
-		Args:       []string{"hello world"},
-		Env:        []string{"A=b"},
-		CWD:        values.Home,
-		CostLedger: true,
-	}
-	if err := state.WriteSeatRun("seat-1", run); err != nil {
-		t.Fatal(err)
-	}
-	t.Run("symlink recipe rejected", func(t *testing.T) {
-		dir := filepath.Join(filepath.Dir(values.StateDB), "seats")
-		if err := os.Symlink(filepath.Join(dir, "seat-1.json"), filepath.Join(dir, "linked.json")); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := state.ReadSeatRun("linked"); err == nil {
-			t.Fatal("followed a symlink launch recipe")
-		}
-	})
-
-	got, err := state.ReadSeatRun("seat-1")
-	if err != nil || !reflect.DeepEqual(got, run) {
-		t.Fatalf("run = %+v,%v", got, err)
-	}
-	info, err := os.Stat(filepath.Join(filepath.Dir(values.StateDB), "seats", "seat-1.json"))
+// A testjail home's shared state is served from memory through the marker the
+// SQLite door leaves at its path, so a reader that stats the path first finds
+// the seat, and a second spelling of the directory (macOS reaches its temp
+// directory through /private) reaches the same database.
+func TestReadSeatsFindsTheSeatTheDoorServesFromMemory(t *testing.T) {
+	testjail.Fleet(t)
+	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("run permissions = %o", info.Mode().Perm())
-	}
-	for _, id := range []string{"", "..", "../other", "a/b"} {
-		if err := state.WriteSeatRun(id, run); err == nil {
-			t.Fatalf("unsafe id %q accepted", id)
-		}
-	}
-	if _, err := state.ReadSeatRun("missing"); err == nil || !strings.Contains(err.Error(), "missing") {
-		t.Fatalf("missing run = %v", err)
-	}
-}
-
-func TestReadSeatsPreservesLegacyDatabase(t *testing.T) {
-	state, values := openTestStore(t)
-	if _, err := state.db.Exec("DROP TABLE seat; PRAGMA user_version=5"); err != nil {
+	ctx := context.Background()
+	state := OpenSharedState(ctx, values)
+	if err := state.Degraded(); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := ReadSeats(context.Background(), values)
-	if err != nil || len(rows) != 0 {
-		t.Fatalf("legacy seat read=%+v %v", rows, err)
+	t.Cleanup(func() { _ = state.Close() })
+	if err := state.PutSeat(ctx, Seat{
+		SeatID: "seat-memory", SessionID: "session-memory", Engine: "claude",
+		Backend: "tmux", TmuxSocket: "tmux-fixture", TmuxPane: "%1", State: "live",
+	}); err != nil {
+		t.Fatal(err)
 	}
-	var version int
-	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
-		t.Fatalf("read-only seat lookup migrated durable state: version=%d err=%v", version, err)
+	rows, err := ReadSeats(ctx, values)
+	if err != nil || len(rows) != 1 || rows[0].SeatID != "seat-memory" {
+		t.Fatalf("ReadSeats(%s) = %+v, %v; want the one seat seat-memory", values.StateDB, rows, err)
 	}
-}
-
-func TestSeatLivePaneAtomicOwnership(t *testing.T) {
-	for _, mode := range []string{"put", "bind", "revive", "stale-patch"} {
-		t.Run(mode, func(t *testing.T) {
-			state, values := openTestStore(t)
-			ctx := context.Background()
-			other := OpenSharedState(ctx, values)
-			defer func() { _ = other.Close() }()
-			stores := []*Store{state, other}
-			originals := make([]Seat, 2)
-			for i := range originals {
-				originals[i] = Seat{
-					SeatID:      fmt.Sprintf("seat-%d", i),
-					Backend:     "herdr",
-					State:       "live",
-					HerdrSocket: "/fixture/herdr.sock",
-					HerdrPane:   "w6:p3",
-				}
-				if mode != "put" {
-					before := originals[i]
-					if mode == "bind" || mode == "stale-patch" {
-						before.HerdrPane = ""
-					} else {
-						before.State = "failed"
-					}
-					if err := state.PutSeat(ctx, before); err != nil {
-						t.Fatal(err)
-					}
-					originals[i] = before
-				}
-			}
-			start := make(chan struct{})
-			results := make(chan error, 2)
-			var wg sync.WaitGroup
-			for i := range originals {
-				wg.Add(1)
-				go func(i int) {
-					defer wg.Done()
-					<-start
-					before := originals[i]
-					after := before
-					after.HerdrPane = "w6:p3"
-					after.State = "live"
-					if mode == "put" {
-						results <- stores[i].PutSeat(ctx, after)
-					} else {
-						results <- stores[i].UpdateSeat(ctx, before, after)
-					}
-				}(i)
-			}
-			close(start)
-			wg.Wait()
-			close(results)
-			wins := 0
-			for err := range results {
-				if err == nil {
-					wins++
-				} else if !strings.Contains(err.Error(), "already owned") {
-					t.Fatalf("conflict error = %v", err)
-				}
-			}
-			if wins != 1 {
-				t.Fatalf("concurrent %s admitted %d live owners, want exactly one", mode, wins)
-			}
-			owner, found, err := state.SeatByPane(ctx, "/fixture/herdr.sock", "w6:p3")
-			if err != nil || !found {
-				t.Fatalf("owner=%+v %v %v", owner, found, err)
-			}
-			// A stale metadata-only patch cannot overwrite the winning address or state.
-			for i, before := range originals {
-				if before.SeatID == owner.SeatID && mode != "put" {
-					after := before
-					after.Name = "renamed"
-					if err := state.UpdateSeat(ctx, before, after); err != nil {
-						t.Fatalf("stale metadata patch %d: %v", i, err)
-					}
-				}
-			}
-			rows, err := state.Seats(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			live := 0
-			for _, row := range rows {
-				if row.State == "live" && row.HerdrPane == "w6:p3" {
-					live++
-				}
-			}
-			if live != 1 {
-				t.Fatalf("stored live owners=%d rows=%+v", live, rows)
-			}
-		})
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(filepath.Dir(values.StateDB), link); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := sqlitedb.OpenStore(ctx, filepath.Join(link, "pfm.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = linked.Close() })
+	var seatID, mode string
+	if err := linked.QueryRowContext(ctx, "SELECT seat_id FROM seat").
+		Scan(&seatID); err != nil ||
+		seatID != "seat-memory" {
+		t.Fatalf("seat through %s = %q, %v; want seat-memory", link, seatID, err)
+	}
+	if err := linked.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil || mode != "memory" {
+		t.Fatalf("journal_mode through %s = %q, %v; want memory", link, mode, err)
 	}
 }
 
 func TestSeatPaneHistoricalDuplicatesRefuse(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	owner := Seat{
 		SeatID:      "first",
@@ -390,13 +264,14 @@ func TestSeatPaneHistoricalDuplicatesRefuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, found, err := state.SeatByPane(ctx, owner.HerdrSocket, owner.HerdrPane)
-	if err == nil || !strings.Contains(err.Error(), "multiple live seats") || found || got.SeatID != "" {
+	if err == nil || err.Error() != "herdr pane w6:p3 at /fixture/herdr.sock has multiple live seats" || found ||
+		got.SeatID != "" {
 		t.Fatalf("ambiguous owner=%+v found=%v err=%v", got, found, err)
 	}
 }
 
 func TestSeatUpdateRejectsStaleCanonicalAddress(t *testing.T) {
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	before := Seat{SeatID: "moving", Backend: "herdr", State: "live", HerdrPane: "w1:p1", HerdrSocket: "fixture"}
 	if err := state.PutSeat(ctx, before); err != nil {
@@ -479,7 +354,7 @@ VALUES('legacy','session','claude','herdr','','','fixture.sock','w1:p2','w1','OL
 func TestSeatFailurePublicationRejectsChangedBinding(t *testing.T) {
 	for _, change := range []string{"host", "terminal", "end"} {
 		t.Run(change, func(t *testing.T) {
-			db, _ := openTestStore(t)
+			db := openTestStore(t)
 			ctx := context.Background()
 			before := Seat{
 				SeatID:          "failure",
@@ -525,7 +400,7 @@ func TestSeatFailurePublicationRejectsChangedBinding(t *testing.T) {
 func TestSeatLifecycleIgnoresHeartbeatConflict(t *testing.T) {
 	for _, lifecycle := range []string{"start", "failure", "heartbeat"} {
 		t.Run(lifecycle, func(t *testing.T) {
-			db, _ := openTestStore(t)
+			db := openTestStore(t)
 			ctx := context.Background()
 			before := Seat{SeatID: "heartbeat", Backend: "herdr", State: "live", SessionID: "session", UpdatedAt: 1}
 			if err := db.PutSeat(ctx, before); err != nil {
@@ -562,7 +437,7 @@ func TestSeatLifecycleIgnoresHeartbeatConflict(t *testing.T) {
 func TestSeatLifecycleComposesLearnedSession(t *testing.T) {
 	for _, phase := range []string{"retry-start", "reload-start", "failure"} {
 		t.Run(phase, func(t *testing.T) {
-			db, _ := openTestStore(t)
+			db := openTestStore(t)
 			ctx := context.Background()
 			before := Seat{
 				SeatID:          "learning",

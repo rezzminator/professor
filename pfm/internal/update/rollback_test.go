@@ -30,7 +30,7 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 				updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 			})
 			updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-				return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
+				return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 			}
 			var order []string
 			updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {

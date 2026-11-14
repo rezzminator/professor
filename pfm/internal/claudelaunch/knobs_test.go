@@ -1,6 +1,7 @@
 package claudelaunch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -80,7 +81,7 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("hygiene row %s missing", name)
 		}
 	}
-	for _, name := range []string{"configDir", "binary", "cache1h", "shell", "systemPrompt", "nativeCursor", "remoteControl", "subagentStatuslineTrace", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "helperModel", "tmuxTruecolor", "noFlicker", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
+	for _, name := range []string{"configDir", "binary", "cache1h", "shell", "systemPrompt", "nativeCursor", "remoteControl", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "helperModel", "tmuxTruecolor", "noFlicker", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
 		if !seen[name] {
 			t.Errorf("knob %s missing", name)
 		}
@@ -134,15 +135,43 @@ func TestClaudeEnvRefusesLaunchNames(t *testing.T) {
 				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := pfmconfig.Load(path, home, nil); err == nil {
-					t.Errorf("claude.env accepts %s, which the launch registry's %s knob owns", knob.Target, knob.Name)
-				} else if !strings.Contains(err.Error(), "claude.env."+knob.Target) {
-					t.Fatalf("Load failed for another reason: %v", err)
+				_, err := pfmconfig.Load(path, home, nil)
+				if got, want := strings.NewReplacer(home, "{home}", knob.Target, "{target}").
+					Replace(fmt.Sprint(err)),
+					map[string]string{
+						"CACHE_LIVE_CONTROL_MAIN_TTL":   "config {home}/pfm.config.json: claude.env.{target} is set on every launch from claude.cache1h: set that key instead",
+						"CACHE_LIVE_CONTROL_AGENTS_TTL": "config {home}/pfm.config.json: claude.env.{target} is discarded on every launch as inherited state: set CACHE_LIVE_CONTROL_SUBAGENT_TTL instead",
+					}[knob.Target]; got != want {
+					t.Errorf("Load error = %q, want %q", got, want)
 				}
 			})
 		}
 	}
 	if len(checked) == 0 {
 		t.Fatal("no launch variable carries a default plugin's prefix: the check ran on nothing")
+	}
+}
+
+// A chat born from a Codex tool shell drops what Codex injected there, the marker included, and
+// keeps the rest; a shell without the marker keeps everything, a user's own NO_COLOR included.
+func TestWithoutCodexToolShell(t *testing.T) {
+	toolShell := []string{
+		"PATH=/usr/bin", "NO_COLOR=1", "PAGER=cat", "GIT_PAGER=cat", "GH_PAGER=cat", "CODEX_CI=1",
+		"CODEX_SESSION_ID=0a1b", "CODEX_TOOL_CALL_ID=exec-0a1b", "CODEX_VERSION=0.166.0",
+		"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS=1", "CODEX_HOME=/srv/tester/.codex",
+	}
+	login := []string{"PATH=/usr/bin", "NO_COLOR=1", "PAGER=less", "CODEX_CI=1"}
+	for _, test := range []struct {
+		name          string
+		environ, want []string
+	}{
+		{"codex tool shell", toolShell, []string{"PATH=/usr/bin", "CODEX_HOME=/srv/tester/.codex"}},
+		{"login shell without the marker", login, login},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := WithoutCodexToolShell(test.environ); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("WithoutCodexToolShell(%q) = %q, want %q", test.environ, got, test.want)
+			}
+		})
 	}
 }

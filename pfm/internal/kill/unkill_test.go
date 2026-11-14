@@ -85,7 +85,8 @@ func runPostExitFinisher(
 	t.Helper()
 	unkillTmux := &fakeTmux{existsFor: 1}
 	finisher, err := NewFinisher(database, Dependencies{
-		Tmux: unkillTmux, Screen: unkillTmux, Refresher: refresher,
+		Paths: jail.resolved(),
+		Tmux:  unkillTmux, Screen: unkillTmux, Refresher: refresher,
 		Delay: time.Millisecond, PollEvery: time.Millisecond, PollAttempts: 3,
 		Now: func() time.Time { return time.Unix(200, 0) },
 	})
@@ -106,6 +107,7 @@ func TestManagerUnkillReportsWhetherItCleared(t *testing.T) {
 	database := jail.open(t)
 	ctx := context.Background()
 	manager, err := New(database, Dependencies{
+		Paths:  jail.resolved(),
 		ProcFS: &fakeProc{}, Tmux: &fakeTmux{}, Spawner: &captureSpawner{},
 		Now: func() time.Time { return time.Unix(50, 0) },
 	})

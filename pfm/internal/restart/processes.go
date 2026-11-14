@@ -12,10 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -28,10 +25,6 @@ const (
 	// pollEvery is the cadence every bounded wait in this package polls at.
 	pollEvery = 100 * time.Millisecond
 )
-
-// Signaler delivers sig to pid; signal 0 only asks whether pid exists.
-// syscall.Kill is the real one; a test's fake plays the kernel.
-type Signaler func(pid int, sig syscall.Signal) error
 
 // process is one row of the process table, with the identity a stop
 // re-checks before it signals: the same pid must still run the same argv
@@ -106,7 +99,7 @@ func (finder *discoverer) skippable(pid int, readErr error) bool {
 	if errors.Is(readErr, fs.ErrNotExist) || errors.Is(readErr, syscall.ESRCH) {
 		return true
 	}
-	if finder.deps.Signal != nil && errors.Is(finder.deps.Signal(pid, 0), syscall.ESRCH) {
+	if finder.deps.Probe != nil && errors.Is(finder.deps.Probe(pid), syscall.ESRCH) {
 		return true
 	}
 	identities, ok := finder.deps.Procs.(gather.ProcIdentity)
@@ -168,156 +161,6 @@ const (
 	daemonGone
 )
 
-// ConvergeMCPDaemon hands off only this install's unmanaged loopback daemon.
-// It uses kernel executable identity and the process's effective config, never basename alone.
-func ConvergeMCPDaemon(ctx context.Context, dependencies Deps, enabled bool) (string, error) {
-	finder := &discoverer{deps: dependencies}
-	table, err := finder.readTable()
-	if err != nil {
-		return "", fmt.Errorf("process check: %w", err)
-	}
-	if err := table.unreadableErr(); err != nil {
-		return "", fmt.Errorf("process check: %w", err)
-	}
-	var owned []process
-	for _, proc := range table.Processes {
-		match, err := finder.ownedMCPDaemon(ctx, proc)
-		if err != nil {
-			return "", err
-		}
-		if match == daemonOwned {
-			owned = append(owned, proc)
-		}
-	}
-	if len(owned) == 0 {
-		return "process enumeration confirms no daemon owned by this install", nil
-	}
-	stopper := processStopper{
-		procs:  dependencies.Procs,
-		signal: dependencies.Signal,
-		clock:  dependencies.Clock,
-		uid:    dependencies.EffectiveUID,
-		verify: func(proc process) (bool, error) {
-			state, err := finder.ownedMCPDaemon(ctx, proc)
-			if err != nil {
-				return false, err
-			}
-			switch state {
-			case daemonGone:
-				return false, nil
-			case daemonForeign:
-				return false, fmt.Errorf("pid %d daemon identity changed before signal", proc.PID)
-			default:
-				return true, nil
-			}
-		},
-	}
-	for _, proc := range owned {
-		if proc.Start == 0 {
-			return "", fmt.Errorf("pid %d daemon start identity unavailable", proc.PID)
-		}
-	}
-	for _, proc := range owned {
-		if _, err := stopper.stop(ctx, proc); err != nil {
-			return "", fmt.Errorf("stop owned MCP daemon: %w", err)
-		}
-	}
-	if !enabled {
-		return fmt.Sprintf("stopped %d owned unmanaged MCP daemon(s)", len(owned)), nil
-	}
-	return finder.startDaemon(ctx)
-}
-
-type daemonMissingRead struct {
-	door string
-	err  error
-}
-
-func (err *daemonMissingRead) Error() string { return err.door + ": " + err.err.Error() }
-func (err *daemonMissingRead) Unwrap() error { return err.err }
-
-func (finder *discoverer) ownedMCPDaemon(ctx context.Context, proc process) (daemonOwnership, error) {
-	deadline := finder.deps.Clock.Now().Add(termGrace)
-	waited := false
-	for {
-		if err := ctx.Err(); err != nil {
-			return daemonForeign, fmt.Errorf("prove daemon pid %d exit: %w", proc.PID, err)
-		}
-		state, err := finder.savedDaemonIdentity(proc)
-		if state == daemonOwned && err == nil {
-			state, err = finder.inspectOwnedMCPDaemon(proc)
-		}
-		if err == nil {
-			if waited && state == daemonOwned {
-				state, err = finder.savedDaemonIdentity(proc)
-				if state == daemonOwned && err == nil {
-					state, err = finder.inspectOwnedMCPDaemon(proc)
-				}
-				if state == daemonOwned && err == nil {
-					state, err = finder.savedDaemonIdentity(proc)
-				}
-				if state == daemonOwned && err == nil {
-					state, err = finder.daemonIdentityState(proc)
-				}
-			}
-			if err == nil {
-				return state, nil
-			}
-		}
-		var missing *daemonMissingRead
-		if !errors.As(err, &missing) || (!errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ESRCH)) {
-			return daemonForeign, fmt.Errorf("pid %d daemon ownership: %w", proc.PID, err)
-		}
-		state, proofErr := finder.daemonIdentityState(proc)
-		if proofErr != nil {
-			return daemonForeign, fmt.Errorf("pid %d daemon %s: %w", proc.PID, missing.door, errors.Join(err, proofErr))
-		}
-		if state != daemonOwned {
-			return state, nil
-		}
-		if !finder.deps.Clock.Now().Before(deadline) {
-			return daemonForeign, fmt.Errorf(
-				"deadline proving daemon pid %d %s after %s: %w",
-				proc.PID,
-				missing.door,
-				termGrace,
-				err,
-			)
-		}
-		if err := finder.deps.Clock.Sleep(ctx, pollEvery); err != nil {
-			return daemonForeign, fmt.Errorf("wait for daemon pid %d exit proof: %w", proc.PID, err)
-		}
-		waited = true
-	}
-}
-
-// savedDaemonIdentity never replaces the census's start time or argv with a later process.
-func (finder *discoverer) savedDaemonIdentity(proc process) (daemonOwnership, error) {
-	stat, statErr := finder.deps.Procs.Stat(proc.PID)
-	argv, argvErr := finder.deps.Procs.Cmdline(proc.PID)
-	if statErr != nil || argvErr != nil {
-		state, err := finder.daemonIdentityState(proc)
-		if err != nil {
-			return daemonForeign, errors.Join(statErr, argvErr, err)
-		}
-		if state == daemonGone {
-			return state, nil
-		}
-		readErr := errors.Join(statErr, argvErr)
-		return daemonForeign, fmt.Errorf("read saved pid %d identity: %w", proc.PID, readErr)
-	}
-	if stat.StartTime != proc.Start {
-		return daemonGone, nil
-	}
-	if len(argv) == 0 {
-		return daemonForeign, &daemonMissingRead{door: "command line", err: fs.ErrNotExist}
-	}
-	if !slices.Equal(argv, proc.Argv) {
-		return daemonForeign, nil
-	}
-	return daemonOwned, nil
-}
-
 func (finder *discoverer) daemonIdentityState(proc process) (daemonOwnership, error) {
 	identities, ok := finder.deps.Procs.(gather.ProcIdentity)
 	if !ok {
@@ -339,74 +182,10 @@ func (finder *discoverer) daemonIdentityState(proc process) (daemonOwnership, er
 	return daemonOwned, nil
 }
 
-func (finder *discoverer) inspectOwnedMCPDaemon(proc process) (daemonOwnership, error) {
-	if !finder.mcpDaemon(proc.Argv) {
-		return daemonForeign, nil
-	}
-	state, err := finder.daemonIdentityState(proc)
-	if err != nil || state != daemonOwned {
-		return state, err
-	}
-	executables, ok := finder.deps.Procs.(gather.ProcExecutable)
-	if !ok {
-		return daemonForeign, fmt.Errorf("pid %d daemon executable reader unavailable", proc.PID)
-	}
-	executable, err := executables.Executable(proc.PID)
-	if err != nil {
-		return daemonForeign, &daemonMissingRead{door: "executable", err: err}
-	}
-	if !filepath.IsAbs(finder.deps.Executable) ||
-		paths.PhysicalPath(executable) != paths.PhysicalPath(finder.deps.Executable) {
-		return daemonForeign, nil
-	}
-	args := proc.Argv[1:]
-	configPath := ""
-	switch {
-	case len(args) >= 2 && args[0] == "--config":
-		configPath, args = args[1], args[2:]
-	case len(args) >= 1 && strings.HasPrefix(args[0], "--config="):
-		configPath, args = strings.TrimPrefix(args[0], "--config="), args[1:]
-	}
-	if !slices.Equal(args, []string{mcpCommand, mcpServeCommand}) {
-		return daemonForeign, nil
-	}
-	if configPath == "" {
-		environment, err := finder.deps.Procs.Environ(proc.PID)
-		if err != nil {
-			return daemonForeign, &daemonMissingRead{door: "environment", err: err}
-		}
-		if len(environment) == 0 {
-			// An exiting process's environ reads empty without an error: prove exit, never resolve it.
-			return daemonForeign, &daemonMissingRead{door: "environment", err: fs.ErrNotExist}
-		}
-		configPath, err = config.ResolvePathFrom(&paths.MapEnv{Values: environment}, environment["HOME"])
-		if err != nil {
-			// A torn environ read of an exiting process can lack PFM_CONFIG: a not-exist
-			// cause proves exit or meets the deadline; any other cause fails at once.
-			return daemonForeign, &daemonMissingRead{
-				door: "environment",
-				err:  fmt.Errorf("pid %d daemon config: %w", proc.PID, err),
-			}
-		}
-	}
-	if !filepath.IsAbs(configPath) || !filepath.IsAbs(finder.deps.ConfigPath) {
-		return daemonForeign, fmt.Errorf("pid %d daemon config identity requires absolute paths", proc.PID)
-	}
-	if paths.PhysicalPath(configPath) != paths.PhysicalPath(finder.deps.ConfigPath) {
-		return daemonForeign, nil
-	}
-	return daemonOwned, nil
-}
-
 // processUnit is the stop of one process: SIGTERM, then SIGKILL, each
 // confirmed against the table.
 func (finder *discoverer) processUnit(family, kind string, proc process) Unit {
-	stopper := processStopper{
-		procs:  finder.deps.Procs,
-		signal: finder.deps.Signal,
-		clock:  finder.deps.Clock,
-		uid:    finder.deps.EffectiveUID,
-	}
+	stopper := finder.deps.stopper(&finder.deps.Install)
 	return Unit{
 		Family:  family,
 		Name:    fmt.Sprintf("%s pid %d", kind, proc.PID),
@@ -425,18 +204,27 @@ func clipArgv(command string) string {
 	return command[:limit] + "…"
 }
 
-// processStopper stops one process and proves it gone.
+// processStopper stops one process through the signal door and proves it gone.
 type processStopper struct {
-	procs             gather.ProcFS
-	signal            Signaler
-	clock             clock.Clock
-	uid               uint32
-	verify            func(process) (bool, error)
+	door  gather.Door
+	probe gather.Probe
+	// verify is the site's own match, held before the first signal.
+	verify func(process) (bool, error)
+	// owner, when set, is the install that must have launched the process,
+	// checked by the door right before each signal; nil stops a process by its
+	// identity alone (one this install did not launch, like a Herdr pane's).
+	owner             *gather.Install
 	ownershipVerified bool
 }
 
+// stopper is a processStopper over these dependencies; owner as processStopper's.
+func (dependencies Deps) stopper(owner *gather.Install) processStopper {
+	return processStopper{door: dependencies.door(), probe: dependencies.Probe, owner: owner}
+}
+
 // stop signals proc only while the pid still runs the same command since the
-// same start, so a recycled pid is never hit.
+// same start, so a recycled pid is never hit: the door re-reads the process
+// right before SIGTERM and again before SIGKILL.
 func (stopper processStopper) stop(ctx context.Context, proc process) (string, error) {
 	same, err := stopper.same(proc)
 	if err != nil {
@@ -445,38 +233,54 @@ func (stopper processStopper) stop(ctx context.Context, proc process) (string, e
 	if !same {
 		return "already gone", nil
 	}
-	if err := stopper.signal(proc.PID, syscall.SIGTERM); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			return "already gone", nil
-		}
-		return "", fmt.Errorf("SIGTERM pid %d: %w", proc.PID, err)
-	}
-	gone, err := stopper.waitGone(ctx, proc, termGrace)
-	if err != nil {
-		return "", err
-	}
-	if gone {
+	stopped, err := stopper.door.Stop(
+		ctx,
+		stopper.target(proc),
+		gather.Escalation{Term: termGrace, Kill: killGrace, Poll: pollEvery},
+	)
+	switch {
+	case errors.Is(err, gather.ErrStillRunning):
+		return "", fmt.Errorf("pid %d still runs %s after SIGKILL", proc.PID, clipArgv(proc.command()))
+	case err != nil:
+		return "", fmt.Errorf("stop pid %d: %w", proc.PID, err)
+	case stopped == gather.StoppedGone:
+		return "already gone", nil
+	case stopped == gather.StoppedChanged:
+		return "", fmt.Errorf("pid %d identity changed before signal", proc.PID)
+	case stopped == gather.StoppedOnTerm:
 		return "exited on SIGTERM", nil
 	}
-	if err := stopper.signal(proc.PID, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return "", fmt.Errorf("SIGKILL pid %d after %s: %w", proc.PID, termGrace, err)
-	}
-	gone, err = stopper.waitGone(ctx, proc, killGrace)
-	if err != nil {
-		return "", err
-	}
-	if !gone {
-		return "", fmt.Errorf("pid %d still runs %s after SIGKILL", proc.PID, clipArgv(proc.command()))
-	}
 	return "killed (SIGKILL after " + termGrace.String() + ")", nil
+}
+
+// target is proc as the door's target: the generation the table read, and,
+// with an owner, that install's launch held right before each signal. The
+// facts verify proves (executable image, config) are fixed for a generation,
+// so the door's re-read of start, owner and argv keeps them.
+func (stopper processStopper) target(proc process) gather.Target {
+	target := gather.Target{
+		Identity: gather.Identity{PID: proc.PID, Start: proc.Start, UID: stopper.door.UID, Argv: proc.Argv},
+	}
+	if stopper.owner != nil {
+		owner, procs := *stopper.owner, stopper.door.Procs
+		target.Check = func(live gather.Identity) (bool, error) {
+			owns, err := owner.Owns(procs, live)
+			if gather.IsGone(err) {
+				return false, nil // exited mid-read: the door's re-read says gone
+			}
+			return owns, err
+		}
+	}
+	return target
 }
 
 // same reports whether proc's pid still runs proc's command since proc's
 // start. A pid the kernel no longer has is not the same; a table that cannot
 // be read for a pid that still exists is an error, never "gone".
 func (stopper processStopper) same(proc process) (bool, error) {
-	stat, statErr := stopper.procs.Stat(proc.PID)
-	argv, argvErr := stopper.procs.Cmdline(proc.PID)
+	procs := stopper.door.Procs
+	stat, statErr := procs.Stat(proc.PID)
+	argv, argvErr := procs.Cmdline(proc.PID)
 	if statErr == nil && argvErr == nil {
 		if stat.StartTime != proc.Start {
 			return false, nil
@@ -490,7 +294,7 @@ func (stopper processStopper) same(proc process) (bool, error) {
 			}
 			return false, nil
 		}
-		if identities, ok := stopper.procs.(gather.ProcIdentity); ok {
+		if identities, ok := procs.(gather.ProcIdentity); ok {
 			identity, err := identities.ProcessIdentity(proc.PID)
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
 				return false, nil
@@ -501,7 +305,7 @@ func (stopper processStopper) same(proc process) (bool, error) {
 			if identity.Zombie {
 				return false, nil
 			}
-			if identity.EffectiveUID != stopper.uid {
+			if identity.EffectiveUID != stopper.door.UID {
 				return false, fmt.Errorf("pid %d identity changed before signal", proc.PID)
 			}
 		}
@@ -510,7 +314,7 @@ func (stopper processStopper) same(proc process) (bool, error) {
 		}
 		return true, nil
 	}
-	if err := stopper.signal(proc.PID, 0); errors.Is(err, syscall.ESRCH) {
+	if stopper.probe != nil && errors.Is(stopper.probe(proc.PID), syscall.ESRCH) {
 		return false, nil
 	}
 	return false, fmt.Errorf("read pid %d from the process table: %w", proc.PID, errors.Join(statErr, argvErr))
@@ -527,32 +331,24 @@ func (stopper processStopper) verifiedSnapshot(proc process) (bool, error) {
 	return guard.same(proc)
 }
 
-// waitGone polls until proc is gone or within elapses.
-func (stopper processStopper) waitGone(ctx context.Context, proc process, within time.Duration) (bool, error) {
-	deadline := stopper.clock.Now().Add(within)
-	for {
-		same, err := stopper.same(proc)
-		if err != nil {
-			return false, err
-		}
-		if !same {
-			return true, nil
-		}
-		if !stopper.clock.Now().Before(deadline) {
-			return false, nil
-		}
-		if err := stopper.clock.Sleep(ctx, pollEvery); err != nil {
-			return false, fmt.Errorf("wait for pid %d to exit: %w", proc.PID, err)
-		}
-	}
-}
-
 // findHelpers is the chat-helpers family: every cost sink and stdio MCP server in the process table.
 func (finder *discoverer) findHelpers(table processTable) {
-	count := 0
+	count, kept := 0, 0
+	var unowned []error
 	for _, proc := range table.Processes {
 		kind := finder.helperKind(proc.Argv)
 		if kind == "" || finder.claimed[proc.PID] {
+			continue
+		}
+		owned, gone, err := finder.ownedByInstall(proc)
+		if err != nil {
+			unowned = append(unowned, err)
+			continue
+		}
+		if !owned {
+			if !gone {
+				kept++
+			}
 			continue
 		}
 		finder.claimed[proc.PID] = true
@@ -560,11 +356,37 @@ func (finder *discoverer) findHelpers(table processTable) {
 		count++
 	}
 	finder.found(FamilyHelpers, fmt.Sprintf(
-		"%d helper process(es) of %d listed — process table: pfm internal cost-sink, pfm mcp serve --stdio",
+		"%d helper process(es) of %d listed — process table: pfm internal cost-sink, pfm mcp serve --stdio%s",
 		count,
 		table.Listed,
+		keptNote(kept),
 	))
-	finder.failedOn(FamilyHelpers, table.unreadableErr())
+	finder.failedOn(FamilyHelpers, errors.Join(append(unowned, table.unreadableErr())...))
+}
+
+// ownedByInstall reports whether proc was launched by this install
+// (gather.Install.Owns). gone says its pid exited since the table read: a torn
+// read of an exiting process is neither this install's nor another's.
+func (finder *discoverer) ownedByInstall(proc process) (owned, gone bool, err error) {
+	owned, err = finder.deps.Install.Owns(
+		finder.deps.Procs,
+		gather.Identity{PID: proc.PID, Start: proc.Start, Argv: proc.Argv},
+	)
+	if gather.IsGone(err) {
+		return false, true, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("pid %d install ownership: %w", proc.PID, err)
+	}
+	return owned, false, nil
+}
+
+// keptNote names the processes of another install a family left running.
+func keptNote(kept int) string {
+	if kept == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %d of another install kept", kept)
 }
 
 // failedOn records err as family's failed find when there is one.
@@ -577,12 +399,24 @@ func (finder *discoverer) failedOn(family string, err error) {
 // findPFM is the pfm family: every pfm process no earlier family claimed,
 // except this worker and the front that launched it.
 func (finder *discoverer) findPFM(table processTable) {
-	count := 0
+	count, kept := 0, 0
+	var unowned []error
 	for _, proc := range table.Processes {
 		if _, ok := finder.pfmArgs(
 			proc.Argv,
 		); !ok || finder.claimed[proc.PID] ||
 			slices.Contains(finder.deps.Spare, proc.PID) {
+			continue
+		}
+		owned, gone, err := finder.ownedByInstall(proc)
+		if err != nil {
+			unowned = append(unowned, err)
+			continue
+		}
+		if !owned {
+			if !gone {
+				kept++
+			}
 			continue
 		}
 		finder.claimed[proc.PID] = true
@@ -594,6 +428,7 @@ func (finder *discoverer) findPFM(table processTable) {
 		last = "the restart worker is last"
 	}
 	finder.found(FamilyPFM, fmt.Sprintf(
-		"%d other pfm process(es) of %d listed — process table, argv[0] named pfm; %s", count, table.Listed, last))
-	finder.failedOn(FamilyPFM, table.unreadableErr())
+		"%d other pfm process(es) of %d listed — process table, argv[0] named pfm; %s%s",
+		count, table.Listed, last, keptNote(kept)))
+	finder.failedOn(FamilyPFM, errors.Join(append(unowned, table.unreadableErr())...))
 }

@@ -1,5 +1,5 @@
 # Release checks. `make release-check` runs, locally, exactly the checks the
-# release pull request's jobs in .github/workflows/release.yml run, and
+# release pull request's jobs in .github/workflows/ci.yml run, and
 # those jobs call these same targets, so a release never fails on a check
 # nobody ran. Run `git fetch origin main` first: `release` reads origin/main.
 # pfm's own build and gate targets live in pfm/Makefile (`make -C pfm help`).
@@ -18,9 +18,9 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64
 .PHONY: release-check check build release-binary release
 
 release-check: check build release
-	@echo "NOT RUN LOCALLY: check job's Scan — the HOL AI Plugin Scanner is a GitHub Action (hashgraph-online/ai-plugin-scanner-action) with no local install"
+	@echo "NOT RUN LOCALLY: ci.yml's scan job — the HOL AI Plugin Scanner is a GitHub Action (hashgraph-online/ai-plugin-scanner-action) with no local install"
 
-# The check job: the Codex and OpenCode mirrors the scanner scores.
+# ci.yml's scan job builds these first: the Codex and OpenCode mirrors the scanner scores.
 check:
 	"$(ENGINE_SYNC_BIN)" build .
 

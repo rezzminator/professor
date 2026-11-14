@@ -2,7 +2,6 @@ package mockengine
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -53,6 +52,9 @@ const (
 	flagMCPConfig   = "--mcp-config"
 	flagSettings    = "--settings"
 	flagForkSession = "--fork-session"
+	flagSessionID   = "--session-id"
+	flagResume      = "--resume"
+	flagContinue    = "--continue"
 )
 
 var (
@@ -62,7 +64,9 @@ var (
 		"--json-schema": true, "--tools": true, "--setting-sources": true, "--permission-mode": true,
 		"--add-dir": true, flagMCPConfig: true, "--agent": true, "--input-format": true,
 	}
-	claudeResumeFlags = map[string]bool{"--resume": true, "-r": true}
+	// The flags whose value is optional, taken only when the next word is no flag: --resume's id and
+	// --remote-control's chat name (internal/claudelaunch/remote_control.go), never a launch prompt.
+	claudeOptionalValueFlags = map[string]bool{"--resume": true, "-r": true, "--remote-control": true}
 )
 
 func parseClaudeArgs(args []string) claudeInvocation {
@@ -71,7 +75,7 @@ func parseClaudeArgs(args []string) claudeInvocation {
 		argument := args[index]
 		name, inline, hasInline := strings.Cut(argument, "=")
 		if !strings.HasPrefix(argument, "-") {
-			if call.subcommand == "" && call.prompt == "" && argument == "agents" {
+			if call.subcommand == "" && call.prompt == "" && (argument == "agents" || argument == claudeBGSpare) {
 				call.subcommand = argument
 			} else if call.prompt == "" {
 				call.prompt = argument
@@ -86,7 +90,7 @@ func parseClaudeArgs(args []string) claudeInvocation {
 				value = args[next]
 				next++
 			}
-		} else if claudeResumeFlags[name] && !hasInline {
+		} else if claudeOptionalValueFlags[name] && !hasInline {
 			if next < len(args) && !strings.HasPrefix(args[next], "-") {
 				value = args[next]
 				next++
@@ -109,9 +113,9 @@ func parseClaudeArgs(args []string) claudeInvocation {
 			call.systemPrompt = value
 		case "--system-prompt-file":
 			call.systemPromptFile = value
-		case "--session-id":
+		case flagSessionID:
 			call.sessionID = value
-		case "--resume", "-r":
+		case flagResume, "-r":
 			call.resumed = true
 			if value != "" {
 				call.resumeID = strings.TrimSuffix(filepath.Base(value), ".jsonl")
@@ -141,20 +145,30 @@ type claudeSession struct {
 	model      string
 	title      string
 	hooks      hookSet
-	statusCmd  string
-	environ    []string
-	seat       *seat
-	turnUsage  Tokens
+	status     statusLineSetting
+	// statusShown is the line the last landed statusline run printed.
+	statusShown string
+	environ     []string
+	seat        *seat
+	turnUsage   Tokens
+	// asking is the tool call whose permission dialog is open (claude_permission.go).
+	asking *permissionAsk
+	// fork is a fork's transcript still unwritten before its first prompt (claude_resume.go).
+	fork *pendingFork
+	// snapshot is the tool shells' zsh snapshot, taken at the first Bash call (claude_shell_snapshot.go).
+	snapshot string
+	// job is set once the chat moved to a background job (claude_background_job.go).
+	job *claudeJob
 }
 
 func newClaudeSession(proc *process, call claudeInvocation) (*claudeSession, error) {
 	configDir := claudeConfigDir(proc)
-	hooks, statusCmd, err := loadClaudeHooks(configDir, proc.cwd, call.settings)
+	hooks, status, err := loadClaudeHooks(configDir, proc.cwd, call.settings)
 	if err != nil {
 		return nil, err
 	}
 	session := &claudeSession{
-		proc: proc, call: call, configDir: configDir, hooks: hooks, statusCmd: statusCmd,
+		proc: proc, call: call, configDir: configDir, hooks: hooks, status: status,
 		model: proc.script.Model, title: call.name, environ: append(os.Environ(), "CLAUDE_PROJECT_DIR="+proc.cwd),
 	}
 	if call.resumed {
@@ -197,13 +211,24 @@ func newClaudeSession(proc *process, call claudeInvocation) (*claudeSession, err
 		}
 		if parentID != "" {
 			parent := filepath.Join(configDir, "projects", claudeProjectSlug(proc.cwd), parentID+".jsonl")
-			if err := seedClaudeFork(parent, session.transcript, session.sessionID); err != nil {
-				return nil, err
-			}
+			session.fork = &pendingFork{parent: parent}
 		}
 	}
 	return session, nil
 }
+
+// claudeSessionIDRefusal is the installed Claude Code's (2.1.322) line for
+// --session-id with --resume and no --fork-session, read from its own run.
+const claudeSessionIDRefusal = "Error: " + flagSessionID + " can only be used with " + flagContinue + " or " +
+	flagResume + " if " + flagForkSession + " is also specified."
+
+// launchCrashed is the exit code of a Claude pane the scenario's launch_crash ends at launch.
+const launchCrashed = 1
+
+// launchCrashBoot is how long a Claude Code that dies at launch runs first:
+// its runtime loads before the fault it prints, so the server around its pane
+// is up long enough for a launcher to keep the dead pane's last screen.
+const launchCrashBoot = 500 * time.Millisecond
 
 func serveClaude(proc *process) int {
 	call := parseClaudeArgs(proc.args)
@@ -212,6 +237,21 @@ func serveClaude(proc *process) int {
 		// background agents a chat runs; the mock has none.
 		fmt.Fprintln(proc.stdout, "[]")
 		return 0
+	}
+	if call.subcommand == claudeBGSpare {
+		return serveBGSpare(proc)
+	}
+	if call.sessionID != "" && call.resumed && !call.fork {
+		// Claude Code's own refusal: a resume keeps its session id unless it forks.
+		fmt.Fprintln(proc.stderr, claudeSessionIDRefusal)
+		return 1
+	}
+	if proc.script.LaunchCrash != "" && !call.headless {
+		// A Claude Code that dies at launch prints its last words and exits before
+		// any hook, record or prompt.
+		sleepOrCancel(proc.ctx, launchCrashBoot)
+		fmt.Fprintln(proc.stderr, proc.script.LaunchCrash)
+		return launchCrashed
 	}
 	session, err := newClaudeSession(proc, call)
 	if err != nil {
@@ -247,7 +287,7 @@ func (session *claudeSession) start(resumed bool) error {
 // begin opens (or reopens) the session: the seat bindings, the title record,
 // then SessionStart with its additionalContext folded into the transcript.
 func (session *claudeSession) begin(source string) error {
-	if !session.proc.script.NoTranscript {
+	if !session.proc.script.NoTranscript && session.fork == nil {
 		if err := touchFile(session.transcript); err != nil {
 			return err
 		}
@@ -267,7 +307,8 @@ func (session *claudeSession) begin(source string) error {
 	}
 	payload := session.payload(hookSessionStart)
 	payload.Source = source
-	answers, err := session.fire(hookSessionStart, "", payload)
+	// Claude matches a SessionStart hook against its source: startup, resume, clear or compact.
+	answers, err := session.fire(hookSessionStart, source, payload)
 	if err != nil {
 		return err
 	}
@@ -280,53 +321,15 @@ func (session *claudeSession) begin(source string) error {
 }
 
 func (session *claudeSession) recordUser(text string) error {
+	if err := session.landFork(); err != nil {
+		return err
+	}
 	return session.write(session.userRecord(text, false))
 }
 
 func (session *claudeSession) recordAssistant(reply string, usage Tokens) error {
 	session.turnUsage = usage
 	return session.write(session.assistantRecord([]contentPart{{Type: blockText, Text: reply}}, usage, false))
-}
-
-func (session *claudeSession) tool(step Step) (string, error) {
-	input := step.Input
-	if len(input) == 0 {
-		input = json.RawMessage(`{}`)
-	}
-	payload := session.payload(hookPreToolUse)
-	payload.ToolName, payload.ToolInput = step.Tool, input
-	use := contentPart{Type: "tool_use", ID: "toolu_" + uuid.NewV4().String()[:8], Name: step.Tool, Input: input}
-	payload.ToolUseID = use.ID
-	answers, err := session.fire(hookPreToolUse, step.Tool, payload)
-	if err != nil {
-		return "", err
-	}
-	preReturned := time.Now()
-	if err := session.write(
-		session.assistantRecord([]contentPart{use}, session.proc.script.Tokens, false),
-	); err != nil {
-		return "", err
-	}
-	result := contentPart{Type: "tool_result", ToolUseID: use.ID, Content: "done"}
-	denied := ""
-	deniedFound := false
-	for index := range answers {
-		if refused, reason := answers[index].denies(); refused && !deniedFound {
-			deniedFound = true
-			denied = reason
-			result.Content, result.IsError = reason, true
-		}
-	}
-	if !deniedFound {
-		if err := session.postToolUse(step.Tool, input, use.ID, time.Since(preReturned)); err != nil {
-			return "", err
-		}
-	}
-	record := claudeRecord{
-		Type: roleUser, SessionID: session.sessionID, Timestamp: stamp(time.Now()), CWD: session.proc.cwd,
-		Message: &claudeMessage{Role: roleUser, Content: []contentPart{result}},
-	}
-	return denied, session.write(record)
 }
 
 // compact writes what Claude Code leaves after /compact: the boundary record
@@ -359,6 +362,15 @@ func (session *claudeSession) compact(step Step) error {
 func (session *claudeSession) rename(name string) error {
 	session.title = name
 	return session.write(claudeRecord{Type: claudeCustomTitle, CustomTitle: name, SessionID: session.sessionID})
+}
+
+// taskNotification submits the prompt Claude Code opens a background agent's result turn with: its
+// UserPromptSubmit carries the <task-notification> prompt and no other mark (internal/hookentry
+// herdr_seat.go taskNotificationPrompt).
+func (session *claudeSession) taskNotification(name string) error {
+	_, err := session.prompt("<task-notification>\n<task-id>" + name + "</task-id>\n<status>completed</status>\n" +
+		"<summary>Agent \"" + name + "\" completed</summary>\n</task-notification>")
+	return err
 }
 
 // background starts a sidechain. Its records carry isSidechain and live in
@@ -420,7 +432,7 @@ func (session *claudeSession) mcp(step Step) error {
 	if err := session.proc.recorder.write("mcp-call-"+step.Tool+".json", string(encoded)+"\n"); err != nil {
 		return err
 	}
-	result := contentPart{Type: "tool_result", ToolUseID: use.ID, Content: string(encoded), IsError: answer.IsError}
+	result := contentPart{Type: blockToolResult, ToolUseID: use.ID, Content: string(encoded), IsError: answer.IsError}
 	return session.write(claudeRecord{
 		Type: roleUser, SessionID: session.sessionID, Timestamp: stamp(time.Now()), CWD: session.proc.cwd,
 		Message: &claudeMessage{Role: roleUser, Content: []contentPart{result}},
@@ -467,7 +479,11 @@ func (session *claudeSession) callMCP(step Step, input json.RawMessage) (*mcp.Ca
 		"TMUX="+session.proc.env("TMUX"), "TMUX_PANE="+session.proc.env("TMUX_PANE"),
 		"CLAUDE_CODE_SESSION_ID="+session.sessionID)
 	client := mcp.NewClient(&mcp.Implementation{Name: "mock-engine", Version: session.proc.script.Version}, nil)
-	connection, err := client.Connect(bounded, &mcp.CommandTransport{Command: command}, nil)
+	connection, err := client.Connect(
+		bounded,
+		discoveringTransport{&mcp.CommandTransport{Command: command}},
+		claudeMCPHandshake,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize MCP %s with %s: %w", name, server.Command, err)
 	}
@@ -497,17 +513,6 @@ func (session *claudeSession) clear() error {
 	return session.begin(sourceClear)
 }
 
-func (session *claudeSession) finish(reason string) error {
-	payload := session.payload(hookSessionEnd)
-	payload.Reason = reason
-	_, err := session.fire(hookSessionEnd, "", payload)
-	if session.seat != nil {
-		err = errors.Join(err, session.seat.release())
-		session.seat = nil
-	}
-	return err
-}
-
 // statusLine feeds the statusLine command the struct
 // internal/statusline/render.go:41-84 decodes.
 func (session *claudeSession) statusLine(usage Tokens) (string, error) {
@@ -529,6 +534,9 @@ func (session *claudeSession) statusLine(usage Tokens) (string, error) {
 		CWD:            session.proc.cwd,
 		SessionName:    session.title,
 	}
+	if session.job != nil {
+		input.SessionID, input.TranscriptPath = session.job.hostSession, session.job.hostTranscript
+	}
 	input.Model.ID, input.Model.DisplayName = session.model, claudeDisplayName(session.model)
 	input.Workspace.CurrentDir = session.proc.cwd
 	input.ContextWindow.UsedPercentage = percent
@@ -538,8 +546,17 @@ func (session *claudeSession) statusLine(usage Tokens) (string, error) {
 	input.ContextWindow.CurrentUsage.CacheCreationInputTokens = usage.CacheCreation
 	input.Cost.TotalCostUSD = usageCost(usage)
 	input.Effort.Level = session.call.effort
-	return invokeStatusLine(session.proc.ctx, session.statusCmd, input, session.proc.cwd, session.environ)
+	line, landed, err := invokeStatusLine(session.proc.ctx, session.status.command, input, session.proc.cwd,
+		session.environ, statusRunBound(session.status.refresh))
+	if err != nil || !landed {
+		// An aborted run keeps the line the last landed run painted; a fresh process has none.
+		return session.statusShown, err
+	}
+	session.statusShown = line
+	return line, nil
 }
+
+func (session *claudeSession) statusRefresh() time.Duration { return session.status.refresh }
 
 // claudeDisplayName is the family word Claude Code shows for a model id.
 func claudeDisplayName(model string) string {
@@ -607,6 +624,14 @@ func (session *claudeSession) headless() int {
 		}
 		prompt = strings.TrimSpace(string(content))
 	}
+	refusal, err := session.askAPI(prompt)
+	if err != nil {
+		warn(proc.stderr, "%v", err)
+		return ExitUsage
+	}
+	if refusal != "" {
+		return session.headlessAPIError(prompt, Step{Type: StepAPIError, Reply: refusal})
+	}
 	started := time.Now()
 	running := proc.script.forPrompt(prompt)
 	step := running.next()
@@ -619,6 +644,9 @@ func (session *claudeSession) headless() int {
 	}
 	if step.Type == StepCrash {
 		return step.ExitCode
+	}
+	if step.Type == StepAPIError {
+		return session.headlessAPIError(prompt, step)
 	}
 	reply, busyMS, usage := running.turnReply(step)
 	if !sleepOrCancel(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
@@ -692,98 +720,4 @@ type modelUsage struct {
 	Output        int64 `json:"outputTokens"`
 	CacheRead     int64 `json:"cacheReadInputTokens"`
 	CacheCreation int64 `json:"cacheCreationInputTokens"`
-}
-
-// Transcript records, in the keys internal/transcript/transcript.go:49-75,
-// meta.go:47-84 and internal/index/claude.go:13-25 read.
-type claudeRecord struct {
-	Type             string           `json:"type"`
-	UUID             string           `json:"uuid,omitempty"`
-	SessionID        string           `json:"sessionId,omitempty"`
-	Timestamp        string           `json:"timestamp,omitempty"`
-	CWD              string           `json:"cwd,omitempty"`
-	IsSidechain      bool             `json:"isSidechain"`
-	IsMeta           bool             `json:"isMeta,omitempty"`
-	IsCompactSummary bool             `json:"isCompactSummary,omitempty"`
-	AgentID          string           `json:"agentId,omitempty"`
-	Entrypoint       string           `json:"entrypoint,omitempty"`
-	PromptSource     string           `json:"promptSource,omitempty"`
-	CustomTitle      string           `json:"customTitle,omitempty"`
-	Subtype          string           `json:"subtype,omitempty"`
-	CompactMetadata  *compactMetadata `json:"compactMetadata,omitempty"`
-	Message          *claudeMessage   `json:"message,omitempty"`
-}
-
-type compactMetadata struct {
-	Trigger    string `json:"trigger"`
-	PreTokens  int64  `json:"preTokens"`
-	PostTokens int64  `json:"postTokens"`
-}
-
-type claudeMessage struct {
-	Role    string       `json:"role"`
-	Model   string       `json:"model,omitempty"`
-	Content any          `json:"content"`
-	Usage   *claudeUsage `json:"usage,omitempty"`
-}
-
-type claudeUsage struct {
-	Input         int64 `json:"input_tokens"`
-	CacheCreation int64 `json:"cache_creation_input_tokens"`
-	CacheRead     int64 `json:"cache_read_input_tokens"`
-	Output        int64 `json:"output_tokens"`
-}
-
-type contentPart struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
-	IsError   bool            `json:"is_error,omitempty"`
-}
-
-func (session *claudeSession) userRecord(text string, meta bool) claudeRecord {
-	return claudeRecord{
-		Type:         roleUser,
-		UUID:         uuid.NewV4().String(),
-		SessionID:    session.sessionID,
-		Timestamp:    stamp(time.Now()),
-		CWD:          session.proc.cwd,
-		IsMeta:       meta,
-		Entrypoint:   "cli",
-		PromptSource: "typed",
-		Message:      &claudeMessage{Role: roleUser, Content: text},
-	}
-}
-
-func (session *claudeSession) assistantRecord(parts []contentPart, usage Tokens, sidechain bool) claudeRecord {
-	return claudeRecord{
-		Type: roleAssistant, UUID: uuid.NewV4().String(), SessionID: session.sessionID, Timestamp: stamp(time.Now()),
-		CWD: session.proc.cwd, IsSidechain: sidechain,
-		Message: &claudeMessage{
-			Role:    roleAssistant,
-			Model:   session.model,
-			Content: parts,
-			Usage: &claudeUsage{
-				Input:         usage.Input,
-				CacheCreation: usage.CacheCreation,
-				CacheRead:     usage.CacheRead,
-				Output:        usage.Output,
-			},
-		},
-	}
-}
-
-func (session *claudeSession) write(record claudeRecord) error {
-	if session.proc.script.NoTranscript {
-		return nil
-	}
-	encoded, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("encode transcript record: %w", err)
-	}
-	return appendLine(session.transcript, encoded)
 }

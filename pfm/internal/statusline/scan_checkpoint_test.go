@@ -78,9 +78,9 @@ var foldKinds = []struct {
 		view: func(state foldState) string {
 			fold := state.(*activityFold)
 			return fmt.Sprintf("seen=%d last=%s errors=%d compactions=%d hit=%d context=%d effort=%s model=%s "+
-				"turn=%v/%v/%v/%s spend=%s", len(fold.Seen), fold.Last.UTC(), fold.Errors, fold.Compactions,
-				fold.CacheHit, fold.Context, fold.Effort, fold.Model, fold.Turn.Open, fold.Turn.Delegating,
-				fold.Turn.Seen, fold.Turn.Last.UTC(), spendView(fold.Spend.total()))
+				"turn=%v/%v spend=%s", len(fold.Seen), fold.Last.UTC(), fold.Errors, fold.Compactions,
+				fold.CacheHit, fold.Context, fold.Effort, fold.Model, fold.Turn.Open, fold.Turn.Seen,
+				spendView(fold.Spend.total()))
 		},
 	},
 }
@@ -357,7 +357,7 @@ func TestRenderMarksASpendFloorWhileTheFoldCatchesUp(t *testing.T) {
 	if gauge.transcript || gauge.transcriptErr {
 		t.Fatalf("gauge %+v; want the harness's gauge, the transcript neither read nor failed", gauge)
 	}
-	if got := stripANSICodes(line); !strings.Contains(got, "💰$?/0/0/0+?") {
+	if got := stripANSICodes(line); got != "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/0/0/0+? │ 💾1h?" {
 		t.Fatalf("line %q; want the spend shown as a floor not yet priced, +?", got)
 	}
 }
@@ -453,7 +453,7 @@ func TestAgentRowBehindItsBudgetClaimsNoTurnOrContext(t *testing.T) {
 	writeInPlace(t, path, strings.Join(scanFixtureLines, "\n")+"\n")
 	scans.deadline = time.Now().Add(-time.Second)
 	activity := readAgentActivity(session, "a1", testPrices(t), scans)
-	if activity.err != nil || activity.turn.err == nil || !activity.last.IsZero() || !activity.turn.last.IsZero() ||
+	if activity.err != nil || activity.turn.err == nil || !activity.last.IsZero() || activity.turn.open ||
 		activity.context != 0 || activity.cacheHit != -1 || !activity.spend.behind || !activity.spend.partial {
 		t.Fatalf("behind: err %v, turn %+v, last %s, context %d, hit %d, spend %s behind %v; want the turn "+
 			"unread, no last entry, context or hit, the spend a floor", activity.err, activity.turn, activity.last,

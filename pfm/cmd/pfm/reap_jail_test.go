@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -27,7 +29,7 @@ import (
 // where the failure surfaces as an unrelated-looking tmux error.
 func reapJail(t *testing.T) string {
 	t.Helper()
-	root, err := os.MkdirTemp("", "rp")
+	root, err := os.MkdirTemp(paths.TempRoot(), "rp")
 	if err != nil {
 		t.Fatalf("create jail root: %v", err)
 	}
@@ -48,10 +50,9 @@ func reapJail(t *testing.T) string {
 		}
 	}
 
-	// TMUX_TMPDIR and PFM_TMUX_DIR must agree: the probe addresses a
-	// socket by -L (which resolves through TMUX_TMPDIR) and the kill by -S
-	// (which joins PFM_TMUX_DIR), and a jail where those two disagree
-	// tests nothing at all.
+	// The probe and the kill both address a socket by -S under
+	// PFM_TMUX_DIR; TMUX_TMPDIR is pinned to the jail so no tmux call
+	// reaches the operator's default socket directory.
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv("PFM_TMUX_DIR", socketDir)
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
@@ -64,7 +65,7 @@ func reapJail(t *testing.T) string {
 	// The reaper reads the REAL /proc here on purpose: the jail's panes are
 	// real processes, and the non-chat guard is only proved by a real process
 	// tree. Reading /proc mutates nothing.
-	t.Setenv("PFM_PROC_ROOT", "/proc")
+	t.Setenv(paths.EnvProcRoot, paths.SystemProcRoot())
 	// A stub `claude agents --json` keeps the busy probe answering. Without an
 	// answer the sweep fails closed and would kill nothing — which would make
 	// this fixture pass for the wrong reason.
@@ -138,6 +139,7 @@ func reapServerAlive(root, socket string) bool {
 // Claude busy proof is unavailable. Its durable branch-seat marker is the
 // evidence that an untouched, unattached fork is intentionally reapable.
 func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -197,6 +199,7 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 // orphan, however idle its chat looks. The twin socket in the same sweep
 // proves the guard is a guard and not a refusal to reap anything.
 func TestReapNeverKillsASocketHostingNonChatWork(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -256,6 +259,7 @@ func TestReapNeverKillsASocketHostingNonChatWork(t *testing.T) {
 // A chat writing its transcript right now is working, whatever the busy
 // snapshot said a moment ago.
 func TestReapKeepsAChatWhoseTranscriptIsBeingWritten(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -286,6 +290,7 @@ func TestReapKeepsAChatWhoseTranscriptIsBeingWritten(t *testing.T) {
 // A socket file with no server behind it is only a corpse once it is old
 // enough that a server cannot still be starting up behind it.
 func TestReapLeavesAYoungEmptySocketAlone(t *testing.T) {
+	testjail.TmuxServer(t)
 	root := reapJail(t)
 	const socket = "cc-1800000004-42-4"
 	path := filepath.Join(reapSocketDir(root), socket)

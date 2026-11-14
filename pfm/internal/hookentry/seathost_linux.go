@@ -8,10 +8,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func seatForeground(tty, group int) error {
-	return unix.IoctlSetPointerInt(tty, unix.TIOCSPGRP, group)
-}
-
 // seatTerminalPath resolves the controlling PTY even when launcher stdio is redirected.
 func seatTerminalPath(tty int) (string, error) {
 	device, err := unix.IoctlGetInt(tty, unix.TIOCGDEV)
@@ -27,4 +23,13 @@ func seatTerminalPath(tty int) (string, error) {
 		return "", fmt.Errorf("controlling PTY %s device %d does not match %d", path, stat.Rdev, uint32(device))
 	}
 	return path, nil
+}
+
+// seatTerminalHungUp reads a PTY hangup without blocking: poll reports POLLHUP.
+func seatTerminalHungUp(tty int) (bool, error) {
+	terminal := []unix.PollFd{{Fd: int32(tty)}}
+	if _, err := unix.Poll(terminal, 0); err != nil {
+		return false, err
+	}
+	return terminal[0].Revents&unix.POLLHUP != 0, nil
 }

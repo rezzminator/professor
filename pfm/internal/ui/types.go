@@ -110,7 +110,10 @@ type Snapshot struct {
 	Width             int
 	Height            int
 	InitialQuery      string
-	InitialCursorID   string
+	// HerdrSpace is the label of the Herdr space a picker opened in ~ runs in;
+	// the picker opens on the place wearing it (omnibox.go). "" elsewhere.
+	HerdrSpace      string
+	InitialCursorID string
 	// ScheduleError is a failed read of the unseen-schedule flags, shown in
 	// the Chats header so a broken read never renders as "no schedules".
 	ScheduleError string
@@ -118,6 +121,10 @@ type Snapshot struct {
 	// working state (internal/rowfacts), shown in the header: rows with no
 	// facts must read as "could not look", never as "nothing to show".
 	FactsError string
+	// ScanError is the pass's per-item failures that still composed a fleet:
+	// an unreadable primary account, a native seat left unenriched. Shown in
+	// the header so a stand-in or a bare seat never reads as the whole truth.
+	ScanError string
 	// MergeNewChat is used only by the interactive picker. Plain and TSV
 	// output leave it false so their existing two-row output remains stable.
 	MergeNewChat bool
@@ -195,8 +202,16 @@ type Outcome struct {
 	PrimaryAccount       int
 	ClaudePrimaryAccount int
 	Cache1H              bool
+	Resume               *ResumeChoice // set by a finished resume walk: it overrides Row's account and Cache1H
 	Query                string
 	KillChanges          []KillChange
+}
+
+// ResumeChoice is what a resume walk chose for a resumable chat: the account
+// and prompt cache its session resumes under.
+type ResumeChoice struct {
+	Account int
+	Cache1H bool
 }
 
 // RefreshFailure is why a refresh pass produced no fleet: the stage that

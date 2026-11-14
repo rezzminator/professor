@@ -2,6 +2,8 @@ package updatecheck
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -35,8 +37,11 @@ func TestUnreachable(t *testing.T) {
 		close(release)
 		timeout.Close()
 	})
-	tls := httptest.NewTLSServer(http.NotFoundHandler())
-	defer tls.Close()
+	secure := httptest.NewTLSServer(http.NotFoundHandler())
+	defer secure.Close()
+	// an empty root pool distrusts the test server's certificate without
+	// loading the host's system roots
+	distrusting := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: x509.NewCertPool()}}}
 
 	for _, tc := range []struct {
 		name, url, current string
@@ -48,7 +53,7 @@ func TestUnreachable(t *testing.T) {
 			name: "timeout", url: timeout.URL, current: "v1.0.0", want: true,
 			client: &http.Client{Timeout: 50 * time.Millisecond},
 		},
-		{name: "TLS failure", url: tls.URL, current: "v1.0.0"},
+		{name: "TLS failure", url: secure.URL, current: "v1.0.0", client: distrusting},
 		{name: "unsupported URL", url: "ftp://127.0.0.1/latest", current: "v1.0.0"},
 		{name: "answered", url: answered.URL, current: "v1.0.0"},
 		{name: "untagged", url: untagged.URL, current: "v1.0.0"},

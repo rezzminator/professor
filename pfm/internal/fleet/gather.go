@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/kill"
@@ -27,14 +28,22 @@ func PrintWarn(stderr io.Writer) Warn {
 	}
 }
 
+// KillFinisherRunner is the deps.Runner every kill manager built from
+// KillDependencies launches its detached finisher through; nil is the real
+// runner. A test binary sets it: os.Executable there is the test binary, not
+// pfm, so a real start would run the suite's binary as the finisher.
+var KillFinisherRunner deps.Runner
+
 // KillDependencies is the kill manager's view of the runtime: the fleet's
-// paths, both engines' roots, and the config the exit choreography reads.
+// paths, both engines' roots, the config the exit choreography reads, and
+// the runner its finisher starts through.
 func KillDependencies(runtime pfmconfig.Runtime) kill.Dependencies {
 	return kill.Dependencies{
 		Paths:       runtime.Paths,
 		ClaudeRoots: append([]string(nil), runtime.Paths.Roots[pfmengine.Claude]...),
 		CodexHomes:  runtime.Config.CodexHomes(),
 		ConfigPath:  runtime.Config.Path,
+		Runner:      KillFinisherRunner,
 	}
 }
 
@@ -72,9 +81,7 @@ func Gather(
 		store.CodexThreads(data.Rollouts),
 		data.CxNames,
 	)
-	tmuxClient := gather.TmuxProbe{
-		TmuxTmpDir: filepath.Dir(env.Paths.TmuxDir),
-	}
+	tmuxClient := gather.TmuxProbe{TmuxDir: env.Paths.TmuxDir}
 	// The pane-binding manager lets the rollout-less live-process resolver
 	// (store.NewCodexThreadResolverRoots) rank a pane's fleet-recorded thread
 	// binding over its own birth-window guess — the guess never moves once a
@@ -84,8 +91,8 @@ func Gather(
 		return gather.Snapshot{}, fmt.Errorf("prepare Codex pane binding resolver: %w", err)
 	}
 	gatherer, err := gather.New(gather.Dependencies{
-		Tmux:       tmuxClient,
-		TmuxTmpDir: filepath.Dir(env.Paths.TmuxDir),
+		Paths: &env.Paths,
+		Tmux:  tmuxClient,
 		CodexName: func(rolloutPath string) naming.CodexName {
 			return codexNamesByPath[filepath.Clean(rolloutPath)]
 		},

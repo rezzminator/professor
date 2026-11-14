@@ -1,26 +1,19 @@
 package installer
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/mockengine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv("MOCK_ENGINE_HELPER") == "1" {
-		os.Exit(
-			mockengine.Main(context.Background(), os.Args[0], os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv),
-		)
-	}
 	// Install convergence must not discover or signal another suite's painter.
-	procRoot, err := os.MkdirTemp("", "installer-proc-")
+	procRoot, err := os.MkdirTemp(paths.TempRoot(), "installer-proc-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "installer process jail: %v\n", err)
 		os.Exit(1)

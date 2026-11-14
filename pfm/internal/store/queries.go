@@ -115,7 +115,7 @@ LIMIT ?`, limit)
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate cached transcripts: %w", err)
 	}
-	return s.clearNames(ctx, transcripts)
+	return s.clearNames(ctx, transcripts), nil
 }
 
 func (s *Store) defaultRollouts(
@@ -382,23 +382,7 @@ func (s *Store) Transcript(
 	if err != nil {
 		return Transcript{}, false, fmt.Errorf("query transcript %q: %w", uuid, err)
 	}
-	transcript, err = s.clearName(ctx, transcript)
-	return transcript, err == nil, err
-}
-
-// Transcripts returns all transcripts ordered by UUID.
-func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
-	transcripts, err := queryRows(
-		ctx,
-		s.logged(),
-		"SELECT "+transcriptColumns+" FROM transcripts AS t ORDER BY t.uuid",
-		"transcript",
-		scanTranscript,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return s.clearNames(ctx, transcripts)
+	return s.clearName(ctx, transcript), true, nil
 }
 
 func scanTranscript(row rowScanner) (Transcript, error) {
@@ -492,17 +476,6 @@ func (s *Store) Rollout(ctx context.Context, id string) (Rollout, bool, error) {
 		return Rollout{}, false, fmt.Errorf("query rollout %q: %w", id, err)
 	}
 	return rollout, true, nil
-}
-
-// Rollouts returns all rollouts ordered by ID.
-func (s *Store) Rollouts(ctx context.Context) ([]Rollout, error) {
-	return queryRows(
-		ctx,
-		s.logged(),
-		"SELECT "+rolloutColumns+" FROM rollouts ORDER BY id",
-		"rollout",
-		scanRollout,
-	)
 }
 
 func queryRows[T any](

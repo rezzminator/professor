@@ -1,16 +1,19 @@
 package kill
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // THE BUG. A resumed Codex lineage member's rollout file lands on disk the
@@ -26,8 +29,18 @@ import (
 // id: the id the picker's composed row (keyed on the lineage ROOT) never
 // carries, so the kill never suppresses it.
 func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
-	for _, suffix := range []string{"", "_cccccccc-cccc-4ccc-8ccc-cccccccccccc"} {
-		t.Run("rollout"+suffix, func(t *testing.T) {
+	for _, test := range []struct {
+		name, suffix string
+		// unreadable writes a member header no reader can decode: the kill
+		// says so and falls back to the member's own id.
+		unreadable bool
+	}{
+		{name: "rollout"},
+		{name: "rollout_cccccccc-cccc-4ccc-8ccc-cccccccccccc", suffix: "_cccccccc-cccc-4ccc-8ccc-cccccccccccc"},
+		{name: "unreadable header", unreadable: true},
+	} {
+		suffix := test.suffix
+		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
 			defer func() {
@@ -53,7 +66,7 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 				Path:        rootPath,
 				Size:        100,
 				MTimeNS:     100,
-				CWD:         "/work/proja",
+				CWD:         testjail.Place("/work/proja"),
 				UserThread:  true,
 				FirstPrompt: "start",
 				PromptCount: 1,
@@ -64,12 +77,15 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 			// session_id link back to root lives in the file's own header, but
 			// nothing has indexed it yet, so the fleet database knows nothing about
 			// it at all.
+			header := `{"type":"session_meta","payload":{"id":"` + memberID +
+				`","thread_source":"user","session_id":"` + rootID + `","cwd":"/work/proja"}}` + "\n"
+			if test.unreadable {
+				header = "not json\n"
+			}
 			writeTestFile(
 				t,
 				memberPath,
-				`{"type":"session_meta","payload":{"id":"`+memberID+
-					`","thread_source":"user","session_id":"`+rootID+`","cwd":"/work/proja"}}`+"\n"+
-					`{"type":"event_msg","payload":{"type":"user_message","message":"resumed"}}`+"\n",
+				header+`{"type":"event_msg","payload":{"type":"user_message","message":"resumed"}}`+"\n",
 			)
 
 			proc := &fakeProc{
@@ -81,7 +97,9 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 				stats:   map[int]gather.ProcStat{40: {ParentPID: 11}},
 				environ: map[int]map[string]string{},
 			}
+			var warnings bytes.Buffer
 			manager, err := New(database, Dependencies{
+				Paths: jail.resolved(),
 				ResolveTarget: func(_ context.Context, identity resolve.Identity) (Target, error) {
 					if identity.ID != memberID || identity.Pane != "%9" {
 						t.Fatalf("unproved caller projection: %+v", identity)
@@ -92,6 +110,7 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 				Tmux:    &fakeTmux{},
 				Spawner: &captureSpawner{},
 				Now:     func() time.Time { return time.Unix(50, 0) },
+				Log:     &warnings,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -110,6 +129,23 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 			target, err := manager.Kill(ctx, Request{Self: true})
 			if err != nil {
 				t.Fatalf("self-kill on an unindexed lineage member: %v", err)
+			}
+			if test.unreadable {
+				// The cause is the header reader's own words, carried whole.
+				_, headerErr := codexmeta.ReadHeader(memberPath)
+				if headerErr == nil {
+					t.Fatalf("fixture header %s decoded", memberPath)
+				}
+				want := "pfm kill: resolve the lineage of " + memberPath + ": " + headerErr.Error() +
+					"; the kill falls back to the chat's own id\n"
+				if target.ID != memberID || warnings.String() != want {
+					t.Fatalf("unreadable header kill = %q, warning %q; want %q, warning %q",
+						target.ID, warnings.String(), memberID, want)
+				}
+				return
+			}
+			if warnings.String() != "" {
+				t.Fatalf("readable header kill warned: %q", warnings.String())
 			}
 			if target.ID != rootID {
 				t.Fatalf(

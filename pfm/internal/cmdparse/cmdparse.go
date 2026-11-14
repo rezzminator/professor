@@ -38,14 +38,27 @@ const (
 	maxShellDepth   = 8
 )
 
-// Call is one Bash tool call: its tool_use_id, its command string and the
-// absolute directory it ran in.
+// Call is one Bash tool call: its tool_use_id and its command string.
 type Call struct {
-	ID, Command, Cwd string
+	ID, Command string
 	// Vars seeds the parse with variables the command's shell already has
 	// (HOME), so `$HOME/x` resolves; nil seeds nothing.
 	Vars map[string]string
+	// Script is the script file Command was read from; the zero value for a
+	// typed command.
+	Script Script
 }
+
+// Script is a script file a call runs: `$0` and `${BASH_SOURCE[0]}` are Path,
+// and `$1`…`$9` are Args (unset ones empty) outside a function, unless the
+// script reassigns them with shift or set.
+type Script struct {
+	Path string
+	Args []string
+}
+
+// positional are the parameters a Script's Args seed.
+var positional = strings.Fields("1 2 3 4 5 6 7 8 9")
 
 // Part is one simple command of a call, in source order. Program is the
 // command word as written, after unwrapping any wrapper (`timeout 60 env
@@ -66,11 +79,19 @@ type Part struct {
 	Args    []string
 	Status  string
 	Bounded bool
-	// Unread is true for a bash, sh or zsh part whose -c string holds an
-	// expansion the parse cannot know: the string is not parsed, so the
-	// commands it runs are among no part, and a caller deciding on them
-	// treats the call as unread.
+	// Unread is true for a bash, sh, zsh, dash or ksh part whose -c string,
+	// or an eval part whose words, hold an expansion the parse cannot know:
+	// the string is not parsed, so the commands it runs are among no part,
+	// and a caller deciding on them treats the call as unread.
 	Unread bool
+	// Lasting is true for a part whose effect on the shell (a cd, an
+	// assignment) every later part of the call sees: one on the call's
+	// top-level list, in a { } block there, or on the left of && or ||. A
+	// part in a child shell (a subshell, a substitution, a pipeline, a
+	// background job, a -c string, a find -exec) or one that runs only on a
+	// condition (an if, case or loop body, a function, the right of && or
+	// ||, an eval string) is not.
+	Lasting bool
 	// Env holds the variable assignments in force for the command: those set
 	// earlier in the call, its own `NAME=v` prefix and those of an
 	// `env`/`sudo` wrapper, less what `unset` and `env -u/-i` removed. A value
@@ -92,16 +113,13 @@ type Redirect struct {
 }
 
 // ParseBatch parses every call and returns its parts keyed by Call.ID. The
-// error return is for a malformed batch (duplicate id, relative cwd), never
-// for a command that did not parse.
+// error return is for a malformed batch (duplicate id), never for a command
+// that did not parse; the parse reads no cwd, so a relative one costs nothing.
 func ParseBatch(calls []Call) (map[string][]Part, error) {
 	out := make(map[string][]Part, len(calls))
 	for _, call := range calls {
 		if _, dup := out[call.ID]; dup {
 			return nil, fmt.Errorf("cmdparse: duplicate call id %q in batch", call.ID)
-		}
-		if !filepath.IsAbs(call.Cwd) {
-			return nil, fmt.Errorf("cmdparse: call %q: cwd %q is not absolute", call.ID, call.Cwd)
 		}
 		out[call.ID] = parseCall(call).parts
 	}
@@ -115,13 +133,22 @@ type callParser struct {
 	arrays map[string][]string // literal indexed arrays: NAME=(a b c)
 	// env is the assignments in force for the next command (Part.Env); base
 	// is the call's seeded variables, which a child shell inherits.
-	env     map[string]string
-	base    map[string]string
+	env  map[string]string
+	base map[string]string
+	// script: the command was read from a script file (Call.Script).
+	script  bool
 	parts   []Part
 	printer *syntax.Printer
 	// shellDepth counts the literal -c strings the walk is inside, up to
 	// maxShellDepth.
 	shellDepth int
+	// loops is the product of the item counts of the for loops the walk is
+	// inside, each body walked once per item, up to maxExpansions.
+	loops int
+	// lasting holds the call's statements whose parts are Lasting
+	// (markLasting); now is whether the statement being walked is one.
+	lasting map[*syntax.Stmt]bool
+	now     bool
 }
 
 func parseCall(call Call) *callParser {
@@ -131,9 +158,16 @@ func parseCall(call Call) *callParser {
 		env:     map[string]string{},
 		base:    call.Vars,
 		printer: syntax.NewPrinter(),
+		loops:   1,
+		lasting: map[*syntax.Stmt]bool{},
 	}
 	for name, val := range call.Vars {
 		p.vars[name] = []string{val}
+	}
+	if call.Script.Path != "" {
+		p.vars["0"] = []string{call.Script.Path}
+		p.arrays["BASH_SOURCE"] = []string{call.Script.Path}
+		p.script = true
 	}
 	if len(call.Command) > maxCommandBytes {
 		p.parts = []Part{{Status: StatusUnparsed, Bounded: true}}
@@ -144,8 +178,62 @@ func parseCall(call Call) *callParser {
 		p.parts = []Part{{Status: StatusError}}
 		return p
 	}
+	if p.script && !reassignsPositional(file) {
+		for i, name := range positional {
+			p.vars[name] = []string{""}
+			if i < len(call.Script.Args) {
+				p.vars[name] = []string{call.Script.Args[i]}
+			}
+		}
+	}
+	markLasting(file.Stmts, p.lasting)
 	syntax.Walk(file, p.visit)
 	return p
+}
+
+// markLasting adds to out every statement of stmts that runs in the call's
+// own shell whenever a later statement does: through { } blocks and the
+// left side of && and ||, never a background job (Part.Lasting).
+func markLasting(stmts []*syntax.Stmt, out map[*syntax.Stmt]bool) {
+	for _, s := range stmts {
+		if s.Background || s.Coprocess {
+			continue
+		}
+		switch c := s.Cmd.(type) {
+		case *syntax.BinaryCmd:
+			if c.Op == syntax.AndStmt || c.Op == syntax.OrStmt {
+				markLasting([]*syntax.Stmt{c.X}, out)
+			}
+		case *syntax.Block:
+			markLasting(c.Stmts, out)
+		default:
+			out[s] = true
+		}
+	}
+}
+
+// reassignsPositional reports a shift, or a set given operands, anywhere in
+// file: after one, `$1`… no longer hold the script's arguments.
+func reassignsPositional(file *syntax.File) bool {
+	found := false
+	syntax.Walk(file, func(node syntax.Node) bool {
+		call, ok := node.(*syntax.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return !found
+		}
+		switch call.Args[0].Lit() {
+		case "shift":
+			found = true
+		case "set":
+			for _, arg := range call.Args[1:] {
+				if lit := arg.Lit(); lit == "--" || !strings.HasPrefix(lit, "-") && !strings.HasPrefix(lit, "+") {
+					found = true
+				}
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 func (p *callParser) visit(node syntax.Node) bool {
@@ -155,12 +243,14 @@ func (p *callParser) visit(node syntax.Node) bool {
 		case *syntax.CallExpr:
 			p.walkNested(cmd.Assigns, cmd.Args, x.Redirs)
 			from := len(p.parts)
+			p.now = p.lasting[x]
 			p.callStmt(cmd)
 			p.attachRedirs(from, x.Redirs)
 			return false
 		case *syntax.DeclClause:
 			p.walkNested(cmd.Args, nil, x.Redirs)
 			from := len(p.parts)
+			p.now = p.lasting[x]
 			p.declStmt(cmd)
 			p.attachRedirs(from, x.Redirs)
 			return false
@@ -175,31 +265,66 @@ func (p *callParser) visit(node syntax.Node) bool {
 		}
 		p.attachRedirs(from, x.Redirs)
 		return false
+	case *syntax.FuncDecl:
+		// A function's $1… are its own arguments, never the script's.
+		saved := map[string][]string{}
+		for _, name := range positional {
+			if vals, ok := p.vars[name]; ok {
+				saved[name] = vals
+				delete(p.vars, name)
+			}
+		}
+		if x.Body != nil {
+			syntax.Walk(x.Body, p.visit)
+		}
+		maps.Copy(p.vars, saved)
+		return false
 	case *syntax.ForClause:
 		iter, ok := x.Loop.(*syntax.WordIter)
 		if !ok {
 			return true
 		}
 		p.walkNested(nil, iter.Items, nil)
-		var vals []string
-		resolved := true
-	items:
-		for _, item := range iter.Items {
-			for _, a := range p.args(item) {
-				if !a.resolved {
-					resolved = false
-					break items
-				}
-				vals = append(vals, a.text)
-			}
-		}
-		p.setVar(iter.Name.Value, vals, resolved && len(iter.Items) > 0)
-		for _, stmt := range x.Do {
-			syntax.Walk(stmt, p.visit)
-		}
+		p.forItems(iter, x.Do)
 		return false
 	}
 	return true
+}
+
+// forItems walks a for loop's body once per item, the variable bound to
+// that item, as the shell runs it. A loop over a word the parse cannot know,
+// over no item, or one whose nesting would pass maxExpansions body walks has
+// its body walked once with the variable unbound.
+func (p *callParser) forItems(iter *syntax.WordIter, body []*syntax.Stmt) {
+	walk := func() {
+		for _, stmt := range body {
+			syntax.Walk(stmt, p.visit)
+		}
+	}
+	var vals []string
+	resolved := true
+items:
+	for _, item := range iter.Items {
+		for _, a := range p.args(item) {
+			if !a.resolved {
+				resolved = false
+				break items
+			}
+			vals = append(vals, a.text)
+		}
+	}
+	if !resolved || len(vals) == 0 || p.loops*len(vals) > maxExpansions {
+		p.setVar(iter.Name.Value, nil, false)
+		walk()
+		return
+	}
+	outer := p.loops
+	p.loops *= len(vals)
+	defer func() { p.loops = outer }()
+	for _, v := range vals {
+		p.setVar(iter.Name.Value, []string{v}, true)
+		walk()
+	}
 }
 
 // walkNested visits the command substitutions inside a command's words
@@ -315,6 +440,7 @@ func (p *callParser) emit(part Part) {
 	if part.Status == "" {
 		part.Status = StatusOK
 	}
+	part.Lasting = p.now
 	p.parts = append(p.parts, part)
 }
 
@@ -334,10 +460,16 @@ func (p *callParser) callStmt(cmd *syntax.CallExpr) {
 		// unwrapProgram needs a word.
 		return
 	}
+	p.run(args, cmd.Assigns, nil)
+}
+
+// run emits the parts of one command's words: the program they run once
+// unwrapped, under prefix's assignments and the outer wrappers' ops.
+func (p *callParser) run(args []arg, prefix []*syntax.Assign, outerOps []envOp) {
 	args, runs, ops := unwrapProgram(args)
 	program, rest := args[0].text, args[1:]
 	texts := argTexts(rest)
-	env := p.partEnv(cmd.Assigns, ops)
+	env := p.partEnv(prefix, append(outerOps, ops...))
 	if !runs {
 		p.emit(Part{Program: program, Args: texts, Env: env})
 		return
@@ -345,6 +477,15 @@ func (p *callParser) callStmt(cmd *syntax.CallExpr) {
 	base := filepath.Base(program)
 	if script, ok := shellScript(base, rest); ok {
 		p.innerShell(program, rest, script, env)
+		return
+	}
+	if base == "eval" {
+		p.evalWords(program, rest, env)
+		return
+	}
+	if base == "find" {
+		p.emit(Part{Program: program, Args: texts, Env: env})
+		p.findExec(rest, prefix, append(outerOps, ops...))
 		return
 	}
 	if (base == "node" || base == "nodejs") && hasAny(texts, "-e", "--eval", "-p", "--print") {

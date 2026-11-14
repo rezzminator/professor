@@ -45,3 +45,30 @@ func HerdrConfig(home string, env Env) (string, error) {
 	}
 	return absolute, nil
 }
+
+// HerdrServerSocket is the socket the `herdr` command itself serves and
+// attaches to from env: HERDR_SOCKET_PATH, else the named session
+// HERDR_SESSION's socket, else the default session's, all under
+// XDG_CONFIG_HOME (~/.config when unset or empty).
+func HerdrServerSocket(env Env) (string, error) {
+	if socket := env.Get("HERDR_SOCKET_PATH"); socket != "" {
+		absolute, err := filepath.Abs(socket)
+		if err != nil {
+			return socket, fmt.Errorf("resolve HERDR_SOCKET_PATH %s: %w", socket, err)
+		}
+		return absolute, nil
+	}
+	directory := env.Get("XDG_CONFIG_HOME")
+	if directory == "" {
+		home, err := env.Home()
+		if err != nil {
+			return "", fmt.Errorf("resolve the Herdr socket: home directory: %w", err)
+		}
+		directory = filepath.Join(home, ".config")
+	}
+	directory = filepath.Join(directory, "herdr")
+	if session := env.Get("HERDR_SESSION"); session != "" {
+		directory = filepath.Join(directory, "sessions", session)
+	}
+	return filepath.Join(directory, "herdr.sock"), nil
+}

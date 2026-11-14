@@ -138,26 +138,7 @@ func followName(ctx context.Context, request Request, options Options, tmux Tmux
 			request.Name,
 		)
 	}
-	if request.Transcript == "" {
-		return
-	}
-	title := request.Name + LeftBehindSuffix
-	if err := labelTranscript(request.Transcript, title, TranscriptBackupDir(options.Home), options.Clock); err != nil {
-		fmt.Fprintf(
-			stderr,
-			"pfm chat reload --new: the conversation left behind in %s is NOT relabelled %q: %v\n",
-			request.Transcript,
-			title,
-			err,
-		)
-		return
-	}
-	fmt.Fprintf(
-		stderr,
-		"pfm chat reload --new: conversation left behind relabelled %q (%s)\n",
-		title,
-		request.Transcript,
-	)
+	labelLeftBehind(request.Transcript, request.Name, options, stderr)
 }
 
 const (

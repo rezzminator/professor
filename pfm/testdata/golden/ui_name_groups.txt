@@ -1,0 +1,68 @@
+ ◆ pfm   ● 1 Codex                                                                                       ·           ·  
+ tabs   Chats   Stats   Limits   cosmos    tab/shift+tab                                                       ·        
+ Chats · 🥈 account 2 · ⚡ 1h · 1 rows · 0 hidden · 0 empty                                                      ·      
+find › t                                                                                                     1/1 visible
+╭─ fleet 1 ─────────────────────────────────────────────────────────────────────  ╭─ dossier ───────────────────────────
+│╭─ alpha ───────────────────────────────────────────────────────────────── ● 1     LIVE   Codex  🥇                    
+││  P (1)                                                                          P:BUILDER                            
+│›   ● P:BUILDER          ⬢ 🥇                       0p    0B ◖▶ open◗        0s   ───────────────────────────────────  
+│                                                                                  ┃ no prompt recorded for this chat   
+│                                                                                                                       
+│                                                                                  project  alpha                       
+│                                                                                  active   ▰▰▰▰▰▰▰▰  0s ago            
+│                                                                                                                       
+│                                                                              ◆   ◖ ▶ open                        ⏎ ◗  
+╰──────────┴7d──────────┴1d───────┴6h─────────┴1h─────────┴10m───────────────0s▲  ╰─────────────────────────────────────
+  ↑↓  move   ←→  action   ⏎  open   esc  close  type to find · @ go · ⇧←→ place                                         
+  ⌃X  kill   ⌃O  reboot                                                                                                 
+ ◆ pfm   ● 1 Claude   ● 1 Codex                                                                          ·           ·  
+ tabs   Chats   Stats   Limits   cosmos    tab/shift+tab                                                ·            ·  
+ Chats · 🥈 account 2 · ⚡ 1h · 2 rows · 0 hidden · 0 empty                                                      ·      
+find › t                                                                                                     2/2 visible
+╭─ fleet 2 ─────────────────────────────────────────────────────────────────────  ╭─ dossier ───────────────────────────
+│╭─ alpha ───────────────────────────────────────────────────────────────── ● 2     LIVE   Codex  🥇                    
+││  P (2)                                                                          P:BUILDER                            
+│›   ● P:BUILDER          ⬢ 🥇                       0p    0B ◖▶ open◗        0s   ───────────────────────────────────  
+││   ● P:TESTER                🥇                         0p    0B ▰▰▰▰▰▰▰▰   0s   ┃ no prompt recorded for this chat   
+│                                                                                                                       
+│                                                                                  project  alpha                       
+│                                                                                  active   ▰▰▰▰▰▰▰▰  0s ago            
+│                                                                                                                       
+│                                                                              ◆   ◖ ▶ open                        ⏎ ◗  
+╰──────────┴7d──────────┴1d───────┴6h─────────┴1h─────────┴10m───────────────0s▲  ╰─────────────────────────────────────
+  ↑↓  move   ←→  action   ⏎  open   esc  close  type to find · @ go · ⇧←→ place                                         
+  ⌃X  kill   ⌃O  reboot                                                                                                 
+ ◆ pfm   ● 1 Codex                                                                                       ·           ·  
+ tabs   Chats   Stats   Limits   cosmos    tab/shift+tab                                                       ·        
+ Chats · 🥈 account 2 · ⚡ 1h · 1 rows · 0 hidden · 0 empty                                                      ·      
+find › t                                                                                                     1/1 visible
+╭─ fleet 1 ─────────────────────────────────────────────────────────────────────  ╭─ dossier ───────────────────────────
+│╭─ alpha ───────────────────────────────────────────────────────────────── ● 1     LIVE   Codex  🥇                    
+│› ● BUILDER              ⬢ 🥇                       0p    0B ◖▶ open◗        0s   BUILDER                              
+│                                                                                  ───────────────────────────────────  
+│                                                                                  ┃ no prompt recorded for this chat   
+│                                                                                                                       
+│                                                                                  project  alpha                       
+│                                                                                  active   ▰▰▰▰▰▰▰▰  0s ago            
+│                                                                                                                       
+│                                                                              ◆   ◖ ▶ open                        ⏎ ◗  
+╰──────────┴7d──────────┴1d───────┴6h─────────┴1h─────────┴10m───────────────0s▲  ╰─────────────────────────────────────
+  ↑↓  move   ←→  action   ⏎  open   esc  close  type to find · @ go · ⇧←→ place                                         
+  ⌃X  kill   ⌃O  reboot                                                                                                 
+ ◆ pfm   ● 1 Codex                                                                                       ·           ·  
+ tabs   Chats   Stats   Limits   cosmos    tab/shift+tab                                                       ·        
+ Chats · 🥈 account 2 · ⚡ 1h · 1 rows · 0 hidden · 0 empty                                                      ·      
+find › t                                                                                                     1/1 visible
+╭─ fleet 1 ─────────────────────────────────────────────────────────────────────  ╭─ dossier ───────────────────────────
+│╭─ alpha ───────────────────────────────────────────────────────────────── ● 1     LIVE   Codex  🥇                    
+│› ● :BUILDER             ⬢ 🥇                       0p    0B ◖▶ open◗        0s   :BUILDER                             
+│                                                                                  ───────────────────────────────────  
+│                                                                                  ┃ no prompt recorded for this chat   
+│                                                                                                                       
+│                                                                                  project  alpha                       
+│                                                                                  active   ▰▰▰▰▰▰▰▰  0s ago            
+│                                                                                                                       
+│                                                                              ◆   ◖ ▶ open                        ⏎ ◗  
+╰──────────┴7d──────────┴1d───────┴6h─────────┴1h─────────┴10m───────────────0s▲  ╰─────────────────────────────────────
+  ↑↓  move   ←→  action   ⏎  open   esc  close  type to find · @ go · ⇧←→ place                                         
+  ⌃X  kill   ⌃O  reboot                                                                                                 

@@ -12,6 +12,10 @@
 # ~/.codex/config.toml. Keep only this repo's reasoning-effort override.
 model_reasoning_effort = "xhigh"
 
+# The project chain (AGENTS.md + pfm/AGENTS.md) carries the main-chat git rule compiled from
+# .claude/rules/, which used to ride the Codex home's AGENTS.md outside this budget: 32 KiB + 4 KiB.
+project_doc_max_bytes = 36864
+
 [sandbox_workspace_write]
 # This repo builds Go and npm projects; `go mod download` and `npm ci` both need
 # the network from inside workspace-write or every build fails at fetch.

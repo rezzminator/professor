@@ -1,13 +1,14 @@
 package index
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestReadOpenCodeSessionsRecordsTheForeignRead: OpenCode's store is read
-// through the db door — one kind=opencode select record over sessions.
+// through the db door — a kind=opencode select over its tables, then one over sessions.
 func TestReadOpenCodeSessionsRecordsTheForeignRead(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	root := t.TempDir()
@@ -15,7 +16,7 @@ func TestReadOpenCodeSessionsRecordsTheForeignRead(t *testing.T) {
 	if _, err := ReadOpenCodeSessions(ctx, root); err != nil {
 		t.Fatal(err)
 	}
-	found := 0
+	var ops []any
 	for _, record := range recorder.Records() {
 		kind, _ := record.Field("kind")
 		if record.Message != "db.statement" || kind != "opencode" {
@@ -24,16 +25,14 @@ func TestReadOpenCodeSessionsRecordsTheForeignRead(t *testing.T) {
 		if comp, _ := record.Field(obs.FieldComp); comp != "db" {
 			t.Fatalf("comp = %v", comp)
 		}
-		// openCodeSessionsQuery is a CTE: its verb is `with`.
-		if op, _ := record.Field("op"); op != "with" {
-			t.Fatalf("op = %v, want with", op)
-		}
+		op, _ := record.Field("op")
+		ops = append(ops, op)
 		if _, ok := record.Field(obs.FieldDur); !ok {
 			t.Fatalf("no dur_ms: %v", record.Fields)
 		}
-		found++
 	}
-	if found != 1 {
-		t.Fatalf("opencode records = %d, want 1: %s", found, recorder.Raw())
+	// The table check selects from sqlite_master; openCodeSessionsQuery is a CTE: its verb is `with`.
+	if want := []any{"select", "with"}; !slices.Equal(ops, want) {
+		t.Fatalf("opencode record ops = %v, want %v: %s", ops, want, recorder.Raw())
 	}
 }

@@ -17,7 +17,7 @@ Every PARTIAL-NAMED row states what it could not load and why; every FAIL-NAMED 
 
 ## Landed
 
-- Site adapters and checks (before the redesign): IMDb reviews through the site's GraphQL API, Quora answers, Booking's stated review count as a named gap, the wall, paywall and stated-count checks on reader-service output, a stated count set against what loaded on every rung, a redirect to a different page named.
+- Site adapters and checks (before the redesign): IMDb reviews through the site's GraphQL API, Quora answers, the hotel-review site's stated review count as a named gap, the wall, paywall and stated-count checks on reader-service output, a stated count set against what loaded on every rung, a redirect to a different page named.
 - The surface redesign (`surface-spec.md`):
   - One retrieval function (`Retrieve`) behind every network read, with four policies (page, file, inline image, gateway; the inline-image policy is since retired); the file policy ends in a browser download that captures the download event or the navigation body, and refetches in the page when Chrome's PDF viewer answers with its wrapper.
   - A binary guard by magic bytes: an audio file, a legacy Office file or an unknown binary read as a page is a named file result, never binary characters stored as success.

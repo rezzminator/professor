@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -84,56 +83,5 @@ func TestLoadSubagentCapsTopLevelAndPerAccount(t *testing.T) {
 			prefs.MaxSubagentSpawnDepth,
 			prefs.MaxConcurrentSubagents,
 		)
-	}
-}
-
-func TestLoadSubagentCapsRejectsUnusableValues(t *testing.T) {
-	for _, testCase := range []struct{ name, content, want string }{
-		{
-			name:    "zero depth",
-			content: `{"version": 2, "claude": {"maxSubagentSpawnDepth": 0}}`,
-			want:    "maxSubagentSpawnDepth",
-		},
-		{
-			name:    "negative depth",
-			content: `{"version": 2, "claude": {"maxSubagentSpawnDepth": -3}}`,
-			want:    "maxSubagentSpawnDepth",
-		},
-		{
-			name:    "zero concurrency",
-			content: `{"version": 2, "claude": {"maxConcurrentSubagents": 0}}`,
-			want:    "maxConcurrentSubagents",
-		},
-		{
-			name:    "string depth",
-			content: `{"version": 2, "claude": {"maxSubagentSpawnDepth": "5"}}`,
-			want:    "maxSubagentSpawnDepth",
-		},
-		{
-			name:    "fractional depth",
-			content: `{"version": 2, "claude": {"maxSubagentSpawnDepth": 5.5}}`,
-			want:    "maxSubagentSpawnDepth",
-		},
-		{
-			name: "negative account concurrency",
-			content: `{"version": 2, "accounts": [` +
-				`{"id": 1, "configDir": "~/one", "claude": {"maxConcurrentSubagents": -1}}]}`,
-			want: "maxConcurrentSubagents",
-		},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			home := filepath.Join(t.TempDir(), "home")
-			path := filepath.Join(t.TempDir(), "config.json")
-			if err := os.WriteFile(path, []byte(testCase.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, err := Load(path, home, nil)
-			if err == nil {
-				t.Fatalf("Load() error = nil, want a refusal naming %s", testCase.want)
-			}
-			if !strings.Contains(err.Error(), testCase.want) {
-				t.Fatalf("Load() error = %q, want it to name %s", err, testCase.want)
-			}
-		})
 	}
 }

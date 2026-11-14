@@ -41,6 +41,8 @@ type HerdrRequest struct {
 	// seat's name, a user's choice only when UserNamed.
 	TabName   string
 	UserNamed bool
+	// Runner looks up a non-Claude native engine's binary; nil is the real one.
+	Runner deps.Runner
 }
 
 type HerdrResult struct {
@@ -126,10 +128,7 @@ func reserveHerdr(ctx context.Context, request HerdrRequest, pane string) (resul
 	if descriptor.ID == pfmengine.Claude {
 		binary, err = gather.ResolveClaudeBinary(request.Paths.Home, request.Run.Binary, (paths.OSEnv{}).Get("PATH"))
 	} else {
-		binary, err = deps.Resolve(request.Run.Binary)
-		if err == nil {
-			binary, err = filepath.Abs(binary)
-		}
+		binary, err = request.lookPath()
 	}
 	if err != nil {
 		return result, fmt.Errorf("resolve native %s engine: %w", descriptor.LongName, err)

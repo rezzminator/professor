@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -16,13 +18,36 @@ import (
 
 // bindNativeHost validates the caller's canonical producer identity and kernel
 // membership before publishing any new binding. Only explicit lost restoration
-// after positive old-host death may adopt a new terminal.
+// after positive old-host death may adopt a new terminal. A supervisor that
+// re-exec'd itself keeps the binding its earlier image published.
 func bindNativeHost(
 	ctx context.Context,
 	db *fleetdb.Store,
 	seat fleetdb.Seat,
 	values paths.Values,
 ) (result fleetdb.Seat, returnErr error) {
+	if seat.SeatHostPID == os.Getpid() {
+		// refreshSeatHostImage keeps the pid and kernel birth this binding names,
+		// while a reload awaiting the new engine holds the conversation lock: prove
+		// the standing binding as the in-process retry does, never wait on that lock.
+		dead, err := gather.HerdrHostDead(gather.NewProcFS(values.ProcRoot), seat)
+		if err != nil {
+			return seat, fmt.Errorf("check re-executed supervisor binding: %w", err)
+		}
+		if !dead {
+			if seat.EndPending {
+				return seat, errors.New("seat absent or pending end")
+			}
+			proved, err := proveRunningHost(ctx, db, seat, seat, values)
+			if err != nil {
+				return seat, fmt.Errorf("prove re-executed supervisor binding: %w", err)
+			}
+			return proved, nil
+		}
+	}
+	if err := awaitReservedPane(ctx, db, seat); err != nil {
+		return seat, err
+	}
 	key := fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID)
 	unlock, err := fleetdb.LockSeat(ctx, values, key)
 	if err != nil {
@@ -52,12 +77,7 @@ func bindNativeHost(
 		}
 	}
 	identity := resolve.CallerEnvironment()
-	// A pane herdr-keep holds names its relay and birth pane; the seat records Herdr's own.
-	keep := gather.HerdrKeep(proc)
-	socket, pane, err := keep.Upstream(ctx, identity.HerdrSocket, identity.HerdrPane)
-	if err != nil {
-		return seat, fmt.Errorf("resolve caller socket: %w", err)
-	}
+	socket, pane := identity.HerdrSocket, identity.HerdrPane
 	if socket != seat.HerdrSocket && !cold {
 		return seat, errors.New("caller socket differs from durable owner")
 	}
@@ -69,7 +89,7 @@ func bindNativeHost(
 	if err != nil {
 		return seat, err
 	}
-	info, found, err := herdr.LocatePane(ctx, keep, socket, asked, chain)
+	info, found, err := herdr.LocatePane(ctx, socket, asked, chain)
 	if err == nil && !found {
 		err = fmt.Errorf("no pane of %s holds the supervisor", socket)
 	}
@@ -99,7 +119,7 @@ func bindNativeHost(
 		args[2] != seat.SeatID {
 		return seat, errors.New("supervisor must exec exact seat-host role")
 	}
-	process, err := keep.Read(ctx, socket, info.ID)
+	process, err := herdr.ReadPaneProcesses(ctx, socket, info.ID)
 	if err != nil {
 		return seat, fmt.Errorf("read caller shell: %w", err)
 	}
@@ -132,7 +152,17 @@ func bindNativeHost(
 		return seat, err
 	}
 	if err := db.UpdateSeat(ctx, seat, next); err != nil {
-		return seat, fmt.Errorf("persist supervisor binding: %w", err)
+		// A gather proof publishes this same binding without the seat lock: adopt it, refuse any other.
+		stored, found, readErr := db.Seat(ctx, seat.SeatID)
+		adopted := stored
+		adopted.HerdrSocket, adopted.HerdrPane = next.HerdrSocket, next.HerdrPane
+		adopted.HerdrWorkspace, adopted.HerdrTerminalID = next.HerdrWorkspace, next.HerdrTerminalID
+		adopted.SeatHostPID, adopted.SeatHostStart, adopted.SeatHostBirth = next.SeatHostPID, next.SeatHostStart,
+			next.SeatHostBirth
+		if readErr != nil || !found || adopted != stored {
+			return seat, fmt.Errorf("persist supervisor binding: %w", errors.Join(err, readErr))
+		}
+		next = stored
 	}
 	proved, owned, err := gather.ProveHerdrSeat(ctx, db, proc, next)
 	if err != nil || !owned {
@@ -146,4 +176,36 @@ func bindNativeHost(
 		)
 	}
 	return proved, nil
+}
+
+// reservedPaneWait bounds a new tab's supervisor waiting for its pane address:
+// SpawnHerdr reserves the seat before layout.apply and records the pane Herdr
+// names in its answer, and the supervisor that answer started can run first.
+var reservedPaneWait = 5 * time.Second
+
+const reservedPanePoll = 20 * time.Millisecond
+
+// awaitReservedPane returns once seat's durable row names a pane or terminal,
+// so the bind compares the caller with the reserved pane, never with none.
+func awaitReservedPane(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat) error {
+	deadline := clock.Real.Now().Add(reservedPaneWait)
+	for seat.HerdrPane == "" && seat.HerdrTerminalID == "" {
+		if !clock.Real.Now().Before(deadline) {
+			return fmt.Errorf("reservation %s names no Herdr pane after %s", seat.SeatID, reservedPaneWait)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("await reserved pane of %s: %w", seat.SeatID, ctx.Err())
+		case <-clock.Real.After(reservedPanePoll):
+		}
+		current, found, err := db.Seat(ctx, seat.SeatID)
+		if err != nil {
+			return fmt.Errorf("read reservation %s: %w", seat.SeatID, err)
+		}
+		if !found || current.EndPending {
+			return errors.New("seat absent or pending end")
+		}
+		seat = current
+	}
+	return nil
 }

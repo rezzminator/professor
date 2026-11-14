@@ -63,8 +63,8 @@ fence_config_schema() {
   local row
   while IFS= read -r row; do printf '%s\n' "$row"; done <<'CONFIG'
 PFM_FENCE_NET|private|network|=
-PFM_FENCE_CPUS|6|cpu|12
-PFM_FENCE_MEM|5g|size|12g
+PFM_FENCE_CPUS|6|cpu|20
+PFM_FENCE_MEM|5g|size|24g
 PFM_FENCE_CPUSET||cpuset|=
 PFM_FENCE_GOMAXPROCS||optional_int|=
 PFM_FENCE_TEST_P||optional_int|6
@@ -113,8 +113,8 @@ EGRESS_LISTEN_WAIT_S|5|number|=
 EGRESS_END_WAIT_S|5|number|=
 SKILL_TEST_SHARDS||optional_int|=
 PFM_FENCE_SKILL_SHARD_MAX|8|int|=
-STEPS_JOBS||optional_int|6
-STEPS_HEAVY_JOBS|2|int|=
+STEPS_JOBS||optional_int|=
+STEPS_HEAVY_JOBS|2|int|4
 STEPS_BOUND_S||optional_int|=
 STEPPROF_GRACE_TICKS|20|uint|=
 STEPPROF_TRACE|err|trace|=
@@ -129,25 +129,6 @@ PFM_FENCE_GOCACHE_MB|15000|int|=
 PFM_FENCE_GOMOD_MB|4000|int|=
 PFM_FENCE_LINTCACHE_MB|2000|int|=
 PFM_FENCE_DF_TIMEOUT_S|120|int|=
-LANE_EGRESS_READY_SECS|10|uint|=
-LANE_EGRESS_VERDICT_SECS|30|uint|=
-LANE_STORM_WAIT_SECS|60|int|=
-LANE_STORM_EVERY_SECS|0.5|number|=
-LANE_ALIVE_RETRY_SECS|1|number|=
-LANE_WAIT_LAST_EVERY_SECS|0.5|number|=
-LANE_WAIT_FOR_EVERY_SECS|0.2|number|=
-PFM_FENCE_LANE_ROOT_LOCK_TICKS|18000|int|=
-PFM_FENCE_LANE_TOLERANCE|1.25|number|=
-PFM_FENCE_LANE_SEQUENCE_S|763|int|=
-PFM_FENCE_LANE_O1_S|70|int|=
-PFM_FENCE_LANE_E1_S|194|int|=
-PFM_FENCE_LANE_E2_S|39|int|=
-PFM_FENCE_LANE_E3_S|14|int|=
-PFM_FENCE_LANE_F_S|134|int|=
-PFM_FENCE_LANE_M_S|156|int|=
-PFM_FENCE_LANE_A_S|49|int|=
-PFM_FENCE_LANE_H_S|unpinned|budget|=
-PFM_FENCE_LANE_O2_S|86|int|=
 CONFIG
 }
 
@@ -163,7 +144,7 @@ _fence_config_default() {
 }
 
 fence_config_resolve() {
-  case "$1" in PFM_FENCE_*|LANE_*) [[ -n "${!1+x}" ]] || { echo "iso: undeclared budget variable $1" >&2; return 1; }; printf '%s\n' "${!1}" ;; *) printf '%s\n' "$1" ;; esac
+  case "$1" in PFM_FENCE_*) [[ -n "${!1+x}" ]] || { echo "iso: undeclared budget variable $1" >&2; return 1; }; printf '%s\n' "${!1}" ;; *) printf '%s\n' "$1" ;; esac
 }
 
 fence_config_values() { # defaults/validation only: safe inside a run and for standalone consumers
@@ -186,7 +167,6 @@ fence_config_values() { # defaults/validation only: safe inside a run and for st
       duration) [[ "$value" =~ ^[1-9][0-9]{0,8}(ms|s|m|h)$ ]] && valid=1 ;;
       network) [[ "$value" == private || "$value" == shared ]] && valid=1 ;;
       trace) [[ "$value" == err || "$value" == x || "$value" == off ]] && valid=1 ;;
-      budget) [[ "$value" == unpinned || "$value" =~ ^[1-9][0-9]{0,8}$ ]] && valid=1 ;;
     esac
     if [[ $valid != 1 ]]; then echo "iso: $name must be $kind (got '$value')" >&2; return 1; fi
     export "$name"
@@ -501,6 +481,7 @@ _fence_sh_ensure_locked() {
     fi
   fi
   _fence_sh_image || { return 1; }
+  fence_cache_budget_pending
   fence_volumes_ensure
   mounts=(-v "$FENCE_SH_MAIN:/repo:ro" -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" -v "$FENCE_SH_HOST:/pfm-fence"
     -v pfm-dev-gocache:/cache/go-build -v pfm-dev-gomod:/cache/gomod -v pfm-dev-lintcache:/cache/lint)
@@ -621,9 +602,12 @@ fence_shared_exec() {
     _fence_sh_leave_old_key
     envs=(-e "PFM_FENCE_RUN_ID=$id" -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" -e PFM_DEV_REPO_WORK_TREE=/worktree
       -e "PFM_DEV_ENGINE_SYNC_MISSING=${PFM_DEV_ENGINE_SYNC_MISSING:-}" -e PFM_TEST_TIMING_DIR=/pfm-timing
-      -e "HARVESTER_FENCE_SRC=$hs" -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}")
+      -e "HARVESTER_FENCE_SRC=$hs" -e "PFM_DEV_HARVESTER_MISSING=${PFM_DEV_HARVESTER_MISSING:-}"
+      -e "GOPROXY=${PFM_GOPROXY:-}")
+    # GOPROXY rides each run, not the long-lived container's start: a container started under
+    # another infra/fence/.env (local-env.sh) still hands this run the caller's proxy; empty is Go's default.
     # Gate knobs: a suite the gate nests starts from none of them (scripts/shtest.sh
-    # shtest_unset_gate_env; infra/fence/lanes/tests/steps_test.sh derives this block's names).
+    # shtest_unset_gate_env; infra/fence/tests/steps_test.sh derives this block's names).
     # Only generated timing artifacts are writable: /pfm-timing is the worktree's timing base.
     envs+=(-e "PFM_FENCE_CPUS=$FENCE_SH_CPUS" -e "PFM_FENCE_HEARTBEAT_S=$PFM_FENCE_HEARTBEAT_S"
       -e "PFM_TEST_TIMING_HOST=$FENCE_SH_HOST/$FENCE_SH_WT/timing")

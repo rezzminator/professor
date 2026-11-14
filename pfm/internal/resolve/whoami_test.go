@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
@@ -72,8 +72,8 @@ func (proc fakeParentProcFS) Environ(int) (map[string]string, error) {
 	return map[string]string{}, nil
 }
 
-func (proc fakeParentProcFS) Stat(int) (ProcStat, error) {
-	return ProcStat{ParentPID: proc.parent}, nil
+func (proc fakeParentProcFS) Stat(int) (gather.ProcStat, error) {
+	return gather.ProcStat{ParentPID: proc.parent}, nil
 }
 
 func TestProcTreeParentUsesInjectedProcFS(t *testing.T) {
@@ -97,183 +97,6 @@ func (tree fakeProcTree) Parent(pid int) (int, error) {
 		return 0, os.ErrNotExist
 	}
 	return parent, nil
-}
-
-func (jail *resolveJail) startPlain(
-	t *testing.T,
-	socket, session string,
-) string {
-	t.Helper()
-	command := jail.command(
-		"-f",
-		"/dev/null",
-		"-L",
-		socket,
-		"new-session",
-		"-d",
-		"-s",
-		session,
-		"-n",
-		"whoami-window",
-		"sleep",
-		"120",
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("start %s: %v: %s", socket, err, output)
-	}
-	jail.sockets = append(jail.sockets, socket)
-	output, err := jail.command(
-		"-L",
-		socket,
-		"list-panes",
-		"-F",
-		"#{pane_id}\t#{pane_pid}",
-	).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.TrimSpace(string(output))
-}
-
-// TestJailedWhoamiEnvironmentAndAncestryPaths walks every rung of chat.sh's
-// self_tmux/tmux_from_ancestry (chat.sh:78-96): $TMUX first, then the process
-// chain's environments, then the tmux servers' own pane-pid tables, and a
-// stated failure when no ancestor carries tmux at all.
-func TestJailedWhoamiEnvironmentAndAncestryPaths(t *testing.T) {
-	jail := newResolveJail(t)
-	socket := "cc-1700000500-1-1"
-	session := "whoami-session"
-	row := jail.startPlain(t, socket, session)
-	fields := strings.Split(row, "\t")
-	if len(fields) != 2 {
-		t.Fatalf("pane row = %q", row)
-	}
-	pane := fields[0]
-	panePID, err := strconv.Atoi(fields[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	socketPath := filepath.Join(jail.tmuxDir, socket)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// 1) $TMUX plus the exported Claude session id: the ordinary Claude chat.
-	identifier, err := NewWhoami(WhoamiDependencies{
-		Environment: &WhoamiEnvironment{
-			TMUX:            fmt.Sprintf("%s,%d,0", socketPath, panePID),
-			TMUXPane:        pane,
-			ClaudeSessionID: "11111111-2222-4333-8444-555555555555",
-		},
-		TmuxDir:   jail.tmuxDir,
-		Processes: fakeProcTree{parents: map[int]int{9999: panePID, panePID: 1}}, SelfPID: 9999,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err := identifier.Identify(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if identity.Session != session ||
-		identity.SocketPath != socketPath ||
-		identity.SocketName != socket ||
-		identity.Pane != pane ||
-		identity.Engine != string(pfmengine.Claude) ||
-		identity.ID != "11111111-2222-4333-8444-555555555555" ||
-		identity.Source != "env-claude" ||
-		identity.Recovered {
-		t.Fatalf("env identity = %+v", identity)
-	}
-
-	// 2) No $TMUX, but an ancestor's environment carries it — the codex path
-	// that left every codex-origin message unsigned.
-	codexSocket := "cx-1700000501-1-2"
-	codexSession := "codex-session"
-	codexRow := jail.startPlain(t, codexSocket, codexSession)
-	codexFields := strings.Split(codexRow, "\t")
-	codexPane := codexFields[0]
-	codexPanePID, err := strconv.Atoi(codexFields[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	codexSocketPath := filepath.Join(jail.tmuxDir, codexSocket)
-	tree := fakeProcTree{
-		parents: map[int]int{4242: 4241, 4241: 4240, 4240: codexPanePID, codexPanePID: 1},
-		environments: map[int]map[string]string{
-			4242: {"PATH": "/usr/bin"},
-			4241: {"PATH": "/usr/bin"},
-			4240: {
-				"TMUX":      codexSocketPath + ",99,0",
-				"TMUX_PANE": codexPane,
-			},
-		},
-	}
-	identifier, err = NewWhoami(WhoamiDependencies{
-		Environment: &WhoamiEnvironment{CodexThreadID: "thread-abc"},
-		Processes:   tree,
-		SelfPID:     4242,
-		TmuxDir:     jail.tmuxDir,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err = identifier.Identify(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if identity.Session != codexSession ||
-		identity.SocketPath != codexSocketPath ||
-		identity.Pane != codexPane ||
-		identity.Engine != string(pfmengine.Codex) ||
-		identity.ID != "thread-abc" ||
-		identity.Source != "env-codex" ||
-		!identity.Recovered {
-		t.Fatalf("ancestry-environ identity = %+v", identity)
-	}
-
-	// 3) No $TMUX and no ancestor environment either: the tmux servers'
-	// pane-pid tables still know which pane owns the chain.
-	blind := fakeProcTree{
-		parents:      map[int]int{7777: panePID, panePID: 1},
-		environments: map[int]map[string]string{},
-	}
-	identifier, err = NewWhoami(WhoamiDependencies{
-		Environment: &WhoamiEnvironment{},
-		Processes:   blind,
-		SelfPID:     7777,
-		TmuxDir:     jail.tmuxDir,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err = identifier.Identify(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if identity.Session != session ||
-		identity.Pane != pane ||
-		identity.Source != "ancestry" ||
-		!identity.Recovered {
-		t.Fatalf("ancestry-owner identity = %+v", identity)
-	}
-
-	// 4) Nothing carries tmux: the failure is STATED, in chat.sh's words.
-	orphan := fakeProcTree{
-		parents:      map[int]int{9001: 1},
-		environments: map[int]map[string]string{9001: {"PATH": "/usr/bin"}},
-	}
-	identifier, err = NewWhoami(WhoamiDependencies{
-		Environment: &WhoamiEnvironment{},
-		Processes:   orphan,
-		SelfPID:     9001,
-		TmuxDir:     filepath.Join(jail.root, "empty-tmux-dir"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := identifier.Identify(ctx); !errors.Is(err, ErrNotInChat) {
-		t.Fatalf("orphan identity error = %v, want ErrNotInChat", err)
-	}
 }
 
 // TestWhoamiProcTreeReadsAJailedProcRoot proves the real /proc reader is
@@ -492,31 +315,175 @@ func TestIdentifyDistinguishesMissingTmuxServerFromReadFailure(t *testing.T) {
 	}
 }
 
+// ownersBySocket plays CommandPaneOwners per socket base name. vanish names a
+// sibling entry the call removes, a server ending mid-scan.
+type ownersBySocket map[string]struct {
+	owners []PaneOwner
+	err    error
+	vanish string
+}
+
+func (fake ownersBySocket) PaneOwners(_ context.Context, socketPath string) ([]PaneOwner, error) {
+	answer := fake[filepath.Base(socketPath)]
+	if answer.vanish != "" {
+		if err := os.Remove(filepath.Join(filepath.Dir(socketPath), answer.vanish)); err != nil {
+			return nil, err
+		}
+	}
+	for index := range answer.owners {
+		answer.owners[index].SocketPath = socketPath
+	}
+	return answer.owners, answer.err
+}
+
+// namerAt answers one pane's session and pid.
+type namerAt struct{ session string }
+
+func (namer namerAt) SessionPane(context.Context, string, string) (string, int, error) {
+	return namer.session, 4300, nil
+}
+
+// A tmux server whose panes cannot be read costs only itself: another server
+// still proves the caller, and with no proof the read failure answers, never
+// a plain not-in-chat.
+func TestIdentifyRecoversPastAnUnreadableTmuxServer(t *testing.T) {
+	failure := errors.New("permission denied")
+	for _, test := range []struct {
+		name     string
+		owners   ownersBySocket
+		wantPane string
+	}{
+		{
+			name: "another server proves the caller",
+			owners: ownersBySocket{
+				"cc-1-1-1": {err: failure},
+				"cc-2-2-2": {owners: []PaneOwner{{PaneID: "%3", PanePID: 4300}}},
+			},
+			wantPane: "%3",
+		},
+		{
+			name: "a server ends between the listing and its stat",
+			owners: ownersBySocket{
+				"cc-1-1-1": {vanish: "cc-1-1-2"},
+				"cc-2-2-2": {owners: []PaneOwner{{PaneID: "%3", PanePID: 4300}}},
+			},
+			wantPane: "%3",
+		},
+		{
+			name:   "no server proves the caller",
+			owners: ownersBySocket{"cc-1-1-1": {err: failure}, "cc-2-2-2": {}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tmuxDir := testjail.ShortRoot(t)
+			for _, name := range []string{"cc-1-1-1", "cc-2-2-2"} {
+				listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(tmuxDir, name), Net: "unix"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = listener.Close() })
+			}
+			// The entry a server removes mid-scan; listed, gone by its stat.
+			if err := os.WriteFile(filepath.Join(tmuxDir, "cc-1-1-2"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			identifier, err := NewWhoami(WhoamiDependencies{
+				Environment: &WhoamiEnvironment{},
+				Namer:       namerAt{session: "mysession"},
+				Owners:      test.owners,
+				Processes:   fakeProcTree{parents: map[int]int{4300: 1}},
+				SelfPID:     4300, TmuxDir: tmuxDir,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := identifier.Identify(context.Background())
+			if test.wantPane != "" {
+				if err != nil || identity.Pane != test.wantPane || identity.Session != "mysession" ||
+					identity.SocketName != "cc-2-2-2" {
+					t.Fatalf("Identify() = %+v, %v; want pane %s on cc-2-2-2", identity, err, test.wantPane)
+				}
+				return
+			}
+			want := "look up the caller: read tmux panes on " + filepath.Join(tmuxDir, "cc-1-1-1") +
+				": permission denied"
+			if err == nil || err.Error() != want || !errors.Is(err, failure) || errors.Is(err, ErrNotInChat) {
+				t.Fatalf("Identify() error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
 type environmentDeniedTree struct{ fakeProcTree }
 
 func (environmentDeniedTree) Environ(int) (map[string]string, error) {
 	return nil, os.ErrPermission
 }
 
+// An ancestor whose environment could not be read is a failed look, never
+// "not in a chat" — also when the Codex seat rung, the last one, holds no seat
+// for the caller's thread; a seat that holds it still answers.
 func TestIdentifyPreservesAncestryEnvironmentReadFailure(t *testing.T) {
-	identifier, err := NewWhoami(WhoamiDependencies{
-		Environment: &WhoamiEnvironment{},
-		Processes:   environmentDeniedTree{fakeProcTree{parents: map[int]int{4300: 1}}},
-		SelfPID:     4300, TmuxDir: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatal(err)
+	seat := CodexSeat{
+		ThreadID: "thread-abc", Backend: "herdr", SeatID: "s1",
+		SocketPath: "/h/herdr.sock", Pane: "wA:p2", HerdrWorkspace: "wA",
 	}
-	_, err = identifier.Identify(context.Background())
-	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrNotInChat) {
-		t.Fatalf("unreadable environment became absence: %v", err)
+	for _, tc := range []struct {
+		name        string
+		environment WhoamiEnvironment
+		seats       []CodexSeat
+		wantSeat    string
+	}{
+		{name: "no engine thread", environment: WhoamiEnvironment{}},
+		{name: "codex thread on no live seat", environment: WhoamiEnvironment{CodexThreadID: "thread-abc"}},
+		{
+			name:        "codex thread on a live seat",
+			environment: WhoamiEnvironment{CodexThreadID: "thread-abc"},
+			seats:       []CodexSeat{seat},
+			wantSeat:    "s1",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			looked := false
+			identifier, err := NewWhoami(WhoamiDependencies{
+				Environment: &tc.environment,
+				Processes:   environmentDeniedTree{fakeProcTree{parents: map[int]int{4300: 1}}},
+				SelfPID:     4300, TmuxDir: t.TempDir(),
+				CodexSeats: func(context.Context) ([]CodexSeat, error) {
+					looked = true
+					return tc.seats, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := identifier.Identify(context.Background())
+			if looked != (tc.environment.CodexThreadID != "") {
+				t.Fatalf("Codex seat rung ran = %t for environment %+v", looked, tc.environment)
+			}
+			if tc.wantSeat != "" {
+				if err != nil || identity.SeatID != tc.wantSeat || identity.Source != "codex-thread" {
+					t.Fatalf(
+						"Identify() = %+v, %v; want seat %s from the codex-thread rung",
+						identity,
+						err,
+						tc.wantSeat,
+					)
+				}
+				return
+			}
+			const want = "look up the caller: read environment of pid 4300: permission denied"
+			if err == nil || err.Error() != want || !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrNotInChat) {
+				t.Fatalf("unreadable environment became absence: %v, want %q", err, want)
+			}
+		})
 	}
 }
 
 type environmentForeignTree struct{ fakeProcTree }
 
 func (environmentForeignTree) Environ(int) (map[string]string, error) {
-	return nil, fmt.Errorf("%w: %w", ErrForeignProcess, os.ErrPermission)
+	return nil, fmt.Errorf("%w: %w", gather.ErrForeignProcess, os.ErrPermission)
 }
 
 // An ssh login's ancestry crosses sshd's non-dumpable session; that ancestor is no pane of the caller's.

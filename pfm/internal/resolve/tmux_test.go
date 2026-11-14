@@ -2,22 +2,17 @@ package resolve
 
 import (
 	"context"
-	"path/filepath"
+	"errors"
+	"reflect"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
-
-// fakeTmuxBinary plays tmux: exits 0 and prints nothing.
-func fakeTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
-}
 
 // requireTmuxRecord asserts the one comp=tmux record a façade call writes:
 // subcmd, target when given, exit 0 and dur_ms.
@@ -53,7 +48,8 @@ func requireTmuxRecord(t *testing.T, recorder *obs.Recorder, index int, subcmd, 
 // the pane text.
 func TestTmuxResolverRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	tmux := TmuxResolver{Binary: fakeTmuxBinary(t)}
+	ctx = pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{}))
+	tmux := TmuxResolver{Binary: "tmux"}
 	if _, err := tmux.CapturePane(ctx, "/sockets/cc-1", "%2"); err != nil {
 		t.Fatal(err)
 	}
@@ -65,16 +61,18 @@ func TestTmuxResolverRecordsEveryInvocation(t *testing.T) {
 	_ = context.Background
 }
 
-// fakeWhoamiTmuxBinary plays tmux for CommandTmuxNamer/CommandPaneOwners:
-// a display-message answers a session name, a list-panes answers pane rows.
-func fakeWhoamiTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	script := "#!/bin/sh\ncase \"$*\" in\n*list-panes*) printf '1234 %%0\\n' ;;\n*) printf 'mysession 1234\\n' ;;\nesac\nexit 0\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+// fakeWhoamiTmux plays tmux for CommandTmuxNamer/CommandPaneOwners on
+// /sockets/cc-1: a display-message answers a session name, a list-panes
+// answers pane rows.
+func fakeWhoamiTmux() *deps.FakeRunner {
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{"tmux", "-S", "/sockets/cc-1", "list-panes"}, deps.RunResult{Stdout: []byte("1234 %0\n")}, nil)
+	fake.Script(
+		[]string{"tmux", "-S", "/sockets/cc-1", "display-message"},
+		deps.RunResult{Stdout: []byte("mysession 1234\n")},
+		nil,
+	)
+	return fake
 }
 
 // TestWhoamiTmuxRecordsEveryInvocation proves CommandTmuxNamer.SessionPane and
@@ -83,7 +81,7 @@ func fakeWhoamiTmuxBinary(t *testing.T) string {
 // sibling façade above.
 func TestWhoamiTmuxRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	binary := fakeWhoamiTmuxBinary(t)
+	ctx, binary := pfmtmux.WithClientRunner(ctx, fakeWhoamiTmux()), "tmux"
 	namer := CommandTmuxNamer{Binary: binary}
 	name, pid, err := namer.SessionPane(ctx, "/sockets/cc-1", "%3")
 	if err != nil || name != "mysession" || pid != 1234 {
@@ -95,4 +93,68 @@ func TestWhoamiTmuxRecordsEveryInvocation(t *testing.T) {
 	}
 	requireTmuxRecord(t, recorder, 0, "display-message", "%3")
 	requireTmuxRecord(t, recorder, 1, "list-panes", "")
+}
+
+// tmuxPrinting is ctx whose tmux answers every call with output.
+func tmuxPrinting(ctx context.Context, output string) context.Context {
+	return pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{Stdout: []byte(output)}))
+}
+
+// One listing line tmux wrote in another shape costs that pane, never the
+// server's other panes, and the loss is named.
+func TestTmuxListingsKeepEveryParsedPane(t *testing.T) {
+	t.Run("list-panes", func(t *testing.T) {
+		ctx, recorder := obs.Test(t)
+		ctx = tmuxPrinting(ctx, "main\x1f%1\x1fclaude\x1fwin\nbroken-line\n")
+		panes, err := TmuxResolver{Binary: "tmux"}.ListPanes(ctx, "/sockets/cc-1")
+		want := []ResolvedPane{{
+			SocketPath: "/sockets/cc-1", SessionName: "main", PaneID: "%1", CurrentCommand: "claude", WindowName: "win",
+		}}
+		if err != nil || !reflect.DeepEqual(panes, want) {
+			t.Fatalf("ListPanes() = %+v, %v; want %+v", panes, err, want)
+		}
+		var skipped []string
+		for _, record := range recorder.Records() {
+			if record.Message == "resolve.pane.skipped" {
+				sock, _ := record.Field(obs.FieldSock)
+				text, _ := record.Field(obs.FieldErr)
+				skipped = append(skipped, record.Level+" "+sock.(string)+": "+text.(string))
+			}
+		}
+		if want := []string{
+			`WARN /sockets/cc-1: tmux returned 1 fields in "broken-line"`,
+		}; !reflect.DeepEqual(
+			skipped,
+			want,
+		) {
+			t.Fatalf("skip records = %q, want %q", skipped, want)
+		}
+	})
+	t.Run("pane owners", func(t *testing.T) {
+		ctx := tmuxPrinting(context.Background(), "1234 %0\nabc %1\n")
+		owners, err := CommandPaneOwners{Binary: "tmux"}.PaneOwners(ctx, "/sockets/cc-1")
+		want := []PaneOwner{{SocketPath: "/sockets/cc-1", PaneID: "%0", PanePID: 1234}}
+		if !reflect.DeepEqual(owners, want) {
+			t.Fatalf("PaneOwners() = %+v, want %+v", owners, want)
+		}
+		if wantErr := `tmux returned 1 unparsable pane owner line(s), first "abc %1"`; err == nil ||
+			err.Error() != wantErr {
+			t.Fatalf("PaneOwners() error = %v, want %q", err, wantErr)
+		}
+	})
+	// A stopped tmux server never answers its client: the lookup costs that
+	// server alone, named, within the probe bound.
+	t.Run("pane owners on a stopped server", func(t *testing.T) {
+		ctx := pfmtmux.WithClientRunner(context.Background(), testjail.HungTmuxRunner(1))
+		started := time.Now()
+		owners, err := CommandPaneOwners{Binary: "tmux"}.PaneOwners(ctx, "/sockets/cc-1")
+		elapsed := time.Since(started)
+		want := "tmux server did not answer within 2s: /sockets/cc-1"
+		if owners != nil || err == nil || err.Error() != want || !errors.Is(err, gather.ErrServerUnresponsive) {
+			t.Fatalf("PaneOwners() = %+v, %v; want nil, %q", owners, err, want)
+		}
+		if elapsed > 10*time.Second {
+			t.Fatalf("PaneOwners() took %s on a stopped server, want the %s probe bound", elapsed, gather.ProbeTimeout)
+		}
+	})
 }

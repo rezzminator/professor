@@ -34,7 +34,7 @@ type nativeSocket struct {
 
 func newNativeSocket(t *testing.T, respond func(nativeRequest) (any, string)) *nativeSocket {
 	t.Helper()
-	root, err := os.MkdirTemp("", "call-herdr-")
+	root, err := os.MkdirTemp(paths.TempRoot(), "call-herdr-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,14 +172,16 @@ func (names nativeNames) ResolveName(context.Context, string, string) (Target, i
 
 func TestHerdrCaptureNative(t *testing.T) {
 	for _, test := range []struct {
-		name      string
-		lines     int
-		text      any
-		kind      string
-		want      string
-		bad       bool
-		wantLines int
-		pane      string
+		name          string
+		lines         int
+		text          any
+		kind          string
+		want          string
+		bad           bool
+		wantLines     int
+		pane          string
+		truncated     any // nil reads false; omitTruncated drops the key
+		omitTruncated bool
 	}{
 		{name: "recent", lines: 2, text: "first\nsecond\nthird\n", kind: "pane_read", want: "second\nthird", wantLines: 2},
 		{name: "empty", lines: 4, text: "", kind: "pane_read", wantLines: 4},
@@ -189,18 +191,24 @@ func TestHerdrCaptureNative(t *testing.T) {
 		{name: "null", lines: 1, text: nil, kind: "pane_read", bad: true, wantLines: 1},
 		{name: "wrong-type", lines: 1, text: 7, kind: "pane_read", bad: true, wantLines: 1},
 		{name: "wrong-result", lines: 1, text: "tail", kind: "surprise", bad: true, wantLines: 1},
+		{name: "no-truncated", lines: 1, text: "tail", kind: "pane_read", want: "tail", wantLines: 1, omitTruncated: true},
+		{name: "text-truncated", lines: 1, text: "tail", kind: "pane_read", want: "tail", wantLines: 1, truncated: "yes"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			socket := newNativeSocket(t, func(_ nativeRequest) (any, string) {
-				return map[string]any{
-					"type": test.kind,
-					"read": map[string]any{
-						"pane_id":      "w1:p2",
-						"workspace_id": "w1",
-						"text":         test.text,
-						"truncated":    false,
-					},
-				}, ""
+				read := map[string]any{
+					"pane_id":      "w1:p2",
+					"workspace_id": "w1",
+					"text":         test.text,
+					"truncated":    false,
+				}
+				if test.truncated != nil {
+					read["truncated"] = test.truncated
+				}
+				if test.omitTruncated {
+					delete(read, "truncated")
+				}
+				return map[string]any{"type": test.kind, "read": read}, ""
 			})
 			target := Target{
 				Backend:        "herdr",
@@ -296,7 +304,9 @@ func TestHerdrThenNativeBoundary(t *testing.T) {
 		{name: "old-completion", states: []string{"idle", "idle"}, seq: []int{6, 8}, completion: []int{4, 4}, wantCode: CodeUndelivered, wantDetail: "boundary"},
 		{name: "stale-then-working-idle", states: []string{"idle", "working", "idle"}, seq: []int{4, 5, 6}, completion: []int{3, 3, 4}},
 		{name: "blocked", states: []string{"blocked"}, seq: []int{5}, completion: []int{3}, wantCode: CodeUndelivered, wantDetail: "blocked"},
-		{name: "unknown", states: []string{"unknown"}, seq: []int{5}, completion: []int{3}, wantCode: CodeUndelivered, wantDetail: "unknown"},
+		// Herdr cannot tell the turn's state: the screen's idle composer settles it.
+		{name: "unknown", sawWorking: true, states: []string{"unknown"}, seq: []int{5}, completion: []int{3}},
+		{name: "unrecognized", sawWorking: true, states: []string{"thinking"}, seq: []int{5}, completion: []int{3}},
 		{name: "stale-idle-not-boundary", states: []string{"idle", "idle"}, seq: []int{4, 4}, completion: []int{3, 3}, wantCode: CodeUndelivered, wantDetail: "boundary"},
 		{name: "timeout", states: []string{"idle"}, seq: []int{4}, completion: []int{3}, refusal: "timeout", wantCode: CodeUndelivered, wantDetail: "timeout"},
 	} {
@@ -628,7 +638,7 @@ type blockingProducerRun struct {
 // budget is the only bound meant to end the blocked wait.
 func runBlockingProducerWait(t *testing.T, budget time.Duration) blockingProducerRun {
 	t.Helper()
-	root, err := os.MkdirTemp("", "call-wait-")
+	root, err := os.MkdirTemp(paths.TempRoot(), "call-wait-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -763,8 +773,11 @@ func TestHerdrThenRawBoundary(t *testing.T) {
 		screens    []string
 		sawWorking bool
 		wantCode   int
+		engine     string // OpenCode when empty
 	}{
 		{name: "observed-working", screens: []string{"› \nesc interrupt", "› "}},
+		// An engine this binary cannot name reads the engine-neutral busy footer.
+		{name: "unnamed-engine", screens: []string{"❯ \nesc to interrupt", "❯ "}, engine: "invalid-engine"},
 		{name: "already-observed", screens: []string{"› "}, sawWorking: true},
 		{name: "dim-placeholder", screens: []string{"› Ask Codex to do anything"}, sawWorking: true},
 		{name: "placeholder-redraw", screens: []string{"› Ask Codex to do anything", "› Ask Codex to do anything\nesc interrupt", "› "}, sawWorking: true},
@@ -798,6 +811,9 @@ func TestHerdrThenRawBoundary(t *testing.T) {
 				Pane:       "w1:p2",
 				Engine:     string(pfmengine.OpenCode),
 			}
+			if test.engine != "" {
+				target.Engine = test.engine
+			}
 			engine := nativeEngine(t, target)
 			engine.options.ThenBusyTries, engine.options.ThenIdleTries, engine.options.ThenIdlePoll = 3, 2, time.Millisecond
 			turn, err := json.Marshal(
@@ -818,7 +834,7 @@ func TestHerdrThenRawBoundary(t *testing.T) {
 					Backend:    "herdr",
 					SocketPath: socket.path,
 					Target:     "w1:p2",
-					Engine:     string(pfmengine.OpenCode),
+					Engine:     target.Engine,
 					Steers:     []string{"resume the port"},
 				},
 			)

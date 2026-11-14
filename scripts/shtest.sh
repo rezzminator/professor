@@ -5,6 +5,7 @@
 # shtest_unset_gate_env clears the gate and profiler knobs a suite can inherit.
 # shtest_clean_also <path>... makes the EXIT trap remove those paths too, beside $T and every earlier call's; a suite never sets its own trap.
 # shtest_probe_trap_guard <path> proves the EXIT trap's PID guard, <path> standing in for a shtest_clean_also path.
+# shtest_as_root <script> [args...] re-runs a root-only suite as root through passwordless sudo.
 # shtest_isolate_host points HOME at $T/home and git at no host config or inherited repository, so a fixture commit never reads the host's.
 # BROKEN STATE: an unset SHTEST_TAG or a failed mktemp exits 2 with a named
 # line before any assertion runs — a suite never reports "0 failed" from a
@@ -45,12 +46,12 @@ EOF
 shtest_unset_gate_env() {
   local knob
   for knob in ${!PFM_FENCE_@}; do unset "$knob"; done
-  unset EGRESS_LISTEN_WAIT_S EGRESS_END_WAIT_S SKILL_TEST_SHARDS LANE_EGRESS_READY_SECS LANE_EGRESS_VERDICT_SECS LANE_STORM_WAIT_SECS LANE_STORM_EVERY_SECS LANE_ALIVE_RETRY_SECS LANE_WAIT_LAST_EVERY_SECS LANE_WAIT_FOR_EVERY_SECS
+  unset EGRESS_LISTEN_WAIT_S EGRESS_END_WAIT_S SKILL_TEST_SHARDS
 
   unset PFM_TEST_ARTIFACT_DIR PFM_TEST_PROFILE PFM_TEST_PROFILE_PARENT PFM_TEST_DEADLINE_EPOCH \
     PFM_TEST_TIMING_DIR PFM_TEST_TIMING_HOST PFM_TEST_RUN_NOTE TESTFLAGS STEPPROF_TRACE STEPPROF_GRACE_TICKS \
     STEPPROF_PSI_DIR STEPS_BOUND_S STEPS_JOBS STEPS_HEAVY_JOBS SAMPLER_INTERVAL_S SAMPLER_SPIN_ITERS \
-    SAMPLER_CGROUP_DIR SAMPLER_PROC_DIR PFM_GATE_FIXTURES PFM_GATE_HISTORY_DIR \
+    SAMPLER_CGROUP_DIR SAMPLER_PROC_DIR PFM_GATE_FIXTURES PFM_GATE_ONLY PFM_GATE_SKIP PFM_GATE_HISTORY_DIR \
     PFM_FENCE_CPUS PFM_FENCE_HEARTBEAT_S PFM_FENCE_TEST_P PFM_FENCE_CONCURRENT
 }
 # A suite that runs git or reads $HOME starts from none of the host's: its fixture commits and worktrees see
@@ -62,6 +63,21 @@ shtest_isolate_host() {
   # namespace or alternate object store reach no fixture either
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
     GIT_TEMPLATE_DIR GIT_NAMESPACE GIT_ALTERNATE_OBJECT_DIRECTORIES
+}
+# shtest_as_root <script> [args...]: a suite whose precondition is root (the fence's user) re-runs itself as
+# root through passwordless sudo when it is not, as on GitHub's hosted runner; HOME=/root keeps root's writes
+# out of the invoking user's caches. BROKEN STATE: not root and no passwordless sudo = a named line and exit 1.
+shtest_as_root() {
+  [ "$(id -u)" = 0 ] && return 0
+  if sudo -n true 2>/dev/null; then
+    rm -rf -- "$T"
+    # The whole environment travels as env's arguments: sudo-rs ignores a bare --preserve-env.
+    local -a vars
+    mapfile -d '' vars < <(env -0)
+    exec sudo -n env -- "${vars[@]}" "PATH=$PATH" HOME=/root bash "$@"
+  fi
+  echo "$SHTEST_TAG: FAILED — this suite needs root (the fence's user); not root and no passwordless sudo" >&2
+  exit 1
 }
 shtest_end() { printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; }
 # shtest_probe_trap_guard <path>: the suite's EXIT trap, run by a forked shell, must leave $T and <path> alone.

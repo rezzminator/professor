@@ -3,6 +3,7 @@ package statusline
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,30 @@ const (
 	fableCacheKey    = "seven_day_fable"
 )
 
+// resetUnix reads one quota window's RFC3339 reset stamp for who's reading. An
+// empty or unreadable stamp is 0, "no countdown": the reset only feeds the
+// countdown and NewerReading's order, so the utilization it stamps is kept; an
+// unreadable (not an empty) stamp is warned.
+func resetUnix(warn io.Writer, who, key, stamp string) int64 {
+	stamp = strings.TrimSpace(stamp)
+	if stamp == "" {
+		return 0
+	}
+	resetAt, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		fmt.Fprintf(
+			warn,
+			"statusline: %s quota: decode %s reset %q: %v (reading kept, no countdown)\n",
+			who,
+			key,
+			stamp,
+			err,
+		)
+		return 0
+	}
+	return resetAt.Unix()
+}
+
 // adoptSiblingReadings lets another seat of this account correct a reported
 // window: an idle chat's payload stops at its last API reply while the account
 // keeps spending. Only reported windows compete here; a missing one stays the
@@ -29,9 +54,10 @@ func adoptSiblingReadings(now time.Time, runtime Runtime, account int, windows m
 	usage, _, found, err := usagehook.ReadStatuslineSnapshot(
 		runtime.RateLimitDir, account, runtime.ConfigDir, now, usagehook.StaleHorizon,
 	)
+	// An error beside found is a partial answer (usagehook): the snapshots that
+	// read still answer, and the cause of each one skipped is told.
 	if err != nil {
 		fmt.Fprintf(runtime.Warn, "statusline: sibling quota snapshots %s: %v\n", runtime.RateLimitDir, err)
-		return
 	}
 	if !found {
 		return
@@ -41,14 +67,10 @@ func adoptSiblingReadings(now time.Time, runtime Runtime, account int, windows m
 		if !present || current.Failure || current.Absent || named.Window.Utilization == nil {
 			continue
 		}
-		resetAt, err := time.Parse(time.RFC3339, named.Window.ResetsAt)
-		if err != nil {
-			fmt.Fprintf(runtime.Warn, "statusline: sibling quota snapshots: decode %s reset: %v\n", named.Key, err)
-			continue
-		}
 		used := *named.Window.Utilization
-		if usagehook.NewerReading(used, resetAt.Unix(), current.UsedPercentage, current.ResetsAt) {
-			windows[named.Key] = rateWindow{UsedPercentage: used, ResetsAt: resetAt.Unix(), Cached: true}
+		resetsAt := resetUnix(runtime.Warn, "sibling snapshot", named.Key, named.Window.ResetsAt)
+		if usagehook.NewerReading(used, resetsAt, current.UsedPercentage, current.ResetsAt) {
+			windows[named.Key] = rateWindow{UsedPercentage: used, ResetsAt: resetsAt, Cached: true}
 		}
 	}
 }
@@ -94,8 +116,14 @@ func fillCachedRateWindows(
 		confirmedAt = &modified
 	}
 	if confirmedAt.After(now) {
-		fail(fmt.Errorf("cache confirmation timestamp %s is in the future", confirmedAt.Format(time.RFC3339)))
-		return
+		// Clock skew on the confirmation stamp: the record is as fresh as it can be.
+		fmt.Fprintf(
+			runtime.Warn,
+			"statusline: usage cache %s: confirmation timestamp %s is in the future (read as now)\n",
+			path,
+			confirmedAt.Format(time.RFC3339),
+		)
+		confirmedAt = &now
 	}
 	if record.Backoff != nil {
 		fmt.Fprintf(runtime.Warn, "statusline: usage cache %s: last refresh failed, retry after %s: %q "+
@@ -146,19 +174,9 @@ func fillCachedRateWindows(
 			continue
 		}
 		cached := rateWindow{UsedPercentage: *window.Utilization, Cached: true}
-		if stamp := strings.TrimSpace(window.ResetsAt); stamp != "" {
-			resetAt, parseErr := time.Parse(time.RFC3339, stamp)
-			if parseErr != nil {
-				fmt.Fprintf(runtime.Warn, "statusline: usage cache %s: decode %s reset: %v\n", path, key, parseErr)
-				if missing[key] {
-					windows[key] = rateWindow{Failure: true}
-				}
-				continue
-			}
-			if !resetAt.After(now) {
-				continue
-			}
-			cached.ResetsAt = resetAt.Unix()
+		cached.ResetsAt = resetUnix(runtime.Warn, "usage cache "+path, key, window.ResetsAt)
+		if cached.ResetsAt != 0 && cached.ResetsAt <= now.Unix() {
+			continue
 		}
 		if missing[key] ||
 			usagehook.NewerReading(cached.UsedPercentage, cached.ResetsAt, current.UsedPercentage, current.ResetsAt) {

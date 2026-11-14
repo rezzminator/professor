@@ -37,12 +37,7 @@ func TestInstallPlanNeedsCheck(t *testing.T) {
 // installer forbidden and the dependency probe quiet, and proves home unchanged.
 func installPlanRun(t *testing.T, home string) (code int, stdout, stderr string) {
 	t.Helper()
-	bin, _ := writeManagerFakes(
-		t,
-		"case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0",
-		"echo 'state = not running'",
-	)
-	t.Setenv("PATH", bin)
+	scriptManagers(t, systemctlActiveState("inactive"), managerSays("state = not running\n"))
 	savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
 	t.Cleanup(func() { doctor.DependencyProbeOverride, runInstaller = savedProbe, savedInstaller })
 	doctor.DependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result { return nil }
@@ -78,12 +73,15 @@ func writeStale(t *testing.T, path string) {
 }
 
 // TestInstallCheckPlanOrdersFixes stages a single-account host (one account,
-// no second seat) whose detectors register shared-db before home-state-file;
-// the plan still lists the config move first, the store's identity file
+// no second seat) whose detectors register stray-dir before home-state-file;
+// the plan still lists the store's identity file first, the store moves
 // before the cleanup rows, and every fix line under its row.
 func TestInstallCheckPlanOrdersFixes(t *testing.T) {
-	home, _, _ := installCheckHome(t, true)
-	writeStale(t, filepath.Join(home, ".local", "state", "pfm", "shared.db"))
+	home, _, account := installCheckHome(t)
+	if err := os.Mkdir(filepath.Join(filepath.Dir(account), ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeStale(t, filepath.Join(installer.ClaudeStore(home), ".credentials.json"))
 	writeStale(t, filepath.Join(home, ".claude.json"))
 	writeStale(t, filepath.Join(home, ".claude.json.tmp.fixture"))
 	code, stdout, stderr := installPlanRun(t, home)
@@ -107,11 +105,11 @@ func TestInstallCheckPlanOrdersFixes(t *testing.T) {
 			blocking++
 		}
 		switch match[2] {
-		case "legacy-config", "home-state-file", "shared-db", "stale-state-tmp":
+		case "store-identity", "home-state-file", "stray-dir", "stale-state-tmp":
 			classes = append(classes, match[2])
 		}
 	}
-	want := []string{"legacy-config", "home-state-file", "shared-db", "stale-state-tmp"}
+	want := []string{"store-identity", "home-state-file", "stray-dir", "stale-state-tmp"}
 	if !reflect.DeepEqual(classes, want) {
 		t.Fatalf("classes=%q want=%q stdout=%q", classes, want, stdout)
 	}
@@ -128,7 +126,7 @@ func TestInstallCheckPlanOrdersFixes(t *testing.T) {
 // tmux directory, where a parallel test's or the host's servers live: the
 // fixture's own tmux directory is inside its home, so the plan never probes it.
 func TestInstallCheckPlanCleanHost(t *testing.T) {
-	home, _, _ := installCheckHome(t, false)
+	home, _, _ := installCheckHome(t)
 	ambient := testjail.ShortRoot(t)
 	t.Setenv("TMUX_TMPDIR", ambient)
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
@@ -157,13 +155,13 @@ func TestInstallCheckPlanCleanHost(t *testing.T) {
 // where a file is read; a chmod would not stop root in the fence): the plan
 // lists it as FAILED and never says "no fixes".
 func TestInstallCheckPlanListsFailedCheck(t *testing.T) {
-	home, _, _ := installCheckHome(t, false)
-	zshrc := filepath.Join(home, ".zshrc")
-	if err := os.Mkdir(zshrc, 0o700); err != nil {
+	home, _, account := installCheckHome(t)
+	registry := filepath.Join(account, ".claude.json")
+	if err := os.Mkdir(registry, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	code, stdout, stderr := installPlanRun(t, home)
-	failed := "  FAILED staged-shim " + zshrc + " — UNREADABLE " + zshrc + ": is a directory\n"
+	failed := "  FAILED third-party-mcp " + registry + " — UNREADABLE " + registry + ": is a directory\n"
 	rerun := "  then: rerun pfm install --check --plan\n"
 	if code != 4 || !strings.Contains(stdout, failed) || strings.Contains(stdout, "no fixes") ||
 		strings.Contains(stdout, " 0 failed") || !strings.HasSuffix(stdout, rerun) ||

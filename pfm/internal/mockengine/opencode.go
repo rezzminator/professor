@@ -127,7 +127,7 @@ func serveOpenCode(proc *process) int {
 				}
 				proc.cwd = cwd
 			}
-			return runPane(proc, newOpenCodeSession(proc, call), call.prompt, call.sessionID != "")
+			return runPane(proc, openCodePane(proc, call), call.prompt, call.sessionID != "")
 		}
 		warn(proc.stderr, "opencode pane shapes are unpinned — pfm matches no OpenCode pane text (map § 2c); "+
 			"supply pane.busy, pane.compacted and pane.composer in the scenario "+
@@ -267,7 +267,9 @@ func (session *openCodeSession) start(bool) (returnErr error) {
 		}
 	}()
 	ctx := proc.ctx
-	if _, err := database.ExecContext(ctx, openCodeSchema); err != nil {
+	// OpenCode's migrator creates its tables in one transaction, so no reader meets a part of them; a failed
+	// statement leaves the transaction open and closing the store rolls it back.
+	if _, err := database.ExecContext(ctx, "BEGIN IMMEDIATE;"+openCodeSchema+"\nCOMMIT;"); err != nil {
 		return fmt.Errorf("create opencode schema: %w", err)
 	}
 	now := time.Now().UnixMilli()
@@ -450,6 +452,8 @@ func (session *openCodeSession) mcp(Step) error {
 
 func (session *openCodeSession) clear() error                      { return errors.New("opencode clear is unpinned") }
 func (session *openCodeSession) statusLine(Tokens) (string, error) { return "", nil }
+
+func (session *openCodeSession) statusRefresh() time.Duration { return 0 }
 func (session *openCodeSession) finish(string) error {
 	var result error
 	if session.database != nil {

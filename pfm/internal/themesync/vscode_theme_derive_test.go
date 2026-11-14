@@ -190,7 +190,7 @@ func TestADerivedThemeCoversEveryBuiltinBase(t *testing.T) {
 			}
 			// The derived layers alone: the chrome the contract paints over
 			// them (vscodeContract) is not derive's to hold.
-			tokens, side := customPalette(base, map[string]string{})
+			tokens, side, _ := customPalette(base, map[string]string{})
 			variant, err := deriveVariant(CustomValue("plain"), tokens)
 			if err != nil {
 				t.Fatal(err)

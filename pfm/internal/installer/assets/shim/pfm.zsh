@@ -10,28 +10,6 @@ export CLAUDE_DISABLE_ADOPT=1
 export CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF=1
 export CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=2
 
-# Re-sourcing an updated install also removes legacy functions and aliases
-# already loaded in this shell. External executables (including /usr/bin/cc)
-# are untouched.
-if (( ${+precmd_functions} )); then
-  precmd_functions=("${(@)precmd_functions:#_cc_auto_open}")
-fi
-for _pfm_retired in cc cc1 cc2 cc3 cc4 cc-clean cc-ls cc-open cc-revive cc-swap \
-  _cc_accounts _cc_acct _cc_agents _cc_ago _cc_arm1h _cc_c1h_tty _cc_cachew \
-  _cc_cfgdir _cc_dir _cc_fleet_eval _cc_has _cc_hsize _cc_in_bunker _cc_isbg \
-  _cc_isgpt _cc_label _cc_lastprompt _cc_medal _cc_meta _cc_metac _cc_newprompts \
-  _cc_open_gate _cc_open_lock _cc_own_terminal _cc_owns_terminal _cc_primary \
-  _cc_resume_acct _cc_run _cc_selfswitch _cc_solo _cc_stat _cc_tui_call _cc_auto_open \
-  cc_children_args cc_detach cc_epoch cc_find_meta cc_find_newest cc_listening \
-  cc_mem cc_mtime cc_mtime0 cc_pane_of cc_penv cc_pfiles cc_ppid cc_pstart \
-  cc_sed_i cc_session_live cc_size cc_size0 cc_timeout cc_trylock cc_unlock \
-  cc_master_item cc_account_meta cc_item_sfx cc_read_item cc_expires_of \
-  cc_freshest_token cc_promote _pfm_eval _pfm_primary; do
-  unfunction "$_pfm_retired" 2>/dev/null || true
-  unalias "$_pfm_retired" 2>/dev/null || true
-done
-unset _pfm_retired _cc_auto_what PFM_CLAUDE_PROMPTED
-
 # cx — a CODEX chat on the same per-chat-server pattern, socket prefix cx-* instead of cc-*.
 # The prefix IS the engine marker: codex writes no statusline breadcrumbs and no ~/.claude
 # transcript, so pfm recognizes (and lists) a live Codex chat by socket name alone. Claude
@@ -55,7 +33,7 @@ cx() {
   (( rc == 0 )) || return $rc
   if _pfm_selfswitch "$sock"; then :                          # already inside it → switch, never nest
   elif _pfm_in_bunker; then TMUX= exec tmux -L "$sock" attach # viewport dies with the tab
-  elif _pfm_owns_terminal; then TMUX= exec tmux -L "$sock" attach # bare terminal dies with the harness
+  elif _pfm_owns_terminal && ! _pfm_on_ssh_terminal; then TMUX= exec tmux -L "$sock" attach # bare terminal dies with the harness
   else
     TMUX= tmux -L "$sock" attach
     _pfm_own_terminal $?   # bare terminal: the chat took it, the chat closes it
@@ -87,6 +65,12 @@ _pfm_owns_terminal() {
   [[ -z "$TMUX" ]] || _pfm_in_bunker
 }
 
+# _pfm_on_ssh_terminal — true when this shell sits on the ssh session's own terminal ($SSH_TTY
+# is this shell's tty). That shell IS the ssh session: ending or replacing it drops the
+# connection, so a harness that ends there hands back the prompt. A Herdr pane or a VS Code tab
+# reached over ssh carries $SSH_CONNECTION but sits on another tty, and still closes.
+_pfm_on_ssh_terminal() { [[ -n "${SSH_TTY:-}" && "$SSH_TTY" == "$TTY" ]] }
+
 # _pfm_own_terminal <status> — the terminal belongs to the harness that was typed into it, so
 # a harness that ENDS takes the terminal with it (the VS Code tab closes) instead of falling
 # back to a prompt nobody asked for. Three guards keep it from eating anything else: only an
@@ -94,10 +78,11 @@ _pfm_owns_terminal() {
 # run return untouched; only a caller that actually ran a harness calls it, so the picker
 # (pfm) still escapes to the prompt on Esc; and a NON-ZERO exit holds the terminal for a
 # keypress first — a crash the tab swallowed is a crash that never happened. zsh's refusal to
-# exit while jobs are suspended is the right refusal, and is left alone.
+# exit while jobs are suspended is the right refusal, and is left alone. The ssh session's own
+# terminal is never ended: closing it would close the ssh connection.
 _pfm_own_terminal() {
   local exit_status="${1:-0}"
-  _pfm_owns_terminal || return "$exit_status"
+  _pfm_owns_terminal && ! _pfm_on_ssh_terminal || return "$exit_status"
   # A bare terminal or a bunker pane exists to hold a harness, so it goes when the harness
   # goes. Inside any OTHER tmux — a chat pane, an ad-hoc work window — the terminal is
   # someone else's and closing it would take the host down too.
@@ -124,9 +109,9 @@ _pfm_tui_call() {
 }
 
 # A harness typed straight into a terminal closes that terminal on exit, exactly as a fleet
-# chat does. claude bypasses recursion by calling the managed absolute launcher path, while
-# codex delegates to the managed launch door, which resolves the real binary, carries extension
-# env, and selects --no-daemon for a TUI without an explicit transport.
+# chat does, except on the ssh session's own terminal, which returns to its prompt. claude bypasses recursion by calling the managed absolute launcher path, while
+# codex delegates to the managed launch door, which resolves the real binary,
+# and selects --no-daemon for a TUI without an explicit transport.
 # Only this shell's own typing is affected — pfm, hooks and scripts exec the binary and never
 # see these functions. An agent tool shell replays a snapshot that keeps `claude`/`codex` but drops
 # every `_`-prefixed helper, and is not interactive — the guard keeps it from calling them.
@@ -147,7 +132,8 @@ codex() {
 # pfm — the picker typed into a bare terminal hands that terminal to the chat it opens, as `cx`
 # does. With stdout captured, pfm draws the picker on /dev/tty and prints the chosen action as
 # one line (action.Dispatch); this shell runs it, then closes when the chat ends or is detached,
-# so no prompt is left behind to read the terminal's late colour-query replies as typed input.
+# so no prompt is left behind to read the terminal's late colour-query replies as typed input;
+# on the ssh session's own terminal it returns to the prompt instead, as _pfm_own_terminal says.
 # Esc prints nothing and returns to the prompt; a failed pfm returns its status. Any argument, a
 # script, a shell inside another tmux, or a snapshot shell without the helpers runs pfm as is.
 pfm() {
@@ -259,6 +245,14 @@ if [[ -o interactive && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:
     # moment is a terminal that reopens whatever you just closed, forever.
     add-zsh-hook -d precmd _pfm_auto_open
     unfunction _pfm_auto_open
+    # A pane Herdr restored with its agent's session is Herdr's: Herdr types that agent's resume
+    # into this shell as it starts, and a picker opened here would read those keys as its find
+    # text. pfm answers whether this pane is one; a pane it cannot ask about opens the picker.
+    if [[ -n "${HERDR_PANE_ID:-}" &&
+      "$("$HOME/.local/bin/pfm" internal herdr-shell resume-pending 2>/dev/null)" == pending ]]; then
+      unset _pfm_auto_what
+      return
+    fi
     # The value chooses, from a WHITELIST — never `eval`, and never run as-is. It arrives from
     # the environment, which a terminal profile, a parent process or an ssh client can set.
     local cmd

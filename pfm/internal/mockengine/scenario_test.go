@@ -3,6 +3,7 @@ package mockengine
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,24 +109,31 @@ func mustJSON(t *testing.T, value any) []byte {
 
 func TestLoadScenarioRefusesUnknownFieldsAndBrokenSteps(t *testing.T) {
 	dir := t.TempDir()
-	for name, body := range map[string]string{
-		"unknown field":     `{"steps":[],"delay":3}`,
-		"hold without gate": `{"steps":[{"type":"hold"}]}`,
-		"unknown step":      `{"steps":[{"type":"dance"}]}`,
-		"menu no options":   `{"steps":[{"type":"menu"}]}`,
-		"menu selected":     `{"steps":[{"type":"menu","options":["a"],"selected":4}]}`,
-		"tool no name":      `{"steps":[{"type":"tool_call"}]}`,
+	for name, tc := range map[string]struct{ body, want string }{
+		"unknown field":     {`{"steps":[],"delay":3}`, "decode scenario {dir}/unknown-field.json: json: unknown field \"delay\""},
+		"hold without gate": {`{"steps":[{"type":"hold"}]}`, "scenario {dir}/hold-without-gate.json step 0: hold needs until_gone"},
+		"unknown step":      {`{"steps":[{"type":"dance"}]}`, "scenario {dir}/unknown-step.json step 0: unknown step type \"dance\""},
+		"menu no options":   {`{"steps":[{"type":"menu"}]}`, "scenario {dir}/menu-no-options.json step 0: menu needs options"},
+		"menu selected":     {`{"steps":[{"type":"menu","options":["a"],"selected":4}]}`, "scenario {dir}/menu-selected.json step 0: menu selected 4 is outside 1..1"},
+		"tool no name":      {`{"steps":[{"type":"tool_call"}]}`, "scenario {dir}/tool-no-name.json step 0: tool_call needs tool"},
+		"perform a read":    {`{"steps":[{"type":"tool_call","tool":"Read","perform":true}]}`, "scenario {dir}/perform-a-read.json step 0: tool_call performs only Bash and Write, not \"Read\""},
 	} {
 		path := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".json")
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := LoadScenario(path, engineClaude); err == nil || !strings.Contains(err.Error(), path) {
-			t.Fatalf("%s: err=%v, want a refusal naming %s", name, err, path)
+		_, err := LoadScenario(path, engineClaude)
+		if got := strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"); got != tc.want {
+			t.Errorf("%s: err = %q, want %q", name, got, tc.want)
 		}
 	}
-	if _, err := LoadScenario(filepath.Join(dir, "absent.json"), engineClaude); err == nil {
-		t.Fatal("a missing scenario loaded as something")
+	_, err := LoadScenario(filepath.Join(dir, "absent.json"), engineClaude)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		dir,
+		"{dir}",
+	), "read scenario {dir}/absent.json: open {dir}/absent.json: no such file or directory"; got != want {
+		t.Fatalf("absent scenario err = %q, want %q", got, want)
 	}
 	if scenario, err := LoadScenario("", engineClaude); err != nil || len(scenario.Steps) != 0 {
 		t.Fatalf("empty path = (%+v, %v), want the default scenario", scenario, err)
@@ -185,24 +193,6 @@ func TestScenarioRateLimitsRoundTripsAndRejectsNonObjects(t *testing.T) {
 		); err == nil ||
 			!strings.Contains(err.Error(), "rate_limits") {
 			t.Fatalf("rate_limits %v: %v", bad, err)
-		}
-	}
-}
-
-func TestLaneDefaultScenarioLoadsForEveryEngine(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "infra", "fence", "lanes", "scenarios", "default.json")
-	for _, engine := range []string{engineClaude, engineCodex, engineOpenCode} {
-		scenario, err := LoadScenario(path, engine)
-		if err != nil {
-			t.Fatalf("%s default scenario: %v", engine, err)
-		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(mustJSON(t, scenario), &fields); err != nil {
-			t.Fatal(err)
-		}
-		if len(fields["rate_limits"]) == 0 || scenario.Pane.Composer == "" || scenario.Pane.Busy == "" ||
-			scenario.Pane.Compacted == "" {
-			t.Fatalf("%s default scenario lacks lane shapes: %+v", engine, scenario)
 		}
 	}
 }

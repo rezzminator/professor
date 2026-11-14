@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -200,6 +199,7 @@ func TestManagerCanExitResolvedCodexSelfWithoutAmbientTmux(t *testing.T) {
 	database := jail.open(t)
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		Spawner: spawner,
 		Now:     func() time.Time { return time.Unix(600, 0) },
 	})
@@ -275,6 +275,7 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	spawner := &captureSpawner{}
 	now := time.Unix(1_700_000_000, 0)
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  proc,
 		Tmux:    tmux,
 		Spawner: spawner,
@@ -357,7 +358,7 @@ func TestAdvanceCodexPaneReturnsThePreviousBindingAndChangedFlag(t *testing.T) {
 	database := jail.open(t)
 	ctx := context.Background()
 
-	manager, err := New(database, Dependencies{})
+	manager, err := New(database, Dependencies{Paths: jail.resolved()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,6 +414,7 @@ func TestKilledChatStaysKilledAsItGrowsUntilUnkill(t *testing.T) {
 	reindex(t, database)
 
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  &fakeProc{},
 		Tmux:    &fakeTmux{},
 		Spawner: &captureSpawner{},
@@ -531,7 +533,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 		Path:        filepath.Join(jail.codexHome, "sessions", "rollout-"+rootID+".jsonl"),
 		Size:        100,
 		MTimeNS:     100,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   rootID,
 		PromptCount: 1,
@@ -545,7 +547,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 		Path:        filepath.Join(jail.codexHome, "sessions", "rollout-"+childID+".jsonl"),
 		Size:        200,
 		MTimeNS:     200,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   rootID,
 		PromptCount: 2,
@@ -575,6 +577,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	// still clear the child-keyed kill, or the row would come right back
 	// killed the next time this same lineage is composed.
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  &fakeProc{},
 		Tmux:    &fakeTmux{},
 		Spawner: &captureSpawner{},
@@ -695,6 +698,7 @@ func TestFinisherChoreographyAndTeammateReaping(t *testing.T) {
 		})
 	})
 	finisher, err := NewFinisher(database, Dependencies{
+		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Screen:       tmux,
 		Refresher:    refresher,
@@ -780,6 +784,7 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 	paneID := "%9"
 	tmux := &fakeTmux{existsFor: 1}
 	finisher, err := NewFinisher(database, Dependencies{
+		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Screen:       tmux,
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),
@@ -825,27 +830,10 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 	}
 }
 
-func TestCommandSpawnerUsesSetsidSelfReexec(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh is not installed")
-	}
-	root := t.TempDir()
-	argvPath := filepath.Join(root, "argv")
-	setsidPath := filepath.Join(root, "setsid")
-	if err := testjail.WriteExecutable(
-		setsidPath,
-		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_SPAWN_ARGV\"\n"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PFM_SPAWN_ARGV", argvPath)
-	spawner := CommandSpawner{
-		Executable: "/jail/pfm",
-		Setsid:     setsidPath,
-		ConfigPath: "/jail/config/pfm.json",
-		LogDir:     t.TempDir(),
-	}
+// The finisher starts detached through the runner: its own argv with no
+// launcher in front, its log on stdout and stderr, and the handle released;
+// a start that fails names the finisher.
+func TestCommandSpawnerStartsTheFinisherDetached(t *testing.T) {
 	args := ExitArgs{
 		Engine:     pfmengine.Claude,
 		ID:         "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -854,94 +842,55 @@ func TestCommandSpawnerUsesSetsidSelfReexec(t *testing.T) {
 		SocketName: "cc-1-1-1",
 		PaneID:     "%3",
 	}
-	if err := spawner.Spawn(context.Background(), args); err != nil {
-		t.Fatal(err)
-	}
-	content, err := os.ReadFile(argvPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := strings.Join([]string{
-		"-f",
-		"/jail/pfm",
-		"--config",
-		"/jail/config/pfm.json",
-		"internal",
-		"kill-exit",
-		"--engine",
-		string(args.Engine),
-		"--id",
-		args.ID,
-		"--path",
-		args.DataPath,
-		"--socket",
-		args.SocketPath,
-		"--socket-name",
-		args.SocketName,
-		"--pane",
-		args.PaneID,
-		"",
-	}, "\n")
-	if string(content) != want {
-		t.Fatalf("setsid argv = %q, want %q", content, want)
-	}
-}
-
-type killJail struct {
-	root       string
-	home       string
-	sidDir     string
-	tmuxDir    string
-	claudeRoot string
-	codexHome  string
-	dbPath     string
-}
-
-func newKillJail(t *testing.T) killJail {
-	t.Helper()
-	root := t.TempDir()
-	jail := killJail{
-		root:       root,
-		home:       filepath.Join(root, "home"),
-		sidDir:     filepath.Join(root, "sid"),
-		tmuxDir:    filepath.Join(root, "tmux"),
-		claudeRoot: filepath.Join(root, "claude"),
-		codexHome:  filepath.Join(root, "codex"),
-		dbPath:     filepath.Join(root, "pfm-cache.db"),
-	}
-	for _, directory := range []string{
-		jail.home,
-		jail.sidDir,
-		jail.tmuxDir,
-		jail.claudeRoot,
-		jail.codexHome,
+	for _, tc := range []struct {
+		name          string
+		startErr      error
+		wantErr       string
+		wantLifecycle []deps.LifecycleCall
+	}{
+		{name: "started", wantLifecycle: []deps.LifecycleCall{{Pid: 4242, Action: "release"}}},
+		{name: "start fails", startErr: errors.New("boom"), wantErr: "start detached kill finisher: boom"},
 	} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			logDir := t.TempDir()
+			runner := &deps.FakeRunner{}
+			if tc.startErr != nil {
+				runner.ScriptStart([]string{"/jail/pfm"}, 0, nil, tc.startErr)
+			}
+			spawner := CommandSpawner{
+				Executable: "/jail/pfm",
+				ConfigPath: "/jail/config/pfm.json",
+				LogDir:     logDir,
+				Runner:     runner,
+			}
+			err := spawner.Spawn(context.Background(), args)
+			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr) {
+				t.Fatalf("Spawn() = %v, want error %q", err, tc.wantErr)
+			}
+			starts := runner.Starts()
+			if len(starts) != 1 {
+				t.Fatalf("starts = %+v, want exactly one", starts)
+			}
+			want := []string{
+				"/jail/pfm", "--config", "/jail/config/pfm.json", "internal", "kill-exit",
+				"--engine", string(args.Engine), "--id", args.ID, "--path", args.DataPath,
+				"--socket", args.SocketPath, "--socket-name", args.SocketName, "--pane", args.PaneID,
+			}
+			if !reflect.DeepEqual(starts[0].Argv, want) {
+				t.Fatalf("finisher argv = %q, want %q", starts[0].Argv, want)
+			}
+			opts := starts[0].Opts
+			logPath := filepath.Join(logDir, paths.SIDKillExitLogPrefix+args.SocketName+".log")
+			stdout, stdoutOK := opts.Stdout.(*os.File)
+			stderr, stderrOK := opts.Stderr.(*os.File)
+			if !opts.Detach || !stdoutOK || !stderrOK || stdout.Name() != logPath || stderr.Name() != logPath {
+				t.Fatalf("start options = %+v, want Detach with stdout and stderr on %s", opts, logPath)
+			}
+			if got := runner.LifecycleCalls(); !reflect.DeepEqual(got, tc.wantLifecycle) {
+				t.Fatalf("lifecycle = %+v, want %+v", got, tc.wantLifecycle)
+			}
+		})
 	}
-	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "tmp"))
-	t.Setenv("PFM_CACHE_DB", jail.dbPath)
-	t.Setenv("PFM_SID_DIR", jail.sidDir)
-	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
-	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)
-	t.Setenv("PFM_TMUX_DIR", jail.tmuxDir)
-	t.Setenv("PFM_HOME", jail.home)
-	return jail
-}
-
-func (jail killJail) open(t *testing.T) *store.Store {
-	t.Helper()
-	database, err := store.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Errorf("close database: %v", err)
-		}
-	})
-	return database
 }
 
 func appendTestFile(t *testing.T, path, content string) {
@@ -1051,6 +1000,7 @@ func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 	}
 
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  &fakeProc{},
 		Tmux:    &fakeTmux{},
 		Spawner: &captureSpawner{},
@@ -1093,6 +1043,7 @@ func TestKillingAnUnknownIDStillFailsWithoutAnEngine(t *testing.T) {
 	ctx := context.Background()
 
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		ProcFS:  &fakeProc{},
 		Tmux:    &fakeTmux{},
 		Spawner: &captureSpawner{},
@@ -1131,6 +1082,7 @@ func TestKillSelfEnrichesAProvenPaneFromItsSeat(t *testing.T) {
 	manager, err := New(
 		database,
 		Dependencies{
+			Paths:   jail.resolved(),
 			Spawner: &captureSpawner{},
 			Tmux:    &fakeTmux{},
 			Identifier: killTestIdentity{
@@ -1160,6 +1112,7 @@ func TestKillKnownClaudeSelfNeedsNoFleetRow(t *testing.T) {
 	manager, err := New(
 		database,
 		Dependencies{
+			Paths:   jail.resolved(),
 			Spawner: &captureSpawner{},
 			Tmux:    &fakeTmux{},
 			Identifier: killTestIdentity{

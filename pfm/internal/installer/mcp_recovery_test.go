@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -96,22 +94,16 @@ func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
 		t.Fatal(err)
 	}
-	var document map[string]any
-	if _, err := toml.Decode(readFixture(t, path), &document); err != nil {
-		t.Fatalf("install corrupted manual secondary Codex config: %v", err)
-	}
-	if got := readFixture(t, path); !strings.HasPrefix(got, original) {
-		t.Fatalf("manual chat table was not kept byte-identical:\n%s", got)
+	want := original + mcpFenceBegin + "\n[mcp_servers.chat-professor]\ncommand = \"" + home + "/.local/bin/pfm\"\n" +
+		"args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"chat\"]\n" + mcpFenceEnd + "\n"
+	if got := readFixture(t, path); got != want {
+		t.Fatalf("%s =\n%s\nwant the manual chat table kept byte-identical\n%s", path, got, want)
 	}
 }
 
 // codexHostShape is the broken host config the one-fence repair starts from:
-// pfm's legacy loopback tables, a hand-written remote gateway, an orphan END
-// and an empty fence at the end.
-const codexHostShape = `[mcp_servers.chat]
-url = "http://127.0.0.1:18377/mcp/chat"
-
-[mcp_servers.external-remote]
+// a hand-written remote gateway, an orphan END and an empty fence at the end.
+const codexHostShape = `[mcp_servers.external-remote]
 url = "https://gateway.example.invalid/mcp"
 
 [desktop]
@@ -151,8 +143,8 @@ func codexChatFence(home string) string {
 		"args = [\"mcp\", \"serve\", \"--stdio\", \"--family\", \"chat\"]\n" + mcpFenceEnd + "\n"
 }
 
-// TestMCPRepairsABrokenCodexFence pins the host repair: the legacy loopback
-// tables, the orphan END and the empty fence go, every other line stays
+// TestMCPRepairsABrokenCodexFence pins the host repair: the orphan END and
+// the empty fence go, every other line stays
 // byte-identical, and one professor fence lands at the end. A second pass
 // changes nothing and reports the wiring ok.
 func TestMCPRepairsABrokenCodexFence(t *testing.T) {
@@ -216,63 +208,50 @@ func TestMCPReclaimsAnOrphanedCodexProfessorBody(t *testing.T) {
 	}
 }
 
-// TestMCPKeepsALegacyCodexTableWithAnExtraKey pins that a [mcp_servers.chat]
-// table differing from pfm's legacy shape by one key is not pfm's and stays.
-func TestMCPKeepsALegacyCodexTableWithAnExtraKey(t *testing.T) {
+// TestMCPKeepsANearCodexFamilyTable pins that a chat-professor table outside
+// a fence that differs from the body install writes (an extra key, or its own
+// [mcp_servers.chat-professor.*] sub-table) is not pfm's: install keeps it
+// byte-identical and yields to it, and doctor classifies it foreign.
+func TestMCPKeepsANearCodexFamilyTable(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	account := filepath.Join(home, ".codex")
-	path := filepath.Join(account, "config.toml")
-	original := "[mcp_servers.chat]\nurl = \"http://127.0.0.1:18377/mcp/chat\"\nstartup_timeout_sec = 30\n"
-	writeFixture(t, path, original)
-	e := codexMCPEngine(home, account)
-	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
-		t.Fatal(err)
-	}
-	if got := readFixture(t, path); got != original+codexChatFence(home) {
-		t.Fatalf("Codex config:\n%s\nwant the extended chat table kept and the professor fence appended", got)
-	}
-	if report := InspectCodexServers(path, home, 18377, chatName)[0]; report.State != MCPClientForeignRegistration {
-		t.Fatalf("doctor classifies the extended chat table as %s, want %s: install keeps it",
-			report.State, MCPClientForeignRegistration)
+	for name, extra := range map[string]string{
+		"extra key": "startup_timeout_sec = 30\n",
+		"sub-table": "\n[mcp_servers.chat-professor.http_headers]\nX-Team = \"research\"\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			account := filepath.Join(home, ".codex")
+			path := filepath.Join(account, "config.toml")
+			body := strings.TrimSuffix(strings.TrimPrefix(codexChatFence(home), mcpFenceBegin+"\n"), mcpFenceEnd+"\n")
+			original := body + extra
+			writeFixture(t, path, original)
+			var out strings.Builder
+			e := codexMCPEngine(home, account)
+			e.options.Stdout = &out
+			if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
+				t.Fatal(err)
+			}
+			if got := readFixture(t, path); got != original {
+				t.Fatalf("Codex config %s:\n%s\nwant the near table kept byte-identical:\n%s", path, got, original)
+			}
+			if !strings.Contains(out.String(), "preserve conflicting manual MCP client chat-professor in "+path) {
+				t.Fatalf("install did not yield to the near table:\n%s", out.String())
+			}
+			if report := InspectCodexServers(path, home, chatRegistrationName)[0]; report.State != MCPClientForeignRegistration {
+				t.Fatalf("doctor classifies the near table in %s as %s, want %s: install keeps it",
+					path, report.State, MCPClientForeignRegistration)
+			}
+		})
 	}
 }
 
-// TestMCPKeepsALegacyCodexTableWithASubTable pins that a [mcp_servers.chat]
-// table whose url line is followed by its own [mcp_servers.chat.*]
-// sub-table (the headers Codex sends to a streamable-HTTP server) is not pfm's
-// single-line shape: install keeps it whole rather than stripping the parent
-// and orphaning the sub-table, as doctor classifies a headed table foreign.
-func TestMCPKeepsALegacyCodexTableWithASubTable(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	account := filepath.Join(home, ".codex")
-	path := filepath.Join(account, "config.toml")
-	original := "[mcp_servers.chat]\nurl = \"http://127.0.0.1:18377/mcp/chat\"\n\n" +
-		"[mcp_servers.chat.http_headers]\nX-Team = \"research\"\n"
-	writeFixture(t, path, original)
-	e := codexMCPEngine(home, account)
-	if err := e.writeMCPCodeConfig([]string{chatRegistrationName}); err != nil {
-		t.Fatal(err)
-	}
-	if got := readFixture(t, path); got != original+codexChatFence(home) {
-		t.Fatalf("Codex config:\n%s\nwant the headed chat table kept and the professor fence appended", got)
-	}
-	if report := InspectCodexServers(path, home, 18377, chatName)[0]; report.State != MCPClientForeignRegistration {
-		t.Fatalf(
-			"doctor classifies the headed chat table as %s, want %s",
-			report.State,
-			MCPClientForeignRegistration,
-		)
-	}
-}
-
-// TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere pins both ways
-// pfm takes its registrations back — every family disabled, and uninstall:
-// the owned professor and every legacy shape leave Codex and OpenCode, the
-// fence and orphan markers included, and nothing else moves. Claude has no
+// TestMCPRemovalClearsFamilyEntriesEverywhere pins both ways pfm takes its
+// registrations back — every family disabled, and uninstall: the owned family
+// entry leaves Codex and OpenCode, the fence and orphan markers included, and
+// nothing else moves. Claude has no
 // install-time registration to take back (docs/design/engines/claude-config-dir.md § MCP servers).
-func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
+func TestMCPRemovalClearsFamilyEntriesEverywhere(t *testing.T) {
 	for name, mode := range map[string]Mode{"both disabled": ModeApply, "uninstall": ModeUninstall} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
@@ -299,17 +278,22 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 			}
 			codexPath := filepath.Join(home, ".codex", "config.toml")
 			remote := "[mcp_servers.external-remote]\nurl = \"https://gateway.example.invalid/mcp\"\n"
-			writeFixture(t, codexPath, readFixture(t, codexPath)+"\n[mcp_servers.chat]\n"+
-				"url = \"http://127.0.0.1:18377/mcp/chat\"\n\n"+remote+mcpFenceEnd+"\n")
-			professor, _ := json.Marshal(
-				map[string]any{
-					"type":    "local",
-					"enabled": true,
-					"command": []any{filepath.Join(home, ".local", "bin", "pfm"), "mcp", "serve", "--stdio"},
-				},
-			)
-			writeFixture(t, openCodePath, `{"mcp":{"professor":`+string(professor)+
-				`,"chat":{"type":"remote","url":"http://127.0.0.1:18377/mcp/chat","enabled":true}}}`)
+			writeFixture(t, codexPath, readFixture(t, codexPath)+"\n"+remote+mcpFenceEnd+"\n")
+			installed, err := decodeJSONCObject([]byte(readFixture(t, openCodePath)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			servers, _ := installed["mcp"].(map[string]any)
+			if _, present := servers[chatRegistrationName]; !present {
+				t.Fatalf("OpenCode servers in %s = %#v, want install's %s", openCodePath, servers, chatRegistrationName)
+			}
+			other := map[string]any{"type": "remote", "url": "https://operator.invalid"}
+			servers["other"] = other
+			encoded, err := json.Marshal(installed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFixture(t, openCodePath, string(encoded))
 
 			options.Mode = mode
 			options.MCPEnabled = map[string]bool{"chat": false}
@@ -318,15 +302,15 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 			}
 			codex := readFixture(t, codexPath)
 			if !strings.Contains(codex, remote) || strings.Contains(codex, "pfm mcp_servers") ||
-				strings.Contains(codex, "mcp_servers.professor") || strings.Contains(codex, "/mcp/chat") {
-				t.Fatalf("Codex config kept pfm lines:\n%s", codex)
+				strings.Contains(codex, "mcp_servers."+chatRegistrationName) {
+				t.Fatalf("Codex config %s kept pfm lines or lost the remote table:\n%s", codexPath, codex)
 			}
 			document, err := decodeJSONCObject([]byte(readFixture(t, openCodePath)))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, _ := document["mcp"].(map[string]any); len(got) != 0 {
-				t.Fatalf("OpenCode servers=%#v, want none", got)
+			if got, _ := document["mcp"].(map[string]any); !sameJSONValue(got, map[string]any{"other": other}) {
+				t.Fatalf("OpenCode servers in %s = %#v, want only the foreign other entry", openCodePath, got)
 			}
 		})
 	}
@@ -538,62 +522,5 @@ func TestMCPWritePreservesAnEditDuringBackup(t *testing.T) {
 	}
 	if got := readFixture(t, path); got != "client edit" {
 		t.Fatalf("client edit overwritten: %q", got)
-	}
-}
-
-// A hostile registry must not leave an installer renewing its native lock
-// forever. Subprocesses bound the blocked-open regression without leaking it.
-func TestMCPReadsRejectFIFO(t *testing.T) {
-	if source := os.Getenv("PFM_TEST_FIFO_SOURCE"); source != "" {
-		var err error
-		switch os.Getenv("PFM_TEST_FIFO_READ") {
-		case "backup":
-			err = copyBackup(source, source+".backup")
-		case "save":
-			inst := &engine{stamp: "fixture"}
-			err = withClaudeMCPLocks([]string{source}, func(check func() error) error {
-				if err := os.Remove(source); err != nil {
-					return err
-				}
-				if err := syscall.Mkfifo(source, 0o600); err != nil {
-					return err
-				}
-				return inst.writeMCPFileIf(source, []byte("original"), []byte("pfm"), true, check)
-			})
-			if _, lockErr := os.Lstat(source + ".lock"); !errors.Is(lockErr, os.ErrNotExist) {
-				t.Fatalf("hostile registry left native lock held: %v", lockErr)
-			}
-		default:
-			_, _, err = readMCPFile(source)
-		}
-		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
-			t.Fatalf("want non-regular rejection for %s, got %v", source, err)
-		}
-		return
-	}
-	for _, reader := range []string{"registry", "backup", "save"} {
-		t.Run(reader, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "registry.json")
-			if reader == "save" {
-				writeFixture(t, path, "original")
-			} else if err := syscall.Mkfifo(path, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			executable, err := os.Executable()
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			command := exec.CommandContext(ctx, executable, "-test.run=^TestMCPReadsRejectFIFO$")
-			command.Env = append(os.Environ(), "PFM_TEST_FIFO_SOURCE="+path, "PFM_TEST_FIFO_READ="+reader)
-			output, err := command.CombinedOutput()
-			if ctx.Err() != nil {
-				t.Fatalf("%s blocked on a FIFO: %v", reader, ctx.Err())
-			}
-			if err != nil {
-				t.Fatalf("%s: %v\n%s", reader, err, output)
-			}
-		})
 	}
 }

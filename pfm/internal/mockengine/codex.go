@@ -114,11 +114,8 @@ func serveCodex(proc *process) int {
 		warn(proc.stderr, "codex mcp-server JSON-RPC is unpinned in this mock")
 		return ExitUnpinned
 	}
-	codexHome := proc.env("CODEX_HOME")
-	if codexHome == "" {
-		codexHome = filepath.Join(proc.env("HOME"), ".codex")
-	}
-	hooks, _, err := loadHookDocument(filepath.Join(codexHome, "hooks.json"))
+	codexHome := codexHomeDir(proc)
+	hooks, err := loadCodexHooks(codexHome)
 	if err != nil {
 		warn(proc.stderr, "%v", err)
 		return ExitUsage
@@ -436,38 +433,11 @@ func (session *codexSession) start(resumed bool) error {
 		return err
 	}
 	session.seat = seat
-	// hooks.json SessionStart, stdin per Codex's own hook input contract.
-	payload := map[string]any{
-		"hook_event_name": hookSessionStart, "source": source, "transcript_path": session.rollout,
-		"session_id": session.threadID, keyCWD: session.proc.cwd,
-	}
-	answers, err := session.hooks.fire(
-		session.proc.ctx,
-		hookSessionStart,
-		source,
-		payload,
-		session.proc.cwd,
-		session.environ,
-		session.proc.stderr,
-	)
+	answers, err := session.fire(hookSessionStart, source, map[string]any{"source": source})
 	if err != nil {
 		return err
 	}
-	for index := range answers {
-		additional := answers[index].Specific.AdditionalContext
-		if additional == "" {
-			continue
-		}
-		// Codex folds additionalContext into history as a developer message.
-		if err := session.write(codexRecord{Type: recordResponseItem, Payload: codexMessage{
-			Type:    payloadMessage,
-			Role:    roleDeveloper,
-			Content: []codexContent{{Type: blockInputText, Text: additional}},
-		}}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return session.foldContext(answers)
 }
 
 // turnContext carries the model internal/transcript/meta.go:139 reads.
@@ -476,8 +446,6 @@ func (session *codexSession) turnContext() codexRecord {
 		keyCWD: session.proc.cwd, "approval_policy": "never", "model": session.model, "summary": "auto",
 	}}
 }
-
-func (session *codexSession) prompt(string) (string, error) { session.mcpError = ""; return "", nil }
 
 func (session *codexSession) recordUser(text string) error {
 	return session.write(codexRecord{Type: recordResponseItem, Payload: codexMessage{
@@ -511,28 +479,6 @@ func (session *codexSession) recordAssistant(reply string, usage Tokens) error {
 		}
 	}
 	return nil
-}
-
-func (session *codexSession) tool(step Step) (string, error) {
-	arguments := string(step.Input)
-	if arguments == "" {
-		arguments = "{}"
-	}
-	callID := "call_" + uuid.NewV4().String()[:8]
-	records := []codexRecord{
-		{Type: recordResponseItem, Payload: map[string]any{
-			keyType: "function_call", "name": step.Tool, "arguments": arguments, "call_id": callID,
-		}},
-		{Type: recordResponseItem, Payload: map[string]any{
-			keyType: "function_call_output", "call_id": callID, "output": "done",
-		}},
-	}
-	for index := range records {
-		if err := session.write(records[index]); err != nil {
-			return "", err
-		}
-	}
-	return "", nil
 }
 
 // compact writes the `compacted` record a reader of the rollout sees: the
@@ -715,8 +661,10 @@ func (session *codexSession) clear() error {
 }
 
 func (session *codexSession) finish(string) error {
-	var closeErr, seatErr error
+	var endErr, closeErr, seatErr error
 	if session.rolloutFile != nil {
+		// A session ends once: the pane's end and serveCodex's deferred one both land here.
+		_, endErr = session.fire(hookSessionEnd, "", nil)
 		if err := session.rolloutFile.Close(); err != nil {
 			closeErr = fmt.Errorf("close rollout %s: %w", session.rollout, err)
 		}
@@ -726,8 +674,10 @@ func (session *codexSession) finish(string) error {
 		seatErr = session.seat.release()
 		session.seat = nil
 	}
-	return errors.Join(closeErr, seatErr)
+	return errors.Join(endErr, closeErr, seatErr)
 }
+
+func (session *codexSession) statusRefresh() time.Duration { return 0 }
 
 // statusLine is internal/spawn/spawn.go's idle footer, keeping MCP failures
 // on a separate line after the turn completes.

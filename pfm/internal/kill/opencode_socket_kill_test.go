@@ -20,6 +20,7 @@ func TestKillOfASocketKeyedOpenCodeSeatClosesWithoutATombstone(t *testing.T) {
 	database := jail.open(t)
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		Spawner: spawner,
 		Now:     func() time.Time { return time.Unix(700, 0) },
 	})
@@ -62,6 +63,7 @@ func TestKillOfAnIdentifiedOpenCodeSeatStillRecordsItsTombstone(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
 	manager, err := New(database, Dependencies{
+		Paths:   jail.resolved(),
 		Spawner: &captureSpawner{},
 		Now:     func() time.Time { return time.Unix(700, 0) },
 	})

@@ -20,6 +20,7 @@ func (current *composer) openCodeSessionRow(session store.OpenCodeSession) Row {
 		Kind:           ResumeOpenCode,
 		ID:             session.ID,
 		Name:           name,
+		UserNameKnown:  true, // read from OpenCode's store; its title is OpenCode's own, never a user's
 		Project:        current.projects.of(session.ProjectDir),
 		CWD:            firstNonEmpty(session.Directory, session.ProjectDir),
 		PromptCount:    session.PromptCount,

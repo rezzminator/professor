@@ -116,7 +116,7 @@ func isFleetSourceLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	return !strings.HasPrefix(trimmed, "#") &&
 		strings.Contains(trimmed, "source") &&
-		(strings.Contains(trimmed, "pfm.zsh") || strings.Contains(trimmed, "cc-fleet.zsh"))
+		strings.Contains(trimmed, "pfm.zsh")
 }
 
 // fleetCommandCall matches a fleet launcher INVOKED as a command — at the start

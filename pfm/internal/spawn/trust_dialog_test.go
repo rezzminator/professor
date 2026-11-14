@@ -60,15 +60,9 @@ func TestRunHoldsAtTheClaudeFolderTrustDialogWithoutAKey(t *testing.T) {
 
 func TestTrustRefusalNamesTheDialogTheFolderAndTheAttachLine(t *testing.T) {
 	result := Result{Socket: "cc-1-2-3", Session: "cc-1-2-3"}
-	for directory, want := range map[string]string{
-		"/work/alpha": "worker is held at Claude Code's folder-trust dialog for /work/alpha — pfm pressed nothing",
-		"":            "worker is held at Claude Code's folder-trust dialog — pfm pressed nothing",
-	} {
-		got := result.TrustRefusal("worker", directory)
-		if !strings.HasPrefix(got, want) ||
-			!strings.Contains(got, "tmux -L cc-1-2-3 attach -t cc-1-2-3") ||
-			!strings.Contains(got, `choose "Yes, I trust this folder"`) {
-			t.Fatalf("TrustRefusal(%q) = %q, want prefix %q", directory, got, want)
+	for directory, want := range map[string]string{"/work/alpha": "worker is held at Claude Code's folder-trust dialog for /work/alpha — pfm pressed nothing (Enter there selects \"No, exit\"); trust the folder yourself: tmux -L cc-1-2-3 attach -t cc-1-2-3, choose \"Yes, I trust this folder\"", "": "worker is held at Claude Code's folder-trust dialog — pfm pressed nothing (Enter there selects \"No, exit\"); trust the folder yourself: tmux -L cc-1-2-3 attach -t cc-1-2-3, choose \"Yes, I trust this folder\""} {
+		if got := result.TrustRefusal("worker", directory); got != want {
+			t.Errorf("TrustRefusal(%q) = %q, want %q", directory, got, want)
 		}
 	}
 }

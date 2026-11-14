@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -104,12 +105,23 @@ func TestBillingSelectionSurvivesSavedDocumentAndReport(t *testing.T) {
 	}
 	a, _, _ := testAuditor(t)
 	a.prices = book
-	if line := a.gapsLine(); !strings.Contains(line, "; Claude bedrock/geo") || strings.Contains(line, billingGap) {
-		t.Errorf("configured billing must be explicit without a default warning: %s", line)
+	if got, want := strings.ReplaceAll(
+		a.gapsLine(),
+		filepath.Dir(path),
+		"{dir}",
+	), "pricing: saved table {dir}/cloud.json; Standard service, published prompt/context tiers (Codex aggregates use the run peak tier); table fetched 2026-01-01T00:00:00Z from anthropic, openai; not historical billing; Claude bedrock/geo\ndata gaps: transcript totals exclude background API calls (auto_mode, prompt_suggestion, hook_prompt, generate_session_title, agent_summary); captured telemetry is reported separately by pfm tokens (without --tree); missing telemetry and metadata-filtered background sessions cannot be quantified"; got != want {
+		t.Errorf("gaps line = %q, want %q", got, want)
 	}
-	catalog := stringify(book.catalog(), 0)
-	if !strings.Contains(catalog, `"billing":{"route":"bedrock","region":"geo","configured":true,"multiplier":1.1}`) {
-		t.Errorf("billing provenance missing from report JSON: %s", catalog)
+	var report struct {
+		Billing json.RawMessage `json:"billing"`
+	}
+	if err := json.Unmarshal([]byte(stringify(book.catalog(), 0)), &report); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(
+		report.Billing,
+	), `{"route":"bedrock","region":"geo","configured":true,"multiplier":1.1}`; got != want {
+		t.Errorf("billing in the report JSON = %q, want %q", got, want)
 	}
 }
 
@@ -130,18 +142,14 @@ func TestLoadSavedRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(dir, "missing.json")
-	cases := []struct{ path, want string }{
-		{
-			single,
-			"--prices " + single + ": a single-model lookup (claude-sonnet-5); prices come from `pfm model-cost --json --all`",
-		},
-		{missing, "--prices " + missing + ": open " + missing + ": no such file or directory"},
-		{garbled, "--prices " + garbled + ": invalid character"},
-	}
-	for _, c := range cases {
-		_, err := loadSaved(c.path)
-		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
-			t.Errorf("loadSaved(%s) = %v, want an error starting %q", filepath.Base(c.path), err, c.want)
+	for path, want := range map[string]string{single: "--prices {dir}/single.json: a single-model lookup (claude-sonnet-5); prices come from `pfm model-cost --json --all`", missing: "--prices {dir}/missing.json: open {dir}/missing.json: no such file or directory", garbled: "--prices {dir}/garbled.json: invalid character 'n' looking for beginning of object key string"} {
+		if _, err := loadSaved(path); strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}") != want {
+			t.Errorf(
+				"loadSaved(%s) = %q, want %q",
+				filepath.Base(path),
+				strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"),
+				want,
+			)
 		}
 	}
 }
@@ -220,12 +228,54 @@ func TestLoadServedServesTheEmbeddedTableOfflineWithoutAClone(t *testing.T) {
 		Fetch: (&countingFetch{err: errors.New("offline must not fetch")}).fetch,
 	})
 	if err != nil {
-		t.Fatalf("loadServed = %v", err)
+		t.Fatalf("loadServed error = %v, want the embedded table", err)
 	}
 	if book.saved != "" || *book.servedFrom != pricing.FromEmbedded || book.refresh.Status != modelcost.StatusOffline ||
 		len(book.table.Rows) == 0 {
 		t.Errorf("served book = saved %q from %q refresh %q, %d rows; want the embedded table, offline",
 			book.saved, *book.servedFrom, book.refresh.Status, len(book.table.Rows))
+	}
+}
+
+// A published table that cannot be loaded prices nothing and loses nothing
+// else: every token still counts, every dollar reads "n/a", and the data gaps
+// name the table failure.
+func TestAnUnloadablePublishedTablePricesNothingAndStillCountsTokens(t *testing.T) {
+	broken := errors.New("embedded prices.json: unexpected end of JSON input")
+	saved := refreshPrices
+	refreshPrices = func(context.Context, modelcost.Options) (pricing.Prices, modelcost.Result, error) {
+		return pricing.Prices{}, modelcost.Result{}, broken
+	}
+	t.Cleanup(func() { refreshPrices = saved })
+	root := fixture(t, "claude/projects")
+	out := filepath.Join(t.TempDir(), "report.json")
+	code, stdout, stderr := auditWith(t, Options{Served: modelcost.Options{Home: t.TempDir()}},
+		"--since", "99999d", "--root", root, "--out", out)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d, stderr %q; want 0 and nothing", code, stderr)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Pricing struct {
+			TableFailure string `json:"table_failure"`
+		} `json:"pricing"`
+	}
+	wantFailure := "load the price table: " + broken.Error()
+	if err := json.Unmarshal(raw, &document); err != nil || document.Pricing.TableFailure != wantFailure {
+		t.Errorf("%s pricing.table_failure = %q, %v; want %q", out, document.Pricing.TableFailure, err, wantFailure)
+	}
+	for _, want := range []string{
+		"pricing: none, no price table loaded; not historical billing\n",
+		"data gaps: price table unusable (load the price table: embedded prices.json: unexpected end of JSON " +
+			`input) — tokens counted, every dollar "n/a" · `,
+		" UNPRICED calls ",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
 	}
 }
 
@@ -259,7 +309,9 @@ func TestAFailedRefreshServesTheCloneTableOnceAndLeadsTheGapsLine(t *testing.T) 
 	}
 }
 
-func TestAnInvalidOverrideFailsBeforeAnyTranscriptIsRead(t *testing.T) {
+// An invalid pfm.prices.json loses only itself: the run counts every token, prices by the
+// published table without the override, and names the override's failure in its data gaps.
+func TestAnInvalidOverridePricesByThePublishedTableAndNamesTheFailure(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), config.FileName)
 	override := config.PricesPath(configPath)
 	if err := os.WriteFile(override, []byte(`{"version":1,"rows":[]}`), 0o600); err != nil {
@@ -271,13 +323,14 @@ func TestAnInvalidOverrideFailsBeforeAnyTranscriptIsRead(t *testing.T) {
 		Offline:    true,
 		Clock:      clock.NewFake(goldenNow),
 	}
-	missingRoot := filepath.Join(t.TempDir(), "no-such-root")
-	code, stdout, stderr := auditWith(t, Options{Served: served}, "--root", missingRoot)
-	if code != 1 || stdout != "" {
-		t.Errorf("exit %d, stdout %q; want 1 and nothing", code, stdout)
+	root := fixture(t, "claude/projects")
+	code, stdout, stderr := auditWith(t, Options{Served: served}, "--since", "99999d", "--root", root)
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d, stderr %q; want 0 and nothing", code, stderr)
 	}
-	if !strings.HasPrefix(stderr, "pfm tokens: the price table cannot load (pfm model-cost): ") ||
-		!strings.Contains(stderr, override) || strings.Contains(stderr, missingRoot) {
-		t.Errorf("stderr = %q; want the override named and the root never reached", stderr)
+	want := "data gaps: price override unusable (prices " + override + ": version must be 2, got 1) — " +
+		"dollars use the published table without it"
+	if !strings.Contains(stdout, want) {
+		t.Errorf("stdout lacks %q:\n%s", want, stdout)
 	}
 }

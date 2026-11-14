@@ -3,12 +3,14 @@ package action
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -23,13 +25,8 @@ func TestHeadlessForkCodexUsesRealForkAndSelectedAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{"-u CODEX_THREAD_ID", "CODEX_HOME=", " 'fork' 'thread-123'"} {
-		if !strings.Contains(plan.Run, fragment) {
-			t.Fatalf("fork command %q lacks %q", plan.Run, fragment)
-		}
-	}
-	if strings.Contains(plan.Run, "resume") {
-		t.Fatalf("Codex fork command used resume: %q", plan.Run)
+	if want := "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='/tmp/fork-home/.codex' codex --no-daemon --dangerously-bypass-approvals-and-sandbox 'fork' 'thread-123'"; plan.Run != want {
+		t.Errorf("fork command = %q, want %q", plan.Run, want)
 	}
 }
 
@@ -114,5 +111,54 @@ func TestHeadlessForkCodexStatesSelectedHome(t *testing.T) {
 	})
 	if err != nil || plan.CodexHome != want {
 		t.Fatalf("plan CodexHome=%q error=%v; want %q", plan.CodexHome, err, want)
+	}
+}
+
+// A fork bound for a Herdr seat carries a session id fixed before birth beside
+// its resume and --fork-session, with its launch record; Codex has none to fix.
+func TestHeadlessForkFixesTheForkID(t *testing.T) {
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	machine.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: home + "/.codex"}}
+	const parent, fork = "b1111111-1111-4111-8111-111111111111", "f2222222-2222-4222-8222-222222222222"
+	for _, tc := range []struct {
+		name   string
+		engine pfmengine.ID
+		forkID string
+		words  []string
+		record *fleetdb.Launch
+		err    string
+	}{
+		{
+			name: "Claude with a fixed id", engine: pfmengine.Claude, forkID: fork,
+			words:  []string{"--session-id", fork, "--resume", parent, "--fork-session"},
+			record: &fleetdb.Launch{SessionID: fork, Engine: pfmengine.Claude, Account: 1, Cache1H: true},
+		},
+		{name: "Claude minting its id", engine: pfmengine.Claude, words: []string{"--resume", parent, "--fork-session"}},
+		{name: "Codex with a fixed id", engine: pfmengine.Codex, forkID: fork, err: "a Codex fork takes no session id fixed before birth"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := HeadlessFork(HeadlessForkRequest{
+				Engine: tc.engine, SessionID: parent, Name: "branch", CWD: "/work/alpha", Home: home,
+				PrimaryAccount: 1, Cache1H: true, Config: machine, ForkID: tc.forkID,
+			})
+			if tc.err != "" {
+				if err == nil || err.Error() != tc.err {
+					t.Fatalf("HeadlessFork error = %v, want %q", err, tc.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Join(plan.SeatRun.Args, "\x00")
+			fixed := strings.Contains(args, "--session-id")
+			if !strings.Contains(args, strings.Join(tc.words, "\x00")) || fixed != (tc.forkID != "") {
+				t.Fatalf("fork argv %q, want the run %q", plan.SeatRun.Args, tc.words)
+			}
+			if !reflect.DeepEqual(plan.Record, tc.record) {
+				t.Fatalf("launch record = %+v, want %+v", plan.Record, tc.record)
+			}
+		})
 	}
 }

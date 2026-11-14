@@ -3,6 +3,7 @@ package herdr
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -72,12 +73,11 @@ func TestParseTabGlyphsDoneFrames(t *testing.T) {
 }
 
 func TestParseTabGlyphsOnlyBlockedAndErrorMayAnimate(t *testing.T) {
-	for _, state := range []string{"working", "done", "idle", "dead", "unknown"} {
+	for state, want := range map[string]string{"working": "tab glyph \"working\": tab state \"working\" requires exactly one frame: only blocked and error may animate", "done": "tab glyph \"done\": tab state \"done\" requires exactly one frame: only blocked and error may animate", "idle": "tab glyph \"idle\": tab state \"idle\" requires exactly one frame: only blocked and error may animate", "dead": "tab glyph \"dead\": tab state \"dead\" requires exactly one frame: only blocked and error may animate", "unknown": "tab glyph \"unknown\": tab state \"unknown\" requires exactly one frame: only blocked and error may animate"} {
 		t.Run(state, func(t *testing.T) {
 			_, err := ParseTabGlyphs(map[string]TabFrames{state: {"🔵", "⚪"}})
-			if err == nil || !strings.Contains(err.Error(), state) ||
-				!strings.Contains(err.Error(), "only blocked and error") {
-				t.Errorf("animated %s: error = %v, want state named and only blocked and error may animate", state, err)
+			if got := fmt.Sprint(err); got != want {
+				t.Errorf("animated %s: error = %q, want %q", state, got, want)
 			}
 		})
 	}

@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
@@ -23,10 +24,7 @@ import (
 
 func TestCodexLaunchPolicyAndHygiene(t *testing.T) {
 	jailTest(t)
-	binary, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatal(err)
-	}
+	binary := neverRunBinary(t)
 	for _, enabled := range []bool{true, false} {
 		t.Run(map[bool]string{true: "yolo-on", false: "yolo-off"}[enabled], func(t *testing.T) {
 			previous := hookentry.LaunchExec
@@ -65,10 +63,10 @@ func TestCodexLaunchPolicyAndHygiene(t *testing.T) {
 }
 
 func TestCodexLaunchWorkbench(t *testing.T) {
-	for _, scenario := range []string{"new", "resume", "fork", "explicit", "long model", "equals model", "explicit effort", "disabled", "disabled resume", "invalid", "mirror failure", "outside", "login", "logout", "mcp", "mcp-server", "app-server", "completion", "sandbox", "debug", "apply", "cloud", "features", "help", "--version", "-V", "--help", "-h"} {
+	for _, scenario := range []string{"new", "resume", "fork", "explicit", "long model", "equals model", "explicit effort", "disabled", "disabled resume", "invalid", "mirror failure", "outside", "settings extend", "settings envs in a workbench", "settings both keys", "login", "logout", "mcp", "mcp-server", "app-server", "completion", "sandbox", "debug", "apply", "cloud", "features", "help", "--version", "-V", "--help", "-h"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := jailTest(t)
-			scribe, duo := newWorkbenchRunFixture(t, &runJail{root: root})
+			scribe, duo := newWorkbenchRunFixture(t, root)
 			if err := os.WriteFile(
 				paths.WorkbenchManifest(duo),
 				[]byte(`{"prompt":"duo.md","engines":["codex","claude"],"model":"gpt-x","effort":"xhigh"}`),
@@ -77,10 +75,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				t.Fatal(err)
 			}
 			dir := duo
-			binary, err := exec.LookPath("sh")
-			if err != nil {
-				t.Fatal(err)
-			}
+			binary := neverRunBinary(t)
 			runtime := pfmconfig.Runtime{
 				Config: pfmconfig.Config{Codex: pfmconfig.CodexPrefs{Binary: binary, Yolo: true}},
 				Paths:  paths.Values{Home: filepath.Join(root, "home")},
@@ -89,9 +84,33 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			personaArgs := append([]string{"--model", "gpt-x"}, action.CodexEffortArg("xhigh")...)
 			personaArgs = append(personaArgs, action.CodexDeveloperInstructionsArg("You are duo.")...)
 			transport := []string{"--no-daemon"}
-			wantError := ""
+			wantError, wantWarning := "", ""
 			mirror := true
-			mirrorRecord := testjail.FakeEngineSync(t, testjail.CleanMirrorReply, 0)
+			mirrorRecord, engineSync := testjail.FakeEngineSyncRunner(t, testjail.CleanMirrorReply, 0)
+			engineSync.ScriptLookPath(binary, binary, nil)
+			project := filepath.Dir(filepath.Dir(duo))
+			var wantEnv []string
+			if strings.HasPrefix(scenario, "settings ") {
+				clone := filepath.Join(root, "clone")
+				settings := map[string]string{
+					"settings extend":              `{"harnessPrompt":{"extend":"team.md"},"envs":{"TEAM_MODE":"strict"}}`,
+					"settings envs in a workbench": `{"envs":{"TEAM_MODE":"strict"}}`,
+					"settings both keys":           `{"harnessPrompt":{"extend":"team.md","replace":"team.md"}}`,
+				}[scenario]
+				for path, body := range map[string]string{
+					paths.GeneratedHarnessPromptIn(clone, pfmengine.Codex): "Codex fleet.\n",
+					paths.Settings(project):                                settings,
+					filepath.Join(project, "team.md"):                      "Team rules.\n",
+					filepath.Join(project, "src", "main.go"):               "package main\n",
+				} {
+					if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := paths.WriteSourceRepoMarker(runtime.Paths.Home, clone); err != nil {
+					t.Fatal(err)
+				}
+			}
 			switch scenario {
 			case "resume":
 				args = []string{"resume", "--last"}
@@ -127,18 +146,35 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				if err := os.WriteFile(paths.WorkbenchManifest(duo), []byte(`{"prompt":""}`), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				wantError = "launch Codex: " + paths.WorkbenchManifest(duo) + `: "prompt" is required` + "\n"
+				personaArgs = nil
+				mirror = false
+				wantWarning = "launch Codex: workbench persona not applied (" + paths.WorkbenchManifest(duo) +
+					`: "prompt" is required); launching without it` + "\n"
 			case "mirror failure":
-				mirrorRecord = testjail.FakeEngineSync(t, testjail.FailedMirrorReply, 1)
-				persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.New)
+				mirrorRecord, engineSync = testjail.FakeEngineSyncRunner(t, testjail.FailedMirrorReply, 1)
+				engineSync.ScriptLookPath(binary, binary, nil)
+				persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.New)
 				if err != nil {
 					t.Fatal(err)
 				}
-				err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, runtime.Paths.Home)
+				err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, runtime.Paths.Home, engineSync)
 				if err == nil {
 					t.Fatal("mirror fixture must fail")
 				}
-				wantError = "launch Codex: " + err.Error() + "\n"
+				wantWarning = "launch Codex: " + err.Error() + "; launching on the mirror as it stands\n"
+			case "settings extend":
+				dir = filepath.Join(project, "src")
+				personaArgs = action.CodexDeveloperInstructionsArg("Codex fleet.\n\nTeam rules.\n")
+				mirror = false
+				wantEnv = []string{"TEAM_MODE=strict"}
+			case "settings envs in a workbench":
+				wantEnv = []string{"TEAM_MODE=strict"}
+			case "settings both keys":
+				dir = filepath.Join(project, "src")
+				personaArgs = nil
+				mirror = false
+				wantWarning = "launch Codex: " + paths.Settings(project) +
+					`: harnessPrompt sets both "extend" and "replace": keep one; launching without the settings` + "\n"
 			case "outside":
 				dir = root
 				personaArgs = nil
@@ -169,7 +205,16 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			previous := hookentry.LaunchExec
 			t.Cleanup(func() { hookentry.LaunchExec = previous })
 			called := false
-			hookentry.LaunchExec = func(path string, argv, _ []string) error {
+			hookentry.LaunchExec = func(path string, argv, env []string) error {
+				var adopted []string
+				for _, entry := range env {
+					if strings.HasPrefix(entry, "TEAM_MODE=") {
+						adopted = append(adopted, entry)
+					}
+				}
+				if !reflect.DeepEqual(adopted, wantEnv) {
+					t.Fatalf("settings env = %q, want %q", adopted, wantEnv)
+				}
 				called = true
 				if wantError != "" {
 					t.Fatal("refusal reached exec")
@@ -188,15 +233,15 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				return nil
 			}
 			var stderr bytes.Buffer
-			code := hookentry.CodexLaunch(args, &stderr, runtime)
+			code := hookentry.CodexLaunchWith(args, &stderr, runtime, engineSync)
 			if wantError != "" {
 				if code != 1 || called || stderr.String() != wantError {
 					t.Fatalf("refusal = %d, called %v, %q; want %q", code, called, stderr.String(), wantError)
 				}
 				return
 			}
-			if code != 0 || !called || stderr.Len() != 0 {
-				t.Fatalf("launch = %d, called %v, stderr %q", code, called, stderr.String())
+			if code != 0 || !called || stderr.String() != wantWarning {
+				t.Fatalf("launch = %d, called %v, stderr %q; want %q", code, called, stderr.String(), wantWarning)
 			}
 		})
 	}
@@ -204,23 +249,19 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 
 func TestCodexLaunchBinaryAndNoArguments(t *testing.T) {
 	jailTest(t)
-	binary, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatal(err)
-	}
+	binary := neverRunBinary(t)
 	previous := hookentry.LaunchExec
 	t.Cleanup(func() { hookentry.LaunchExec = previous })
 	for _, configured := range []bool{true, false} {
 		runtime := pfmconfig.Runtime{Paths: paths.Values{Home: t.TempDir()}}
+		var lookup deps.Runner
 		if configured {
 			runtime.Config.Codex.Binary = binary
 		} else {
-			pathDir := t.TempDir()
-			if err := os.Symlink(binary, filepath.Join(pathDir, "codex")); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-			binary = filepath.Join(pathDir, "codex")
+			// The default name `codex` is found through the launch's runner, not a PATH walk.
+			scripted := &deps.FakeRunner{}
+			scripted.ScriptLookPath("codex", binary, nil)
+			lookup = scripted
 		}
 		hookentry.LaunchExec = func(path string, args, _ []string) error {
 			if path != binary || !reflect.DeepEqual(args, []string{binary, "--no-daemon"}) {
@@ -229,7 +270,7 @@ func TestCodexLaunchBinaryAndNoArguments(t *testing.T) {
 			return errors.New("exec intercepted")
 		}
 		var stderr bytes.Buffer
-		code := hookentry.CodexLaunch(nil, &stderr, runtime)
+		code := hookentry.CodexLaunchWith(nil, &stderr, runtime, lookup)
 		if code != 1 || !strings.Contains(stderr.String(), "exec intercepted") {
 			t.Fatalf("code=%d stderr=%s", code, stderr.String())
 		}
@@ -247,10 +288,7 @@ func TestCodexLaunchBinaryAndNoArguments(t *testing.T) {
 
 func TestCodexLaunchUsesSelectedPrimaryAccount(t *testing.T) {
 	jailTest(t)
-	binary, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatal(err)
-	}
+	binary := neverRunBinary(t)
 	home := t.TempDir()
 	values := paths.Values{Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db")}
 	machine := pfmconfig.Defaults(home, nil)
@@ -297,4 +335,15 @@ func TestInternalCodexTransportPrintsTheTransport(t *testing.T) {
 				test.args, code, stdout.String(), stderr.String(), test.want)
 		}
 	}
+}
+
+// neverRunBinary writes an executable the code under test only resolves and
+// hands to the faked exec seam, so no real `sh` is looked up or started.
+func neverRunBinary(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "codex-binary")
+	if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

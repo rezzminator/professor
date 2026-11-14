@@ -7,14 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestLastReadsTheNewestAnswerPastLaterToolCalls pins what `last` means: the
 // newest thing the chat SAID, however many tool calls came after it.
 func TestLastReadsTheNewestAnswerPastLaterToolCalls(t *testing.T) {
-	root := testjail.Fleet(t)
+	root := memoryFleet(t)
 	const id = "a1111111-1111-4111-8111-111111111111"
 	seedClaudeChat(
 		t,
@@ -37,7 +35,7 @@ func TestLastReadsTheNewestAnswerPastLaterToolCalls(t *testing.T) {
 // that exists but never spoke: ErrNoAnswer carrying the resolved chat — not a
 // target failure, and never an empty success.
 func TestLastNamesAChatThatHasNotAnswered(t *testing.T) {
-	root := testjail.Fleet(t)
+	root := memoryFleet(t)
 	const id = "b2222222-2222-4222-8222-222222222222"
 	seedClaudeChat(t, root, id)
 	result, err := LastAnswer(context.Background(), nil, LastRequest{Target: id})
@@ -111,7 +109,7 @@ func TestLastHoldsAnOpenCodexTurnAsInProgress(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			root := testjail.Fleet(t)
+			root := memoryFleet(t)
 			seedCodexRollout(t, root, testCase.id, testCase.records...)
 			result, err := LastAnswer(context.Background(), nil, LastRequest{Target: testCase.id})
 			if testCase.wantErr != nil {

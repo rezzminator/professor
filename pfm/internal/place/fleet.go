@@ -36,10 +36,16 @@ func (fleet Fleet) Labeled(extra ...compose.Row) Index {
 	return index
 }
 
-// Of is the place a chat started in cwd belongs to: the place the rail files
-// its row under once it runs, the fleet's other rows as they stand.
+// Of is the place whose Herdr workspace holds a chat started in cwd, the one
+// door every Herdr placement asks: the project cwd sits in (a worktree or a
+// subdirectory files under its repository, a workbench under the project
+// holding it), folded as the rail folds it, the fleet's other rows as they
+// stand. The rail files a workbench's chats as its own group.
 func (fleet Fleet) Of(cwd string) Place {
-	name, root := compose.ProjectOf(cwd, fleet.Benches)
+	if bench, found := workbench.Owner(fleet.Benches, cwd); found {
+		cwd = bench.Root
+	}
+	name, root := compose.ProjectOf(cwd, nil)
 	index := fleet.Labeled(compose.Row{Kind: compose.LiveClaude, Project: name, CWD: root})
 	return index.PlaceOf(len(index.RowPlace) - 1)
 }

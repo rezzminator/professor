@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	goRuntime "runtime"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
@@ -24,6 +25,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
+	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
 const harnessPromptFixtureCaptured = "pfm jail fixture harness prompt\n"
@@ -47,8 +50,34 @@ func testDependencies() Dependencies {
 	return Dependencies{ExpectedEngineCapabilities: expectedEngineCapabilities}
 }
 
+// runDoctor runs the doctor over healthyDoctorRunner; any other probe through
+// the doctor's runner answers as an unscripted call, never as a process.
 func runDoctor(args []string, stdout, stderr interface{ Write([]byte) (int, error) }, runtime config.Runtime) int {
-	return Run(args, stdout, stderr, runtime, testDependencies())
+	dependencies := testDependencies()
+	dependencies.Runner = healthyDoctorRunner()
+	return Run(args, stdout, stderr, runtime, dependencies)
+}
+
+// healthyDoctorRunner is the FakeRunner holding the one answer a healthy jail
+// needs: python3 and the stub kit.
+func healthyDoctorRunner() *deps.FakeRunner {
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath("python3", tracerPython, nil)
+	fake.Script([]string{tracerPython, "--version"}, deps.RunResult{Stdout: []byte("Python 3.12.1\n")}, nil)
+	fake.Script([]string{tracerPython}, tracerUsage, nil)
+	return fake
+}
+
+// childEnvValue is the value a launched child's environment holds for name; the
+// last entry wins, as it does for a launched process.
+func childEnvValue(env []string, name string) (string, bool) {
+	value, found := "", false
+	for _, entry := range env {
+		if rest, ok := strings.CutPrefix(entry, name+"="); ok {
+			value, found = rest, true
+		}
+	}
+	return value, found
 }
 
 func stageModelHarnessPromptBaseline(
@@ -68,12 +97,36 @@ func stageHarnessPromptBaseline(t *testing.T, home string) {
 	}
 }
 
+// doctorRows returns the lines of out that name needle, each newline-terminated.
+func doctorRows(out, needle string) string {
+	var rows strings.Builder
+	for _, line := range strings.SplitAfter(out, "\n") {
+		if strings.Contains(line, needle) {
+			rows.WriteString(line)
+		}
+	}
+	return rows.String()
+}
+
+// rooted writes each run-unique temp root as {root}, {root2}, … so output naming it compares exactly.
+func rooted(s string, roots ...string) string {
+	for i, root := range roots {
+		token := "{root}"
+		if i > 0 {
+			token = fmt.Sprintf("{root%d}", i+1)
+		}
+		s = strings.ReplaceAll(s, root, token)
+	}
+	return s
+}
+
 func jailTest(t *testing.T) string {
 	t.Helper()
 	root := testjail.InstalledHome(t)
 	dirs, files := storeLayout()
 	testjail.StageAccountLinks(t, filepath.Join(root, "home"), filepath.Join(root, "home", ".cc", "1"), dirs, files)
 	stageStorePlugins(t, filepath.Join(root, "home"))
+	testjail.StageHerdrClaudeHook(t, filepath.Join(root, "home", ".cc", "1"))
 	testjail.PinClaudeAsk(t, filepath.Join(root, "home"))
 	return root
 }
@@ -101,6 +154,9 @@ func TestMain(m *testing.M) {
 		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
 	}
 	PrePushGateProbeOverride = func(context.Context) PrePushGate { return PrePushGate{State: "outside-repository"} }
+	// The jail reaches no user service manager: macOS always has launchctl,
+	// whose real gui domain holds no plist in a jailed home.
+	ScheduleTimerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport { return ServiceManagerReport{} }
 	DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
 		results := make([]deps.Result, 0, len(entries))
 		for index := range entries {
@@ -128,7 +184,11 @@ func TestMain(m *testing.M) {
 			CLIVersion:    "fixture",
 		}, err
 	}
-	os.Exit(testjail.Run(m))
+	// The retired-name scan and the project ledger enumerate a project's files
+	// through update's git seam; the fixture projects are no repositories, which
+	// the git model answers as "not a git repository", the walk's trigger.
+	update.StubRunnerForTest(&fakegit.Runner{})
+	os.Exit(testjail.RunInJail(m))
 }
 
 type fourthSource struct{}
@@ -165,4 +225,5 @@ func stageStorePlugins(t *testing.T, home string) {
 		t.Fatal(err)
 	}
 	testjail.StageClaudePlugins(t, storeDir, ids)
+	testjail.StageTracetreeKit(t, storeDir, ids)
 }

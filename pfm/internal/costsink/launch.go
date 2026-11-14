@@ -5,19 +5,22 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // launchExec is the process-replacing seam of RunLaunch.
 var launchExec = syscall.Exec
+
+// launchRunner looks up the wrapped command; a test points it at a FakeRunner.
+var launchRunner deps.Runner = deps.RealRunner{}
 
 // LaunchOptions is one launch the cost ledger decides for.
 type LaunchOptions struct {
@@ -136,7 +139,7 @@ func RunLaunch(args []string, stderr io.Writer, env paths.Env) int {
 		fmt.Fprintln(stderr, "usage: pfm internal cost-launch -- {claude} [arguments]")
 		return 2
 	}
-	path, err := exec.LookPath(args[0])
+	path, err := launchRunner.LookPath(args[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal cost-launch: find %s: %v\n", args[0], err)
 		return 127

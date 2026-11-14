@@ -3,12 +3,14 @@ package mcpserv
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
@@ -16,7 +18,7 @@ import (
 // MCP: inside tmux the answer is this chat's own session name; outside it, the
 // absence is stated rather than guessed.
 func TestChatWhoamiReportsIdentityOrStatesItsAbsence(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	t.Setenv("TMUX", "")
 	t.Setenv(resolve.ClaudeSessionEnv, "")
 	t.Setenv(resolve.CodexThreadEnv, "")
@@ -34,7 +36,7 @@ func TestChatWhoamiReportsIdentityOrStatesItsAbsence(t *testing.T) {
 		WhoamiInput{},
 	)
 	if output.Status != "not_found" ||
-		!strings.Contains(output.Message, "not inside a pfm chat") {
+		output.Message != "ERROR: this process is not inside a pfm chat: no live tmux pane or Herdr pane holds it" {
 		t.Fatalf("whoami outside tmux = %+v", output)
 	}
 	if output.Session != "" {
@@ -51,7 +53,7 @@ func TestChatWhoamiReportsIdentityOrStatesItsAbsence(t *testing.T) {
 // steer, which no longer distinguishes anything once call bans every
 // /compact primary outright — see engine.go's Call().
 func TestChatCallCarriesTheThenArgument(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -102,9 +104,7 @@ func TestChatCallCarriesTheThenArgument(t *testing.T) {
 		Message: "hold: read /tmp/hold.md",
 		Then:    []string{"resume the port"},
 	})
-	if unresolved.Code != 4 ||
-		unresolved.Typed ||
-		!strings.Contains(unresolved.Message, "matched no live chat") {
+	if unresolved.Code != 4 || unresolved.Typed || unresolved.Message != `no chat named "no-such-chat"` {
 		t.Fatalf("legal steer chain = %+v", unresolved)
 	}
 }
@@ -112,10 +112,10 @@ func TestChatCallCarriesTheThenArgument(t *testing.T) {
 // TestChatCaptureBoundsAreAppliedAfterTheCapture keeps the whole-scrollback
 // capture from returning an unbounded payload.
 func TestChatCaptureBoundsAreAppliedAfterTheCapture(t *testing.T) {
-	if _, err := os.Stat("/proc/self"); err != nil {
+	if _, err := os.Stat(filepath.Join(paths.SystemProcRoot(), "self")); err != nil {
 		t.Skip("no /proc")
 	}
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {

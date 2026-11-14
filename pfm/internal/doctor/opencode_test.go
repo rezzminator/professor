@@ -3,20 +3,20 @@ package doctor
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 func TestDoctorRejectsMalformedOpenCodeRowsInsteadOfReportingHealthy(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	root := t.TempDir()
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,8 @@ INSERT INTO part VALUES ('part', 'message', 'session', 1, 1, '{"type":"text","te
 	warnings := printOpenCodeStoreDoctor(context.Background(), &stdout, pfmconfig.Config{
 		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: root}},
 	})
-	if warnings == 0 || !strings.Contains(stdout.String(), "doctor: opencode store=unhealthy") {
+	if warnings == 0 ||
+		stdout.String() != "doctor: opencode store=unhealthy account=1 error=validate opencode rows: opencode session session kept with malformed rows (message JSON 1)\n" {
 		t.Fatalf("doctor warnings=%d output=%q, want malformed row reported unhealthy", warnings, stdout.String())
 	}
 }

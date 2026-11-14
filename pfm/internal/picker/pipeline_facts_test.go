@@ -47,8 +47,12 @@ func TestBuildSnapshotNamesAFactsFailureInsteadOfShowingNoFacts(t *testing.T) {
 	}
 	snapshot := buildSnapshot(context.Background(), fleet.Env{NowNS: statNowNS(t, output.Rows[0].Path)},
 		scanRequest{Facts: rowfacts.NewReader(sid)}, output)
-	if !strings.Contains(snapshot.FactsError, "1 unreadable") {
-		t.Fatalf("FactsError = %q, want the failure counted and named", snapshot.FactsError)
+	if got, want := strings.ReplaceAll(
+		snapshot.FactsError,
+		sid,
+		"{sid}",
+	), "1 unreadable, first: row \"live\": parse {sid}/statusline-effort-live: invalid character 'b' looking for beginning of object key string"; got != want {
+		t.Fatalf("FactsError = %q, want %q", got, want)
 	}
 }
 

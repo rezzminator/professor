@@ -1,22 +1,13 @@
 package action
 
 import (
-	"path/filepath"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
-
-// fakeActionTmuxBinary plays tmux: exits 0 and prints nothing.
-func fakeActionTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
-}
 
 // TestTmuxExecutorRecordsEveryInvocation proves TmuxExecutor.command crosses
 // the observed tmux door (pfmtmux.Exec, not the bare pfmtmux.Command) —
@@ -24,7 +15,8 @@ func fakeActionTmuxBinary(t *testing.T) string {
 func TestTmuxExecutorRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	tmuxDir := t.TempDir()
-	tmux := TmuxExecutor{Binary: fakeActionTmuxBinary(t), TmuxDir: tmuxDir}
+	ctx = pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{}))
+	tmux := TmuxExecutor{Binary: "tmux", TmuxDir: tmuxDir}
 	if err := tmux.KillPane(ctx, "cc-1", "%3"); err != nil {
 		t.Fatal(err)
 	}

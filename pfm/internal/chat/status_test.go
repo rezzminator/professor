@@ -8,12 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -21,7 +21,7 @@ import (
 // resumable chat with no server behind it comes back dead, with its facts,
 // and no error — the caller reads Alive(), never an error, for liveness.
 func TestStatusReportsADeadChatAsAStatusNotAnError(t *testing.T) {
-	root := testjail.Fleet(t)
+	root := memoryFleet(t)
 	const id = "c3333333-3333-4333-8333-333333333333"
 	seedClaudeChat(t, root, id, assistantSaid("tests are green"))
 	status, err := Status(context.Background(), nil, StatusRequest{Target: id}, io.Discard)
@@ -54,7 +54,7 @@ func TestHerdrAnsweredStatusRequiresReachableEndpoint(t *testing.T) {
 				name = state.name + "/watch"
 			}
 			t.Run(name, func(t *testing.T) {
-				root := testjail.Fleet(t)
+				root := memoryFleet(t)
 				const id = "c3333333-3333-4333-8333-333333333333"
 				seedClaudeChat(t, root, id, state.record)
 				target := headless.Chat{
@@ -104,7 +104,7 @@ func TestHerdrAnsweredStatusRequiresReachableEndpoint(t *testing.T) {
 func TestHerdrStatusRequiresItsPaneAndNamesEndpoint(t *testing.T) {
 	for _, answered := range []bool{false, true} {
 		t.Run(fmt.Sprint(answered), func(t *testing.T) {
-			root := testjail.Fleet(t)
+			root := memoryFleet(t)
 			const id = "c3333333-3333-4333-8333-333333333333"
 			target := headless.Chat{
 				ID: id, Name: "missing", Backend: "herdr", Engine: pfmengine.Claude,
@@ -157,6 +157,34 @@ func TestInspectSeatReportsDurableLossUntilNextPrompt(t *testing.T) {
 			t.Fatalf("status=%+v err=%v want lost_note=%q", status, err, note)
 		}
 	}
+	// An unreadable seat store costs only the note, which says it could not look.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Paths.StateDB = filepath.Join(blocker, "state.db")
+	status, err := InspectSeat(
+		context.Background(),
+		&runtime,
+		headless.Chat{
+			ID:      seat.SessionID,
+			SeatID:  seat.SeatID,
+			Backend: "herdr",
+			Engine:  pfmengine.Claude,
+			Name:    seat.Name,
+		},
+		time.Now(),
+		nil,
+	)
+	if err != nil || !strings.HasPrefix(status.LostNote, "loss note unknown: ") ||
+		!strings.Contains(status.LostNote, blocker) || status.Name != seat.Name {
+		t.Fatalf(
+			"status=%+v err=%v; want the status with lost_note naming the unreadable store %s",
+			status,
+			err,
+			blocker,
+		)
+	}
 }
 
 func TestHerdrStatusReconcilesTranscript(t *testing.T) {
@@ -164,7 +192,7 @@ func TestHerdrStatusReconcilesTranscript(t *testing.T) {
 		for _, native := range []string{"idle", "done", "working", "blocked", "unknown"} {
 			for _, cached := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%t/%d", native, cached, len(record)), func(t *testing.T) {
-					root := testjail.Fleet(t)
+					root := memoryFleet(t)
 					const id = "c3333333-3333-4333-8333-333333333333"
 					target := headless.Chat{
 						ID:      id,
@@ -227,128 +255,72 @@ func TestHerdrStatusReconcilesTranscript(t *testing.T) {
 	}
 }
 
-func TestHerdrWatchAccumulatesNativeIdle(t *testing.T) {
-	testjail.Fleet(t)
-	var reply atomic.Value
-	set := func(state string, seq int, terminal, session string) {
-		reply.Store(
-			fmt.Sprintf(
-				`{"agent":{"pane_id":"w6:p3","terminal_id":%q,"agent_status":%q,"state_change_seq":%d,"agent_session":{"source":"hook","agent":"opencode","kind":"session_id","value":%q}}}`,
-				terminal,
-				state,
-				seq,
-				session,
-			),
-		)
-	}
-	set("idle", 1, "term-1", "session-1")
-	target := headless.Chat{
-		ID:      "native-idle",
-		Name:    "native",
-		Engine:  pfmengine.OpenCode,
-		Backend: "herdr",
-		Live:    true,
-		Pane:    "w6:p3",
-		Socket: herdrStatusSocketReplies(
-			t,
-			func() string { return reply.Load().(string) },
-			"w6:p3",
-			string(pfmengine.OpenCode),
-		),
-	}
-	inspector := NewSeatInspector(nil)
-	now := time.Now()
-	check := func(at time.Time, want int64) {
-		t.Helper()
-		got, err := inspector.Inspect(context.Background(), target, at)
-		if err != nil || got.IdleSeconds != want {
-			t.Fatalf("status=%+v err=%v want idle=%d", got, err, want)
-		}
-		if got.State == headless.StateIdle && got.RestID == "" {
-			t.Fatal("native rest identity did not reach watch status")
-		}
-	}
-	check(now, 0)
-	inspector.Sweep()
-	check(now.Add(11*time.Second), 11)
-	for i, reset := range []struct {
-		state, terminal, session string
-		seq                      int
+// Herdr answering agent.get with agent_not_found is an answer, not a failed
+// read — `pfm chat ls` and `pfm chat status` must classify the seat from the
+// pane's foreground: engine gone is dead, engine still there keeps the
+// transcript's verdict; only an unreadable foreground stays an error.
+func TestHerdrStatusAgentNotFoundIsAnAnswer(t *testing.T) {
+	for _, testCase := range []struct {
+		name, foreground, want, source string
+		fails                          bool
 	}{
-		{"working", "term-1", "session-1", 2},
-		{"blocked", "term-1", "session-1", 4},
-		{"unknown", "term-1", "session-1", 6},
-		{"idle", "term-2", "session-1", 8},
-		{"idle", "term-2", "session-2", 10},
-		{"idle", "term-2", "session-2", 12},
+		{name: "engine exited", foreground: "bash", want: headless.StateDead},
+		{name: "engine untracked", foreground: "claude", want: headless.StateIdle, source: herdrAgentUntracked},
+		{name: "foreground unreadable", fails: true},
 	} {
-		at := now.Add(time.Duration(20+i*30) * time.Second)
-		set(reset.state, reset.seq, reset.terminal, reset.session)
-		check(at, 0)
-		set("idle", reset.seq+1, reset.terminal, reset.session)
-		check(at.Add(time.Second), 0)
-		check(at.Add(12*time.Second), 11)
-	}
-	inspector.Sweep()
-	inspector.Sweep()
-	check(now.Add(300*time.Second), 0)
-	check(now.Add(299*time.Second), 0)
-}
-
-func TestHerdrWatchFreshTranscriptCapsNativeIdle(t *testing.T) {
-	inspector := NewSeatInspector(nil)
-	target := headless.Chat{
-		ID:      "native",
-		Name:    "native",
-		Backend: "herdr",
-		Live:    true,
-		Socket:  "fixture",
-		Pane:    "w1:p1",
-	}
-	native := nativeStatusObservation{Pane: target.Pane, State: "idle", StateChangeSeq: 4, Terminal: "one"}
-	now := time.Now()
-	status := headless.Status{State: headless.StateIdle}
-	inspector.observeNativeIdle(target, now, native, &status, nil)
-	status.IdleSeconds = 20
-	inspector.observeNativeIdle(target, now.Add(20*time.Second), native, &status, nil)
-	if status.IdleSeconds != 20 {
-		t.Fatalf("native idle did not advance: %+v", status)
-	}
-	// A newer completed transcript turn is shorter rest evidence, never permission
-	// to keep the elapsed time of the previous turn.
-	target.Path = "transcript.jsonl"
-	socket := herdrStatusSocket(
-		t,
-		`{"agent":{"pane_id":"w1:p1","agent_status":"idle","terminal_id":"one","state_change_seq":4}}`,
-		"w1:p1",
-	)
-	target.Socket = socket
-	nativeStatus := headless.Status{State: headless.StateIdle, IdleSeconds: 3}
-	var observed nativeStatusObservation
-	got, err := statusFromHerdr(context.Background(), target, nativeStatus, &observed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Seed the identical identity from this request, then compare fresh evidence.
-	inspector = NewSeatInspector(nil)
-	older := headless.Status{State: headless.StateIdle, IdleSeconds: 20}
-	inspector.observeNativeIdle(target, now, observed, &older, nil)
-	inspector.observeNativeIdle(target, now, observed, &got, nil)
-	if got.IdleSeconds != 3 {
-		t.Fatalf("new transcript rest ignored: %+v", got)
-	}
-	// A failed read and a new endpoint both restart observation instead of restoring
-	// the age of an old answered transcript.
-	inspector.observeNativeIdle(target, now.Add(time.Second), native, &got, fmt.Errorf("fixture read failed"))
-	got.IdleSeconds = 100
-	inspector.observeNativeIdle(target, now.Add(2*time.Second), observed, &got, nil)
-	if got.IdleSeconds != 0 {
-		t.Fatalf("failed read did not reset native idle: %+v", got)
-	}
-	target.Socket += ".moved"
-	got.IdleSeconds = 100
-	inspector.observeNativeIdle(target, now.Add(3*time.Second), observed, &got, nil)
-	if got.IdleSeconds != 0 {
-		t.Fatalf("endpoint replacement did not reset idle: %+v", got)
+		for _, watch := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/watch=%t", testCase.name, watch), func(t *testing.T) {
+				root := memoryFleet(t)
+				t.Setenv("PFM_STATE_DB", filepath.Join(t.TempDir(), "state.db"))
+				t.Setenv("PFM_PROC_ROOT", t.TempDir())
+				const id = "c3333333-3333-4333-8333-333333333333"
+				seedClaudeChat(t, root, id, assistantSaid("ready"))
+				socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
+					switch req.Method {
+					case "agent.get":
+						return nil, herdr.AgentNotFound
+					case "pane.process_info":
+						if testCase.fails {
+							return nil, "process_read_failed"
+						}
+						return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
+							"pane_id":   "w6:p3",
+							"shell_pid": 41,
+							"foreground_processes": []any{
+								map[string]any{"pid": os.Getpid(), "name": testCase.foreground},
+							},
+						}}, ""
+					}
+					if proof, code, ok := nativeChatProof(req, "w6:p3"); ok {
+						return proof, code
+					}
+					return nil, "unexpected_method"
+				})
+				_, db, seat := nativeChatSeat(t, socket, "live")
+				_ = nativeChatHost(t, db, seat, true)
+				target := headless.Chat{
+					ID: id, Name: "gone", Backend: "herdr", Engine: pfmengine.Claude,
+					Live: true, Pane: "w6:p3", Socket: socket,
+					Path: filepath.Join(root, "claude", "project", id+".jsonl"),
+				}
+				inspect := NewSeatInspector(nil).Inspect
+				if !watch {
+					inspect = func(ctx context.Context, chat headless.Chat, now time.Time) (headless.Status, error) {
+						return InspectSeat(ctx, nil, chat, now, nil)
+					}
+				}
+				got, err := inspect(context.Background(), target, time.Now().Add(time.Minute))
+				if testCase.fails {
+					if err == nil || !strings.Contains(err.Error(), socket) || !strings.Contains(err.Error(), "w6:p3") {
+						t.Fatalf("unreadable foreground status=%+v err=%v; want a named endpoint error", got, err)
+					}
+					return
+				}
+				if err != nil || got.State != testCase.want || got.StateSource != testCase.source {
+					t.Fatalf("agent_not_found with foreground %s: status=%+v err=%v; want state %s source %q",
+						testCase.foreground, got, err, testCase.want, testCase.source)
+				}
+			})
+		}
 	}
 }

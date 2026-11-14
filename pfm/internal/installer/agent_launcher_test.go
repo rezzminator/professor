@@ -180,9 +180,7 @@ func TestDryRunPlansTheLauncherAndWritesNothing(t *testing.T) {
 	if _, err := os.Lstat(agentlauncher.Program(home)); !os.IsNotExist(err) {
 		t.Fatalf("a dry run wrote the launcher: %v", err)
 	}
-	if !strings.Contains(out.String(), agentlauncher.Program(home)) {
-		t.Fatalf("a dry run planned nothing for the missing launcher:\n%s", out.String())
-	}
+	wantOutputLines(t, out.String(), []string{"  change  write " + agentlauncher.Program(home)}, "pfm-agent")
 }
 
 // TestUninstallRemovesTheLauncher: the launcher goes with an uninstall on

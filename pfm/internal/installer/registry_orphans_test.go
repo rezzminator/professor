@@ -42,6 +42,11 @@ func TestRetireDeadRegistryLinks(t *testing.T) {
 				if err := os.Symlink(live, filepath.Join(assertRoot, "live.md")); err != nil {
 					t.Fatal(err)
 				}
+				// A link whose target cannot be stated costs only itself.
+				loop := filepath.Join(repo, "templates", "global", "commands", "loop.md")
+				unreadable := filepath.Join(assertRoot, "aaa.md")
+				symlinkFixture(t, loop, loop)
+				symlinkFixture(t, loop, unreadable)
 				var output bytes.Buffer
 				installer := &engine{
 					options:     Options{Home: home, ConfigDir: store, Stdout: &output},
@@ -51,7 +56,9 @@ func TestRetireDeadRegistryLinks(t *testing.T) {
 				if err := installer.retireDeadRegistryLinks(); err != nil {
 					t.Fatal(err)
 				}
-				want := "  change  retire " + link + " (dead pfm link -> " + target + ")\n"
+				want := "  skip    registry-ownership entry left alone: inspect registry link " + unreadable +
+					" target " + loop + ": stat " + loop + ": too many levels of symbolic links\n" +
+					"  change  retire " + link + " (dead pfm link -> " + target + ")\n"
 				if output.String() != want {
 					t.Fatalf("transcript=%q, want %q", output.String(), want)
 				}
@@ -104,24 +111,18 @@ func TestRegistryDeadLinksUninstall(t *testing.T) {
 }
 
 // TestRegistryOwnershipUninstall: an uninstall plans nothing, so every owned
-// link left in a registry goes — a live legacy-workflows link and one into the
-// retired store included — while a foreign link stays.
+// link left in a registry goes — a live link into the managed root included —
+// while a foreign link stays.
 func TestRegistryOwnershipUninstall(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	store := ClaudeStore(home)
-	clone := filepath.Join(home, ".professor")
-	live := filepath.Join(clone, "workflows", "left.md")
+	live := filepath.Join(managedRootForHome(home), "commands", "left.md")
 	writeFixture(t, live, "exists")
-	retiredStore := filepath.Join(RetiredGeneratedStores(home)[1], "role.md")
-	writeFixture(t, retiredStore, "rendered")
 	foreign := filepath.Join(home, "foreign", "mine.md")
 	writeFixture(t, foreign, "mine")
-	owned := []string{
-		filepath.Join(store, "commands", "left.md"), filepath.Join(store, "agents", "role.md"),
-	}
+	owned := []string{filepath.Join(store, "commands", "left.md")}
 	symlinkFixture(t, live, owned[0])
-	symlinkFixture(t, retiredStore, owned[1])
 	mine := filepath.Join(store, "commands", "mine.md")
 	symlinkFixture(t, foreign, mine)
 	if _, err := Run(
@@ -198,7 +199,7 @@ func TestRegistryDeadLinkResilience(t *testing.T) {
 				agentsLink := filepath.Join(home, ".agents", "skills", "fetched")
 				symlinkFixture(t, fetched, agentsLink)
 				t.Cleanup(func() { assertLink(t, agentsLink, fetched) })
-				_, _, sourcesErr := loadSkillSources(clone, "")
+				_, _, _, sourcesErr := loadSkillSources(clone, "")
 				want = "  skip    registry-ownership check skipped: " + errPlanSkillSources.Error() + ": " +
 					sourcesErr.Error() + "\n"
 			}
@@ -255,7 +256,7 @@ func TestRetireDeadRegistryRootLink(t *testing.T) {
 			home := t.TempDir()
 			store := ClaudeStore(home)
 			root := filepath.Join(home, ".agents", "skills")
-			target := filepath.Join(home, ".professor", "workflows", "retired-skills")
+			target := filepath.Join(managedRootForHome(home), "skills", "retired-skills")
 			if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
 				t.Fatal(err)
 			}

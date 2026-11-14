@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -192,6 +193,20 @@ func (reporter *herdrReporter) labelTab(ctx context.Context, target herdrTarget,
 	}
 	if err != nil {
 		return fmt.Errorf("name tab %s of pane %s: %w", tab, target.pane, err)
+	}
+	return nil
+}
+
+// clearNativeTitle clears the title pfm gave the ended seat's pane, as an end
+// on a pane pfm reports to does with its release.
+func (reporter *herdrReporter) clearNativeTitle(ctx context.Context, seat fleetdb.Seat) error {
+	line, err := herdr.Metadata{Pane: seat.HerdrPane, ClearTitle: true, Seq: reporter.nextSent()}.Line()
+	if err != nil {
+		return err
+	}
+	// A Herdr server or pane that is gone shows no title.
+	if err := releaseSettled(herdr.Send(ctx, seat.HerdrSocket, line)); err != nil && !herdr.SocketGone(err) {
+		return fmt.Errorf("clear pfm's title on pane %s of %s: %w", seat.HerdrPane, seat.HerdrSocket, err)
 	}
 	return nil
 }

@@ -193,7 +193,7 @@ func writeAcceptedHuman(stdout io.Writer, scan *RetiredNameScan) {
 // whenever rows are open, so a session that starts from any prompt still
 // reads what ends each row. Each line leads with "·", never a bare status
 // word: a reader that takes an indented first field after a status header as
-// a row (infra/fence/lanes/adopt.sh) must not read the guide as rows.
+// a row (an adopter session reading the report) must not read the guide as rows.
 func writeSessionGuide(stdout io.Writer) {
 	fmt.Fprintln(
 		stdout,
@@ -257,7 +257,7 @@ func runProjectAccept(
 	}
 	rules := report.Baseline.RetiredAccepted
 	var hits []RetiredNameHit
-	var incomplete []RetiredNameFailure
+	var incomplete, failures []RetiredNameFailure
 	if !*undo {
 		if scan == nil {
 			fmt.Fprintln(
@@ -267,13 +267,9 @@ func runProjectAccept(
 			return 1
 		}
 		result := scan(report.Root, retiredScanPinned(&report))
-		if len(result.Failures) != 0 {
-			fmt.Fprintf(stderr, "pfm update accept: %d file(s) could not be scanned (%s); fix that first\n",
-				len(result.Failures), result.Failures[0].Path)
-			return 1
-		}
 		hits = result.Hits
 		incomplete = result.Incomplete
+		failures = result.Failures
 	}
 	changed := 0
 	for _, value := range paths {
@@ -297,6 +293,13 @@ func runProjectAccept(
 			}
 			rules = kept
 			continue
+		}
+		// Only a file under (or holding) this path that could not be scanned
+		// blocks it: accepting would cover hits nobody has seen.
+		if failure, found := unscannedUnder(failures, path); found {
+			fmt.Fprintf(stderr, "pfm update accept: %s could not be scanned (%s: %s); fix that first\n",
+				path, failure.Path, failure.Error)
+			return 1
 		}
 		rule := RetiredRule{Path: path, Name: *name, Coverage: *coverage, Reason: text}
 		covered := 0
@@ -347,6 +350,18 @@ func runProjectAccept(
 		fmt.Fprintf(stdout, "accepted retired-name hits under %d path(s)\n", changed)
 	}
 	return 0
+}
+
+// unscannedUnder is the first scan failure at, under or above path ("." is
+// the whole project).
+func unscannedUnder(failures []RetiredNameFailure, path string) (RetiredNameFailure, bool) {
+	for _, failure := range failures {
+		if failure.Path == "." || failure.Path == path || strings.HasPrefix(failure.Path, path+"/") ||
+			strings.HasPrefix(path, failure.Path+"/") {
+			return failure, true
+		}
+	}
+	return RetiredNameFailure{}, false
 }
 
 // keepSelected applies --keep to the named UPDATED locals: each pin
@@ -417,6 +432,9 @@ func runProjectKeep(
 }
 
 func writeUpdatedCommits(stdout io.Writer, item projectReportItem) {
+	if item.HistoryError != "" {
+		fmt.Fprintf(stdout, "      upstream commits UNAVAILABLE — %s\n", item.HistoryError)
+	}
 	if len(item.Commits) == 0 {
 		return
 	}

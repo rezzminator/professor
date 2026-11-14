@@ -9,21 +9,25 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
 	fixtureHerdr = "onboarding = false\n\n[theme]\nname = \"solarized\"\nauto_switch = false\n\n" +
 		"# VS Code terminal shortcuts\n[keys]\nnew_tab = [\"prefix+c\"]\n"
-	fixtureVscode = "{\n  \"workbench.colorTheme\": \"Sonar\"\n}\n"
-	herdrBinary   = "/opt/bin/herdr"
-	settingsRel   = ".claude/settings.json"
-	tokyoNightRel = ".claude/themes/tokyo-night.json"
+	fixtureVscode  = "{\n  \"workbench.colorTheme\": \"Sonar\"\n}\n"
+	herdrBinary    = "/opt/bin/herdr"
+	defaultsBinary = "/usr/bin/defaults"
+	settingsRel    = ".claude/settings.json"
+	tokyoNightRel  = ".claude/themes/tokyo-night.json"
 
 	herdrRegistryRel = ".config/herdr/plugins.json"
 	herdrManifestRel = ".config/herdr/pfm-indicators/herdr-plugin.toml"
@@ -106,18 +110,19 @@ type harness struct {
 	tmux     *fakeTmux
 	env      Env
 
-	appearanceOut      string // "Dark" or "" (missing key)
-	appearanceFail     string
-	herdrReload        deps.RunResult
-	herdrLink          deps.RunResult
-	herdrUnlink        deps.RunResult
-	psVscode           string
+	appearanceOut  string // "Dark" or "" (missing key)
+	appearanceFail string
+	herdrReload    deps.RunResult
+	herdrLink      deps.RunResult
+	herdrUnlink    deps.RunResult
+	// processes are the argvs of the process table the vscode row reads.
+	processes          [][]string
 	herdrOnPath        bool
 	runner             *deps.FakeRunner
 	launchctlPrintFail bool
-	// goos is the platform the run serves: darwin unless a Linux test sets
-	// linux and rearms.
-	goos string
+	// platform is the profile the run serves: darwinPlatform unless a Linux
+	// test sets linuxPlatform and rearms.
+	platform *platform
 	// unitsInactive scripts `systemctl --user is-active` answering inactive.
 	unitsInactive bool
 }
@@ -137,7 +142,7 @@ func newHarness(t *testing.T) *harness {
 		tmux:          newFakeTmux("cc-a", "cc-b"),
 		appearanceOut: "Dark",
 		herdrOnPath:   true,
-		goos:          "darwin",
+		platform:      darwinPlatform,
 		herdrReload: deps.RunResult{
 			Stdout: []byte(`{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}`),
 		},
@@ -180,7 +185,8 @@ func (h *harness) exists(rel string) bool {
 // rearm rebuilds the scripted runner from the harness's current knobs.
 func (h *harness) rearm() {
 	runner := new(deps.FakeRunner)
-	defaults := []string{"defaults", "read", "-g", "AppleInterfaceStyle"}
+	runner.ScriptLookPath("defaults", defaultsBinary, nil)
+	defaults := []string{defaultsBinary, "read", "-g", "AppleInterfaceStyle"}
 	switch {
 	case h.appearanceFail != "":
 		runner.Script(defaults, deps.RunResult{ExitCode: 1, Stderr: []byte(h.appearanceFail)}, nil)
@@ -199,7 +205,6 @@ func (h *harness) rearm() {
 		runner.Script([]string{herdrBinary, "plugin", "link"}, h.herdrLink, nil)
 		runner.Script([]string{herdrBinary, "plugin", "unlink"}, h.herdrUnlink, nil)
 	}
-	runner.Script([]string{"ps", "-axo", "args="}, deps.RunResult{Stdout: []byte(h.psVscode)}, nil)
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
 	runner.Script([]string{"launchctl", "bootout"}, deps.RunResult{}, nil)
 	runner.Script([]string{"launchctl", "bootstrap", domain}, deps.RunResult{}, nil)
@@ -216,8 +221,38 @@ func (h *harness) rearm() {
 	runner.Script([]string{"systemctl", "--user", "is-active"}, active, nil)
 	h.runner = runner
 	h.env = Env{
-		Home: h.home, StateDir: h.stateDir, PfmBinary: "/opt/bin/pfm", Runner: runner, Tmux: h.tmux, GOOS: h.goos,
+		Home: h.home, StateDir: h.stateDir, PfmBinary: "/opt/bin/pfm", Runner: runner, Tmux: h.tmux,
+		Platform: h.platform, Proc: h.procTable(),
 	}
+}
+
+// procTable stages h.processes as a Linux proc tree, pid 1 upward, each
+// argv its NUL-separated cmdline (empty for a kernel thread's), a nil argv a
+// pid whose cmdline is gone, and opens it.
+func (h *harness) procTable() gather.ProcFS {
+	h.t.Helper()
+	root := h.t.TempDir()
+	for index, argv := range h.processes {
+		dir := filepath.Join(root, fmt.Sprint(index+1))
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			h.t.Fatal(err)
+		}
+		if argv == nil {
+			continue
+		}
+		cmdline := strings.Join(argv, "\x00")
+		if cmdline != "" {
+			cmdline += "\x00"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cmdline"), []byte(cmdline), 0o644); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	table, err := gather.OpenProcFS(root)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return table
 }
 
 func (h *harness) on() Report {
@@ -276,11 +311,14 @@ func row(t *testing.T, report Report, surface string) SurfaceResult {
 	return SurfaceResult{}
 }
 
+// wantVerdict asserts a surface row's verdict and its whole detail, every
+// test's temporary directory in it (up to its numbered t.TempDir) written {tmp}.
 func wantVerdict(t *testing.T, report Report, surface string, want Verdict, detail string) {
 	t.Helper()
 	got := row(t, report, surface)
-	if got.Verdict != want || !strings.Contains(got.Detail, detail) {
-		t.Errorf("%s row = %s %q, want %s containing %q", surface, got.Verdict, got.Detail, want, detail)
+	gotDetail := testjail.TempPath(`/[^\s"':]*?/\d{3}\b`).ReplaceAllString(got.Detail, "{tmp}")
+	if got.Verdict != want || gotDetail != detail {
+		t.Errorf("%s row = %s %q, want %s %q", surface, got.Verdict, gotDetail, want, detail)
 	}
 }
 
@@ -302,7 +340,7 @@ func TestOnReadBackOffRoundTrip(t *testing.T) {
 		report.Source.Title != "Tokyo Night · neon pink" || report.Source.Side != Dark {
 		t.Fatalf("On source = %+v, want custom:tokyo-night titled Tokyo Night · neon pink", report.Source)
 	}
-	wantVerdict(t, report, "claude", VerdictSource, "custom:tokyo-night · Tokyo Night · neon pink")
+	wantVerdict(t, report, "claude", VerdictSource, "~/.claude · custom:tokyo-night · Tokyo Night · neon pink")
 	wantVerdict(t, report, "tmux", VerdictInSync, "2 servers")
 	for _, surface := range []string{"herdr", "follower"} {
 		wantVerdict(t, report, surface, VerdictInSync, "")
@@ -430,16 +468,46 @@ func TestAutoSourceFollowsTheSystemAppearance(t *testing.T) {
 	}
 }
 
+// An auto theme whose system side cannot be read keeps the side last applied:
+// the sync goes on, every surface still follows, and the claude row names why
+// the side was not re-read.
+func TestAutoSourceKeepsTheLastSideWhenTheSystemAppearanceCannotBeRead(t *testing.T) {
+	h := newHarness(t)
+	h.write(settingsRel, `{"theme":"auto"}`)
+	h.appearanceOut = "" // a light system
+	h.rearm()
+	h.on()
+	h.appearanceFail = "defaults: broken plist"
+	h.rearm()
+	report := h.sync(true)
+	wantVerdict(
+		t,
+		report,
+		"claude",
+		VerdictSource,
+		"~/.claude · auto · auto · system appearance unreadable, drawing light: themesync: defaults read AppleInterfaceStyle exited 1: defaults: broken plist",
+	)
+	if report.Appearance != Light || h.tmux.servers["cc-a"]["@pfm-c-bg"] != "#ffffff" {
+		t.Errorf("an unreadable system side gave appearance %s tmux bg %q, want the last side light #ffffff",
+			report.Appearance, h.tmux.servers["cc-a"]["@pfm-c-bg"])
+	}
+}
+
 func TestSourceErrorNamesTheFileAndWritesNoSurface(t *testing.T) {
 	h := newHarness(t)
 	h.write(settingsRel, `{"theme":"custom:missing"}`)
 	herdrBefore := h.read(".config/herdr/config.toml")
 	report := h.on()
-	want := "custom theme missing: open " + h.path(".claude/themes/missing.json") + ": no such file or directory"
 	if len(report.Surfaces) != 1 || report.OK() {
 		t.Fatalf("On with a missing custom theme = %+v, want only the failed claude row", report.Surfaces)
 	}
-	wantVerdict(t, report, "claude", VerdictError, want)
+	wantVerdict(
+		t,
+		report,
+		"claude",
+		VerdictError,
+		"{tmp}/.claude/settings.json: custom theme missing: open {tmp}/.claude/themes/missing.json: no such file or directory",
+	)
 	if h.exists(".local/state/pfm/theme/state.json") || h.read(".config/herdr/config.toml") != herdrBefore ||
 		h.tmux.applyCalls != 0 {
 		t.Error("a source error wrote the state, a surface or a tmux server")
@@ -449,13 +517,36 @@ func TestSourceErrorNamesTheFileAndWritesNoSurface(t *testing.T) {
 	h.on()
 	h.write(settingsRel, `{"theme":`)
 	status := h.status()
-	wantVerdict(t, status, "claude", VerdictError, h.path(settingsRel))
-	wantVerdict(t, status, "tmux", VerdictInSync, "")
+	wantVerdict(
+		t,
+		status,
+		"claude",
+		VerdictError,
+		"themesync: parse {tmp}/.claude/settings.json: unexpected end of JSON input",
+	)
+	wantVerdict(t, status, "tmux", VerdictInSync, "2 servers")
 	synced := h.sync(false)
 	if synced.OK() || synced.Generation != 1 || synced.Changed {
 		t.Errorf("Sync over an unparsable settings.json = ok %v gen %d changed %v, want a failed, unapplied gen 1",
 			synced.OK(), synced.Generation, synced.Changed)
 	}
+}
+
+// One account whose settings.json will not parse never stops the others from
+// governing: the run goes on from the accounts that read and the claude row names
+// the one it skipped.
+func TestSourceGovernsFromTheAccountsThatRead(t *testing.T) {
+	h := newHarness(t)
+	h.write(".cc/2/settings.json", `{"theme":`)
+	report := h.on()
+	wantVerdict(
+		t,
+		report,
+		"claude",
+		VerdictSource,
+		"~/.claude · custom:tokyo-night · Tokyo Night · neon pink · account skipped: themesync: parse {tmp}/.cc/2/settings.json: unexpected end of JSON input",
+	)
+	wantVerdict(t, report, "tmux", VerdictInSync, "2 servers")
 }
 
 // scriptedClock returns the scripted instants in order, then the last one.
@@ -545,8 +636,8 @@ func TestSurfaceFailuresNameThemselvesAndNeverReadInSync(t *testing.T) {
 	h.herdrReload = deps.RunResult{ExitCode: 2, Stderr: []byte("bad config")}
 	h.rearm()
 	report := h.on()
-	wantVerdict(t, report, "tmux", VerdictError, "1 of 2 servers failed")
-	wantVerdict(t, report, "herdr", VerdictError, "bad config")
+	wantVerdict(t, report, "tmux", VerdictError, "1 of 2 servers failed: tmux cc-b: apply: lost connection")
+	wantVerdict(t, report, "herdr", VerdictError, "themesync: herdr server reload-config exited 2: bad config")
 	if got := h.tmux.servers["cc-a"]["@pfm-theme"]; got != "custom:tokyo-night" {
 		t.Errorf("one dead tmux server stopped the others: cc-a @pfm-theme = %q", got)
 	}
@@ -557,7 +648,13 @@ func TestSurfaceFailuresNameThemselvesAndNeverReadInSync(t *testing.T) {
 	if err := os.Remove(h.path("Library/Application Support/Code/User/settings.json")); err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, h.status(), "vscode", VerdictAbsent, "no VS Code settings.json")
+	wantVerdict(
+		t,
+		h.status(),
+		"vscode",
+		VerdictAbsent,
+		"no VS Code settings.json at {tmp}/Library/Application Support/Code/User/settings.json, {tmp}/Library/Application Support/Code - Insiders/User/settings.json, {tmp}/Library/Application Support/VSCodium/User/settings.json, {tmp}/Library/Application Support/Cursor/User/settings.json",
+	)
 }
 
 func TestOffAndReadBackWhenNeverOnDoNothing(t *testing.T) {
@@ -594,18 +691,24 @@ func TestLogOnceDedupesTheSameLineUntilCleared(t *testing.T) {
 func TestVscodeRowFollowsTheAckAndTheProcessTable(t *testing.T) {
 	h := newHarness(t)
 	h.on()
-	h.psVscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n"
+	h.processes = [][]string{{"/Applications/Visual Studio Code.app/Contents/MacOS/Electron"}}
 	h.rearm()
 	old := time.Now().Add(-time.Minute)
 	if err := os.Chtimes(h.path(".local/state/pfm/theme/current.json"), old, old); err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, h.status(), "vscode", VerdictPending, "reload a VS Code window once")
+	wantVerdict(
+		t,
+		h.status(),
+		"vscode",
+		VerdictPending,
+		"reload a VS Code window once: no Professor extension has acknowledged a theme yet ({tmp}/.local/state/pfm/theme/vscode-ack.json absent)",
+	)
 	h.write(
 		".local/state/pfm/theme/vscode-ack.json",
 		`{"generation":1,"appliedAt":"x","keys":[],"error":"cannot write settings"}`,
 	)
-	wantVerdict(t, h.status(), "vscode", VerdictError, "cannot write settings")
+	wantVerdict(t, h.status(), "vscode", VerdictError, "extension reported: cannot write settings")
 	h.ackVscode(1)
 	wantVerdict(t, h.status(), "vscode", VerdictInSync, "")
 }
@@ -615,7 +718,13 @@ func TestFollowerRowReportsAnUnloadedAgentAsDrift(t *testing.T) {
 	h.on()
 	h.launchctlPrintFail = true
 	h.rearm()
-	wantVerdict(t, h.status(), "follower", VerdictDrift, "not loaded")
+	wantVerdict(
+		t,
+		h.status(),
+		"follower",
+		VerdictDrift,
+		"launch agent is not loaded in gui/"+strconv.Itoa(os.Getuid())+"/com.professor.pfm.theme",
+	)
 }
 
 func TestStatusShowsASourceChangeAsDriftUntilSynced(t *testing.T) {
@@ -623,8 +732,14 @@ func TestStatusShowsASourceChangeAsDriftUntilSynced(t *testing.T) {
 	h.on()
 	h.write(settingsRel, `{"theme":"light"}`)
 	status := h.status()
-	wantVerdict(t, status, "tmux", VerdictDrift, "status-style")
-	wantVerdict(t, status, "claude", VerdictSource, "light")
+	wantVerdict(
+		t,
+		status,
+		"tmux",
+		VerdictDrift,
+		"tmux cc-a: status-style = \"bg=#221634,fg=#ff9ed6\", want \"bg=#f0f0f0,fg=#000000\"; tmux cc-b: status-style = \"bg=#221634,fg=#ff9ed6\", want \"bg=#f0f0f0,fg=#000000\"",
+	)
+	wantVerdict(t, status, "claude", VerdictSource, "~/.claude · light · light")
 	if h.state().Generation != 1 {
 		t.Error("status persisted a generation bump")
 	}
@@ -657,7 +772,7 @@ func TestStatusOverAnOldShapedEnabledStateShowsTheResolvedSource(t *testing.T) {
 	if !status.Enabled {
 		t.Fatalf("ReadBack over an old state = %+v, want it enabled", status)
 	}
-	wantVerdict(t, status, "claude", VerdictSource, "custom:tokyo-night · Tokyo Night · neon pink")
+	wantVerdict(t, status, "claude", VerdictSource, "~/.claude · custom:tokyo-night · Tokyo Night · neon pink")
 	if got := row(t, status, "claude"); got.Path != h.path(settingsRel) {
 		t.Errorf("claude row path = %q, want %q", got.Path, h.path(settingsRel))
 	}
@@ -670,7 +785,13 @@ func TestStatusOverAnOldShapedEnabledStateShowsTheResolvedSource(t *testing.T) {
 
 	h.write(settingsRel, `{"theme":`)
 	failed := h.status()
-	wantVerdict(t, failed, "claude", VerdictError, h.path(settingsRel))
+	wantVerdict(
+		t,
+		failed,
+		"claude",
+		VerdictError,
+		"themesync: parse {tmp}/.claude/settings.json: unexpected end of JSON input",
+	)
 	if failed.Source != nil {
 		t.Errorf("report source over an unresolvable old state = %+v, want none", failed.Source)
 	}
@@ -748,7 +869,13 @@ func TestAChipReadThatFailsCapturesNoPriorSoOffNeverErasesTheValue(t *testing.T)
 	if err != nil {
 		t.Fatalf("On: %v", err)
 	}
-	wantVerdict(t, report, "tmux", VerdictError, "read @host_accent: tmux: server timed out")
+	wantVerdict(
+		t,
+		report,
+		"tmux",
+		VerdictError,
+		"2 of 2 servers failed: tmux cc-a: read @host_accent: tmux: server timed out; tmux cc-b: read @host_accent: tmux: server timed out",
+	)
 	if got, held := h.tmux.servers["cc-a"]["@pfm-theme-prior-@host_accent"]; held {
 		t.Errorf("a failed read of @host_accent captured the prior %q, want none", got)
 	}
@@ -813,7 +940,7 @@ func TestAConfigResourceResetsAChipAndTheSyncHealsItKeepingThePrior(t *testing.T
 	wantVerdict(t, h.status(), "tmux", VerdictInSync, "2 servers")
 
 	h.tmux.servers["cc-a"]["@host_accent"] = "#00e5ff" // a user `tmux source-file`
-	wantVerdict(t, h.status(), "tmux", VerdictDrift, "@host_accent")
+	wantVerdict(t, h.status(), "tmux", VerdictDrift, "tmux cc-a: @host_accent = \"#00e5ff\", want \"#c95cff\"")
 	report := h.sync(false)
 	wantVerdict(t, report, "tmux", VerdictInSync, "2 servers")
 	if got := h.tmux.servers["cc-a"]["@host_accent"]; got != "#c95cff" {

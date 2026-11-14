@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -26,6 +27,7 @@ import (
 
 const (
 	nativeReloadFailed = "failed"
+	nativeSeatLive     = "live"
 	herdrPaneKey       = "pane_id"
 )
 
@@ -36,8 +38,6 @@ type nativeReload struct {
 	door    *pfmcall.Engine
 	db      *fleetdb.Store
 	owner   fleetdb.Seat
-	// keep reads the pane through herdr-keep, which may hold its shell.
-	keep *herdr.Keep
 }
 
 // pane is the native seat's seatScreen: call's door, the seat's supervisor
@@ -96,7 +96,6 @@ func RunHerdr(
 		options: options,
 		door:    door,
 		db:      db,
-		keep:    gather.HerdrKeep(gather.NewProcFS(values.ProcRoot)),
 		target: pfmcall.Target{
 			Backend:    "herdr",
 			SocketPath: request.SocketPath,
@@ -138,7 +137,7 @@ func RunHerdr(
 			return Result{}, err
 		}
 	}
-	updated, run, err := nativeReloadRecipe(request, resumed, old)
+	updated, run, err := nativeReloadRecipe(request, resumed, old, options.EngineSyncRunner, stderr)
 	if err != nil {
 		return Result{}, err
 	}
@@ -232,6 +231,11 @@ func RunHerdr(
 	} else {
 		submitted, err = typeExit(ctx, n.pane(), n.options.Clock, stderr)
 	}
+	if submitted {
+		// Past Enter the seat host starts the published recipe: the chat runs
+		// on its account from here, whatever the startup wait reports.
+		recordReloadLaunch(ctx, n.request, stderr)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -243,6 +247,7 @@ func RunHerdr(
 			return Result{}, err
 		}
 	}
+	n.labelLeftBehind(request.LeftBehind, stderr)
 	return Result{
 		Account:    n.request.Account,
 		Cache1H:    n.request.Cache1H,
@@ -279,10 +284,13 @@ func lockNativeReload(ctx context.Context, request Request, options Options) (*o
 	return nil, errors.Join(errors.New("another reload of this pane is already in flight"), lock.Close())
 }
 
-func nativeReloadRecipe(request Request, seat fleetdb.Seat, old fleetdb.SeatRun) (Request, fleetdb.SeatRun, error) {
-	if !filepath.IsAbs(old.Binary) || !filepath.IsAbs(old.CWD) {
-		return request, fleetdb.SeatRun{}, errors.New("native reload current recipe binary and cwd must be absolute")
-	}
+func nativeReloadRecipe(
+	request Request,
+	seat fleetdb.Seat,
+	old fleetdb.SeatRun,
+	engineSync deps.Runner,
+	stderr io.Writer,
+) (Request, fleetdb.SeatRun, error) {
 	for _, word := range append(append([]string{old.Binary, old.CWD}, old.Args...), old.Env...) {
 		if strings.ContainsRune(word, '\x00') {
 			return request, fleetdb.SeatRun{}, errors.New("native reload current recipe contains NUL")
@@ -295,7 +303,7 @@ func nativeReloadRecipe(request Request, seat fleetdb.Seat, old fleetdb.SeatRun)
 		)
 	}
 	var err error
-	request, err = nativeReloadDefaults(request, old)
+	request, err = nativeReloadDefaults(request, old, stderr)
 	if err != nil {
 		return request, fleetdb.SeatRun{}, err
 	}
@@ -319,7 +327,7 @@ func nativeReloadRecipe(request Request, seat fleetdb.Seat, old fleetdb.SeatRun)
 			request.SessionID = id
 		}
 	}
-	request, err = applyReloadWorkbench(request)
+	request, err = applyReloadWorkbench(request, engineSync, stderr)
 	if err != nil {
 		return request, fleetdb.SeatRun{}, err
 	}
@@ -345,7 +353,7 @@ func nativeReloadRecipe(request Request, seat fleetdb.Seat, old fleetdb.SeatRun)
 
 // nativeReloadDefaults reads the current recipe, not historical LaunchFor data:
 // an explicit earlier reload may have changed the account or cache in-place.
-func nativeReloadDefaults(request Request, old fleetdb.SeatRun) (Request, error) {
+func nativeReloadDefaults(request Request, old fleetdb.SeatRun, stderr io.Writer) (Request, error) {
 	if !request.AccountGiven {
 		account, found := RecipeAccount(request.Machine, request.Engine, old.Env)
 		if !found {
@@ -366,13 +374,23 @@ func nativeReloadDefaults(request Request, old fleetdb.SeatRun) (Request, error)
 		if key == "" {
 			return request, errors.New("native reload cache registry metadata is unavailable")
 		}
-		switch nativeReloadEnv(old.Env, key) {
+		switch recorded := nativeReloadEnv(old.Env, key); recorded {
 		case "1h":
 			request.Cache1H = true
 		case "5m":
 			request.Cache1H = false
 		default:
-			return request, errors.New("native reload current recipe cache is missing or invalid; specify --cache")
+			kept := "5m"
+			if request.Cache1H {
+				kept = "1h"
+			}
+			fmt.Fprintf(
+				stderr,
+				"pfm chat reload: the pane's recipe holds no valid cache (%s=%q) — reloading with %s; pass --cache to choose\n",
+				key,
+				recorded,
+				kept,
+			)
 		}
 	}
 	return request, nil
@@ -398,7 +416,7 @@ func nativeReloadRun(request Request, name string) (fleetdb.SeatRun, error) {
 	plan, err := action.PlanCodex(action.HeadlessRequest{
 		Engine: request.Engine, Name: name, CWD: request.CWD, Home: request.Home,
 		PrimaryAccount: request.Account, Config: request.Machine, Model: request.Model, Effort: request.Effort,
-		PromptChannel: request.PromptChannel, ResumeSessionID: request.SessionID,
+		PromptChannel: request.PromptChannel, ResumeSessionID: request.SessionID, Envs: request.Envs,
 	})
 	if err != nil {
 		return fleetdb.SeatRun{}, err
@@ -412,6 +430,9 @@ func nativeReloadRun(request Request, name string) (fleetdb.SeatRun, error) {
 func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 	stable := 0
 	pane := n.pane()
+	// agentUnread is the last Herdr agent read that told nothing: it waits
+	// without reading the screen and names itself if the tries run out.
+	var agentUnread error
 	for attempt := 0; attempt < n.options.IdleTries; attempt++ {
 		screen, err := pane.capture(ctx)
 		if err != nil {
@@ -436,24 +457,38 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 					Status string `json:"agent_status"`
 				} `json:"agent"`
 			}
+			agentUnread = nil
 			if err := json.Unmarshal(body, &state); err != nil {
-				return fmt.Errorf("decode native reload agent: %w", err)
+				agentUnread = fmt.Errorf("decode native reload agent: %w", err)
+			} else if state.Type != "agent_info" || state.Agent == nil {
+				agentUnread = errors.New("native reload malformed agent_info")
 			}
-			if state.Type != "agent_info" || state.Agent == nil {
-				return errors.New("native reload malformed agent_info")
+			// Herdr vetoes only a chat waiting on its user; one it has not
+			// classified yet waits; idleness is the screen's call, as on the tmux path.
+			// Claude stays working while background shells or sub-agents run
+			// behind an idle composer, and only the footer shows a live turn.
+			// An unread or unrecognized state polls without reading the screen.
+			settled := false
+			if agentUnread == nil {
+				switch status := state.Agent.Status; status {
+				case "blocked":
+					return fmt.Errorf("native reload target is %s", status)
+				case "unknown":
+					// Herdr holds a Claude it has just found in "unknown" through its
+					// startup grace (3 s); a reload typed then waits it out.
+					agentUnread = errors.New("native reload target is unknown")
+				case "idle", "done", "working":
+					settled = true
+				default:
+					agentUnread = fmt.Errorf("native reload unknown agent state %q", status)
+				}
 			}
-			switch state.Agent.Status {
-			case "blocked", "unknown":
-				return fmt.Errorf("native reload target is %s", state.Agent.Status)
-			case "working":
+			if !settled {
 				stable = 0
 				if err := n.options.Clock.Sleep(ctx, n.options.Poll); err != nil {
 					return err
 				}
 				continue
-			case "idle", "done":
-			default:
-				return fmt.Errorf("native reload unknown agent state %q", state.Agent.Status)
 			}
 		}
 		if !composerDrawn(screen) || pfmcall.IsFooterBusy(n.request.Engine, screen) {
@@ -483,14 +518,19 @@ func (n *nativeReload) ready(ctx context.Context, stash bool) error {
 			return err
 		}
 	}
+	if agentUnread != nil {
+		return fmt.Errorf("native reload: Herdr never reported the chat's state (%w); /exit was not typed", agentUnread)
+	}
 	return errors.New("native reload: chat still busy or input box not ready; /exit was not typed")
 }
+
+var errEngineUnprovable = errors.New("native reload engine process lacks a valid pid/argv; startup cannot be proved")
 
 func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 	if err := n.refreshTarget(ctx); err != nil {
 		return 0, nil, err
 	}
-	processes, err := n.keep.Read(ctx, n.target.SocketPath, n.target.Pane)
+	processes, err := herdr.ReadPaneProcesses(ctx, n.target.SocketPath, n.target.Pane)
 	if err != nil {
 		return 0, nil, fmt.Errorf("native reload process_info: %w", err)
 	}
@@ -512,7 +552,7 @@ func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 			continue
 		}
 		if process.PID <= 0 || len(process.Argv) == 0 {
-			return 0, nil, errors.New("native reload engine process lacks a valid pid/argv; startup cannot be proved")
+			return 0, nil, errEngineUnprovable
 		}
 		return process.PID, process.Argv, nil
 	}
@@ -520,6 +560,7 @@ func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
 }
 
 func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run fleetdb.SeatRun) error {
+	var unprovable error
 	for attempt := 0; attempt < n.options.ExitTries+n.options.ExitGraceTries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -541,10 +582,19 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 			return fmt.Errorf("native reload new engine failed: %s", seat.LostNote)
 		}
 		pid, argv, err := n.process(ctx)
+		// The old engine dying after /exit has no argv for a moment: read again.
+		if unprovable = nil; errors.Is(err, errEngineUnprovable) {
+			unprovable, err = err, nil
+		}
 		if err != nil {
 			return err
 		}
-		if !seat.ReloadPending && seat.State == "live" && pid > 0 && pid != oldPID && slices.Equal(argv[1:], run.Args) {
+		// The seat host reapplies Remote Control under the seat's current name
+		// at every start (RefreshRecipeRemoteControl): the new engine runs the
+		// published recipe up to that one knob.
+		if !seat.ReloadPending && seat.State == nativeSeatLive && pid > 0 && pid != oldPID &&
+			slices.Equal(claudelaunch.RefreshRemoteControl(argv[1:], false, ""),
+				claudelaunch.RefreshRemoteControl(run.Args, false, "")) {
 			return nil
 		}
 		if pid == oldPID && oldPID != 0 {
@@ -561,6 +611,9 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 		if err := n.options.Clock.Sleep(ctx, n.options.Poll); err != nil {
 			return err
 		}
+	}
+	if unprovable != nil {
+		return unprovable
 	}
 	return errors.New("native reload new engine startup was not confirmed; seat-host retains the pending recipe")
 }
@@ -604,23 +657,6 @@ func (n *nativeReload) rollback(
 	}
 	if err := n.db.UpdateSeat(ctx, pending, old); err != nil {
 		return fmt.Errorf("restore native reload pending: %w", err)
-	}
-	return nil
-}
-
-func (n *nativeReload) then(ctx context.Context) error {
-	if err := n.ready(ctx, false); err != nil {
-		return fmt.Errorf("native reload --then: %w", err)
-	}
-	if err := n.refreshTarget(ctx); err != nil {
-		return err
-	}
-	result, err := n.door.CallTarget(ctx, n.target, pfmcall.Request{Message: n.request.Then})
-	if err != nil {
-		return fmt.Errorf("native reload --then: %w", err)
-	}
-	if result.Code != 0 {
-		return fmt.Errorf("native reload --then unconfirmed: %s", result.Message)
 	}
 	return nil
 }

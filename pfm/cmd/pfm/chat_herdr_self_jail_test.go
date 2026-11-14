@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -97,7 +99,6 @@ func TestUnnamedHerdrSeatFindsItself(t *testing.T) {
 		Version: mcpserv.ProxyWireVersion, Session: identity.Session, Backend: identity.Backend,
 		SeatID: identity.SeatID, HerdrWorkspace: identity.HerdrWorkspace, SocketPath: identity.SocketPath,
 		SocketName: identity.SocketName, Pane: identity.Pane, Engine: identity.Engine, ID: identity.ID,
-		Source: identity.Source,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -150,18 +151,6 @@ func TestUnnamedHerdrSeatFindsItself(t *testing.T) {
 	default:
 		t.Fatal("exit answered ok without reaching the exit verb")
 	}
-}
-
-// exitRecordingVerbs keeps every real chat verb but records exit's target
-// instead of running the detached exit choreography on the test process.
-type exitRecordingVerbs struct {
-	mcpserv.ChatVerbs
-	exits chan headless.Chat
-}
-
-func (verbs exitRecordingVerbs) Exit(_ context.Context, self headless.Chat) (string, error) {
-	verbs.exits <- self
-	return "recorded", nil
 }
 
 // stageNativeCallerProc writes a jailed /proc in which this test process runs

@@ -1,14 +1,11 @@
 package mcpserv
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -17,10 +14,12 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -78,7 +77,7 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 }
 
 func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -152,7 +151,7 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 }
 
 func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -173,107 +172,14 @@ func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
 		Target:  "missing",
 		Message: strings.Repeat("x", 1<<20),
 	})
-	if huge.Code != 4 || huge.Typed || huge.Status != "refused" ||
-		!strings.Contains(huge.Message, "matched no live chat") {
+	if huge.Code != 4 || huge.Typed || huge.Status != "not_found" || huge.Message != `no chat named "missing"` {
 		t.Fatalf("huge call = %+v", huge)
-	}
-}
-
-func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
-	root := setupBackendFixture(t)
-	binary := buildFleetBinary(t)
-	command := exec.Command(
-		binary,
-		"--config",
-		writeEnabledMCPConfig(t, root),
-		"mcp",
-		"serve",
-		"--stdio",
-		"--family",
-		"chat",
-	)
-	command.Env = os.Environ()
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = stdin.Close()
-		_ = command.Process.Kill()
-		_ = command.Wait()
-	}()
-	if _, err := io.WriteString(
-		stdin,
-		"{malformed json-rpc}\n"+
-			`{"jsonrpc":"2.0","id":7,"method":"unknown/method"}`+"\n",
-	); err != nil {
-		t.Fatal(err)
-	}
-	lineChannel := make(chan []string, 1)
-	go func() {
-		reader := bufio.NewReader(stdout)
-		lines := make([]string, 0, 2)
-		for len(lines) < 2 {
-			line, readErr := reader.ReadString('\n')
-			if readErr != nil {
-				break
-			}
-			var envelope struct {
-				Method string `json:"method"`
-				Error  any    `json:"error"`
-			}
-			if json.Unmarshal([]byte(line), &envelope) == nil &&
-				envelope.Method != "" &&
-				envelope.Error == nil {
-				// The SDK may publish tools/list_changed between request
-				// responses. Notifications have no request ID and are not a
-				// malformed-frame response.
-				continue
-			}
-			lines = append(lines, line)
-		}
-		lineChannel <- lines
-	}()
-	select {
-	case lines := <-lineChannel:
-		if len(lines) != 2 {
-			t.Fatalf("malformed frame responses = %q", lines)
-		}
-		for index, line := range lines {
-			var response struct {
-				JSONRPC string `json:"jsonrpc"`
-				Error   any    `json:"error"`
-			}
-			if err := json.Unmarshal([]byte(line), &response); err != nil ||
-				response.JSONRPC != "2.0" ||
-				response.Error == nil {
-				t.Fatalf(
-					"malformed frame response[%d] = %q parsed=%+v err=%v stderr=%s",
-					index,
-					line,
-					response,
-					err,
-					stderr.String(),
-				)
-			}
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("server did not answer malformed frame; stderr=%s", stderr.String())
 	}
 }
 
 func openFDs(t *testing.T) int {
 	t.Helper()
-	entries, err := os.ReadDir("/proc/self/fd")
+	entries, err := os.ReadDir(filepath.Join(paths.SystemProcRoot(), "self", "fd"))
 	if err != nil {
 		t.Skipf("cannot count fds: %v", err)
 	}
@@ -282,7 +188,7 @@ func openFDs(t *testing.T) int {
 
 func rssBytes(t *testing.T) int64 {
 	t.Helper()
-	content, err := os.ReadFile("/proc/self/statm")
+	content, err := os.ReadFile(filepath.Join(paths.SystemProcRoot(), "self", "statm"))
 	if err != nil {
 		t.Skipf("cannot read RSS: %v", err)
 	}

@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -11,16 +13,20 @@ import (
 	"testing"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	base := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -103,10 +109,11 @@ func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
 // byte-index clip and a rune-index clip would disagree, and reads the
 // window name back through tmux itself.
 func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	base := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -170,6 +177,7 @@ func TestChatNameCallsThroughTheExactLivePaneNotTranscriptUUID(t *testing.T) {
 }
 
 func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newKillCLIJail(t)
 	socket := "cx-self-pane-" + strconv.Itoa(os.Getpid())
 	if output, err := exec.Command(
@@ -218,12 +226,14 @@ func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
 }
 
 func TestScopedLiveKillConfirmsClosureWithoutExitFlag(t *testing.T) {
+	testjail.TmuxServer(t)
 	jailTest(t)
-	bin := t.TempDir()
-	if err := testjail.WriteExecutable(filepath.Join(bin, "setsid"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The finisher's start is recorded, never run: os.Executable here is this
+	// test binary, not pfm.
+	finisher := &deps.FakeRunner{}
+	previous := fleet.KillFinisherRunner
+	fleet.KillFinisherRunner = finisher
+	t.Cleanup(func() { fleet.KillFinisherRunner = previous })
 	self := headless.Chat{
 		ID: "a1111111-1111-4111-8111-111111111111", Engine: "cc",
 		Socket: "cc-new-review", Session: "cc-new-review", Pane: "%0", Live: true,
@@ -235,6 +245,35 @@ func TestScopedLiveKillConfirmsClosureWithoutExitFlag(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "closing pane %0 on socket cc-new-review") {
 		t.Fatalf("kill self output=%q, want confirmed live-pane closure", stdout.String())
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts := finisher.Starts()
+	if len(starts) != 1 {
+		t.Fatalf("finisher starts = %+v, want one detached kill-exit finisher", starts)
+	}
+	argv, opts := starts[0].Argv, starts[0].Opts
+	flags := map[string]string{}
+	verb := -1
+	for index := range argv {
+		if argv[index] == "internal" && index+1 < len(argv) && argv[index+1] == "kill-exit" {
+			verb = index
+		}
+		if verb >= 0 && strings.HasPrefix(argv[index], "--") && index+1 < len(argv) {
+			flags[argv[index]] = argv[index+1]
+		}
+	}
+	if argv[0] != executable || verb < 0 || !opts.Detach || flags["--id"] != self.ID ||
+		flags["--socket-name"] != "cc-new-review" || flags["--pane"] != "%0" {
+		t.Fatalf(
+			"finisher start argv=%q detach=%v; want %s … internal kill-exit --id %s --socket-name cc-new-review --pane %%0, detached",
+			argv,
+			opts.Detach,
+			executable,
+			self.ID,
+		)
 	}
 }
 

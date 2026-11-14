@@ -253,7 +253,9 @@ func transcriptGauge(runtime Runtime, data input, project string, scan *spendSca
 	if !meta.ContextKnown {
 		return fallback
 	}
-	if data.Model.ID != "" && meta.Model != "" &&
+	// A compaction's estimate is the floor plus the boundary's own count, no
+	// model's counters: a model switched right after it keeps the estimate.
+	if !meta.CompactedAfterUsage && data.Model.ID != "" && meta.Model != "" &&
 		canonicalContextModel(data.Model.ID) != canonicalContextModel(meta.Model) {
 		return fallback
 	}

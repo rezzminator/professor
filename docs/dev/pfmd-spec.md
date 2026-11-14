@@ -27,7 +27,7 @@ The statusline accepts the harness `rate_limits` payload on stdin and records it
 
 **The store is opened per process, and the MCP layer multiplies those processes.** `internal/mcpserv/backend.go:58,62` opens both `store.Open` and `shared.Open` for every family-scoped MCP server that runs in process; each family stdio registration runs its family server when the daemon is absent or incompatible and serves in process instead of forwarding to the daemon. Each handle is `SetMaxOpenConns(1)` with WAL and `busy_timeout=10000` (`internal/store/store.go:122,162,170`; same in `internal/shared/shared.go:136,152`), so N chats on that path means N single-connection writers queueing on one file.
 
-**Upgrading is a kill.** `Makefile:10-17` states the problem in its own comment — replacing `~/.local/bin/pfm` leaves the running process on the deleted inode, *"and nothing in between says a word."* The remedy at `Makefile:241-243` is `pkill -f 'mcp serve$'` whenever the `pfm-mcp.service` unit is absent — a pattern that matches the daemon's command line and never a `pfm mcp serve --stdio` server. A live `pfm mcp serve` (a 5-day-old inode, pid 20576 at the time of writing) is killed mid-request, and every MCP client sees its server vanish.
+**Upgrading is a kill.** `Makefile:10-17` states the problem in its own comment — replacing `~/.local/bin/pfm` leaves the running process on the deleted inode, *"and nothing in between says a word."* `make mcp-restart` restarts the daemon only through its supervisor (`systemctl --user restart` of the `pfm-mcp.service` unit, or `launchctl kickstart -k` of its agent); with neither present it stops nothing by name: it lists each unsupervised `pfm mcp serve` with its identity-checked stop line (`ps -o args= -p {pid} | grep -qxF '{args}' && kill {pid}`), and `make sweep-stale` stops only a process proven to run a replaced binary. The pattern `mcp serve$` matches the daemon's command line and never a `pfm mcp serve --stdio` server, which is why a match is no proof of identity.
 
 ## Decisions
 
@@ -35,8 +35,8 @@ The statusline accepts the harness `rate_limits` payload on stdin and records it
 2. **Transport is HTTP/1.1 over a unix socket** at `${XDG_STATE_HOME:-~/.local/state}/pfm/run/pfmd.sock`, mode `0600`. Go `net.Listen("unix", …)` + `net/http`; clients use `http.Transport` with a `DialContext` onto the socket. Versioned under `/v1`. `paths.Resolve` puts `pfm.db` and `pfm-cache.db` under `~/.local/state/pfm`, so the runtime socket lives beside them; `~/.local/share/pfm` is the install tree. `PFM_RUN_DIR` overrides the directory in this proposed daemon.
 3. **Every existing surface becomes a client.** The TUI subscribes to SSE instead of ticking; the prompt hook does one `GET` with a 200 ms timeout; the statusline reads and *writes back*; family-scoped `pfm mcp serve --stdio --family …` registrations — forwarders to the daemon's family routes — become thin stdio↔socket JSON-RPC proxies, so each enabled family registration (the Claude launch's `--mcp-config`, the Codex config, `opencode.jsonc`) is untouched (`internal/installer/mcp.go`).
 4. **No socket, no failure.** Clients degrade to today's behaviour — shared cache file, direct store. A hook or statusline must never block or fail a prompt. First client that finds no socket spawns `pfm daemon run` detached, the way `statusline.SpawnDetached` (`internal/statusline/process.go:23`) already spawns its refresher behind a lockfile. `pfm daemon install` optionally writes a launchd agent (macOS) or a systemd `--user` unit (devbox, Ubuntu 24.04) with `KeepAlive` / `Restart=always`.
-5. **Harvester is independent of PFM.** Its Go module lives at `plugins/harvester/`; it owns source fetching, conversion, the persistent `harvester serve` daemon, native plugin manifests for Claude Code, Codex and OpenCode, and the optional authenticated gateway. Each engine plugin invokes `harvester mcp` as a stdio proxy; that proxy starts or reconnects to the Harvester daemon, which stays up after client exit. The PFM daemon serves chat only at `/mcp/chat-professor`. PFM retains no Harvester config, provisioning, doctor or active registration support; its installer only sweeps exact legacy `harvester-professor` registrations.
-6. **Upgrade is a handoff, not a kill.** The new pfmd inherits the listening socket fd from the old one; the old drains in-flight requests and exits. `pfm update` and `make install` restart through this path instead of `pkill`. Clients reconnect with backoff; SSE clients resubscribe with a cursor.
+5. **Harvester is independent of PFM.** Its Go module lives at `plugins/harvester/`; it owns source fetching, conversion, the persistent `harvester serve` daemon, native plugin manifests for Claude Code, Codex and OpenCode, and the optional authenticated gateway. Each engine plugin invokes `harvester mcp` as a stdio proxy; that proxy starts or reconnects to the Harvester daemon, which stays up after client exit. The PFM daemon serves chat only at `/mcp/chat-professor`. PFM retains no Harvester config, provisioning, doctor or registration support.
+6. **Upgrade is a handoff, not a kill.** The new pfmd inherits the listening socket fd from the old one; the old drains in-flight requests and exits. `pfm update` and `make install` restart through this path instead of the supervisor restart and `make sweep-stale`. Clients reconnect with backoff; SSE clients resubscribe with a cursor.
 7. **Five phases, each behind its own gate, each revertible alone.** Skeleton → limits → store → MCP proxies → handoff.
 
 ## Architecture
@@ -71,7 +71,7 @@ The statusline accepts the harness `rate_limits` payload on stdin and records it
      standalone plugin: native `harvester` MCP server · optional external gateway · plugin-owned Python worker
 ```
 
-Today's picture for contrast: three arrows into `api.anthropic.com` (hook, sampler, and — via `codex app-server` — the statusline refresher), N family-scoped `pfm mcp serve --stdio --family …` processes serving MCP in process when the daemon is absent, each holding two single-connection sqlite handles, and a `pkill` between any two versions.
+Today's picture for contrast: three arrows into `api.anthropic.com` (hook, sampler, and — via `codex app-server` — the statusline refresher), N family-scoped `pfm mcp serve --stdio --family …` processes serving MCP in process when the daemon is absent, each holding two single-connection sqlite handles, and a supervisor restart plus a stale-process sweep between any two versions.
 
 ## API
 
@@ -106,7 +106,7 @@ All paths are under `/v1`. Request and response bodies are JSON unless noted. Ev
 
 **Handoff (phase 5).** **Decision: re-exec with an inherited fd**, not `SCM_RIGHTS`. The old pfmd clears `FD_CLOEXEC` on the listener, `exec`s the new binary with `PFMD_LISTEN_FD=3` and `PFMD_HANDOFF_FROM=<pid>`, and the new process rebuilds the listener with `net.FileListener`. Why this over passing the fd across a control socket: re-exec needs no second listener, no ordering protocol between two live daemons, and no ambiguity about which process owns the socket file — the pid changes but the inode never does, so no client sees a closed socket. `SCM_RIGHTS` would be the right tool if the old and new daemons had to run **concurrently** (a true zero-downtime blue/green), and they do not: the drain here is measured in the milliseconds a JSON-RPC frame takes. The cost is that a new binary which fails to start takes the socket down; the mitigation is that the old process validates `pfm --version` on the candidate binary before exec'ing it, and clients fall back (§ Failure modes) during the gap.
 
-`make install` and `pfm update` then call `pfm daemon restart`, which is `POST /v1/daemon/handoff`. The `pkill -f 'mcp serve$'` line at `Makefile:241-243` is deleted in phase 5, not before.
+`make install` and `pfm update` then call `pfm daemon restart`, which is `POST /v1/daemon/handoff`. The unsupervised-daemon listing in `make mcp-restart` is replaced by the handoff in phase 5, not before.
 
 ## Failure modes and fallbacks
 
@@ -168,7 +168,7 @@ Each phase is gated by `daemon.<phase>.enabled` in `{clone}/pfm.config.json` (st
 ### Phase 5 — socket handoff on upgrade
 
 - **New:** `internal/daemon/handoff.go` (`PFMD_LISTEN_FD`, `net.FileListener`, candidate validation).
-- **Touched:** `Makefile:80,100-116` — `mcp-restart` becomes `daemon-restart`, `pkill` deleted; `internal/update/run.go` — `applyUpdateInstall` calls the handoff; `internal/installer/installer.go:318-322` — the unconditional `systemctl restart` becomes a handoff with the restart as fallback.
+- **Touched:** `Makefile:80,100-116` — `mcp-restart` becomes `daemon-restart`, its unsupervised-daemon listing deleted; `internal/update/run.go` — `applyUpdateInstall` calls the handoff; `internal/installer/installer.go:318-322` — the unconditional `systemctl restart` becomes a handoff with the restart as fallback.
 - **Tests:** `internal/daemon/handoff_jail_test.go` (a client holding an open connection across a handoff sees no `ECONNRESET`; the socket inode is unchanged), `handoff_badbinary_test.go` (a candidate that fails `--version` is never exec'd), `cmd/pfm/update_handoff_test.go`, and an `e2e/` case in the style of `e2e/install_e2e_test.go`.
 
 ## Open questions

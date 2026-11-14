@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,8 +15,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -37,7 +36,7 @@ func renderNoSuchChat(name string, stdout, stderr io.Writer, asJSON bool) int {
 	} else {
 		fmt.Fprintf(stdout, "%s\t%s\n", name, headless.StateMissing)
 	}
-	fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", name)
+	fmt.Fprintf(stderr, "pfm chat: %s\n", pfmcall.UnknownChat(name).Message)
 	return codeUnknownChat
 }
 
@@ -261,26 +260,22 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 		return codeUndelivered
 	}
 	target, code, detail, err := engine.Resolve(context.Background(), name)
+	if err == nil {
+		err = pfmchat.ResolveRefusal(code, detail, name)
+	}
+	var refusal pfmchat.Refusal
+	if errors.As(err, &refusal) {
+		return reportChatRefusal("resolve", err, name, stdout, stderr)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat resolve: %v\n", err)
 		return codeUndelivered
 	}
-	if code != 0 {
-		if code == pfmcall.CodeUnknown {
-			return renderNoSuchChat(name, stdout, stderr, false)
-		}
-		if detail != "" {
-			fmt.Fprintln(stderr, detail)
-		}
-		if code == pfmcall.CodeAmbiguous {
-			return 2
-		}
-		return codeUndelivered
+	socket := filepath.Base(target.SocketPath) // a tmux socket's -L name; a Herdr socket is addressed by path
+	if target.Backend == pfmcall.HerdrBackend {
+		socket = target.SocketPath
 	}
-	fmt.Fprintf(
-		stdout, "%s\t%s\t%s\n",
-		filepath.Base(target.SocketPath), target.Session, target.ID,
-	)
+	fmt.Fprintf(stdout, "%s\t%s\t%s\n", socket, target.Session, target.ID)
 	return 0
 }
 
@@ -293,29 +288,15 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 		flags.Usage()
 		return 2
 	}
-	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtimes...)
-	if code != 0 {
-		return code
-	}
-	if !chat.Live {
-		fmt.Fprintf(stderr, "pfm chat capture: %q is not running\n", chat.Name)
-		return codeDeadChat
-	}
-	door, seat, err := chatSeat(chat)
+	captured, err := pfmchat.Capture(context.Background(), firstRuntime(runtimes), flags.Arg(0), 0)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
-		return 1
+		return reportChatRefusal("capture", err, flags.Arg(0), stdout, stderr)
 	}
-	capture, err := pfmchat.CaptureSeat(context.Background(), door, seat, pfmcall.FullScrollback)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
-		return codeDeadChat
-	}
-	fmt.Fprint(stdout, capture)
+	fmt.Fprint(stdout, captured.Text)
 	return 0
 }
 
-func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatRecover(args []string, stdout, stderr io.Writer) int {
 	flags := cli.NewFlagSet("chat recover", "usage: pfm chat recover <thread-id|rollout-path>", stderr)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -323,11 +304,6 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 	if flags.NArg() != 1 {
 		flags.Usage()
 		return 2
-	}
-	_, err := pfmconfig.OptionalRuntime(runtimes)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat recover: load config: %v\n", err)
-		return 1
 	}
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -558,12 +534,14 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 	if !all {
 		directory, err := os.Getwd()
 		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat ls: read the current directory: %v\n", err)
-			return 1
+			fmt.Fprintf(stderr, "pfm chat ls: read the current directory: %v; listing every repo\n", err)
+			all, request.NoCurrentDir = true, true
+		} else {
+			request.Repo = gitroot.RepoRoot(directory)
 		}
-		request.Repo = gitroot.RepoRoot(directory)
 	}
-	listed, err := pfmchat.List(context.Background(), firstRuntime(runtimes), request, stderr)
+	listed, statuses, inspectErrs, err := pfmchat.ListInspected(
+		context.Background(), firstRuntime(runtimes), request, clk.Now(), stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
 		return 1
@@ -578,14 +556,12 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 	}
 	for index := range listed.Rows {
 		row := &listed.Rows[index]
-		chat := pfmchat.FromRow(*row)
-		status, inspectErr := pfmchat.InspectSeat(context.Background(), firstRuntime(runtimes), chat, clk.Now(), nil)
-		state := doctor.StateUnknown
-		if inspectErr != nil {
-			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", chat.Name, inspectErr)
-		} else {
-			state = status.State
+		if inspectErrs[index] != nil {
+			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", row.Name, inspectErrs[index])
 		}
+		state := pfmchat.ListedState(*row, func() (headless.Status, error) {
+			return statuses[index], inspectErrs[index]
+		})
 		// Name is the actionable identity; retain the raw tmux session second
 		// so parsers lose no information.
 		handle := row.Socket

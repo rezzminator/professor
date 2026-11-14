@@ -18,6 +18,25 @@ func TestWorkbenchManifest(t *testing.T) {
 	}
 }
 
+func TestSettingsPaths(t *testing.T) {
+	if got := Settings("/work/acme"); got != "/work/acme/pfm.settings.json" {
+		t.Errorf("Settings = %q", got)
+	}
+	for _, test := range []struct {
+		root   string
+		engine pfmengine.ID
+		want   string
+	}{
+		{"/work/acme", pfmengine.Claude, "/fixture/home/.local/state/pfm/settings-prompts/e3b8fe59972bb48f/claude.md"},
+		{"/work/acme", pfmengine.Codex, "/fixture/home/.local/state/pfm/settings-prompts/e3b8fe59972bb48f/codex.md"},
+		{"/work/beta", pfmengine.OpenCode, "/fixture/home/.local/state/pfm/settings-prompts/b4e242277325fc7c/opencode.md"},
+	} {
+		if got := SettingsPrompt("/fixture/home", test.root, test.engine); got != test.want {
+			t.Errorf("SettingsPrompt(%s, %s) = %q, want %q", test.root, test.engine, got, test.want)
+		}
+	}
+}
+
 func TestResolveOverrides(t *testing.T) {
 	testRoot := t.TempDir()
 	t.Setenv("TMUX_TMPDIR", filepath.Join(testRoot, "t"))
@@ -69,7 +88,6 @@ func TestResolveOverrides(t *testing.T) {
 		ProcRoot:           procRoot,
 		CgroupRoot:         cgroupRoot,
 		ManagedSettingsDir: managedSettingsDir,
-		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve() = %#v, want %#v", got, want)
@@ -128,6 +146,16 @@ func TestServicePathIsTheOneServiceSearchPath(t *testing.T) {
 	want := "/h/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 	if got := ServicePath("/h"); got != want {
 		t.Fatalf("ServicePath(/h) = %q, want %q", got, want)
+	}
+}
+
+// The per-user service unit directories are spelled once, under home.
+func TestServiceUnitDirsHangOffHome(t *testing.T) {
+	if got := LaunchAgentsDir("/h"); got != "/h/Library/LaunchAgents" {
+		t.Fatalf("LaunchAgentsDir(/h) = %q, want /h/Library/LaunchAgents", got)
+	}
+	if got := SystemdUserDir("/h"); got != "/h/.config/systemd/user" {
+		t.Fatalf("SystemdUserDir(/h) = %q, want /h/.config/systemd/user", got)
 	}
 }
 
@@ -238,30 +266,6 @@ func TestSocketUnderKeepsTheSocketInsideTheTmuxDir(t *testing.T) {
 	}
 }
 
-// The activity log hangs off the same pfm state directory as the fleet cache,
-// so a jail, a fence and the live host each keep their own and never mix.
-func TestResolveLogFileHangsOffTheHomesStateDirectory(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv(EnvHome, home)
-	resolved, err := Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl")
-	if resolved.LogFile != want {
-		t.Fatalf("LogFile = %q, want %q", resolved.LogFile, want)
-	}
-	other := t.TempDir()
-	t.Setenv(EnvHome, other)
-	second, err := Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.LogFile == resolved.LogFile {
-		t.Fatalf("two homes resolved to one activity log: %s", second.LogFile)
-	}
-}
-
 func TestResolveIgnoresRetiredDatabaseEnvironment(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(EnvHome, home)
@@ -291,10 +295,6 @@ func TestHarnessBaselineDirUsesRecordedClone(t *testing.T) {
 	want := filepath.Join(repo, "pfm", "harness-prompts", "claude", "baselines")
 	if err != nil || got != want {
 		t.Fatalf("baseline dir = %q, %v; want %q", got, err, want)
-	}
-	legacy := filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
-	if got := LegacyHarnessPromptsDir(home); got != legacy {
-		t.Fatalf("legacy dir = %q; want %q", got, legacy)
 	}
 }
 
@@ -339,82 +339,14 @@ func TestResolveManagedSettingsDirUsesJailOverride(t *testing.T) {
 	}
 }
 
-func TestCheckLegacyPending(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	present := filepath.Join(root, "present.db")
-	if err := os.WriteFile(present, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	blocker := filepath.Join(root, "blocker")
-	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	absent := filepath.Join(root, "absent.db")
-	unreadable := filepath.Join(blocker, "fleet.db") // ENOTDIR, even for root
-	tests := []struct {
-		name, target, legacy string
-		pending              bool
-		wantText             []string
-	}{
-		{name: "target exists", target: present, legacy: present},
-		{name: "fresh home", target: absent, legacy: filepath.Join(root, "absent-legacy.db")},
-		{
-			name: "legacy waits", target: absent, legacy: present, pending: true,
-			wantText: []string{absent, present, "run pfm doctor for the fix"},
-		},
-		{name: "legacy unreadable", target: absent, legacy: unreadable, wantText: []string{"inspect " + unreadable}},
-		{name: "target unreadable", target: unreadable, legacy: present, wantText: []string{"inspect " + unreadable}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			err := CheckLegacyPending(test.target, test.legacy)
-			if len(test.wantText) == 0 {
-				if err != nil {
-					t.Fatalf("CheckLegacyPending = %v, want nil", err)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatal("CheckLegacyPending = nil, want an error")
-			}
-			if errors.Is(err, ErrLegacyPending) != test.pending {
-				t.Fatalf("errors.Is(%v, ErrLegacyPending) = %v, want %v", err, !test.pending, test.pending)
-			}
-			if test.pending {
-				want := ErrLegacyPending.Error() + ": " + test.target + " not created while legacy " + test.legacy + " still exists — run pfm doctor for the fix"
-				if err.Error() != want {
-					t.Fatalf("error=%q, want %q", err, want)
-				}
-			}
-			for _, want := range test.wantText {
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("error %q lacks %q", err, want)
-				}
-			}
-		})
-	}
-}
-
-func TestLegacyDatabasePaths(t *testing.T) {
-	t.Parallel()
-	home := filepath.Join(t.TempDir(), "home")
-	if got, want := LegacyStateDB(home), filepath.Join(home, ".cc", "fleet.db"); got != want {
-		t.Fatalf("LegacyStateDB = %q, want %q", got, want)
-	}
-	if got, want := LegacyCacheDB(home), filepath.Join(home, ".local", "state", "pfm", "fleet.db"); got != want {
-		t.Fatalf("LegacyCacheDB = %q, want %q", got, want)
-	}
-}
-
 // TestResolveRefusesARelativeManagedSettingsDir proves the override is
 // validated at entry: a relative dir would write the managed drop-in
 // relative to the working directory.
 func TestResolveRefusesARelativeManagedSettingsDir(t *testing.T) {
 	t.Setenv(EnvHome, t.TempDir())
 	t.Setenv(EnvManagedSettingsDir, "managed-settings.d")
-	if _, err := Resolve(); err == nil || !strings.Contains(err.Error(), EnvManagedSettingsDir) {
+	if _, err := Resolve(); err == nil ||
+		err.Error() != "PFM_MANAGED_SETTINGS_DIR=\"managed-settings.d\" is not an absolute path" {
 		t.Fatalf("Resolve() err = %v, want the relative %s refused", err, EnvManagedSettingsDir)
 	}
 }
@@ -484,17 +416,6 @@ func TestCostLedgerDirHonoursItsOverrideAndFallsBackToTheStateDirectory(t *testi
 		if got := CostLedgerDir(tc.env, home); got != tc.want {
 			t.Errorf("%s: CostLedgerDir = %q, want %q", tc.name, got, tc.want)
 		}
-	}
-	if got, want := CostSinkLog(home), "/jail/home/.local/state/pfm/log/cost-sink.log"; got != want {
-		t.Errorf("CostSinkLog = %q, want %q", got, want)
-	}
-}
-
-func TestSubagentStatuslineTraceStaysInTheHomesLogDirectory(t *testing.T) {
-	got := SubagentStatuslineTrace("/jail/home")
-	want := "/jail/home/.local/state/pfm/log/subagent-statusline.jsonl"
-	if got != want {
-		t.Fatalf("SubagentStatuslineTrace = %q, want %q", got, want)
 	}
 }
 

@@ -27,6 +27,7 @@ const (
 	// The write names more than one language's table spells.
 	pcmGuardOpen    = "open"
 	pcmGuardUnlink  = "unlink"
+	pcmGuardTee     = "tee"
 	pcmGuardRename  = "rename"
 	pcmGuardReplace = "replace"
 	// pcmGuardInto joins a copy's destination and source in one target, for
@@ -207,14 +208,14 @@ func (judge *pcmGuardJudge) program(part *cmdparse.Part, base, dir string, depth
 		return
 	}
 	for _, body := range bodies {
-		judge.shell(body, dir, depth)
+		judge.shell(body, dir, cmdparse.Script{}, depth)
 	}
 	for _, word := range words {
 		if strings.ContainsAny(word, "$`") {
 			judge.code(word, dir)
 			continue
 		}
-		judge.shell(word, dir, depth)
+		judge.shell(word, dir, cmdparse.Script{}, depth)
 	}
 }
 
@@ -304,13 +305,14 @@ func (judge *pcmGuardJudge) scriptFile(word, dir string) bool {
 }
 
 // shell judges shell code run in dir the way a Bash command is judged, one
-// level deeper; past pcmGuardMaxShellDepth it is unreadable.
-func (judge *pcmGuardJudge) shell(code, dir string, depth int) {
+// level deeper; past pcmGuardMaxShellDepth it is unreadable. script is the
+// file the code came from, zero for inline code.
+func (judge *pcmGuardJudge) shell(code, dir string, script cmdparse.Script, depth int) {
 	if depth >= pcmGuardMaxShellDepth {
 		judge.unreadable = true
 		return
 	}
-	if err := judge.bash(code, dir, depth+1); err != nil {
+	if err := judge.bash(code, dir, script, depth+1); err != nil {
 		judge.unreadable = true // a malformed batch: the code went unread
 	}
 }

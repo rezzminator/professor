@@ -1,0 +1,12 @@
+DIAGNOSIS timeout — package <nil>, pid <nil>
+wall <nil>s of timeout <nil>s · cpu user not measured (<nil>) sys not measured (<nil>) · run delay not measured (<nil>) · max rss not measured (<nil>)
+VM pressure while this process ran: not measured (<nil>)
+
+Tests running at capture:
+  fleet.TestScan [chan receive] at internal/fleet/scan_test.go:60 (fleet.TestScan)
+  fleet.TestScan [select] at internal/fleet/scan_test.go:55 (fleet.TestScan.func1)
+
+Other goroutines of this module:
+  none
+
+2 goroutines in all: goroutines.txt · trace window: go tool trace trace.out · heap: go tool pprof heap.pprof

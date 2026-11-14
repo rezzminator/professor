@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // SchemaVersion is the user_version this build stamps on the shared database.
@@ -81,30 +82,27 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 	if err := BackupBeforeMigration(ctx, db, path, first, existed); err != nil {
 		return err
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin shared database migration: %w", err)
-	}
-	defer func() {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			returnErr = errors.Join(returnErr, fmt.Errorf("roll back shared database migration: %w", err))
+	return withImmediate(ctx, db, immediateLabels{
+		conn:    "begin shared database migration: connection",
+		lock:    "begin shared database migration",
+		release: "roll back shared database migration",
+	}, func(conn *sql.Conn) (bool, error) {
+		for next := first; next <= SchemaVersion; next++ {
+			if next == RetiredSchemaVersion {
+				continue
+			}
+			if _, err := conn.ExecContext(ctx, sharedMigrations[next]); err != nil {
+				return false, fmt.Errorf("apply shared database migration %d: %w", next, err)
+			}
 		}
-	}()
-	for next := first; next <= SchemaVersion; next++ {
-		if next == RetiredSchemaVersion {
-			continue
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
+			return false, fmt.Errorf("set shared database schema version %d: %w", SchemaVersion, err)
 		}
-		if _, err := tx.ExecContext(ctx, sharedMigrations[next]); err != nil {
-			return fmt.Errorf("apply shared database migration %d: %w", next, err)
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return false, fmt.Errorf("commit shared database migration %d: %w", SchemaVersion, err)
 		}
-	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
-		return fmt.Errorf("set shared database schema version %d: %w", SchemaVersion, err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit shared database migration %d: %w", SchemaVersion, err)
-	}
-	return nil
+		return true, nil
+	})
 }
 
 // addHiddenRevision adds hidden.revision to a file that lacks it: one created
@@ -247,40 +245,31 @@ func dropRetiredIssuesTable(ctx context.Context, db *sql.DB, path string) (retur
 // dropIssuesHolding drops the issues table only while it still holds the
 // backed-up row count, under an immediate write lock so no row lands between
 // the count and the drop; a changed count drops nothing and reports false.
-func dropIssuesHolding(ctx context.Context, db *sql.DB, path string, backedUp int) (dropped bool, returnErr error) {
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		return false, fmt.Errorf("drop retired issues table on shared database %s: connection: %w", path, err)
-	}
-	defer func() { returnErr = errors.Join(returnErr, conn.Close()) }()
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return false, fmt.Errorf("drop retired issues table on shared database %s: lock: %w", path, err)
-	}
-	committed := false
-	defer func() {
-		if committed {
-			return
+func dropIssuesHolding(ctx context.Context, db *sql.DB, path string, backedUp int) (bool, error) {
+	dropped := false
+	err := withImmediate(ctx, db, immediateLabels{
+		conn:    fmt.Sprintf("drop retired issues table on shared database %s: connection", path),
+		lock:    fmt.Sprintf("drop retired issues table on shared database %s: lock", path),
+		release: "drop retired issues table: release lock",
+	}, func(conn *sql.Conn) (bool, error) {
+		var rows int
+		if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM issues").Scan(&rows); err != nil {
+			return false, fmt.Errorf("recount retired issues on shared database %s: %w", path, err)
 		}
-		if _, err := conn.ExecContext(context.Background(), "ROLLBACK"); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("drop retired issues table: release lock: %w", err))
+		if rows != backedUp {
+			obs.Logger(ctx).Warn("fleet.issues.changed", "path", path, "backed_up", backedUp, "rows", rows)
+			return false, nil
 		}
-	}()
-	var rows int
-	if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM issues").Scan(&rows); err != nil {
-		return false, fmt.Errorf("recount retired issues on shared database %s: %w", path, err)
-	}
-	if rows != backedUp {
-		obs.Logger(ctx).Warn("fleet.issues.changed", "path", path, "backed_up", backedUp, "rows", rows)
-		return false, nil
-	}
-	if _, err := conn.ExecContext(ctx, "DROP TABLE issues"); err != nil {
-		return false, fmt.Errorf("drop retired issues table on shared database %s: %w", path, err)
-	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return false, fmt.Errorf("commit retired issues drop on shared database %s: %w", path, err)
-	}
-	committed = true
-	return true, nil
+		if _, err := conn.ExecContext(ctx, "DROP TABLE issues"); err != nil {
+			return false, fmt.Errorf("drop retired issues table on shared database %s: %w", path, err)
+		}
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return false, fmt.Errorf("commit retired issues drop on shared database %s: %w", path, err)
+		}
+		dropped = true
+		return true, nil
+	})
+	return dropped, err
 }
 
 // hasTable reports whether the file holds the named table.
@@ -364,6 +353,10 @@ func hasMovedTmuxSeats(ctx context.Context, db *sql.DB) (bool, error) {
 // opener re-applies migrations the first one already committed. The returned
 // func releases the lock.
 func LockMigration(ctx context.Context, path string) (func() error, error) {
+	if sqlitedb.InMemory(path) {
+		// No other process reaches an in-memory database, and no directory holds its lock file.
+		return func() error { return nil }, nil
+	}
 	lockPath := path + ".migrate.lock"
 	for {
 		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)

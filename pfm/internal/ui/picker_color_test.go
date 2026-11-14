@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -116,25 +115,23 @@ func TestPlainAndTSVPickersRemainUncolored(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("TTY_FORCE", "1")
 	t.Setenv("COLORTERM", "truecolor")
-	snapshot := fixtureSnapshot(80)
+	snapshot := fixtureSnapshot(120)
 	plainOutput := &bytes.Buffer{}
 	tsvOutput := &bytes.Buffer{}
 
 	for _, testCase := range []struct {
-		name string
-		pick Picker
-		out  *bytes.Buffer
+		name, golden string
+		pick         Picker
+		out          *bytes.Buffer
 	}{
-		{name: "plain", pick: PlainPicker{Writer: plainOutput}, out: plainOutput},
-		{name: "TSV", pick: TSVPicker{Writer: tsvOutput}, out: tsvOutput},
+		{name: "plain", golden: "ui_plain.txt", pick: PlainPicker{Writer: plainOutput}, out: plainOutput},
+		{name: "TSV", golden: "ui.tsv", pick: TSVPicker{Writer: tsvOutput}, out: tsvOutput},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			if _, err := testCase.pick.Pick(context.Background(), snapshot); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(testCase.out.String(), "\x1b[") {
-				t.Fatalf("%s picker emitted ANSI: %q", testCase.name, testCase.out.String())
-			}
+			golden(t, testCase.golden, testCase.out.String())
 		})
 	}
 }

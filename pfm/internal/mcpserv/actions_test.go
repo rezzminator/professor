@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeChatVerbs is the MCP tests' stand-in for chat.Verbs: it records every
@@ -43,6 +45,13 @@ type fakeChatVerbs struct {
 	exits             []headless.Chat
 	exitMessage       string
 	exitErr           error
+	captured          chat.Captured
+	captureTails      []int
+	keyed             chat.Keyed
+	inspected         headless.Status
+	inspectErr        error
+	// seats drives capture and keys through the real chat verbs over the jailed fleet's seats.
+	seats bool
 }
 
 func (fake *fakeChatVerbs) Last(ctx context.Context, request chat.LastRequest) (chat.LastResult, error) {
@@ -82,11 +91,41 @@ func (fake *fakeChatVerbs) Exit(_ context.Context, self headless.Chat) (string, 
 	return fake.exitMessage, fake.exitErr
 }
 
+// Capture records the tail asked for and answers from the fake's fields, or with seats the real chat.Capture of
+// the jailed fleet's seat.
+func (fake *fakeChatVerbs) Capture(ctx context.Context, target string, tail int) (chat.Captured, error) {
+	fake.captureTails = append(fake.captureTails, tail)
+	if fake.seats {
+		return chat.Capture(ctx, nil, target, tail)
+	}
+	return fake.captured, fake.err
+}
+
+// Keys answers from the fake's fields, or with seats the real chat.PressKeys of the jailed fleet's seat.
+func (fake *fakeChatVerbs) Keys(ctx context.Context, target string, request chat.KeysRequest) (chat.Keyed, error) {
+	if fake.seats {
+		return chat.PressKeys(ctx, nil, target, request)
+	}
+	return fake.keyed, fake.err
+}
+
+// Inspect answers every listed row with the fake's inspected status.
+func (fake *fakeChatVerbs) Inspect(context.Context, compose.Row) (headless.Status, error) {
+	return fake.inspected, fake.inspectErr
+}
+
+// CallAnswer lets the call engine's result stand, as the registry does for a live chat.
+func (fake *fakeChatVerbs) CallAnswer(
+	_ context.Context, result chat.CallResult, name string,
+) (chat.CallResult, string, bool) {
+	return result, name, false
+}
+
 // TestChatLastAndStatusReachTheTypedVerbs pins the seam: last and
 // status call the chat verb layer with the target as given — no argv, no
 // JSON round trip — and a dead chat comes back as a status, not an error.
 func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +137,7 @@ func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 			Engine: pfmengine.Codex, SessionID: "thread-a",
 		},
 	}
-	service, err := NewConfigured("test", nil, Runtime{Paths: resolved, Chat: verbs})
+	service, err := NewConfigured("test", nil, Runtime{Store: memoryStore(t), Paths: resolved, Chat: verbs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +158,12 @@ func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 	}
 	if want := []chat.LastRequest{{Target: "MCP_HAMMER_A"}}; !reflect.DeepEqual(verbs.lasts, want) {
 		t.Fatalf("Last calls = %+v, want %+v", verbs.lasts, want)
+	}
+	// An answer with no text is the chat's answer, as `pfm chat last` prints it: never a tool error.
+	verbs.last = chat.LastResult{Text: "\n"}
+	if _, empty, err := service.chatLast(context.Background(), nil, LastInput{Target: "MCP_HAMMER_A"}); err != nil ||
+		empty != (LastOutput{Target: "MCP_HAMMER_A"}) {
+		t.Fatalf("last of an empty answer = %+v, err=%v; want the target with no text", empty, err)
 	}
 	if want := []chat.StatusRequest{{Target: "MCP_HAMMER_A"}}; !reflect.DeepEqual(verbs.statuses, want) {
 		t.Fatalf("Status calls = %+v, want %+v", verbs.statuses, want)
@@ -228,7 +273,7 @@ func TestCallerScopedSelfReachesMutationDispatchWithoutRedirectingExplicitTarget
 }
 
 func TestCallerScopedRawPaneReachesMutationDispatchOnTheCallerSocket(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -284,8 +329,8 @@ func TestCallerScopedRawPaneReachesMutationDispatchOnTheCallerSocket(t *testing.
 }
 
 func TestResolvedCodexSelfUsesTheNewestLineageRollout(t *testing.T) {
-	setupBackendFixture(t)
-	database, err := store.Open()
+	setupBackendPaths(t)
+	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +355,7 @@ func TestResolvedCodexSelfUsesTheNewestLineageRollout(t *testing.T) {
 }
 
 func TestReviewScopedSelfKeepsUnindexedTranscript(t *testing.T) {
-	root := setupBackendFixture(t)
+	root := setupBackendPaths(t)
 	transcriptPath := filepath.Join(root, "claude", "project-alpha", "unindexed.jsonl")
 	if err := os.WriteFile(
 		transcriptPath,
@@ -320,7 +365,7 @@ func TestReviewScopedSelfKeepsUnindexedTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := compose.Row{
-		Kind: compose.LiveClaude, ID: "unindexed", Path: transcriptPath, CWD: "/work/alpha",
+		Kind: compose.LiveClaude, ID: "unindexed", Path: transcriptPath, CWD: testjail.Place("/work/alpha"),
 		SessionName: "cc-unindexed", Socket: "cc-unindexed", PaneID: "%1",
 	}
 	verbs := &fakeChatVerbs{
@@ -385,12 +430,12 @@ func TestChatNewDefaultsEngineFromValidatedCaller(t *testing.T) {
 				},
 			}}}
 			if _, _, err := service.chatNew(
-				context.Background(), request, NewInput{Name: "child", CWD: "/explicit"},
+				context.Background(), request, NewInput{Name: "child", CWD: testjail.Place("/explicit")},
 			); err != nil {
 				t.Fatal(err)
 			}
 			want := [][]string{{
-				"chat", "new", "--name", "child", "--engine", test.engine, "--cwd", "/explicit",
+				"chat", "new", "--name", "child", "--engine", test.engine, "--cwd", testjail.Place("/explicit"),
 			}}
 			if !reflect.DeepEqual(calls, want) {
 				t.Fatalf("new calls = %q, want %q", calls, want)
@@ -513,19 +558,19 @@ func TestChatNewRefusesPresentInvalidCallerMetadata(t *testing.T) {
 }
 
 func TestResolvedSelfPathFallbacksAndIndexedPrecedence(t *testing.T) {
-	setupBackendFixture(t)
-	database, err := store.Open()
+	setupBackendPaths(t)
+	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	if err := database.UpsertTranscript(context.Background(), store.Transcript{
-		UUID: "indexed", Path: "/indexed.jsonl", CWD: "/work/indexed",
+		UUID: "indexed", Path: "/indexed.jsonl", CWD: testjail.Place("/work/indexed"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.UpsertTranscript(context.Background(), store.Transcript{
-		UUID: "indexed-empty", CWD: "/work/indexed-empty",
+		UUID: "indexed-empty", CWD: testjail.Place("/work/indexed-empty"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -683,43 +728,32 @@ func TestChatLastAndStatusReportTheVerbsFailureWithItsKind(t *testing.T) {
 	_, _, lastErr := service.chatLast(context.Background(), nil, LastInput{Target: "duplicate"})
 	for name, err := range map[string]error{"status": statusErr, "last": lastErr} {
 		var target *chat.TargetError
-		if !errors.As(err, &target) || !strings.Contains(err.Error(), "matches 2 chats") ||
-			strings.Contains(err.Error(), "decode") {
-			t.Fatalf("%s error = %v, want the verb's *TargetError verbatim", name, err)
+		if got, want := fmt.Sprint(err), name+`: "duplicate" matches 2 chats`; got != want || !errors.As(err, &target) {
+			t.Errorf("%s error (a *TargetError: %t) = %q, want %q", name, errors.As(err, &target), got, want)
 		}
 	}
 }
 
-// TestChatLastAndStatusRefuseWithoutAVerbLayer pins the broken wiring's own
-// answer: a server built without its verb layer says so, and an engine name
-// the registry does not know is refused before any verb runs.
 func TestChatLastAndStatusRefuseWithoutAVerbLayer(t *testing.T) {
 	t.Parallel()
 	unwired := newService("test", &backend{})
-	if _, _, err := unwired.chatLast(context.Background(), nil, LastInput{Target: "seat"}); err == nil ||
-		!strings.Contains(err.Error(), "last verb is not configured") {
-		t.Fatalf("last without verbs error = %v", err)
-	}
-	if _, _, err := unwired.chatStatus(context.Background(), nil, StatusInput{Target: "seat"}); err == nil ||
-		!strings.Contains(err.Error(), "status verb is not configured") {
-		t.Fatalf("status without verbs error = %v", err)
-	}
+	_, _, lastErr := unwired.chatLast(context.Background(), nil, LastInput{Target: "seat"})
+	_, _, statusErr := unwired.chatStatus(context.Background(), nil, StatusInput{Target: "seat"})
 	verbs := &fakeChatVerbs{}
-	_, _, err := newService("test", &backend{chat: verbs}).chatStatus(context.Background(), nil, StatusInput{
+	_, _, engineErr := newService("test", &backend{chat: verbs}).chatStatus(context.Background(), nil, StatusInput{
 		Target: "seat", Summary: true, Engine: "gpt",
 	})
-	if err == nil || !strings.Contains(err.Error(), `unknown engine "gpt"`) || len(verbs.statuses) != 0 {
-		t.Fatalf("status engine=gpt error = %v, calls = %+v; want a refusal before the verb", err, verbs.statuses)
+	got := fmt.Sprintf("%v\n%v\n%v\nverb calls %d", lastErr, statusErr, engineErr, len(verbs.statuses))
+	if want := "last verb is not configured\nstatus verb is not configured\nstatus: unknown engine \"gpt\" (want cc/claude, cx/codex, ox/opencode)\nverb calls 0"; got != want {
+		t.Fatalf("refusals = %q, want %q", got, want)
 	}
 }
 
-// TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess pins open's
-// failure shape now that it opens through action.Executor.Open's detached mode instead of the
-// argv Dispatch seam: a target that is not indexed comes back as a tool
-// error naming the target, never an "ok" ActionOutput with nothing behind
-// it.
-func TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess(t *testing.T) {
-	setupBackendFixture(t)
+// TestChatOpenUnindexedTargetIsNotFoundNeverEmptySuccess pins open's failure shape: a target that is not indexed
+// comes back as the not_found receipt pfm chat open's refusal words, never an "ok" ActionOutput with nothing
+// behind it.
+func TestChatOpenUnindexedTargetIsNotFoundNeverEmptySuccess(t *testing.T) {
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	defer func() {
 		if err := service.Close(); err != nil {
@@ -727,11 +761,9 @@ func TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess(t *testing.T) {
 		}
 	}()
 	_, output, err := service.chatOpen(context.Background(), nil, TargetInput{Target: "no-such-chat"})
-	if err == nil || !strings.Contains(err.Error(), "no-such-chat") {
-		t.Fatalf("open unindexed target error = %v, want it to name the target", err)
-	}
-	if output.Status == "ok" {
-		t.Fatalf("open unindexed target reported ok: %+v", output)
+	want := ActionOutput{Status: "not_found", Code: 4, Message: `no chat named "no-such-chat"`}
+	if err != nil || output != want {
+		t.Fatalf("open unindexed target = %+v, %v; want %+v, nil", output, err, want)
 	}
 }
 
@@ -741,7 +773,7 @@ func TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess(t *testing.T) {
 // case. A door matching row.ID == target answers a name with "is not
 // indexed" — an absence for a chat that is right there.
 func TestChatOpenResolvesATargetByName(t *testing.T) {
-	root := setupBackendFixture(t)
+	root := setupBackendPaths(t)
 	// The fixture's own Claude chat, addressed the way a caller does.
 	rows, err := chat.Rows(context.Background(), io.Discard, nil)
 	if err != nil {
@@ -781,8 +813,8 @@ func TestChatOpenResolvesATargetByName(t *testing.T) {
 func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
 	t.Parallel()
 	current := &backend{chat: &fakeChatVerbs{}}
-	for repo, want := range map[string]string{"/work/one": "/work/one", "": "all repos"} {
-		output, err := current.listProjected(context.Background(), LSInput{}, true, repo)
+	for repo, want := range map[string]string{testjail.Place("/work/one"): testjail.Place("/work/one"), "": "all repos"} {
+		output, err := current.listProjected(context.Background(), LSInput{}, true, repo, false)
 		if err != nil {
 			t.Fatalf("listProjected(%q): %v", repo, err)
 		}
@@ -802,16 +834,16 @@ func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
 func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
-		SessionName: "cc-seat", ID: "session-id", CWD: "/work/exit", Project: "exit",
+		SessionName: "cc-seat", ID: "session-id", CWD: testjail.Place("/work/exit"), Project: "exit",
 		Name: "Exit Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
 	}
 	proxy := mcp.Meta{"pfmProxy": map[string]any{
 		"v": ProxyWireVersion, "session": "cc-seat", "socketPath": "/tmp/tmux-1000/cc-seat",
-		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id", "source": "tmux",
+		"socketName": "cc-seat", "pane": "%7", "engine": "claude", "id": "session-id",
 	}}
 	seat := headless.Chat{
 		Backend: "tmux",
-		Name:    "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: "/work/exit",
+		Name:    "Exit Claude", ID: "session-id", Engine: pfmengine.Claude, CWD: testjail.Place("/work/exit"),
 		Socket: "cc-seat", Session: "cc-seat", Pane: "%7", Live: true,
 	}
 	tests := []struct {
@@ -942,13 +974,13 @@ func TestReservedSeatLabel(t *testing.T) {
 		chat:     &fakeChatVerbs{},
 		dispatch: func(context.Context, []string, io.Writer, io.Writer) int { return 0 },
 	})
+	got := ""
 	for _, label := range []string{"seat:child", "SeAt:child"} {
 		_, _, newErr := service.chatNew(context.Background(), nil, NewInput{Name: label})
 		_, _, nameErr := service.chatName(context.Background(), nil, NameInput{Target: "fixture", Name: label})
-		for _, err := range []error{newErr, nameErr} {
-			if err == nil || !strings.Contains(err.Error(), "reserved for durable seat handles") {
-				t.Errorf("label %q: error=%v", label, err)
-			}
-		}
+		got += fmt.Sprintf("%v\n%v\n", newErr, nameErr)
+	}
+	if want := "label \"seat:child\" is reserved for durable seat handles\nlabel \"seat:child\" is reserved for durable seat handles\nlabel \"SeAt:child\" is reserved for durable seat handles\nlabel \"SeAt:child\" is reserved for durable seat handles\n"; got != want {
+		t.Fatalf("reserved labels = %q, want %q", got, want)
 	}
 }

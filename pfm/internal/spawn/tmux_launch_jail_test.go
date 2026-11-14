@@ -1,7 +1,10 @@
+//go:build jail
+
 package spawn
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -87,6 +91,7 @@ func launchLeftovers(t *testing.T, tmuxDir, socket string) []string {
 }
 
 func TestNewSessionLaunchesARunLongerThanATmuxMessage(t *testing.T) {
+	testjail.TmuxServer(t)
 	root, tmuxDir := launchJail(t)
 	marker := filepath.Join(root, "launched")
 	// An env-assignment prefix, as a launch line may carry one, a 64 KiB
@@ -125,7 +130,7 @@ func TestNewSessionLaunchesARunLongerThanATmuxMessage(t *testing.T) {
 	}
 	launchEventually(t, "pane process is the target, not a lingering shell", func() (bool, string) {
 		pid := launchQuery(t, tmuxDir, socket, "#{pane_pid}")
-		exe, err := os.Readlink("/proc/" + pid + "/exe")
+		exe, err := paneExecutable(pid)
 		if err != nil {
 			return false, "read pane exe: " + err.Error()
 		}
@@ -134,6 +139,7 @@ func TestNewSessionLaunchesARunLongerThanATmuxMessage(t *testing.T) {
 }
 
 func TestNewSessionKeepsAShortRunInline(t *testing.T) {
+	testjail.TmuxServer(t)
 	root, tmuxDir := launchJail(t)
 	const socket = "cx-1800000012-1-1"
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
@@ -150,6 +156,24 @@ func TestNewSessionKeepsAShortRunInline(t *testing.T) {
 	if left := launchLeftovers(t, tmuxDir, socket); len(left) != 0 {
 		t.Fatalf("a short run wrote %v into the socket directory", left)
 	}
+}
+
+// paneExecutable resolves a pane process's executable through the platform's
+// process reader: /proc on Linux, kern.procargs2 on macOS, which has no /proc.
+func paneExecutable(pid string) (string, error) {
+	number, err := strconv.Atoi(pid)
+	if err != nil {
+		return "", err
+	}
+	reader, ok := gather.NewProcFS("").(gather.ProcExecutable)
+	if !ok {
+		return "", errors.New("this platform's process reader names no executable")
+	}
+	exe, err := reader.Executable(number)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(exe)
 }
 
 func errString(err error) string {

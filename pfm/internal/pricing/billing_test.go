@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -168,19 +169,21 @@ func TestBillingRejectsInvalidSelectionNamingOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, billing := range []string{
-		`{}`, `null`, `{"route":"other","region":"global"}`, `{"route":"direct","region":"geo"}`,
-		`{"route":"vertex","region":"geo"}`, `{"route":"bedrock","region":"regional"}`,
-		`{"route":"bedrock"}`, `{"route":"vertex","region":"regional","multiplier":2}`,
+	for _, tc := range []struct{ billing, want string }{
+		{`{}`, "prices {dir}/pfm.prices.json: billing route/region \"\"/\"\": want direct/global, bedrock/global|geo or vertex/global|regional"},
+		{`null`, "prices {dir}/pfm.prices.json: billing route/region \"\"/\"\": want direct/global, bedrock/global|geo or vertex/global|regional"},
+		{`{"route":"other","region":"global"}`, "prices {dir}/pfm.prices.json: billing route/region \"other\"/\"global\": want direct/global, bedrock/global|geo or vertex/global|regional"},
+		{`{"route":"direct","region":"geo"}`, "prices {dir}/pfm.prices.json: billing route/region \"direct\"/\"geo\": want direct/global, bedrock/global|geo or vertex/global|regional"},
+		{`{"route":"vertex","region":"geo"}`, "prices {dir}/pfm.prices.json: billing route/region \"vertex\"/\"geo\": want direct/global, bedrock/global|geo or vertex/global|regional"},
+		{`{"route":"bedrock","region":"regional"}`, "prices {dir}/pfm.prices.json: billing route/region \"bedrock\"/\"regional\": want direct/global, bedrock/global|geo or vertex/global|regional"},
+		{`{"route":"bedrock"}`, "prices {dir}/pfm.prices.json: billing route/region \"bedrock\"/\"\": want direct/global, bedrock/global|geo or vertex/global|regional"},
+		{`{"route":"vertex","region":"regional","multiplier":2}`, "prices {dir}/pfm.prices.json: billing: json: unknown field \"multiplier\""},
 	} {
-		t.Run(billing, func(t *testing.T) {
-			_, err := ServeTable(
-				published,
-				Origin{},
-				configWithOverride(t, `{"version":2,"billing":`+billing+`,"rows":[]}`),
-			)
-			if err == nil || !strings.Contains(err.Error(), "pfm.prices.json") {
-				t.Fatalf("invalid billing must name its file: %v", err)
+		t.Run(tc.billing, func(t *testing.T) {
+			configPath := configWithOverride(t, `{"version":2,"billing":`+tc.billing+`,"rows":[]}`)
+			_, err := ServeTable(published, Origin{}, configPath)
+			if got := strings.ReplaceAll(fmt.Sprint(err), filepath.Dir(configPath), "{dir}"); got != tc.want {
+				t.Fatalf("ServeTable error = %q, want %q", got, tc.want)
 			}
 		})
 	}

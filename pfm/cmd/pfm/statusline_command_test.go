@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +16,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 )
 
@@ -83,19 +84,38 @@ func TestStatuslineOnABrokenConfigRendersTheConfigWarning(t *testing.T) {
 		_ = reader.Close()
 	}()
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", configPath, "statusline"}, &stdout, &stderr); code != 0 ||
-		!strings.Contains(stdout.String(), "Opus 4") || !strings.Contains(stdout.String(), "💾⚠config") {
-		t.Fatalf("broken config statusline code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	code := run([]string{"--config", configPath, "statusline"}, &stdout, &stderr)
+	if got, want := rooted(
+		stdout.String(),
+		root,
+	), "\x1b[0m\x1b[38;5;51m◆ Opus 4\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;220meffort unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢 \x1b[1;32m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m?% ?\x1b[0m \x1b[38;5;226mctx unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;226m💰$?\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;226m?/?/?\x1b[0m \x1b[2m│\x1b[0m \x1b[1;38;5;203m💾⚠config\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m\n\x1b[0m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[2mcodex-7d: no data\x1b[0m\n"; code != 0 ||
+		got != want {
+		t.Fatalf("broken config statusline code=%d stderr=%q stdout = %q, want %q", code, stderr.String(), got, want)
 	}
 }
 
-func TestUsageHookOnABrokenConfigStopsAtTheDispatcher(t *testing.T) {
+// The usage hook runs on defaults and names the broken config, while a
+// command that edits the config still refuses and leaves the file as written.
+func TestUsageHookOnABrokenConfigRunsOnDefaults(t *testing.T) {
 	root := jailTest(t)
 	configPath := writeConfigFixture(t, root, "{")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", configPath, "usage-hook"}, &stdout, &stderr); code != 1 ||
-		!strings.HasPrefix(stderr.String(), "pfm: config:") {
-		t.Fatalf("broken config usage-hook code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	code := run([]string{"--config", configPath, "usage-hook"}, &stdout, &stderr)
+	first, _, _ := strings.Cut(stderr.String(), "\n")
+	want := "pfm: config: parse config " + configPath +
+		" at byte 1: unexpected EOF; running on defaults until it is fixed (pfm doctor)"
+	if code != 0 || first != want {
+		t.Fatalf("broken config usage-hook code=%d first stderr line=%q, want 0 and %q (stdout=%q stderr=%q)",
+			code, first, want, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"--config", configPath, mcpCommand, "chat", "disable"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("broken config mcp chat disable code=%d stdout=%q stderr=%q, want 1", code, stdout.String(),
+			stderr.String())
+	}
+	if got := string(mustReadFile(t, configPath)); got != "{" {
+		t.Fatalf("broken config %s after mcp chat disable = %q, want %q", configPath, got, "{")
 	}
 }
 
@@ -169,10 +189,23 @@ func TestStatuslineAndUsageHookCommandsFailOpen(t *testing.T) {
 	jailTest(t)
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	if code := runStatuslineWithRuntime(nil, strings.NewReader("{"), &stdout, &stderr,
-		statuslineTestRuntime(t), paths.OSEnv{}); code != 0 ||
-		!strings.Contains(stderr.String(), "fail-open") {
-		t.Fatalf("malformed statusline: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := runStatuslineWithRuntime(
+		nil,
+		strings.NewReader("{"),
+		&stdout,
+		&stderr,
+		statuslineTestRuntime(
+			t,
+		),
+		paths.OSEnv{},
+	); code != 0 || stderr.String() != "pfm statusline: render (fail-open): decode statusline input: unexpected end of JSON input\n" {
+		t.Fatalf(
+			"malformed statusline: code=%d stdout=%q stderr = %q, want %q",
+			code,
+			stdout.String(),
+			stderr.String(),
+			"pfm statusline: render (fail-open): decode statusline input: unexpected end of JSON input\n",
+		)
 	}
 
 	configDir := filepath.Join(root, ".claude")
@@ -207,10 +240,14 @@ func TestStatuslineAndUsageHookCommandsFailOpen(t *testing.T) {
 		&stderr,
 		statuslineTestRuntime(t),
 		paths.OSEnv{},
-	); code != 0 ||
-		stdout.Len() != 0 ||
-		!strings.Contains(stderr.String(), "fail-open") {
-		t.Fatalf("usage hook: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	); code != 0 || stdout.Len() != 0 || rooted(stderr.String(), root) != "pfm usage-hook: evaluate (fail-open): usage cache directory {root}/tmp/"+filepath.Base(cacheLink)+" is not a real directory\n" {
+		t.Fatalf(
+			"usage hook: code=%d stdout=%q stderr = %q, want %q",
+			code,
+			stdout.String(),
+			rooted(stderr.String(), root),
+			"pfm usage-hook: evaluate (fail-open): usage cache directory {root}/tmp/cc-usage-0 is not a real directory\n",
+		)
 	}
 }
 
@@ -245,95 +282,6 @@ func TestCodexSeatUsageHookNeverTouchesClaudeCredentials(t *testing.T) {
 	}
 }
 
-// A sub-agent launched without an effort runs at its session's effort; the
-// main statusline records that effort per session and the agent-panel row of
-// the same session shows it when Claude Code's row payload carries none.
-func TestStatuslineRecordsTheSessionEffortForTheAgentPanel(t *testing.T) {
-	jailTest(t)
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PFM_HOME", root)
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "1"))
-	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
-	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-
-	var stdout, stderr bytes.Buffer
-	runtime := statuslineTestRuntime(t)
-	if code := runStatuslineWithRuntime(
-		nil,
-		strings.NewReader(`{"session_id":"sess-eff","model":{"id":"claude-opus-5-5[1m]",`+
-			`"display_name":"Opus"},"effort":{"level":"xhigh"},"context_window":{"used_percentage":5}}`),
-		&stdout,
-		&stderr,
-		runtime,
-		paths.OSEnv{},
-	); code != 0 ||
-		stderr.Len() != 0 {
-		t.Fatalf("main line: code=%d stderr=%q", code, stderr.String())
-	}
-	stdout.Reset()
-	if code := runStatuslineWithRuntime(
-		[]string{"--subagents"},
-		strings.NewReader(`{"session_id":"sess-eff","tasks":[{"id":"t1",`+
-			`"model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10}]}`),
-		&stdout,
-		&stderr,
-		runtime,
-		paths.OSEnv{},
-	); code != 0 ||
-		stderr.Len() != 0 {
-		t.Fatalf("row: code=%d stderr=%q", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "xhigh") {
-		t.Fatalf("row = %q, want the session's effort xhigh", stdout.String())
-	}
-}
-
-func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
-	jailTest(t)
-	root := t.TempDir()
-	t.Setenv("PFM_HOME", root)
-	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-
-	var stdout, stderr bytes.Buffer
-	runtime := statuslineTestRuntime(t)
-	code := runStatuslineWithRuntime(
-		[]string{"--subagents"},
-		strings.NewReader(`{"columns":100,"tasks":[{"id":"t1","label":"trace it","model":"claude-opus-5-5",`+
-			`"contextWindowSize":1000000,"tokenCount":500000}]}`),
-		&stdout,
-		&stderr,
-		runtime,
-		paths.OSEnv{},
-	)
-	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("code=%d stderr=%q", code, stderr.String())
-	}
-	var row struct{ ID, Content string }
-	if err := json.Unmarshal(stdout.Bytes(), &row); err != nil || row.ID != "t1" ||
-		!strings.Contains(row.Content, "50%") || !strings.Contains(row.Content, "trace it") {
-		t.Fatalf("stdout=%q (err %v), want one {id:t1} row carrying 50%% and the label", stdout.String(), err)
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := runStatuslineWithRuntime([]string{"--subagents"}, strings.NewReader(`{"tasks":`), &stdout, &stderr,
-		runtime, paths.OSEnv{}); code != 0 ||
-		stdout.Len() != 0 || !strings.Contains(stderr.String(), "--subagents: render (fail-open)") {
-		t.Fatalf("malformed payload: code=%d stdout=%q stderr=%q, want exit 0, no rows, named error", code,
-			stdout.String(), stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := runStatuslineWithRuntime([]string{"--subagents", "--refresh-gpt"}, strings.NewReader(""), &stdout,
-		&stderr, runtime, paths.OSEnv{}); code != 2 {
-		t.Fatalf("--subagents with --refresh-gpt: code=%d, want usage error 2", code)
-	}
-}
-
 // The main statusline is a paced front: the first tick of a chat starts the
 // chat's worker and prints the pending line, rendering nothing and caching
 // nothing; a later tick prints the worker's cached line byte for byte, renders
@@ -349,6 +297,10 @@ func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
 	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("COLUMNS", "")
+	t.Setenv("TMUX", "/tmp/tmux-1/cc-front,1,0")
+	t.Setenv("TMUX_PANE", "%3")
+	t.Setenv("HERDR_SOCKET_PATH", "")
+	t.Setenv("HERDR_PANE_ID", "")
 	var spawned []string
 	original := statuslinePacedSpawn
 	t.Cleanup(func() { statuslinePacedSpawn = original })
@@ -357,7 +309,8 @@ func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
 		return nil
 	}
 	input := `{"session_id":"paced-front","model":{"display_name":"Opus 4"}}`
-	key := statusline.PacedKey([]byte(input), "")
+	pane := resolve.WhoamiEnvironment{TMUX: "/tmp/tmux-1/cc-front,1,0", TMUXPane: "%3"}
+	key := statusline.PacedKey([]byte(input), "", filepath.Join(root, ".cc", "1"), pane)
 	dir := filepath.Join(root, "tmp", "cc-sl-paced-"+strconv.Itoa(os.Getuid()))
 	runtime := statuslineTestRuntime(t)
 	front := func() string {
@@ -397,15 +350,24 @@ func TestStatuslineFrontStartsTheWorkerThenServesItsLine(t *testing.T) {
 	if second := front(); second != marker || len(spawned) != 1 {
 		t.Fatalf("second tick stdout=%q spawned=%v; want the cached line, no second worker", second, spawned)
 	}
+	// The chat resumed on account 2: the account-1 worker still holds its lock,
+	// and the tick goes to a new worker rather than serving account 1's line.
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "2"))
+	moved := statusline.PacedKey([]byte(input), "", filepath.Join(root, ".cc", "2"), pane)
+	if third := front(); third != statusline.PacedPending || len(spawned) != 2 || spawned[1] != moved ||
+		moved == key {
+		t.Fatalf("tick after the account move stdout=%q spawned=%v key=%s; want the pending line and worker %s",
+			third, spawned, key, moved)
+	}
 }
 
 func TestStatuslinePacedWorkerFlagIsExclusiveAndRefusesABadKey(t *testing.T) {
 	jailTest(t)
 	t.Setenv("PFM_HOME", t.TempDir())
 	var stdout, stderr bytes.Buffer
-	if code := runStatuslineWithRuntime([]string{"--paced", "0123", "--subagents"}, strings.NewReader(""),
+	if code := runStatuslineWithRuntime([]string{"--paced", "0123", "--refresh-gpt"}, strings.NewReader(""),
 		&stdout, &stderr, statuslineTestRuntime(t), paths.OSEnv{}); code != 2 {
-		t.Fatalf("--paced with --subagents code=%d stderr=%q; want usage 2", code, stderr.String())
+		t.Fatalf("--paced with --refresh-gpt code=%d stderr=%q; want usage 2", code, stderr.String())
 	}
 	stderr.Reset()
 	if code := runStatuslineWithRuntime([]string{"--paced", "../escape"}, strings.NewReader(""),
@@ -449,15 +411,23 @@ func TestStatuslineWarningsReachTheActivityLog(t *testing.T) {
 		statuslineTestRuntime(t),
 		paths.OSEnv{},
 	)
-	if code != 0 || !strings.Contains(stdout.String(), "ERR") {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if got, want := rooted(
+		stdout.String(),
+		root,
+	), "\x1b[0m\x1b[38;5;51m◆ Opus 4\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[1;38;5;203meffort unknown · ERR\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢 \x1b[1;32m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m?% ?\x1b[0m \x1b[38;5;226mctx unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;226m💰$?\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;226m?/?/?\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m\n\x1b[0m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[2mcodex-7d: no data\x1b[0m\n"; code != 0 ||
+		got != want {
+		t.Fatalf("code=%d stderr=%q stdout = %q, want %q", code, stderr.String(), got, want)
 	}
+	var causes []string
 	for _, record := range recorder.Records() {
-		cause, _ := record.Field(obs.FieldErr)
-		if text, ok := cause.(string); ok && record.Message == "statusline.warn" && record.Level == "WARN" &&
-			strings.Contains(text, "effort shows ERR") {
-			return
+		if cause, _ := record.Field(obs.FieldErr); record.Message == "statusline.warn" && record.Level == "WARN" {
+			causes = append(causes, scrub(fmt.Sprint(cause), root))
 		}
 	}
-	t.Fatalf("no statusline.warn record names the ERR cause: %s", recorder.Raw())
+	if got, want := fmt.Sprintf(
+		"%q",
+		causes,
+	), "[\"pfm statusline: paced render (rendering inline): spawn paced worker {hash}: no worker in this test\" \"statusline: auto-effort state {root}/auto-effort/state.sess-w.json (effort shows ERR): parse \\\"not json\\\": invalid character 'o' in literal null (expecting 'u')\"]"; got != want {
+		t.Fatalf("statusline.warn causes = %q, want %q", got, want)
+	}
 }

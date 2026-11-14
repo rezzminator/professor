@@ -9,6 +9,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHerdrSeatsUseCanonicalEligibility(t *testing.T) {
@@ -41,7 +42,7 @@ func TestHerdrSeatsUseCanonicalEligibility(t *testing.T) {
 				Transcripts: []store.Transcript{
 					{
 						UUID:        "sid1",
-						Path:        "/jail/session.jsonl",
+						Path:        testjail.Place("/jail/session.jsonl"),
 						CustomTitle: "INDEX",
 						IsBG:        tc.bg,
 						PromptCount: tc.prompts,
@@ -49,7 +50,7 @@ func TestHerdrSeatsUseCanonicalEligibility(t *testing.T) {
 				},
 				HerdrSeats: []gather.HerdrSeat{{Seat: fleetdb.Seat{
 					SeatID: "seat1", SessionID: "sid1", Engine: "cc", Backend: "herdr", State: "live",
-					Name: tc.label, HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p3",
+					Name: tc.label, HerdrSocket: testjail.Place("/jail/herdr.sock"), HerdrPane: "w6:p3",
 				}}},
 			}
 			if tc.kill {
@@ -72,12 +73,20 @@ func TestHerdrSeatsUseCanonicalEligibility(t *testing.T) {
 
 func TestHerdrSeatsKeepDistinctAddressesAndTranscriptMetadata(t *testing.T) {
 	input := Input{
-		Options:     Options{View: AllView},
-		Transcripts: []store.Transcript{{UUID: "shared", Path: "/jail/shared.jsonl", PromptCount: 3, Size: 42}},
+		Options: Options{View: AllView},
+		Transcripts: []store.Transcript{{
+			UUID: "shared", Path: testjail.Place("/jail/shared.jsonl"), PromptCount: 3, Size: 42,
+			CWD: testjail.Place("/jail/work/lantern/.worktrees/demo"),
+		}},
 		Snapshot: gather.Snapshot{
 			Panes: []gather.ProbePane{{Socket: "cc-1-2-3", PaneID: "%0"}},
 			Crumbs: []gather.Crumb{
-				{Filename: "cc-1-2-3.%0", TranscriptPath: "/jail/shared.jsonl", Socket: "cc-1-2-3", PaneID: "%0"},
+				{
+					Filename:       "cc-1-2-3.%0",
+					TranscriptPath: testjail.Place("/jail/shared.jsonl"),
+					Socket:         "cc-1-2-3",
+					PaneID:         "%0",
+				},
 			},
 			ClaudeProcesses: []gather.ClaudeProcess{{Socket: "cc-1-2-3"}},
 		},
@@ -89,7 +98,7 @@ func TestHerdrSeatsKeepDistinctAddressesAndTranscriptMetadata(t *testing.T) {
 					Engine:      "cc",
 					Backend:     "herdr",
 					State:       "live",
-					HerdrSocket: "/jail/herdr.sock",
+					HerdrSocket: testjail.Place("/jail/herdr.sock"),
 					HerdrPane:   "w6:p3",
 				},
 				Err: errors.New("HERDR UNREACHABLE first socket"),
@@ -101,20 +110,38 @@ func TestHerdrSeatsKeepDistinctAddressesAndTranscriptMetadata(t *testing.T) {
 					Engine:      "cc",
 					Backend:     "herdr",
 					State:       "live",
-					HerdrSocket: "/jail/herdr.sock",
+					HerdrSocket: testjail.Place("/jail/herdr.sock"),
 					HerdrPane:   "w6:p4",
 				},
+				// The pane's directory is its supervisor's, opened in the home directory.
+				CWD: testjail.Place("/jail"),
+			},
+			{
+				Seat: fleetdb.Seat{
+					SeatID:      "native3",
+					SessionID:   "unrecorded",
+					Engine:      "cc",
+					Backend:     "herdr",
+					State:       "live",
+					HerdrSocket: testjail.Place("/jail/herdr.sock"),
+					HerdrPane:   "w6:p5",
+				},
+				CWD: testjail.Place("/jail/work/orchard"),
 			},
 		},
 	}
 	output := Compose(input)
-	if len(output.Rows) != 3 {
-		t.Fatalf("rows=%+v; want original tmux seat and both native seats", output.Rows)
+	if len(output.Rows) != 4 {
+		t.Fatalf("rows=%+v; want original tmux seat and three native seats", output.Rows)
 	}
 	bySeat := map[string]Row{}
 	for _, row := range output.Rows {
 		bySeat[row.SeatID] = row
-		if row.ID != "shared" || row.Path != "/jail/shared.jsonl" || row.PromptCount != 3 || row.Size != 42 {
+		if row.SeatID == "native3" {
+			continue
+		}
+		if row.ID != "shared" || row.Path != testjail.Place("/jail/shared.jsonl") || row.PromptCount != 3 ||
+			row.Size != 42 {
 			t.Fatalf("session metadata lost: %+v", row)
 		}
 	}
@@ -122,6 +149,17 @@ func TestHerdrSeatsKeepDistinctAddressesAndTranscriptMetadata(t *testing.T) {
 		bySeat["native1"].BackendError == "" ||
 		bySeat["native2"].BackendError != "" {
 		t.Fatalf("seat address or error lost: %+v", bySeat)
+	}
+	// The chat's own record names where it runs; a chat with none takes its pane's.
+	if bySeat["native2"].CWD != testjail.Place("/jail/work/lantern/.worktrees/demo") ||
+		bySeat["native3"].CWD != testjail.Place("/jail/work/orchard") {
+		t.Fatalf(
+			"row directories native2 %q native3 %q; want the transcript's %q and the pane's %q",
+			bySeat["native2"].CWD,
+			bySeat["native3"].CWD,
+			testjail.Place("/jail/work/lantern/.worktrees/demo"),
+			testjail.Place("/jail/work/orchard"),
+		)
 	}
 }
 
@@ -157,22 +195,27 @@ func TestHerdrSeatsSuppressOnlyMatchingProcessAgents(t *testing.T) {
 			input := Input{
 				Options: Options{View: AllView, PrimaryAccount: 1},
 				ClaudeSeats: []ClaudeSeat{
-					{Account: 1, ConfigDir: "/accounts/primary"},
-					{Account: 2, ConfigDir: "/accounts/secondary"},
+					{Account: 1, ConfigDir: testjail.Place("/accounts/primary")},
+					{Account: 2, ConfigDir: testjail.Place("/accounts/secondary")},
 				},
 				Transcripts: []store.Transcript{
-					{UUID: "native", Path: "/jail/native.jsonl", PromptCount: 3},
-					{UUID: "agent", Path: "/jail/agent.jsonl"},
-					{UUID: "tmux", Path: "/jail/tmux.jsonl"},
+					{UUID: "native", Path: testjail.Place("/jail/native.jsonl"), PromptCount: 3},
+					{UUID: "agent", Path: testjail.Place("/jail/agent.jsonl")},
+					{UUID: "tmux", Path: testjail.Place("/jail/tmux.jsonl")},
 				},
 				Snapshot: gather.Snapshot{
 					Agents: []gather.Agent{
-						{PID: 101, SessionID: "native", ConfigDir: "/accounts/secondary"},
-						{PID: 102, SessionID: "agent", ConfigDir: "/accounts/secondary"},
+						{PID: 101, SessionID: "native", ConfigDir: testjail.Place("/accounts/secondary")},
+						{PID: 102, SessionID: "agent", ConfigDir: testjail.Place("/accounts/secondary")},
 					},
 					Panes: []gather.ProbePane{{Socket: "cc-1-2-3", PaneID: "%0"}},
 					Crumbs: []gather.Crumb{
-						{Filename: "cc-1-2-3.%0", TranscriptPath: "/jail/tmux.jsonl", Socket: "cc-1-2-3", PaneID: "%0"},
+						{
+							Filename:       "cc-1-2-3.%0",
+							TranscriptPath: testjail.Place("/jail/tmux.jsonl"),
+							Socket:         "cc-1-2-3",
+							PaneID:         "%0",
+						},
 					},
 					ClaudeProcesses: []gather.ClaudeProcess{{Socket: "cc-1-2-3"}},
 				},
@@ -182,7 +225,7 @@ func TestHerdrSeatsSuppressOnlyMatchingProcessAgents(t *testing.T) {
 					Engine:      string(pfmengine.Claude),
 					Backend:     "herdr",
 					State:       state,
-					HerdrSocket: "/jail/herdr.sock",
+					HerdrSocket: testjail.Place("/jail/herdr.sock"),
 					HerdrPane:   "w6:p3",
 				}}},
 			}
@@ -212,23 +255,23 @@ func TestHerdrSeatsSuppressOnlyMatchingProcessAgents(t *testing.T) {
 // /rename inside a named seat names its row; a chat named by its AI title or
 // first prompt has none. Every row read from its indexed source says so.
 func TestRowUserNameIsTheNameAUserChose(t *testing.T) {
-	renamed := transcript("cc-renamed", "/claude/cc-renamed.jsonl", "/work", "Mine", 100, 1, 1000)
+	renamed := transcript("cc-renamed", "/claude/cc-renamed.jsonl", testjail.Place("/work"), "Mine", 100, 1, 1000)
 	renamed.AITitle = "AI title"
-	titled := transcript("cc-titled", "/claude/cc-titled.jsonl", "/work", "", 100, 1, 1000)
+	titled := transcript("cc-titled", "/claude/cc-titled.jsonl", testjail.Place("/work"), "", 100, 1, 1000)
 	titled.AITitle, titled.FirstPrompt = "AI title", "first prompt"
-	seated := transcript("cc-seated", "/claude/cc-seated.jsonl", "/work", "Custom", 100, 1, 1000)
-	named := transcript("cc-named", "/claude/cc-named.jsonl", "/work", "", 100, 1, 1000)
+	seated := transcript("cc-seated", "/claude/cc-seated.jsonl", testjail.Place("/work"), "Custom", 100, 1, 1000)
+	named := transcript("cc-named", "/claude/cc-named.jsonl", testjail.Place("/work"), "", 100, 1, 1000)
 	named.AITitle = "AI title"
 	output := Compose(Input{
 		Transcripts: []store.Transcript{renamed, titled, seated, named},
 		HerdrSeats: []gather.HerdrSeat{
 			{Seat: fleetdb.Seat{
 				SeatID: "renamed-seat", SessionID: "cc-seated", Engine: "cc", Backend: "herdr", State: "live",
-				Name: "Seat name", HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p3",
+				Name: "Seat name", HerdrSocket: testjail.Place("/jail/herdr.sock"), HerdrPane: "w6:p3",
 			}},
 			{Seat: fleetdb.Seat{
 				SeatID: "named-seat", SessionID: "cc-named", Engine: "cc", Backend: "herdr", State: "live",
-				Name: "Seat name", HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p4",
+				Name: "Seat name", HerdrSocket: testjail.Place("/jail/herdr.sock"), HerdrPane: "w6:p4",
 			}},
 		},
 		Rollouts: []store.Rollout{
@@ -310,7 +353,7 @@ func TestHerdrCodexSeatNamesOverrideIndexedTitles(t *testing.T) {
 				CxNames:  map[string]string{rollout.ID: tc.indexedName},
 				HerdrSeats: []gather.HerdrSeat{{Seat: fleetdb.Seat{
 					SeatID: "native-seat", SessionID: rollout.ID, Engine: "cx", Backend: "herdr", State: tc.state,
-					Name: tc.seatName, HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p3",
+					Name: tc.seatName, HerdrSocket: testjail.Place("/jail/herdr.sock"), HerdrPane: "w6:p3",
 				}}},
 			})
 			if len(output.Rows) != 1 {
@@ -339,7 +382,7 @@ func TestReservedSeatTitleNeverOverridesNativeSeatName(t *testing.T) {
 		input := Input{
 			Options: Options{View: AllView},
 			Transcripts: []store.Transcript{{
-				UUID: "reserved-title", Path: "/jail/reserved.jsonl", MTimeNS: 1000,
+				UUID: "reserved-title", Path: testjail.Place("/jail/reserved.jsonl"), MTimeNS: 1000,
 				CustomTitle: "SeAt:other", AITitle: "Automatic title",
 			}},
 		}
@@ -347,7 +390,7 @@ func TestReservedSeatTitleNeverOverridesNativeSeatName(t *testing.T) {
 		if native {
 			input.HerdrSeats = []gather.HerdrSeat{{Seat: fleetdb.Seat{
 				SeatID: "native-seat", SessionID: "reserved-title", Engine: "cc", Backend: "herdr", State: "live",
-				Name: "Chosen seat", HerdrSocket: "/jail/herdr.sock", HerdrPane: "w6:p3",
+				Name: "Chosen seat", HerdrSocket: testjail.Place("/jail/herdr.sock"), HerdrPane: "w6:p3",
 			}}}
 			wantName, wantUser = "Chosen seat", "Chosen seat"
 		}
@@ -368,8 +411,8 @@ func userNameRollout(id string) store.Rollout {
 		ID:          id,
 		SessionID:   id,
 		UserThread:  true,
-		Path:        "/codex/sessions/rollout-" + id + ".jsonl",
-		CWD:         "/work",
+		Path:        testjail.Place("/codex/sessions/rollout-") + id + ".jsonl",
+		CWD:         testjail.Place("/work"),
 		Size:        100,
 		MTimeNS:     1000,
 		FirstPrompt: "fp",

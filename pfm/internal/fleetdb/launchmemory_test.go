@@ -8,7 +8,7 @@ import (
 
 func TestLaunchMemoryRoundTrip(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	if got, err := state.LaunchMemory(ctx); err != nil || !reflect.DeepEqual(got, LaunchMemory{}) {
 		t.Fatalf("empty store LaunchMemory() = %+v, %v; want zero, nil", got, err)
@@ -50,7 +50,7 @@ func TestLaunchMemoryRoundTrip(t *testing.T) {
 
 func TestLaunchMemoryFailuresAreErrors(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	if err := state.RememberLaunch(ctx, "", 1, nil, 1); err == nil {
 		t.Fatal("RememberLaunch without an engine succeeded")

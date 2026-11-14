@@ -255,8 +255,12 @@ func sessionSpend(
 		total = *scanned
 	} else {
 		var err error
-		if total, err = readTranscriptSpend(sessionTranscript, prices, scans); err != nil {
-			return agentSpend{}, err
+		total, err = readTranscriptSpend(sessionTranscript, prices, scans)
+		if err != nil && !total.behind {
+			return agentSpend{}, err // nothing of it read: no total to keep
+		}
+		if err != nil && scans.warn != nil {
+			fmt.Fprintf(scans.warn, "statusline: %v (spend kept as a floor)\n", err)
 		}
 	}
 	tree := scanAgentTree(sessionTranscript, prices, scans)
@@ -266,6 +270,7 @@ func sessionSpend(
 		}
 		return total, nil
 	}
+	// Spend needs no parent map: an agent whose meta file did not read is still in ids.
 	for _, id := range tree.ids {
 		spend, err := readTranscriptSpend(transcript.SubagentTranscript(tree.dir, id), prices, scans)
 		spend.partial = spend.partial || err != nil
@@ -280,12 +285,23 @@ func readTranscriptSpend(path string, prices *pricing.Prices, scans transcriptSc
 	scan := newSpendScan(prices)
 	done, err := scans.fold(path, "spend", scan)
 	if err != nil {
-		_, wrapped := transcriptError(path, err)
-		return scan.total(), wrapped
+		opened, wrapped := transcriptError(path, err)
+		return failedReadSpend(scan.total(), opened), wrapped
 	}
 	spend := scan.total()
 	spend.partial, spend.behind = spend.partial || !done, !done
 	return spend, nil
+}
+
+// failedReadSpend is what a failed read keeps of a transcript: nothing when it
+// never opened or folded nothing, else what it folded, as a floor (partial and
+// behind), so the caller can show it beside the error.
+func failedReadSpend(folded agentSpend, opened bool) agentSpend {
+	if !opened || folded.priced == 0 && folded.in == 0 && folded.out == 0 && folded.tools == 0 {
+		return agentSpend{}
+	}
+	folded.partial, folded.behind = true, true
+	return folded
 }
 
 // transcriptError names a sub-agent transcript that failed to open or to
@@ -304,12 +320,14 @@ func transcriptError(path string, err error) (opened bool, wrapped error) {
 // nestedSpend sums what every agent below one task billed, at any depth, each
 // transcript read once per render. A tree that could not be scanned, or a
 // transcript that could not be read, leaves the sum partial and its cause in
-// the tree's warnings.
+// the tree's warnings. So does an agent whose meta file could not be read: it
+// may sit below the task, and its spend is not in the sum.
 func (tree *agentTree) nestedSpend(id string) agentSpend {
 	if tree.err != nil {
 		return agentSpend{partial: true}
 	}
 	var total agentSpend
+	total.partial = len(tree.unreadMeta) > 0
 	seen := map[string]bool{id: true}
 	queue := append([]string(nil), tree.children[id]...)
 	for len(queue) > 0 {

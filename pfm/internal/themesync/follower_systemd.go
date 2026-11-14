@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // Outside macOS the follower is a systemd user unit trio in the directory
@@ -20,7 +20,6 @@ import (
 // it at load and a minute after each run. `pfm theme` writes and removes them
 // itself, as it does the macOS launch agent; install never stages them.
 const (
-	systemctlBinary   = "systemctl"
 	followerUnitStem  = "pfm-theme"
 	followerService   = followerUnitStem + ".service"
 	followerPathUnit  = followerUnitStem + ".path"
@@ -59,7 +58,7 @@ func systemdEnvironment(name, value string) string {
 func systemdPath(path string) string { return strings.ReplaceAll(path, "%", "%%") }
 
 func (s *session) followerUnitDir() string {
-	return filepath.Join(s.env.Home, ".config", "systemd", "user")
+	return paths.SystemdUserDir(s.env.Home)
 }
 
 // systemdFollowerPath is the follower row's file outside macOS: the path unit.
@@ -86,6 +85,7 @@ func (s *session) followerUnits() ([]followerUnit, error) {
 		"Description=Follow Claude Code's theme onto every pfm theme surface (pfm theme sync)\n\n" +
 		"[Service]\nType=oneshot\n" +
 		"Environment=" + systemdEnvironment("PATH", paths.ServicePath(s.env.Home)) + "\n" +
+		"Environment=" + systemdEnvironment(paths.EnvInstallMark, paths.InstallMark(s.env.Home)) + "\n" +
 		"Environment=" + systemdEnvironment("XPC_SERVICE_NAME", followerLabel) + "\n" +
 		"ExecStart=" + systemdExecWord(s.env.PfmBinary) + " theme sync\n" +
 		"StandardOutput=append:" + logPath + "\n" +
@@ -110,14 +110,13 @@ func (s *session) followerUnits() ([]followerUnit, error) {
 // systemctl runs one `systemctl --user` verb; a run that could not start or
 // exited non-zero is its error, naming the command and systemd's words.
 func (s *session) systemctl(ctx context.Context, args ...string) error {
-	argv := append([]string{systemctlBinary, "--user"}, args...)
-	result, err := s.env.Runner.Run(ctx, argv, deps.RunOptions{})
-	if err != nil {
-		return fmt.Errorf("themesync: %s: %w", strings.Join(argv, " "), err)
+	answer := servicemanager.UserSystemctl(ctx, s.env.Runner, args...)
+	if answer.RunErr != nil {
+		return fmt.Errorf("themesync: %s: %w", answer.Command(), answer.RunErr)
 	}
-	if result.ExitCode != 0 {
+	if answer.Result.ExitCode != 0 {
 		return fmt.Errorf("themesync: %s exited %d: %s",
-			strings.Join(argv, " "), result.ExitCode, strings.TrimSpace(string(result.Stderr)))
+			answer.Command(), answer.Result.ExitCode, strings.TrimSpace(string(answer.Result.Stderr)))
 	}
 	return nil
 }
@@ -126,14 +125,14 @@ func (s *session) systemctl(ctx context.Context, args ...string) error {
 // whether both are active, and the ones that are not with their state. A
 // manager that answered no state per unit is an error, never "inactive".
 func (s *session) followerTriggersActive(ctx context.Context) (bool, string, error) {
-	argv := append([]string{systemctlBinary, "--user", "is-active"}, followerTriggers...)
-	result, err := s.env.Runner.Run(ctx, argv, deps.RunOptions{})
-	if err != nil {
-		return false, "", fmt.Errorf("themesync: %s: %w", strings.Join(argv, " "), err)
+	answer := servicemanager.UserSystemctl(ctx, s.env.Runner, append([]string{"is-active"}, followerTriggers...)...)
+	if answer.RunErr != nil {
+		return false, "", fmt.Errorf("themesync: %s: %w", answer.Command(), answer.RunErr)
 	}
+	result := answer.Result
 	states := strings.Fields(string(result.Stdout))
 	if len(states) != len(followerTriggers) {
-		return false, "", fmt.Errorf("themesync: %s exited %d printing %q: %s", strings.Join(argv, " "),
+		return false, "", fmt.Errorf("themesync: %s exited %d printing %q: %s", answer.Command(),
 			result.ExitCode, strings.TrimSpace(string(result.Stdout)), strings.TrimSpace(string(result.Stderr)))
 	}
 	var inactive []string

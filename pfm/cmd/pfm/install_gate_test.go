@@ -13,14 +13,17 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestInstallHostGateBlocksBeforeAnyWrite(t *testing.T) {
 	for _, args := range [][]string{{"--yes"}, {}, {"--check"}} {
 		t.Run(fmt.Sprint(args), func(t *testing.T) {
-			home, clone, _ := installCheckHome(t, true)
-			// A config seed would write here if it ever preceded the gate.
+			home, clone, account := installCheckHome(t)
+			// No clone config: a config seed would write one if it ever
+			// preceded the gate.
+			if err := os.Remove(filepath.Join(clone, pfmconfig.FileName)); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(
 				filepath.Join(clone, "example.pfm.config.json"),
 				[]byte(`{"version":2,"theme":"seeded"}`),
@@ -28,12 +31,11 @@ func TestInstallHostGateBlocksBeforeAnyWrite(t *testing.T) {
 			); err != nil {
 				t.Fatal(err)
 			}
-			legacyDir := pfmconfig.LegacyConfigDir(paths.OSEnv{}, home)
-			if err := os.WriteFile(
-				filepath.Join(legacyDir, "config.json"),
-				[]byte(`{"version":2}`),
-				0o600,
-			); err != nil {
+			identity := filepath.Join(installer.ClaudeStore(home), ".credentials.json")
+			if err := os.MkdirAll(filepath.Dir(identity), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(identity, []byte("{}"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			stale := filepath.Join(home, ".claude.json.tmp.fixture")
@@ -57,14 +59,14 @@ func TestInstallHostGateBlocksBeforeAnyWrite(t *testing.T) {
 			before := installCheckTree(t, home)
 			var out, errOut bytes.Buffer
 			code := runInstall(args, &out, &errOut, loaded)
-			legacy := filepath.Join(pfmconfig.LegacyConfigDir(paths.OSEnv{}, home), pfmconfig.FileName)
-			want := ""
-			// Each BLOCK row carries its fix: a rolled-back binary's doctor may have no host checks.
-			for _, path := range []string{legacy, filepath.Join(legacyDir, "config.json")} {
-				want += "pfm install: BLOCK legacy-config " + path + " — legacy pfm config outside the clone\n" +
-					"pfm install:   fix: mv " + path + " " + loaded.Config.Path + "\n"
-			}
-			want += "pfm install: 2 blocking — run pfm doctor for the fixes\n"
+			// The BLOCK row carries its fix: a rolled-back binary's doctor may have no host checks.
+			want := "pfm install: BLOCK store-identity " + identity + " — .credentials.json is account identity inside the store, " +
+				"written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)\n" +
+				"pfm install:   fix: mkdir -m 700 -p " + account + " && mv " + identity + " " + filepath.Join(
+				account,
+				".credentials.json",
+			) + "\n" +
+				"pfm install: 1 blocking — run pfm doctor for the fixes\n"
 			if code != 4 || out.Len() != 0 || errOut.String() != want {
 				t.Fatalf("code=%d stdout=%q stderr=%q want=%q", code, out.String(), errOut.String(), want)
 			}
@@ -76,7 +78,7 @@ func TestInstallHostGateBlocksBeforeAnyWrite(t *testing.T) {
 }
 
 func TestInstallHostGateWarningsProceed(t *testing.T) {
-	home, _, _ := installCheckHome(t, false)
+	home, _, _ := installCheckHome(t)
 	stale := filepath.Join(home, ".claude.json.tmp.fixture")
 	if err := os.WriteFile(stale, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
@@ -129,7 +131,7 @@ func TestInstallHostGateWarningsProceed(t *testing.T) {
 func TestInstallFirstConfigSeed(t *testing.T) {
 	for _, apply := range []bool{false, true} {
 		t.Run(fmt.Sprint(apply), func(t *testing.T) {
-			home, clone, _ := installCheckHome(t, false)
+			home, clone, _ := installCheckHome(t)
 			target := filepath.Join(clone, pfmconfig.FileName)
 			if err := os.Remove(target); err != nil {
 				t.Fatal(err)
@@ -185,7 +187,7 @@ func TestInstallFirstConfigSeed(t *testing.T) {
 func TestInstallSeedErrorNamesContext(t *testing.T) {
 	for _, scenario := range []string{"preview read", "apply read"} {
 		t.Run(scenario, func(t *testing.T) {
-			_, clone, _ := installCheckHome(t, false)
+			_, clone, _ := installCheckHome(t)
 			if err := os.Remove(filepath.Join(clone, pfmconfig.FileName)); err != nil {
 				t.Fatal(err)
 			}
@@ -197,22 +199,26 @@ func TestInstallSeedErrorNamesContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "pfm install: seed config: read install example "
 
 			args := []string{"--offline"}
 			if scenario != "preview read" {
 				args = append(args, "--yes")
 			}
 			var out, errOut bytes.Buffer
-			if code := runInstall(args, &out, &errOut, loaded); code != 1 || !strings.HasPrefix(errOut.String(), want) {
-				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			code := runInstall(args, &out, &errOut, loaded)
+			if got, want := rooted(
+				errOut.String(),
+				clone,
+			), "pfm install: seed config: read install example {root}/example.pfm.config.json: read {root}/example.pfm.config.json: is a directory\n"; code != 1 ||
+				got != want {
+				t.Fatalf("code=%d stdout=%q stderr = %q, want %q", code, out.String(), got, want)
 			}
 		})
 	}
 }
 
 func TestInstallRosterConfigDirsWithConfigDirFlag(t *testing.T) {
-	home, clone, _ := installCheckHome(t, false)
+	home, clone, _ := installCheckHome(t)
 	account := filepath.Join(home, "acct1")
 	if err := os.Mkdir(account, 0o700); err != nil {
 		t.Fatal(err)

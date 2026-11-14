@@ -29,10 +29,12 @@ func TestShellClaudeEnvAnthropicVariableWithNoSettingsFileWarns(t *testing.T) {
 	env := fixtureEnv(t)
 	env.Environ = []string{"ANTHROPIC_BASE_URL=https://gateway.example"}
 	row := onlyRow(t, detect(t, "shell-claude-env", env))
-	assertContains(t, "problem", row.Problem, "ANTHROPIC_BASE_URL")
-	assertContains(t, "fix", row.Fix+row.Problem, "ANTHROPIC_BASE_URL")
-	if want := "https://gateway.example"; strings.Contains(row.Problem+row.Fix, want) {
-		t.Fatalf("row=%+v prints the shell's value %q", row, want)
+	if got, want := strings.ReplaceAll(
+		row.Problem+" | "+row.Fix,
+		env.Home,
+		"{home}",
+	), "ANTHROPIC_BASE_URL is exported in the login shell but absent from this settings env: chats pfm mcp serve spawns under launchd or systemd inherit no login-shell export, so they run without it while terminal chats have it | add \"ANTHROPIC_BASE_URL\" to the \"env\" block of {home}/.cc/1/settings.json with the value your shell exports, then start a new chat"; got != want {
+		t.Fatalf("problem | fix = %q, want %q", got, want)
 	}
 }
 
@@ -113,7 +115,8 @@ func TestShellClaudeEnvKeepsConfigurationWarningsWithInheritedRuntime(t *testing
 		"CLAUDE_EFFORT=high",
 	}
 	rows := detect(t, "shell-claude-env", env)
-	if len(rows) != 1 || !strings.Contains(rows[0].Problem, betasVar) {
+	if len(rows) != 1 ||
+		rows[0].Problem != "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS is exported in the login shell but absent from this settings env: chats pfm mcp serve spawns under launchd or systemd inherit no login-shell export, so they run without it while terminal chats have it" {
 		t.Fatalf("rows=%+v, want only the configurable beta warning", rows)
 	}
 }

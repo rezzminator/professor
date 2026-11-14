@@ -26,6 +26,9 @@ type badgePart struct {
 
 // rowMarker is the kind glyph shared by the deck row and the plain twin.
 func rowMarker(kind compose.Kind) string {
+	if kind.IsResumable() {
+		return "↻"
+	}
 	switch kind {
 	case compose.LiveClaude, compose.LiveCodex, compose.LiveOpenCode, compose.LiveSplit:
 		return "●"
@@ -33,8 +36,6 @@ func rowMarker(kind compose.Kind) string {
 		return "◐"
 	case compose.Agent:
 		return "⚙"
-	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
-		return "↻"
 	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode:
 		return "✦"
 	case compose.ProfessorUpdate:

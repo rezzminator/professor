@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep"
 )
 
 // A test that never set up its jail must not resolve to the operator's own
@@ -32,14 +34,8 @@ func TestResolveRefusesTheOperatorsRealHomeInsideATest(t *testing.T) {
 			EnvHome, values.Home, realHome, values.CacheDB,
 		)
 	}
-	for _, mustName := range []string{EnvHome, EnvRealHome} {
-		if !strings.Contains(err.Error(), mustName) {
-			t.Errorf(
-				"Resolve() error %q does not name %s; the message is the only place the fix appears",
-				err,
-				mustName,
-			)
-		}
+	if got, want := err.Error(), "refusing to resolve the operator's real home directory inside a test: point PFM_HOME at a temporary directory (see internal/testjail), or set PFM_TEST_REAL_HOME=1 if this test genuinely must read the host"; got != want {
+		t.Errorf("Resolve() error = %q, want %q", got, want)
 	}
 }
 
@@ -91,14 +87,17 @@ func TestNoTestReachesForThePlainHOMEVariable(t *testing.T) {
 			// A directory we cannot read is a hole in the sweep, never a pass.
 			return err
 		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
-			return nil
-		}
 		relative, relErr := filepath.Rel(moduleRoot, path)
 		if relErr != nil {
 			return relErr
 		}
 		relative = filepath.ToSlash(relative)
+		if entry.IsDir() && sourcesweep.SkipDir(relative) {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
 		if _, ok := allowed[relative]; ok {
 			return nil
 		}

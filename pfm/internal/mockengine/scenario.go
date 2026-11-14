@@ -49,19 +49,6 @@ const (
 	DefaultOpenCodeVersion = "1.14.30"
 )
 
-// Step kinds.
-const (
-	StepTurn            = "turn"
-	StepHold            = "hold"
-	StepToolCall        = "tool_call"
-	StepBackgroundAgent = "background_agent"
-	StepMenu            = "menu"
-	StepCompact         = "compact"
-	StepCrash           = "crash"
-	StepExit            = "exit"
-	StepMCP             = "mcp"
-)
-
 // Tokens is the usage one turn reports, in the engine's own field names when
 // written (Claude usage / modelUsage, Codex token_count).
 type Tokens struct {
@@ -72,37 +59,6 @@ type Tokens struct {
 	// ContextWindow is the model's window; Codex reports it on every
 	// token_count, Claude only through the statusline.
 	ContextWindow int64 `json:"context_window"`
-}
-
-// Step is one scripted beat. Steps are consumed in order: each prompt the
-// engine receives runs steps until a terminal one (turn, menu, crash, exit);
-// hold, tool_call, background_agent, compact and mcp happen inside that turn.
-// An exhausted list falls back to a default turn.
-type Step struct {
-	Type string `json:"type"`
-	// turn: the reply text, busy duration, and usage shown.
-	Reply  string  `json:"reply,omitempty"`
-	BusyMS int     `json:"busy_ms,omitempty"`
-	Tokens *Tokens `json:"tokens,omitempty"`
-	// Structured is the structured_output a headless -p --json-schema run prints.
-	Structured json.RawMessage `json:"structured,omitempty"`
-	// hold: stay busy until this file no longer exists.
-	UntilGone string `json:"until_gone,omitempty"`
-	// tool_call: the tool name PreToolUse matchers see and its input.
-	Tool  string          `json:"tool,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
-	// background_agent: the sidechain row's name and status text.
-	Name   string `json:"name,omitempty"`
-	Status string `json:"status,omitempty"`
-	// menu: the numbered options and the 1-based preselected row.
-	Options  []string `json:"options,omitempty"`
-	Selected int      `json:"selected,omitempty"`
-	// compact: the postTokens the compact_boundary record carries.
-	PostTokens int64 `json:"post_tokens,omitempty"`
-	// crash / exit: the process exit code.
-	ExitCode int `json:"exit_code,omitempty"`
-	// mcp: the [mcp_servers.<server>] block of config.toml to connect to.
-	Server string `json:"server,omitempty"`
 }
 
 // PaneShapes carries the pane strings pfm has not pinned for an engine. Codex
@@ -142,7 +98,10 @@ type Scenario struct {
 	// before its composer, as a real one boots in a folder its account has not
 	// trusted: 1 trusts the folder and boots on; Enter, Escape or 2 — "No,
 	// exit" is the default row — ends the engine.
-	TrustDialog  bool       `json:"trust_dialog,omitempty"`
+	TrustDialog bool `json:"trust_dialog,omitempty"`
+	// LaunchCrash ends a Claude pane at launch: the line printed, exit 1,
+	// before any hook, record or prompt is read.
+	LaunchCrash  string     `json:"launch_crash,omitempty"`
 	Pane         PaneShapes `json:"pane"`
 	Jail         Jail       `json:"jail"`
 	Quiet        bool       `json:"quiet,omitempty"`
@@ -257,6 +216,11 @@ func (running *script) forPrompt(prompt string) *script {
 	} else if steps == nil {
 		return running
 	}
+	return running.only(steps)
+}
+
+// only is the script with steps in place of its own, from their start, remembering no cursor.
+func (running *script) only(steps []Step) *script {
 	local := *running
 	local.Steps, local.position, local.cursor = steps, 0, ""
 	return &local
@@ -275,52 +239,6 @@ func (scenario Scenario) Write(path string) error {
 		return fmt.Errorf("write scenario %s: %w", path, err)
 	}
 	return nil
-}
-
-func (step Step) validate() error {
-	switch step.Type {
-	case StepTurn, StepBackgroundAgent, StepCompact, StepCrash, StepExit, StepMCP:
-		return nil
-	case StepHold:
-		if step.UntilGone == "" {
-			return errors.New("hold needs until_gone")
-		}
-	case StepToolCall:
-		if step.Tool == "" {
-			return errors.New("tool_call needs tool")
-		}
-	case StepMenu:
-		if len(step.Options) == 0 {
-			return errors.New("menu needs options")
-		}
-		if step.Selected < 0 || step.Selected > len(step.Options) {
-			return fmt.Errorf("menu selected %d is outside 1..%d", step.Selected, len(step.Options))
-		}
-	default:
-		return fmt.Errorf("unknown step type %q", step.Type)
-	}
-	return nil
-}
-
-// terminal reports whether the step ends the turn it belongs to.
-func (step Step) terminal() bool {
-	switch step.Type {
-	case StepTurn, StepMenu, StepCrash, StepExit:
-		return true
-	}
-	return false
-}
-
-// sideEffecting reports whether the step fires a hook, writes a record or
-// does an MCP handshake — the beats `-p`'s fast-forward (claude.go:headless)
-// consumes from the cursor without ever running, so it must name what it
-// skipped rather than silently dropping it.
-func (step Step) sideEffecting() bool {
-	switch step.Type {
-	case StepToolCall, StepBackgroundAgent, StepCompact, StepMCP:
-		return true
-	}
-	return false
 }
 
 // cursorSuffix names the file beside a scenario that remembers how many

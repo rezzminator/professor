@@ -95,6 +95,12 @@ func (kind Kind) String() string {
 	}
 }
 
+// IsResumable reports whether kind is a chat with no live seat, one Enter
+// resumes.
+func (kind Kind) IsResumable() bool {
+	return kind == ResumeClaude || kind == ResumeCodex || kind == ResumeOpenCode
+}
+
 // IsLiveSeat reports whether kind is a running primary chat seat.
 func (kind Kind) IsLiveSeat() bool {
 	return kind == LiveClaude || kind == LiveCodex || kind == LiveSplit ||
@@ -126,7 +132,7 @@ func ResumeKindFor(kind Kind) Kind {
 // kind while the seat is live, its resumable kind once it is not (lost,
 // failed, ended), so no reader attaches a seat nothing runs in.
 func SeatKindFor(kind Kind, state string) Kind {
-	if state != "live" {
+	if state != seatLive {
 		return ResumeKindFor(kind)
 	}
 	return kind
@@ -241,13 +247,13 @@ type Row struct {
 	// (fleetdb schedules.unseen). The picker sets it from the shared state
 	// database; the row renders red and sorts above every other row.
 	ScheduleFired bool
-	// Model, Effort, Working and AgentsWorking are read from the chat's
-	// transcript tail by the picker (internal/rowfacts), never by composition:
-	// the model id and effort level it runs at ("" when unknown), whether it is
-	// mid-turn right now, and how many sub-agents are mid-turn for it.
+	// Model, Effort, Working and AgentsWorking are read from the chat's transcript tail by the picker
+	// (internal/rowfacts), never by composition: model id and effort ("" when unknown), mid-turn or not, how
+	// many sub-agents are; Blocked is Herdr's read that the chat waits on its owner (gather.HerdrSeat).
 	Model         string
 	Effort        string
 	Working       bool
+	Blocked       bool
 	AgentsWorking int
 	Accounts      []int
 	Killed        bool
@@ -278,10 +284,14 @@ func RowKey(row Row) string {
 	return row.Kind.String() + "\x00" + row.CWD + "\x00" + row.Project
 }
 
+// NativeHerdr reports that row is a native Herdr seat's, whose Socket is its
+// Herdr server's and whose PaneID is its pane there.
+func NativeHerdr(row Row) bool { return row.Backend == herdrBackend }
+
 // LiveSeatKey names one live seat: a tmux socket is one chat's server, while
 // every Herdr pane shares its server's socket, so a native seat adds its pane.
 func LiveSeatKey(row Row) string {
-	if row.Backend == herdrBackend {
+	if NativeHerdr(row) {
 		return row.Socket + "\x00" + row.PaneID
 	}
 	return row.Socket

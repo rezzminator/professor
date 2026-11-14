@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -34,13 +33,6 @@ func TestSystemPromptValidValuesResolve(t *testing.T) {
 		if got.Claude.SystemPrompt != value {
 			t.Fatalf("Claude.SystemPrompt = %q, want %q", got.Claude.SystemPrompt, value)
 		}
-	}
-}
-
-func TestSystemPromptRejectsUnknownValue(t *testing.T) {
-	_, err := loadSystemPromptConfig(t, `{"systemPrompt": "vibes"}`)
-	if err == nil || !strings.Contains(err.Error(), "systemPrompt") {
-		t.Fatalf("Load(systemPrompt=vibes) error = %v, want a systemPrompt validation error", err)
 	}
 }
 

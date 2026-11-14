@@ -1,7 +1,5 @@
-cmd/pfm/chat_satellite_command.go
 internal/action/dispatch.go
 internal/doctor/herdr_check.go
-internal/gather/tmuxprobe.go
 internal/hookentry/launch.go
 internal/hookentry/launch_native.go
 internal/themesync/herdr.go

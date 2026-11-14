@@ -13,21 +13,24 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/deps"
-)
-
-// launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry
-// that rides out a teardown still in flight — ~2s total, bounded so a genuinely
-// unloadable job reports instead of hanging the install.
-const (
-	launchdBootstrapAttempts      = 20
-	launchdBootstrapRetryInterval = 100 * time.Millisecond
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // launchdLabel is the job's name, and the handle launchctl addresses it by.
 const launchdLabel = "com.professor.pfm.name-sync"
 
 const mcpLaunchdLabel = "com.professor.pfm.mcp"
+
+// launchd is the calling user's GUI domain, asked through the install's runner
+// and pausing through its own pause.
+func (installer *engine) launchd() servicemanager.Launchd {
+	pause := func(_ context.Context, d time.Duration) error {
+		installer.pause(d)
+		return nil
+	}
+	return servicemanager.NewLaunchd(commandRun{installer.options.Runner}, pause)
+}
 
 const launchdAsset = "launchd/" + launchdLabel + ".plist"
 
@@ -61,15 +64,11 @@ func (installer *engine) ensureLaunchdLogDir() error {
 
 // launchAgentPath returns where macOS expects a per-user agent to live.
 func (installer *engine) launchAgentPath() string {
-	return filepath.Join(
-		installer.options.Home, "Library", "LaunchAgents", launchdLabel+".plist",
-	)
+	return filepath.Join(paths.LaunchAgentsDir(installer.options.Home), launchdLabel+".plist")
 }
 
 func (installer *engine) mcpLaunchAgentPath() string {
-	return filepath.Join(
-		installer.options.Home, "Library", "LaunchAgents", mcpLaunchdLabel+".plist",
-	)
+	return filepath.Join(paths.LaunchAgentsDir(installer.options.Home), mcpLaunchdLabel+".plist")
 }
 
 // wireLaunchAgent installs the macOS half of the name-sync scheduler.
@@ -99,7 +98,7 @@ func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 		wanted, err = renderNameSyncLaunchAgent(wanted, installer.options)
 	}
 	if err == nil {
-		wanted, err = renderServicePath(wanted, installer.options.Home)
+		wanted, err = renderServiceEnv(wanted, installer.options.Home)
 	}
 	if err != nil {
 		return fmt.Errorf("render launch agent: %w", err)
@@ -138,12 +137,8 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 		} else if err != nil {
 			return err
 		}
-		if installer.apply {
-			domain := "gui/" + strconv.Itoa(os.Getuid())
-			_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+mcpLaunchdLabel)
-		}
 		message := fmt.Sprintf("remove %s (no MCP server is enabled in %s)", path, installer.options.MCPConfigPath)
-		return installer.change(message, func() error { return os.Remove(path) })
+		return installer.retireLaunchAgent(ctx, path, mcpLaunchdLabel, message)
 	}
 	template, err := readAsset(mcpLaunchdAsset)
 	if err != nil {
@@ -154,7 +149,7 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 	}
 	wanted, err := renderLaunchAgentTemplate(template, installer.options.Home)
 	if err == nil {
-		wanted, err = renderServicePath(wanted, installer.options.Home)
+		wanted, err = renderServiceEnv(wanted, installer.options.Home)
 	}
 	if err != nil {
 		return fmt.Errorf("render MCP launch agent: %w", err)
@@ -200,10 +195,11 @@ func (installer *engine) reloadLaunchAgent(ctx context.Context, path string, pli
 // that is the one outcome where the installer left the host worse than it
 // found it, and it must never read like a plain "not loaded".
 func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, label string, plistChanged bool) error {
-	domain := "gui/" + strconv.Itoa(os.Getuid())
-	loaded := installer.options.Runner.Run(ctx, "launchctl", "print", domain+"/"+label) == nil
+	launchd := installer.launchd()
+	domain := servicemanager.Domain(launchd.UID)
+	loaded := launchd.Print(ctx, label).OK()
 	if loaded && !plistChanged {
-		reason, err := installer.launchAgentStale(ctx, domain+"/"+label)
+		reason, err := installer.launchAgentStale(ctx, label)
 		if err != nil {
 			installer.skip(
 				"launchctl " + label + " already loaded, plist unchanged — health NOT probed (" + err.Error() +
@@ -220,12 +216,20 @@ func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, l
 		installer.say("  reload  launchctl %s: %s", label, reason)
 	}
 	if loaded {
-		// Best effort: a job already gone reports failure here for exactly the
-		// state we want, so its exit status decides nothing. The bootstrap
-		// retry below is what actually establishes the outcome.
-		_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+label)
+		// A job already gone is what bootout is for, and Bootout answers nil
+		// for it. A job it could not unload would only fail the
+		// bootstrap below as already loaded, under an error claiming the
+		// service is DOWN while its old job still runs.
+		if err := launchd.Bootout(ctx, label); err != nil {
+			return fmt.Errorf(
+				"launchctl %s not reloaded: the new plist at %s is installed, but its loaded job could not be unloaded: %w",
+				label,
+				path,
+				err,
+			)
+		}
 	}
-	if err := installer.bootstrapWithRetry(ctx, domain, path, label); err != nil {
+	if err := bootstrapWithRetry(ctx, launchd, path); err != nil {
 		if loaded {
 			return fmt.Errorf(
 				"launchctl bootstrap %s failed AFTER its running job was stopped to load the new plist; the agent file is installed and the service is now DOWN — restart it with `launchctl bootstrap %s %s`: %w",
@@ -241,7 +245,7 @@ func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, l
 			err,
 		)
 	}
-	if err := installer.options.Runner.Run(ctx, "launchctl", "print", domain+"/"+label); err != nil {
+	if err := launchd.Print(ctx, label).Err(); err != nil {
 		return fmt.Errorf(
 			"launchctl bootstrap %s returned success but loaded-agent verification failed: %w",
 			label,
@@ -268,17 +272,17 @@ const launchdSpawnFailed = 78
 // the new build by itself (binwatch exits it, KeepAlive relaunches it), and the
 // interval agents start the new build on their next tick. An error means the
 // state could not be read, never "healthy".
-func (installer *engine) launchAgentStale(ctx context.Context, target string) (string, error) {
+func (installer *engine) launchAgentStale(ctx context.Context, label string) (string, error) {
 	reader, ok := installer.options.Runner.(OutputRunner)
 	if !ok {
 		return "", errors.New("the command runner cannot read launchctl output")
 	}
-	output, err := reader.Output(ctx, "launchctl", "print", target)
-	if err != nil {
-		return "", fmt.Errorf("launchctl print %s: %w", target, err)
+	answer := servicemanager.NewLaunchd(commandOutput{reader}, nil).Print(ctx, label)
+	if err := answer.Err(); err != nil {
+		return "", fmt.Errorf("%s: %w", answer.Command(), err)
 	}
 	running, spawnFailed := false, false
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(string(answer.Result.Stdout), "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case line == "state = running":
@@ -311,44 +315,23 @@ func (installer *engine) pause(d time.Duration) {
 	}
 }
 
-// bootstrapWithRetry re-registers the job, retrying while launchd finishes a
-// teardown that bootout only REQUESTED.
+// bootstrapWithRetry re-registers the job through launchd's Bootstrap,
+// retrying while launchd finishes a teardown that bootout only REQUESTED.
 //
 // `launchctl bootout` returns as soon as the request is accepted, not when the
 // label is gone, so an immediate bootstrap can fail with EIO against a label
 // still on its way out. That is the failure that left a stopped daemon with
 // nothing to restart it. Retrying the bootstrap closes the window without
 // asking anyone to predict how long a teardown takes, and it costs a healthy
-// host nothing: the first attempt succeeds and no wait is ever taken.
-func (installer *engine) bootstrapWithRetry(ctx context.Context, domain, path, _ string) error {
-	pause := func(_ context.Context, d time.Duration) error {
-		installer.pause(d)
-		return nil
+// host nothing: the first attempt succeeds and no wait is ever taken. A
+// launchctl that could not run at all ends it at once. The error is the last
+// attempt's, verbatim.
+func bootstrapWithRetry(ctx context.Context, launchd servicemanager.Launchd, path string) error {
+	last, done, err := launchd.Bootstrap(ctx, path, servicemanager.BootstrapAttempts, nil)
+	if err != nil || done {
+		return err
 	}
-	return launchctlBootstrapWithRetry(ctx, installer.options.Runner, pause, domain, path)
-}
-
-// launchctlBootstrapWithRetry is bootstrapWithRetry's loop over any runner:
-// every launchd bootstrap after a bootout goes through it, pausing between
-// attempts through pause.
-func launchctlBootstrapWithRetry(
-	ctx context.Context,
-	runner CommandRunner,
-	pause func(context.Context, time.Duration) error,
-	domain, path string,
-) error {
-	var err error
-	for attempt := 0; attempt < launchdBootstrapAttempts; attempt++ {
-		if attempt > 0 {
-			if pauseErr := pause(ctx, launchdBootstrapRetryInterval); pauseErr != nil {
-				return errors.Join(err, pauseErr)
-			}
-		}
-		if err = runner.Run(ctx, "launchctl", "bootstrap", domain, path); err == nil {
-			return nil
-		}
-	}
-	return err
+	return last.Err()
 }
 
 // unwireLaunchAgent removes the agent and unloads it.
@@ -358,11 +341,7 @@ func (installer *engine) unwireLaunchAgent(ctx context.Context) error {
 		installer.skip("no launch agent at " + path)
 		return installer.unwireMCPLaunchAgent(ctx)
 	}
-	if installer.apply {
-		domain := "gui/" + strconv.Itoa(os.Getuid())
-		_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+launchdLabel)
-	}
-	if err := installer.change("remove "+path, func() error { return os.Remove(path) }); err != nil {
+	if err := installer.retireLaunchAgent(ctx, path, launchdLabel, "remove "+path); err != nil {
 		return err
 	}
 	return installer.unwireMCPLaunchAgent(ctx)
@@ -375,21 +354,20 @@ func (installer *engine) unwireMCPLaunchAgent(ctx context.Context) error {
 	} else if err != nil {
 		return err
 	}
-	if installer.apply {
-		domain := "gui/" + strconv.Itoa(os.Getuid())
-		_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+mcpLaunchdLabel)
-	}
-	return installer.change("remove "+path, func() error { return os.Remove(path) })
+	return installer.retireLaunchAgent(ctx, path, mcpLaunchdLabel, "remove "+path)
 }
 
-// probeAnswered reports whether err came from a probe that ran to completion
-// and reported a status, rather than one that never got an answer at all
-// (the tool missing from PATH, permission denied, or a signal). A positive
-// coded exit means the tool ran and answered; deps.ExitCode reports -1 for
-// anything else, including the production runner's plain errors and a
-// signal-killed *exec.ExitError.
-func probeAnswered(err error) bool {
-	return deps.ExitCode(err) > 0
+// retireLaunchAgent unloads label (when applying) and removes its plist at
+// path, reporting the removal as message. A job the bootout could not unload
+// keeps its plist: the next run finds it and retries, where removing it would
+// orphan a loaded job that no plist names and no unwire looks for.
+func (installer *engine) retireLaunchAgent(ctx context.Context, path, label, message string) error {
+	if installer.apply {
+		if err := installer.launchd().Bootout(ctx, label); err != nil {
+			return fmt.Errorf("unload %s before removing %s: %w", label, path, err)
+		}
+	}
+	return installer.change(message, func() error { return os.Remove(path) })
 }
 
 // launchAgentRunning reports whether the launch agent labelled label (name-sync
@@ -408,18 +386,13 @@ func launchAgentRunning(ctx context.Context, runner CommandRunner, label string)
 	if !ok {
 		return false, false
 	}
-	output, err := reader.Output(
-		ctx, "launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+label,
-	)
-	if err != nil {
-		if probeAnswered(err) {
-			// A label launchd does not know is not an error to report: nothing is
-			// installed yet, so nothing can be mid-execution.
-			return false, true
-		}
-		return false, false
+	answer := servicemanager.NewLaunchd(commandOutput{reader}, nil).Print(ctx, label)
+	if !answer.OK() {
+		// A label launchd does not know is not an error to report: nothing is
+		// installed yet, so nothing can be mid-execution.
+		return false, answer.Ran()
 	}
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(string(answer.Result.Stdout), "\n") {
 		if strings.TrimSpace(line) == "state = running" {
 			return true, true
 		}

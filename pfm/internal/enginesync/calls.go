@@ -255,8 +255,10 @@ type machineDoctorReply struct {
 }
 
 // MachineDoctor runs `engine-sync doctor --machine --json` and returns its
-// rows, each validated: an unknown level, an empty message, or an ok that
-// disagrees with the rows is an error, never a row read as healthy.
+// rows, each validated: a row of an unknown level is kept as warn (fail when
+// only it explains a reply that is not ok) naming the level, a row without a
+// message names that, and an ok that disagrees with the rows is an error;
+// no row is ever read as healthy.
 func (runner Runner) MachineDoctor(ctx context.Context, options MachineDoctorOptions) ([]Row, error) {
 	home, err := runner.home()
 	if err != nil {
@@ -285,17 +287,30 @@ func (runner Runner) MachineDoctor(ctx context.Context, options MachineDoctorOpt
 		return nil, fmt.Errorf("engine-sync doctor --machine: %s", reply.Error)
 	}
 	failing := false
-	for index, row := range reply.Rows {
+	var unknown []int
+	for index := range reply.Rows {
+		row := &reply.Rows[index]
 		switch row.Level {
 		case LevelOK, LevelWarn:
 		case LevelFail:
 			failing = true
 		default:
-			return nil, fmt.Errorf("engine-sync doctor --machine: row %d has unknown level %q", index, row.Level)
+			unknown = append(unknown, index)
 		}
 		if row.Message == "" {
-			return nil, fmt.Errorf("engine-sync doctor --machine: row %d has no message", index)
+			row.Message = fmt.Sprintf("engine-sync doctor --machine: row %d has no message", index)
 		}
+	}
+	// A row of a level this pfm does not know is kept, never read as
+	// healthy: warn, or fail when only it can explain a reply that is not ok.
+	unknownLevel := LevelWarn
+	if !reply.OK && !failing && len(unknown) != 0 {
+		unknownLevel, failing = LevelFail, true
+	}
+	for _, index := range unknown {
+		row := &reply.Rows[index]
+		row.Message = fmt.Sprintf("%s (engine-sync level %q)", row.Message, row.Level)
+		row.Level = unknownLevel
 	}
 	if failing == reply.OK {
 		return nil, fmt.Errorf("engine-sync doctor --machine: ok=%t disagrees with its rows", reply.OK)

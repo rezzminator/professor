@@ -23,7 +23,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -46,15 +45,11 @@ type Scan struct {
 	Unreadable []string
 }
 
-// Signaler delivers a signal to pid; signal 0 only asks whether pid exists.
-// syscall.Kill is the real one; a test's fake plays the kernel.
-type Signaler func(pid int, signal syscall.Signal) error
-
 // Find lists the pfm processes whose executable is not the file at binary.
 // A pfm process is one whose argv[0] names a file called pfm, the name
 // `pgrep -x pfm` matched; a process that exits mid-scan is skipped, not
 // reported.
-func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
+func Find(table gather.ProcFS, binary string, probe gather.Probe) (Scan, error) {
 	images, ok := table.(gather.ProcImage)
 	if !ok {
 		return Scan{}, errors.New(
@@ -81,7 +76,7 @@ func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
 		command := strings.Join(argv, " ")
 		image, err := images.Image(pid)
 		if err != nil {
-			if errors.Is(signal(pid, 0), syscall.ESRCH) {
+			if errors.Is(probe(pid), syscall.ESRCH) {
 				continue
 			}
 			scan.Unreadable = append(scan.Unreadable, fmt.Sprintf("pid=%d  %s: %v", pid, clipCommand(command), err))
@@ -151,7 +146,7 @@ func ClassifyCompatibleProxies(
 	table gather.ProcFS,
 	procRoot string,
 	home string,
-	signal Signaler,
+	probe gather.Probe,
 	processes []Process,
 ) ([]Process, []Process, error) {
 	marker, err := compatibleProxyMarkerTarget(home)
@@ -159,6 +154,9 @@ func ClassifyCompatibleProxies(
 		return nil, nil, err
 	}
 	var sweepable, kept []Process
+	var census gather.ProcFDNames
+	var censusErr error
+	censusOpened := false
 	for _, process := range processes {
 		if !process.compatibleProxyCandidate {
 			sweepable = append(sweepable, process)
@@ -166,7 +164,7 @@ func ClassifyCompatibleProxies(
 		}
 		links, err := table.FDLinks(process.PID)
 		if err != nil {
-			if errors.Is(signal(process.PID, 0), syscall.ESRCH) {
+			if errors.Is(probe(process.PID), syscall.ESRCH) {
 				continue
 			}
 			return nil, nil, fmt.Errorf(
@@ -174,10 +172,17 @@ func ClassifyCompatibleProxies(
 				process.PID, process.Command, marker, err,
 			)
 		}
-		if _, rootErr := os.Stat(procRoot); rootErr == nil {
-			entries, readErr := os.ReadDir(filepath.Join(procRoot, strconv.Itoa(process.PID), "fd"))
+		if !censusOpened {
+			census, censusErr = descriptorCensus(procRoot)
+			censusOpened = true
+		}
+		if censusErr != nil {
+			return nil, nil, fmt.Errorf("inspect descriptor root %s: %w", procRoot, censusErr)
+		}
+		if census != nil {
+			names, readErr := census.FDNames(process.PID)
 			if readErr != nil {
-				if errors.Is(signal(process.PID, 0), syscall.ESRCH) {
+				if errors.Is(probe(process.PID), syscall.ESRCH) {
 					continue
 				}
 				return nil, nil, fmt.Errorf(
@@ -188,8 +193,8 @@ func ClassifyCompatibleProxies(
 			for _, link := range links {
 				read[link.FD] = true
 			}
-			for _, entry := range entries {
-				fd, parseErr := strconv.Atoi(entry.Name())
+			for _, name := range names {
+				fd, parseErr := strconv.Atoi(name)
 				if parseErr == nil && fd >= 0 && !read[fd] {
 					return nil, nil, fmt.Errorf(
 						"inspect descriptors for pid=%d %s: descriptor %d was not readable",
@@ -197,8 +202,6 @@ func ClassifyCompatibleProxies(
 					)
 				}
 			}
-		} else if !errors.Is(rootErr, os.ErrNotExist) {
-			return nil, nil, fmt.Errorf("inspect descriptor root %s: %w", procRoot, rootErr)
 		}
 		if slices.ContainsFunc(links, func(link gather.FDLink) bool {
 			return filepath.Clean(link.Target) == marker
@@ -211,64 +214,97 @@ func ClassifyCompatibleProxies(
 	return sweepable, kept, nil
 }
 
-// Sweep TERMs every stale process, KILLs any still there after wait, then
-// scans again and fails naming each survivor — readback, not trust. It only
-// ever signals images that are not the installed binary, so the binary just
-// installed, and the daemon restarted on it, are never touched.
+// descriptorCensus is the table that lists every descriptor entry at
+// procRoot, or nil where no table can (macOS, a jail root never staged): the
+// census then adds nothing to the readable links.
+func descriptorCensus(procRoot string) (gather.ProcFDNames, error) {
+	table, err := gather.OpenProcFS(procRoot)
+	if errors.Is(err, gather.ErrNoProcRoot) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	census, _ := table.(gather.ProcFDNames)
+	return census, nil
+}
+
+// SweepStaleProcesses TERMs every stale process this install launched, KILLs
+// any still there after wait, then scans again and fails naming each survivor
+// — readback, not trust. It sweeps only against this install's own binary, so
+// another build (a worktree's, a test's) never reads the install's processes
+// as stale, and every signal goes through the door: re-identified, still this
+// install's, still running a replaced image.
 func SweepStaleProcesses(
-	table gather.ProcFS,
+	door gather.Door,
+	install gather.Install,
 	binary string,
 	procRoot string,
 	home string,
-	signal Signaler,
+	probe gather.Probe,
 	stdout io.Writer,
 	wait time.Duration,
-	clk clock.Clock,
 ) error {
-	scan, err := Find(table, binary, signal)
-	if err != nil {
-		return err
-	}
-	if len(scan.Unreadable) != 0 {
+	if paths.PhysicalPath(binary) != paths.PhysicalPath(install.Binary) {
 		return fmt.Errorf(
-			"could not read the executable of %d pfm process(es), so the sweep cannot vouch for them: %s",
-			len(scan.Unreadable),
-			strings.Join(scan.Unreadable, "; "),
+			"sweep refused: %s is not this install's pfm %s, and only the installed binary tells this install's stale processes",
+			binary,
+			install.Binary,
 		)
 	}
-	sweepable, kept, err := ClassifyCompatibleProxies(table, procRoot, home, signal, scan.Stale)
+	sweep, err := planSweep(door.Procs, install, binary, procRoot, home, probe)
 	if err != nil {
 		return err
 	}
-	for _, process := range kept {
+	for _, process := range sweep.kept {
 		fmt.Fprintf(stdout, "sweep: KEEP pid=%d compatible stdio proxy\n", process.PID)
 	}
-	if len(sweepable) == 0 {
+	for _, process := range sweep.foreign {
+		fmt.Fprintf(stdout, "sweep: KEEP pid=%d another install's process  %s\n", process.PID, process.Command)
+	}
+	if len(sweep.targets) == 0 {
 		fmt.Fprintln(stdout, "sweep: none — no obsolete pfm process runs a replaced binary")
 		return nil
 	}
-	mcp := false
-	for _, process := range sweepable {
-		mcp = mcp || process.MCP
+	for _, process := range sweep.processes {
 		fmt.Fprintf(stdout, "sweep: TERM pid=%d  %s\n", process.PID, process.Command)
-		deliver(signal, process.PID, syscall.SIGTERM)
 	}
-	survivors, err := awaitExit(table, binary, procRoot, home, signal, wait, clk)
-	if err != nil {
-		return err
-	}
-	for _, process := range survivors {
-		fmt.Fprintf(stdout, "sweep: KILL pid=%d (ignored TERM for %s)\n", process.PID, wait)
-		deliver(signal, process.PID, syscall.SIGKILL)
-	}
-	if len(survivors) != 0 {
-		if survivors, err = awaitExit(table, binary, procRoot, home, signal, wait, clk); err != nil {
-			return err
+	results := door.StopAll(
+		context.Background(),
+		sweep.targets,
+		gather.Escalation{Term: wait, Kill: wait, Poll: wait / 10},
+	)
+	mcp := false
+	var failures []string
+	for index, result := range results {
+		process := sweep.processes[index]
+		switch {
+		case result.Err != nil && errors.Is(result.Err, gather.ErrStillRunning):
+			fmt.Fprintf(stdout, "sweep: KILL pid=%d (ignored TERM for %s)\n", process.PID, wait)
+			failures = append(failures, fmt.Sprint(process.PID))
+		case result.Err != nil:
+			failures = append(failures, fmt.Sprintf("%d (%v)", process.PID, result.Err))
+		case result.Stopped == gather.StoppedGone:
+			fmt.Fprintf(stdout, "sweep: GONE pid=%d exited or was replaced before TERM; not signalled\n", process.PID)
+		case result.Stopped == gather.StoppedChanged:
+			fmt.Fprintf(stdout, "sweep: SKIP pid=%d changed before TERM; not signalled\n", process.PID)
+		case result.Stopped == gather.StoppedKilled:
+			fmt.Fprintf(stdout, "sweep: KILL pid=%d (ignored TERM for %s)\n", process.PID, wait)
+			mcp = mcp || process.MCP
+		case result.Stopped == gather.StoppedOnTerm:
+			mcp = mcp || process.MCP
 		}
 	}
-	if len(survivors) != 0 {
-		pids := make([]string, 0, len(survivors))
-		for _, process := range survivors {
+	if len(failures) != 0 {
+		return fmt.Errorf("SWEEP-INCOMPLETE: still running a replaced binary: %s", strings.Join(failures, " "))
+	}
+	left, err := planSweep(door.Procs, install, binary, procRoot, home, probe)
+	if err != nil {
+		return fmt.Errorf("re-scan after signalling: %w", err)
+	}
+	if len(left.processes) != 0 {
+		pids := make([]string, 0, len(left.processes))
+		for _, process := range left.processes {
 			pids = append(pids, fmt.Sprint(process.PID))
 		}
 		return fmt.Errorf("SWEEP-INCOMPLETE: still running a replaced binary: %s", strings.Join(pids, " "))
@@ -280,43 +316,104 @@ func SweepStaleProcesses(
 	return nil
 }
 
-// awaitExit re-scans until no stale process is left or wait runs out, and
-// returns what is left. A re-scan that fails is an error, never an empty
-// "all gone".
-func awaitExit(
+// sweepPlan is one discovery pass: the identified targets (processes[i] is
+// targets[i]), the compatible proxies kept, and the stale processes another
+// install launched, kept too.
+type sweepPlan struct {
+	targets   []gather.Target
+	processes []Process
+	kept      []Process
+	foreign   []Process
+}
+
+// planSweep scans for stale processes, keeps compatible proxies, and captures
+// each remaining one's identity. A process this install did not launch is
+// kept; one that exits mid-pass is skipped; any other unreadable answer fails
+// the pass before a signal is sent.
+func planSweep(
 	table gather.ProcFS,
+	install gather.Install,
 	binary string,
 	procRoot string,
 	home string,
-	signal Signaler,
-	wait time.Duration,
-	clk clock.Clock,
-) ([]Process, error) {
-	deadline := clk.Now().Add(wait)
-	for {
-		scan, err := Find(table, binary, signal)
-		if err != nil {
-			return nil, fmt.Errorf("re-scan after signalling: %w", err)
-		}
-		sweepable, _, partitionErr := ClassifyCompatibleProxies(table, procRoot, home, signal, scan.Stale)
-		if partitionErr != nil {
-			return nil, fmt.Errorf("re-scan compatible proxy descriptors: %w", partitionErr)
-		}
-		if len(sweepable) == 0 || clk.Now().After(deadline) {
-			return sweepable, nil
-		}
-		if err := clk.Sleep(context.Background(), wait/10); err != nil {
-			return sweepable, nil
-		}
+	probe gather.Probe,
+) (sweepPlan, error) {
+	current, err := gather.FileIDOf(binary)
+	if err != nil {
+		return sweepPlan{}, fmt.Errorf("identify the installed binary %s: %w", binary, err)
 	}
+	scan, err := Find(table, binary, probe)
+	if err != nil {
+		return sweepPlan{}, err
+	}
+	if len(scan.Unreadable) != 0 {
+		return sweepPlan{}, fmt.Errorf(
+			"could not read the executable of %d pfm process(es), so the sweep cannot vouch for them: %s",
+			len(scan.Unreadable),
+			strings.Join(scan.Unreadable, "; "),
+		)
+	}
+	sweepable, kept, err := ClassifyCompatibleProxies(table, procRoot, home, probe, scan.Stale)
+	if err != nil {
+		return sweepPlan{}, err
+	}
+	plan := sweepPlan{kept: kept}
+	check := staleCheck(table, install, current)
+	for _, process := range sweepable {
+		identity, err := gather.IdentifyProcess(table, process.PID)
+		if gather.IsGone(err) {
+			continue
+		}
+		if err != nil {
+			return sweepPlan{}, fmt.Errorf("identify pid=%d %s: %w", process.PID, process.Command, err)
+		}
+		owned, err := installLaunched(table, install, identity)
+		if err != nil {
+			return sweepPlan{}, fmt.Errorf("tell whose pid=%d %s is: %w", process.PID, process.Command, err)
+		}
+		if !owned {
+			plan.foreign = append(plan.foreign, process)
+			continue
+		}
+		plan.targets = append(plan.targets, gather.Target{Identity: identity, Check: check})
+		plan.processes = append(plan.processes, process)
+	}
+	return plan, nil
 }
 
-// deliver signals one real process. A pid of 0 or below is refused outright:
-// kill(2) reads 0 as the caller's process group and -1 as every process the
-// user owns.
-func deliver(signal Signaler, pid int, which syscall.Signal) {
-	if pid > 0 {
-		_ = signal(pid, which)
+// installLaunched is the sweep's ownership match: the process is this
+// install's (its mark, or no mark and this install's binary) and executed this
+// install's binary path. A stale pfm of this install always did — the install
+// renames each new build over that path — while a test or worktree build that
+// inherited this install's mark from its shell runs from elsewhere.
+func installLaunched(table gather.ProcFS, install gather.Install, live gather.Identity) (bool, error) {
+	owned, err := install.Owns(table, live)
+	if err != nil || !owned {
+		return false, err
+	}
+	if live.Executable == "" {
+		return false, fmt.Errorf("pid %d: the process table cannot read its executable path", live.PID)
+	}
+	return paths.PhysicalPath(live.Executable) == paths.PhysicalPath(install.Binary), nil
+}
+
+// staleCheck is what must still hold right before each signal: the live
+// process is this install's and still runs an image other than current.
+func staleCheck(table gather.ProcFS, install gather.Install, current gather.FileID) gather.Check {
+	return func(live gather.Identity) (bool, error) {
+		owned, err := installLaunched(table, install, live)
+		if err != nil || !owned {
+			return false, err
+		}
+		images, ok := table.(gather.ProcImage)
+		if !ok {
+			return false, errors.New("the process table cannot read which file a process executes")
+		}
+		image, err := images.Image(live.PID)
+		if err != nil {
+			return false, fmt.Errorf("read pid %d image: %w", live.PID, err)
+		}
+		return image != current, nil
 	}
 }
 
@@ -329,7 +426,7 @@ func clipCommand(command string) string {
 
 // Run is `pfm internal stale [--sweep] [--binary PATH]` against the running
 // kernel's process table; the installed binary defaults to the one this
-// command itself was started from.
+// command itself was started from, and a sweep acts for this install only.
 func Run(args []string, stdout, stderr io.Writer) int {
 	binary, err := os.Executable()
 	if err != nil {
@@ -345,24 +442,24 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		args,
 		stdout,
 		stderr,
-		gather.NewProcFS(resolved.ProcRoot),
+		gather.NewDoor(gather.NewProcFS(resolved.ProcRoot)),
+		gather.InstallAt(resolved.Home),
 		binary,
 		resolved.ProcRoot,
 		resolved.Home,
-		syscall.Kill,
-		clock.Real,
+		gather.ProbeProcess,
 	)
 }
 
 func runStale(
 	args []string,
 	stdout, stderr io.Writer,
-	table gather.ProcFS,
+	door gather.Door,
+	install gather.Install,
 	installed string,
 	procRoot string,
 	home string,
-	signal Signaler,
-	clk clock.Clock,
+	probe gather.Probe,
 ) int {
 	flags := flag.NewFlagSet("internal stale", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -377,13 +474,13 @@ func runStale(
 	}
 	binary := *binaryFlag
 	if *sweep {
-		if err := SweepStaleProcesses(table, binary, procRoot, home, signal, stdout, 3*time.Second, clk); err != nil {
+		if err := SweepStaleProcesses(door, install, binary, procRoot, home, probe, stdout, 3*time.Second); err != nil {
 			fmt.Fprintf(stderr, "pfm internal stale: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-	scan, err := Find(table, binary, signal)
+	scan, err := Find(door.Procs, binary, probe)
 	if err != nil {
 		fmt.Fprintf(stderr, "STALE-UNKNOWN: %v\n", err)
 		return 1

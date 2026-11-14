@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // ManagedRoot is the install ownership ledger directory.
 func ManagedRoot(home string) string { return managedRootForHome(home) }
 
-// PFMSettingsLeftovers reports only settings owned by pfm, through links.
-func PFMSettingsLeftovers(home, path string) ([]string, error) {
+// PFMSettingsLeftovers reports only settings owned by pfm, through links; a
+// hook the retired lists name is pfm's too.
+func PFMSettingsLeftovers(lists retired.Lists, home, path string) ([]string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("read settings %s: %w", path, err)
@@ -26,46 +27,7 @@ func PFMSettingsLeftovers(home, path string) ([]string, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	names, err := accountSettingsLeftovers(raw, home, ownership[physicalSettingsPath(path)], true)
-	if err != nil {
-		return nil, probePathError(path, err)
-	}
-	return names, nil
-}
-
-// PFMMCPLeftovers judges a Claude registry by the ledger and pfm's shapes.
-func PFMMCPLeftovers(home string, port int, path string) ([]string, error) {
-	ledger := filepath.Join(ManagedRoot(home), mcpOwnershipName)
-	ownership, err := readMCPOwnership(ledger)
-	if err != nil {
-		return nil, probePathError(ledger, err)
-	}
-	owned := ledgerOwnedMCP(ownership.Registrations, physicalSettingsPath(path))
-	return probeMCPFile(home, port, path, owned)
-}
-
-// PFMHomeMCPLeftovers also reports the retired ledger clients list.
-func PFMHomeMCPLeftovers(home string, port int) (names, clients []string, err error) {
-	ledger := filepath.Join(ManagedRoot(home), mcpOwnershipName)
-	ownership, err := readMCPOwnership(ledger)
-	if err != nil {
-		return nil, nil, probePathError(ledger, err)
-	}
-	names, err = probeMCPFile(home, port, filepath.Join(home, ".mcp.json"), nil)
-	return names, ownership.Clients, err
-}
-
-func probeMCPFile(home string, port int, path string, owned map[string][]any) ([]string, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read MCP registry %s: %w", path, err)
-	}
-	names, err := accountMCPLeftovers(raw, owned, func(name string, registration map[string]any) bool {
-		return pfmClaudeMCPShape(name, registration, home, port)
-	})
+	names, err := accountSettingsLeftovers(lists, raw, home, ownership[physicalSettingsPath(path)], true)
 	if err != nil {
 		return nil, probePathError(path, err)
 	}
@@ -78,18 +40,4 @@ func probePathError(path string, err error) error {
 		err = &fs.PathError{Op: "read", Path: path, Err: err}
 	}
 	return fmt.Errorf("probe %s: %w", path, err)
-}
-
-// IsStagedShimLine matches fleet sources outside the clone's canonical shim.
-func IsStagedShimLine(line string) bool {
-	if !isFleetSourceLine(line) {
-		return false
-	}
-	for _, field := range strings.Fields(line) {
-		path := strings.Trim(field, "\"';()")
-		if strings.HasSuffix(path, "pfm/internal/installer/assets/shim/pfm.zsh") {
-			return false
-		}
-	}
-	return true
 }

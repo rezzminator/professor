@@ -23,20 +23,15 @@ type herdrClaim struct {
 	terminal string
 }
 
-// proveHerdr proves the process location before consulting any seat rows. A
-// shell herdr-keep holds names its holder's relay socket and birth pane; the
-// claim carries Herdr's own socket and the current pane, as an unheld pane's.
+// proveHerdr proves the process location before consulting any seat rows; the
+// claim carries the current pane.
 func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrClaim, int, string, error) {
 	env := identifier.environment
 	claim := herdrClaim{}
 	if env.HerdrSocket == "" || env.HerdrPane == "" {
 		return claim, -1, "", nil
 	}
-	keep := gather.HerdrKeep(gather.NewProcFS(identifier.procRoot))
-	socket, inherited, err := keep.Upstream(ctx, env.HerdrSocket, env.HerdrPane)
-	if err != nil {
-		return claim, -1, "", fmt.Errorf("look up the caller: %w", err)
-	}
+	socket, inherited := env.HerdrSocket, env.HerdrPane
 	failure := func(err error) (herdrClaim, int, string, error) {
 		var refusal *herdr.Refusal
 		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) ||
@@ -49,14 +44,14 @@ func (identifier *Whoami) proveHerdr(ctx context.Context, chain []int) (herdrCla
 	if err != nil {
 		return claim, -1, "", fmt.Errorf("look up the caller: %w", err)
 	}
-	pane, found, err := herdr.LocatePane(ctx, keep, socket, asked, chain)
+	pane, found, err := herdr.LocatePane(ctx, socket, asked, chain)
 	if err != nil {
 		return failure(err)
 	}
 	if !found {
 		return claim, -1, fmt.Sprintf("herdr %s %s: no pane holds the caller", socket, asked), nil
 	}
-	processes, err := keep.Read(ctx, socket, pane.ID)
+	processes, err := herdr.ReadPaneProcesses(ctx, socket, pane.ID)
 	if err != nil {
 		return failure(err)
 	}
@@ -115,15 +110,10 @@ func (identifier *Whoami) herdrChatPane(
 	if err != nil {
 		return "", fmt.Errorf("resolve state paths: %w", err)
 	}
-	state := fleetdb.OpenSharedStateReadOnly(ctx, values)
-	var older *fleetdb.SchemaMismatchError
-	if errors.As(state.Degraded(), &older) && older.Found < older.Expected {
-		// identifyHerdr's writable open migrates an older file on this same
-		// call; the seat lookup must not refuse what that open would accept.
-		if err := state.Close(); err != nil {
-			return "", fmt.Errorf("close read-only caller seat state: %w", err)
-		}
-		state = fleetdb.OpenSharedState(ctx, values)
+	// identifyHerdr's writable open migrates an older file on this same call.
+	state, err := fleetdb.OpenSharedStateUnlessOlder(ctx, values)
+	if err != nil {
+		return "", fmt.Errorf("open caller seat state: %w", err)
 	}
 	defer func() {
 		if err := state.Close(); err != nil {
@@ -215,11 +205,7 @@ func (identifier *Whoami) identifyHerdr(ctx context.Context, claim herdrClaim) (
 		proved.HerdrWorkspace != identity.HerdrWorkspace {
 		return identity, fmt.Errorf("look up the caller: herdr caller pane changed during supervisor proof")
 	}
-	identity.SeatID, identity.Session = proved.SeatID, proved.Name
-	if identity.Session == "" {
-		// The durable handle call and status resolve; a bare seat id is no address.
-		identity.Session = SeatPrefix + proved.SeatID
-	}
+	identity.SeatID, identity.Session = proved.SeatID, SeatHandle(proved.Name, proved.SeatID)
 	identity.Engine, identity.ID = proved.Engine, proved.SessionID
 	return identity, nil
 }

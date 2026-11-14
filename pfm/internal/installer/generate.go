@@ -61,7 +61,7 @@ func (installer *engine) generate() error {
 	if err := installer.generateHarnessPrompts(); err != nil {
 		return fmt.Errorf("generate harness prompts: %w", err)
 	}
-	assets, err := assetFiles()
+	assets, err := assetFiles(installer.options.jobScheduler())
 	if err != nil {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
 	}

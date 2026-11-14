@@ -38,104 +38,9 @@ type paneEngine interface {
 	finish(reason string) error
 	// statusLine refreshes the line shown under the composer.
 	statusLine(usage Tokens) (string, error)
-}
-
-// pane is the screen: the last lines of conversation, an optional busy
-// footer or open menu, the background-agent rows, the composer and the
-// statusline. Every change repaints the whole thing, so a capture sees only
-// what is true now.
-type pane struct {
-	history     []string
-	footer      string
-	menu        *Step
-	selected    int
-	agentRows   []string
-	draft       composer
-	queued      []string
-	status      string
-	glyph       string
-	placeholder string
-	rule        string
-	renameDraft *composer
-	renameError string
-}
-
-const historyKeep = 12
-
-// claudeComposerRule is a horizontal rule of Claude Code's input box, drawn
-// above and below its composer row; the kill-exit finisher reads the box down
-// to the closing one (pfmcall.ComposerBoxEmpty). Codex draws no box.
-const claudeComposerRule = "────────────────────────────────────────\r\n"
-
-// These dialog strings are read by internal/spawn/spawn.go's Codex birth.
-const (
-	codexRenameCommand = "/rename"
-	codexRenameOffer   = "rename the current thread"
-	codexRenameTitle   = "Rename thread"
-	codexRenameHint    = "Type a name and press Enter"
-	codexRenameEmpty   = "Thread name cannot be empty."
-	codexRenameFooter  = "Press enter to confirm or esc to go back"
-)
-
-func (screen *pane) say(line string) {
-	screen.history = append(screen.history, line)
-	if len(screen.history) > historyKeep {
-		screen.history = screen.history[len(screen.history)-historyKeep:]
-	}
-}
-
-func (screen *pane) render() string {
-	var out strings.Builder
-	out.WriteString("\x1b[2J\x1b[H")
-	for _, line := range screen.history {
-		out.WriteString(line)
-		out.WriteString("\r\n")
-	}
-	if screen.footer != "" {
-		out.WriteString("\r\n" + screen.footer + "\r\n")
-	}
-	if screen.renameDraft != nil {
-		out.WriteString("\r\n" + codexRenameTitle + "\r\n" + codexRenameHint + "\r\n")
-		out.WriteString(screen.glyph + " " + screen.renameDraft.text() + "\r\n")
-		if screen.renameError != "" {
-			out.WriteString(screen.renameError + "\r\n")
-		}
-		out.WriteString(codexRenameFooter + "\r\n")
-		return out.String()
-	}
-	if screen.menu != nil {
-		out.WriteString("\r\n")
-		for index, option := range screen.menu.Options {
-			marker := "  "
-			if index+1 == screen.selected {
-				marker = screen.glyph + " "
-			}
-			fmt.Fprintf(&out, "%s%d. %s\r\n", marker, index+1, option)
-		}
-		out.WriteString("Enter to confirm · Esc to cancel\r\n")
-	} else {
-		draft := screen.draft.text()
-		text := draft
-		if text == "" {
-			if screen.placeholder != "" {
-				text = "\x1b[2m" + screen.placeholder + "\x1b[0m"
-			}
-		}
-		out.WriteString("\r\n" + screen.rule + screen.glyph + " " + text + "\r\n" + screen.rule)
-		if screen.placeholder != "" && draft != "" && strings.HasPrefix(codexRenameCommand, draft) {
-			out.WriteString(codexRenameOffer + "\r\n")
-		}
-		if len(screen.queued) > 0 {
-			out.WriteString("  Press up to edit queued messages\r\n")
-		}
-	}
-	for _, row := range screen.agentRows {
-		out.WriteString(row + "\r\n")
-	}
-	if screen.status != "" {
-		out.WriteString(screen.status + "\r\n")
-	}
-	return out.String()
+	// statusRefresh is how often the engine re-runs its statusline besides its
+	// own events (Claude's statusLine.refreshInterval); 0 never.
+	statusRefresh() time.Duration
 }
 
 // runPane drives an engine's TUI until it exits and returns the exit code.
@@ -159,6 +64,11 @@ func runPane(proc *process, engine paneEngine, launchPrompt string, resumed bool
 		return ExitUsage
 	}
 	loop := &paneLoop{proc: proc, engine: engine, screen: &pane{glyph: engine.composerGlyph()}}
+	if every := engine.statusRefresh(); every > 0 {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		loop.statusDue = ticker.C
+	}
 	if codex, ok := engine.(interface{ composerPlaceholder() string }); ok {
 		loop.screen.placeholder = codex.composerPlaceholder()
 	}
@@ -220,7 +130,7 @@ const trustDialogDeclined = 1
 // input or context gone.
 func (loop *paneLoop) trustDialog() (int, bool) {
 	if _, err := loop.proc.stdout.Write([]byte(claudeTrustFrame(loop.proc.cwd))); err != nil {
-		warn(loop.proc.stderr, "paint the folder-trust dialog: %v", err)
+		loop.warn("paint the folder-trust dialog: %v", err)
 		return ExitUsage, true
 	}
 	for {
@@ -244,25 +154,57 @@ func (loop *paneLoop) trustDialog() (int, bool) {
 
 // paneLoop owns the key loop and the turn machine over one pane.
 type paneLoop struct {
-	proc     *process
-	engine   paneEngine
-	screen   *pane
-	keys     <-chan keyEvent
-	usage    Tokens
-	exiting  bool
-	exitCode int
+	proc   *process
+	engine paneEngine
+	screen *pane
+	keys   <-chan keyEvent
+	// statusDue ticks every paneEngine.statusRefresh; nil never.
+	statusDue <-chan time.Time
+	usage     Tokens
+	exiting   bool
+	exitCode  int
+	// painted is the frame on the screen now.
+	painted string
 }
 
+// paint draws the screen when it changed: a frame equal to the one showing is
+// not written again, so a busy turn's 50 ms tick clears and redraws the pane
+// once a second, with its counter, and a capture between two ticks reads a
+// whole frame.
 func (loop *paneLoop) paint() {
-	if _, err := loop.proc.stdout.Write([]byte(loop.screen.render())); err != nil {
+	frame := loop.screen.render()
+	if frame == loop.painted {
+		return
+	}
+	if _, err := loop.proc.stdout.Write([]byte(frame)); err != nil {
 		warn(loop.proc.stderr, "paint: %v", err)
+		return
+	}
+	loop.painted = frame
+}
+
+// warn names a fault on the pane's terminal, which the engine's next frame
+// must cover: the frame showing is forgotten, so it is drawn again.
+func (loop *paneLoop) warn(format string, values ...any) {
+	warn(loop.proc.stderr, format, values...)
+	loop.painted = ""
+}
+
+// paintTyped draws after a typed key once no further key waits: like the
+// engines' own TUIs, a burst of typed text is drawn once, never a whole frame
+// per rune, so the Enter that ends the burst is read as soon as it arrives.
+func (loop *paneLoop) paintTyped() {
+	if len(loop.keys) == 0 {
+		loop.paint()
 	}
 }
 
+// refreshStatus re-runs the statusline into the screen's status line; a run
+// that fails is named and keeps the line it had.
 func (loop *paneLoop) refreshStatus(usage Tokens) {
 	line, err := loop.engine.statusLine(usage)
 	if err != nil {
-		warn(loop.proc.stderr, "%v", err)
+		loop.warn("%v", err)
 		return
 	}
 	loop.screen.status = line
@@ -283,6 +225,14 @@ func (loop *paneLoop) run() int {
 			if code, exited := loop.idleKey(event); exited {
 				return code
 			}
+		case <-loop.agentsDue():
+			if code, exited := loop.agentsEnded(); exited {
+				return code
+			}
+		case <-loop.statusDue:
+			// Repaint only a line that changed, or over a warning the run wrote: an idle pane stays still.
+			loop.refreshStatus(loop.usage)
+			loop.paint()
 		}
 	}
 }
@@ -293,6 +243,9 @@ func (loop *paneLoop) idleKey(event keyEvent) (int, bool) {
 		loop.renameKey(event)
 		loop.paint()
 		return 0, false
+	}
+	if screen.menu != nil && screen.menu.Type == StepPermission && (event.kind == keyEnter || event.kind == keyEscape) {
+		return loop.closePermission(event.kind == keyEnter && screen.selected == 1)
 	}
 	if screen.menu != nil {
 		switch {
@@ -306,9 +259,13 @@ func (loop *paneLoop) idleKey(event keyEvent) (int, bool) {
 		loop.paint()
 		return 0, false
 	}
+	if loop.agentPanelKey(event) {
+		loop.paint()
+		return 0, false
+	}
 	if event.kind != keyEnter {
 		screen.draft.apply(event)
-		loop.paint()
+		loop.paintTyped()
 		return 0, false
 	}
 	line := screen.draft.take()
@@ -331,7 +288,7 @@ func (loop *paneLoop) renameKey(event keyEvent) {
 			return
 		}
 		if err := loop.engine.rename(name); err != nil {
-			warn(loop.proc.stderr, "rename: %v", err)
+			loop.warn("rename: %v", err)
 			screen.renameError = "Rename failed: " + err.Error()
 			return
 		}
@@ -359,6 +316,9 @@ func (loop *paneLoop) closeMenu(confirmed bool) {
 // work (pfmcall.ExitDialogOpen matches its ❯ row; reload and the kill-exit
 // finisher press Enter on it).
 const exitMenuName = "exit-dialog"
+
+// exitByPrompt is the SessionEnd reason of an engine its user ended with /exit.
+const exitByPrompt = "prompt_input_exit"
 
 // submit handles one submitted line: a slash command or a prompt.
 func (loop *paneLoop) submit(line string) (int, bool) {
@@ -406,11 +366,14 @@ func (loop *paneLoop) submit(line string) (int, bool) {
 		if err := loop.engine.rename(strings.TrimSpace(rest)); err != nil {
 			warn(proc.stderr, "rename: %v", err)
 		}
-		if screen.placeholder != "" {
-			loop.refreshStatus(loop.usage)
-		}
+		// Codex repaints at once, Claude Code within its refreshInterval: either line carries the new name.
+		loop.refreshStatus(loop.usage)
 		loop.paint()
 		return 0, false
+	case "/resume":
+		if loop.resumeInApp(strings.TrimSpace(rest)) {
+			return 0, false
+		}
 	case "/clear":
 		if err := loop.engine.clear(); err != nil {
 			warn(proc.stderr, "clear: %v", err)
@@ -419,21 +382,23 @@ func (loop *paneLoop) submit(line string) (int, bool) {
 		loop.paint()
 		return 0, false
 	}
+	// The engines draw a submitted prompt at once and run its hooks behind it; a hook that blocks the
+	// prompt erases it. pfm's delivery proof reads the pane half a second after Enter.
+	screen.say("> " + line)
+	loop.paint()
 	blocked, err := loop.engine.prompt(line)
 	if err != nil {
 		warn(proc.stderr, "prompt hooks: %v", err)
 		return ExitUnpinned, true
 	}
 	if blocked != "" {
-		screen.say("⎿ Blocked by hook: " + blocked)
+		screen.history[len(screen.history)-1] = "⎿ Blocked by hook: " + blocked
 		loop.paint()
 		return 0, false
 	}
-	screen.say("> " + line)
 	if err := loop.engine.recordUser(line); err != nil {
 		warn(proc.stderr, "record prompt: %v", err)
 	}
-	loop.paint()
 	code, exited := loop.turn(proc.script.forPrompt(line))
 	if exited {
 		return code, true
@@ -498,10 +463,8 @@ func (loop *paneLoop) turn(running *script) (int, bool) {
 				warn(proc.stderr, "tool %s: %v", step.Tool, err)
 				return ExitUnpinned, true
 			}
-			if denied != "" {
-				screen.say("⏺ " + step.Tool + " — denied by hook: " + denied)
-			} else {
-				screen.say("⏺ " + step.Tool + "(…)")
+			for _, row := range toolRows(step.Tool, denied) {
+				screen.say(row)
 			}
 			loop.paint()
 		case StepBackgroundAgent:
@@ -510,7 +473,8 @@ func (loop *paneLoop) turn(running *script) (int, bool) {
 				warn(proc.stderr, "background agent: %v", err)
 			}
 			if row != "" {
-				screen.agentRows = append(screen.agentRows, row)
+				agent := agentRow{line: row, name: step.Name, gate: step.UntilGone, busyMS: step.BusyMS}
+				screen.agents.rows = append(screen.agents.rows, agent)
 			}
 			loop.paint()
 		case StepCompact:
@@ -538,11 +502,30 @@ func (loop *paneLoop) turn(running *script) (int, bool) {
 			return step.ExitCode, true
 		case StepExit:
 			return loop.finish("other", step.ExitCode), true
+		case StepAPIError:
+			return loop.failTurn(running, step, started)
+		case StepAITitle:
+			if code, exited := loop.titleTurn(step); exited {
+				return code, true
+			}
+		case StepPermission:
+			return loop.openPermission(running, step)
+		case StepBackgroundJob:
+			if code, exited := loop.backgroundJob(); exited {
+				return code, true
+			}
 		}
 	}
 }
 
+// interrupted ends a turn Escape cut short; Claude Code records the interrupt
+// in its transcript and fires no hook.
 func (loop *paneLoop) interrupted() (int, bool) {
+	if interrupter, ok := loop.engine.(interface{ interrupt() error }); ok && loop.proc.ctx.Err() == nil {
+		if err := interrupter.interrupt(); err != nil {
+			warn(loop.proc.stderr, "record interrupt: %v", err)
+		}
+	}
 	loop.screen.footer = ""
 	loop.screen.say("⎿ Interrupted")
 	loop.paint()
@@ -562,7 +545,7 @@ func (loop *paneLoop) busy(started time.Time, duration time.Duration, gate strin
 	defer ticker.Stop()
 	for {
 		screen.footer = loop.engine.busyLine(time.Since(started), loop.proc.script.Tokens)
-		loop.paint()
+		loop.paintTyped()
 		done := false
 		if gate != "" {
 			_, err := os.Stat(gate)
@@ -597,6 +580,8 @@ func (loop *paneLoop) busy(started time.Time, duration time.Duration, gate strin
 			default:
 				screen.draft.apply(event)
 			}
+		case <-loop.statusDue:
+			loop.refreshStatus(loop.usage)
 		case <-ticker.C:
 		}
 	}
@@ -606,7 +591,7 @@ func (loop *paneLoop) busy(started time.Time, duration time.Duration, gate strin
 // live a confirmation menu opens whose Enter ends the process.
 func (loop *paneLoop) exit() (int, bool) {
 	screen := loop.screen
-	if len(screen.agentRows) > 0 {
+	if len(screen.agents.rows) > 0 {
 		screen.menu = &Step{
 			Type: StepMenu, Name: exitMenuName, Options: []string{"Exit and stop tasks", "Stay"}, Selected: 1,
 		}
@@ -614,7 +599,7 @@ func (loop *paneLoop) exit() (int, bool) {
 		loop.paint()
 		return loop.awaitExitMenu()
 	}
-	return loop.finish("prompt_input_exit", 0), true
+	return loop.finish(exitByPrompt, 0), true
 }
 
 // awaitExitMenu keeps the loop running until the exit menu is confirmed or
@@ -630,7 +615,7 @@ func (loop *paneLoop) awaitExitMenu() (int, bool) {
 			}
 			loop.idleKey(event)
 			if loop.exiting {
-				return loop.finish("prompt_input_exit", loop.exitCode), true
+				return loop.finish(exitByPrompt, loop.exitCode), true
 			}
 		}
 	}
@@ -638,8 +623,12 @@ func (loop *paneLoop) awaitExitMenu() (int, bool) {
 }
 
 func (loop *paneLoop) finish(reason string, code int) int {
+	if reason == exitByPrompt {
+		loop.screen.left = true
+		loop.paint()
+	}
 	if err := loop.engine.finish(reason); err != nil {
-		warn(loop.proc.stderr, "finish: %v", err)
+		loop.warn("finish: %v", err)
 	}
 	return code
 }

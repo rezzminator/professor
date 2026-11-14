@@ -3,7 +3,9 @@ package deps
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -37,12 +39,39 @@ func NewEngineProbeHome(id pfmengine.ID) (EngineProbeHome, error) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return EngineProbeHome{}, fmt.Errorf("could not look: create the probe home base %s: %w", root, err)
 	}
+	sweepLeakedProbeHomes(root, time.Now())
 	dir, err := os.MkdirTemp(root, paths.SIDEngineProbeHomePrefix)
 	if err != nil {
 		return EngineProbeHome{}, fmt.Errorf(
 			"could not look: create a throwaway %s under %s: %w", descriptor.HomeEnv, root, err)
 	}
 	return EngineProbeHome{variable: descriptor.HomeEnv, Dir: dir}, nil
+}
+
+// ProbeHomeLeakAge is how long a throwaway home may outlive its probe: a probe
+// is bounded by ProbeTimeout, so an older home was left by a probe killed before
+// its deferred Remove ran, such as a usage hook its harness timed out under load.
+const ProbeHomeLeakAge = 10 * time.Minute
+
+// sweepLeakedProbeHomes removes the throwaway homes under root older than
+// ProbeHomeLeakAge, so a killed probe's leftover is cleared by the next probe.
+// A home it cannot read or remove stays, and pfm doctor's probe_home warning
+// names it; the probe itself goes on, since its own home is unaffected.
+func sweepLeakedProbeHomes(root string, now time.Time) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), paths.SIDEngineProbeHomePrefix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || now.Sub(info.ModTime()) <= ProbeHomeLeakAge {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+	}
 }
 
 // Env returns base with every entry of the engine's home variable dropped and

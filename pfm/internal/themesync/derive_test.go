@@ -81,11 +81,19 @@ func TestDeriveVariantNamesAMissingOrBadToken(t *testing.T) {
 		tokens[token] = colour
 	}
 	delete(tokens, "success")
-	if _, err := deriveVariant("test", tokens); err == nil || !strings.Contains(err.Error(), `"success"`) {
+	if _, err := deriveVariant(
+		"test",
+		tokens,
+	); err == nil ||
+		err.Error() != "themesync: theme token \"success\" is missing" {
 		t.Fatalf("missing token error = %v", err)
 	}
 	tokens["success"] = "limegreen"
-	if _, err := deriveVariant("test", tokens); err == nil || !strings.Contains(err.Error(), "limegreen") {
+	if _, err := deriveVariant(
+		"test",
+		tokens,
+	); err == nil ||
+		err.Error() != "themesync: theme token \"success\": themesync: colour \"limegreen\" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name" {
 		t.Fatalf("bad colour error = %v", err)
 	}
 }
@@ -227,7 +235,7 @@ func customTokens(t *testing.T, raw string) map[string]string {
 	if err := json.Unmarshal([]byte(raw), &file); err != nil {
 		t.Fatal(err)
 	}
-	tokens, _ := customPalette(file.Base, file.Overrides)
+	tokens, _, _ := customPalette(file.Base, file.Overrides)
 	return tokens
 }
 
@@ -411,16 +419,16 @@ func TestStateHueStaysClearOfTheSidebarWhenNoLightnessClearsEvery(t *testing.T) 
 
 func TestLiftColorAllErrorsNameWhatFailed(t *testing.T) {
 	_, err := liftColorAll("mid", "working", "#808080", []string{"#000000", "#ffffff"}, 22)
-	if err == nil || !strings.Contains(err.Error(), `theme "mid" token "working"`) ||
-		!strings.Contains(err.Error(), "contrast ratio") || !strings.Contains(err.Error(), "#000000") {
+	if err == nil ||
+		err.Error() != "themesync: theme \"mid\" token \"working\": contrast ratio 21.00 against #000000 stays under 22.0 at every lightness" {
 		t.Fatalf("unreachable guard err = %v, want the theme, the token, the ratio and the background", err)
 	}
 	if _, err := liftColorAll("t", "done", "limegreen", []string{"#000000"}, 3); err == nil ||
-		!strings.Contains(err.Error(), "limegreen") {
+		err.Error() != "themesync: theme \"t\" token \"done\": themesync: colour \"limegreen\" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name" {
 		t.Fatalf("bad colour err = %v, want it to name limegreen", err)
 	}
 	if _, err := liftColorAll("t", "done", "#ffffff", []string{"#000000", "navy"}, 3); err == nil ||
-		!strings.Contains(err.Error(), "navy") {
+		err.Error() != "themesync: theme \"t\" token \"done\" background: themesync: colour \"navy\" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name" {
 		t.Fatalf("bad background err = %v, want it to name navy", err)
 	}
 	if _, err := liftColorAll(
@@ -430,7 +438,7 @@ func TestLiftColorAllErrorsNameWhatFailed(t *testing.T) {
 		nil,
 		3,
 	); err == nil ||
-		!strings.Contains(err.Error(), `token "done"`) {
+		err.Error() != "themesync: theme \"t\" token \"done\": no background to measure against" {
 		t.Fatalf("no background err = %v, want it to name the token", err)
 	}
 }

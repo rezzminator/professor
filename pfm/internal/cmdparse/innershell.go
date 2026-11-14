@@ -2,16 +2,20 @@ package cmdparse
 
 import (
 	"maps"
+	"slices"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// shellScript finds the -c STRING of bash, sh and zsh: -c alone or inside a
+// shells are the programs whose -c STRING the parse reads as shell.
+var shells = strings.Fields("bash sh zsh dash ksh")
+
+// shellScript finds the -c STRING of a shell (shells): -c alone or inside a
 // flag cluster (-lc, -ec), the string being the first operand after the
 // flags; -o/-O and --rcfile/--init-file take the next word as their value.
 func shellScript(base string, rest []arg) (arg, bool) {
-	if base != "bash" && base != "sh" && base != "zsh" {
+	if !slices.Contains(shells, base) {
 		return arg{}, false
 	}
 	command := false
@@ -57,15 +61,6 @@ func (p *callParser) innerShell(program string, rest []arg, script arg, env map[
 	if !script.resolved {
 		return
 	}
-	if p.shellDepth >= maxShellDepth {
-		p.emit(Part{Status: StatusUnparsed, Bounded: true})
-		return
-	}
-	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(script.text), "")
-	if err != nil {
-		p.emit(Part{Status: StatusError})
-		return
-	}
 	vars, arrays, outer := p.vars, p.arrays, p.env
 	p.vars, p.arrays = map[string][]string{}, map[string][]string{}
 	for name, val := range p.base {
@@ -75,10 +70,35 @@ func (p *callParser) innerShell(program string, rest []arg, script arg, env map[
 	if p.env == nil {
 		p.env = map[string]string{}
 	}
+	defer func() { p.vars, p.arrays, p.env = vars, arrays, outer }()
+	p.nested(script.text)
+}
+
+// evalWords handles `eval WORDS`: the words joined by spaces are parsed as
+// shell in place, in the calling shell, so its variables stay. A word the
+// parse cannot know leaves the string unparsed and the eval part Unread.
+func (p *callParser) evalWords(program string, rest []arg, env map[string]string) {
+	resolved := !slices.ContainsFunc(rest, func(a arg) bool { return !a.resolved })
+	p.emit(Part{Program: program, Args: argTexts(rest), Env: env, Unread: !resolved})
+	if resolved && len(rest) > 0 {
+		p.nested(strings.Join(argTexts(rest), " "))
+	}
+}
+
+// nested parses text, a -c string or an eval string, as shell in place: one
+// error part when it does not parse, one unparsed, Bounded part past
+// maxShellDepth.
+func (p *callParser) nested(text string) {
+	if p.shellDepth >= maxShellDepth {
+		p.emit(Part{Status: StatusUnparsed, Bounded: true})
+		return
+	}
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(text), "")
+	if err != nil {
+		p.emit(Part{Status: StatusError})
+		return
+	}
 	p.shellDepth++
-	defer func() {
-		p.vars, p.arrays, p.env = vars, arrays, outer
-		p.shellDepth--
-	}()
+	defer func() { p.shellDepth-- }()
 	syntax.Walk(file, p.visit)
 }

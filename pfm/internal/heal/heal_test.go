@@ -16,6 +16,8 @@ import (
 
 	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // codexJail builds a scratch Codex home: a state store, a history store, and
@@ -76,7 +78,7 @@ func newCodexJail(t *testing.T) *codexJail {
 
 func openJailDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	database, err := sql.Open("sqlite", "file:"+path)
+	database, err := sqlitedb.OpenReadWrite(path, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,10 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -36,7 +39,7 @@ func reloadWorkbenchFixture(t *testing.T) (string, string, string) {
 }
 
 func TestReloadWorkbench(t *testing.T) {
-	for _, name := range []string{"effort", "explicit", "Codex", "disabled", "outside", "mirror failure"} {
+	for _, name := range []string{"effort", "explicit", "bad effort", "Codex", "disabled", "outside", "mirror failure", "settings envs", "settings reserved name"} {
 		t.Run(name, func(t *testing.T) {
 			root, scribe, duo := reloadWorkbenchFixture(t)
 			request := Request{
@@ -47,10 +50,22 @@ func TestReloadWorkbench(t *testing.T) {
 			}
 			want := request
 			want.Effort = "xhigh"
-			var wantError, mirrorRecord string
+			var wantError, mirrorRecord, wantStderr string
+			var engineSync deps.Runner
 			switch name {
 			case "explicit":
 				request.Effort, want.Effort = "low", "low"
+			case "bad effort":
+				// The reload validates the persona's effort word as every launch door does.
+				manifest := `{"prompt":"scribe.md","title":"Scribe","name":"_SCRIBE","effort":"loud"}`
+				if err := atomicfile.Write(paths.WorkbenchManifest(scribe), []byte(manifest), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, effortErr := action.ClaudeEffort("loud")
+				if effortErr == nil {
+					t.Fatal("fixture effort word must be invalid")
+				}
+				wantError = "workbench " + scribe + ": " + effortErr.Error()
 			case "Codex", "mirror failure":
 				request.Engine, request.CWD = pfmengine.Codex, duo
 				want = request
@@ -59,13 +74,15 @@ func TestReloadWorkbench(t *testing.T) {
 				if name == "mirror failure" {
 					reply, code = testjail.FailedMirrorReply, 1
 				}
-				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
+				var fake *testjail.EngineSyncRunner
+				mirrorRecord, fake = testjail.FakeEngineSyncRunner(t, reply, code)
+				engineSync = fake
 				if name == "mirror failure" {
-					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.Resume)
+					persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.Resume)
 					if err != nil {
 						t.Fatal(err)
 					}
-					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home)
+					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home, engineSync)
 					if err == nil {
 						t.Fatal("mirror fixture did not fail")
 					}
@@ -77,8 +94,28 @@ func TestReloadWorkbench(t *testing.T) {
 			case "outside":
 				request.CWD = filepath.Join(root, "src")
 				want = request
+			case "settings envs", "settings reserved name":
+				settings := `{"envs":{"TEAM_MODE":"strict","API_REGION":"eu"}}`
+				if name == "settings reserved name" {
+					settings = `{"envs":{"TEAM_MODE":"strict","CODEX_HOME":"/adopter/codex"}}`
+					wantStderr = "pfm chat reload: " + paths.Settings(root) +
+						": envs.CODEX_HOME is set by pfm itself on launch; launching without the settings\n"
+				}
+				if err := atomicfile.Write(paths.Settings(root), []byte(settings), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				request.Engine, request.CWD = pfmengine.Codex, filepath.Join(root, "src")
+				request.CodexHome = "/fixture/codex"
+				want = request
+				if name == "settings envs" {
+					want.Envs = map[string]string{"TEAM_MODE": "strict", "API_REGION": "eu"}
+				}
 			}
-			got, err := applyReloadWorkbench(request)
+			var stderr strings.Builder
+			got, err := applyReloadWorkbench(request, engineSync, &stderr)
+			if stderr.String() != wantStderr {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), wantStderr)
+			}
 			if wantError != "" {
 				if err == nil || err.Error() != wantError {
 					t.Fatalf("error = %v, want %q", err, wantError)
@@ -87,6 +124,16 @@ func TestReloadWorkbench(t *testing.T) {
 			}
 			if err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("request = %#v, err = %v; want %#v", got, err, want)
+			}
+			if name == "settings envs" {
+				run, err := codexRun(got)
+				if err != nil ||
+					!strings.Contains(run, " API_REGION='eu' TEAM_MODE='strict' CODEX_HOME='/fixture/codex' ") {
+					t.Fatalf("codex respawn = %q, %v; want the settings envs ahead of pfm's CODEX_HOME", run, err)
+				}
+				if spawn, err := claudeSpawn(got); err != nil || !reflect.DeepEqual(spawn.Envs, want.Envs) {
+					t.Fatalf("claude respawn envs = %#v, %v; want %#v", spawn.Envs, err, want.Envs)
+				}
 			}
 			if name == "Codex" && !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
 				t.Fatalf("the reload built no codex mirror of %s", duo)

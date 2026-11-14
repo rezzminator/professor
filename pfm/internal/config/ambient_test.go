@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,13 +46,17 @@ func TestRefuseAmbientConfigHomeFromRefusesCurrentClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := &paths.MapEnv{Values: map[string]string{}}
-	if err := RefuseAmbientConfigHomeFrom(env, home); err == nil || !strings.Contains(err.Error(), paths.EnvConfig) {
-		t.Fatalf("current-clone marker error = %v, want a jailed override remedy", err)
+	clean := strings.NewReplacer(home, "{home}", repo, "{repo}")
+	if got, want := clean.Replace(
+		fmt.Sprint(RefuseAmbientConfigHomeFrom(env, home)),
+	), "refusing ambient config in real clone {repo} inside a test: set PFM_CONFIG to a jailed file"; got != want {
+		t.Fatalf("current-clone marker error = %q, want %q", got, want)
 	}
 	env.Values[paths.EnvConfig] = "  "
-	if err := RefuseAmbientConfigHomeFrom(env, home); err == nil ||
-		!strings.HasPrefix(err.Error(), "refusing ambient config in real clone") {
-		t.Fatalf("blank override guard = %v, want ambient refusal", err)
+	if got, want := clean.Replace(
+		fmt.Sprint(RefuseAmbientConfigHomeFrom(env, home)),
+	), "refusing ambient config in real clone {repo} inside a test: set PFM_CONFIG to a jailed file"; got != want {
+		t.Fatalf("blank override guard = %q, want %q", got, want)
 	}
 	env.Values[paths.EnvConfig] = filepath.Join(home, "pfm.config.json")
 	if err := RefuseAmbientConfigHomeFrom(env, home); err != nil {
@@ -67,9 +72,13 @@ func TestConfigMarkerErrorUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Load("", home, nil)
-	if !errors.Is(err, syscall.EISDIR) || !strings.Contains(err.Error(), marker) ||
-		!strings.Contains(err.Error(), "run pfm install from the clone") {
-		t.Fatalf("unreadable marker load = %v, want the marker path and remedy", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		home,
+		"{home}",
+	), "no config path: read source repository marker {home}/.local/share/pfm/install/source-repo: read {home}/.local/share/pfm/install/source-repo: is a directory — run pfm install from the clone, or set PFM_CONFIG"; !errors.Is(err, syscall.EISDIR) ||
+		got != want {
+		t.Fatalf("unreadable marker load = %q, want %q", got, want)
 	}
 }
 

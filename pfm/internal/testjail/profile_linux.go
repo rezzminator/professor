@@ -6,15 +6,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // kernelProc is the real kernel's /proc. The profiler reads the counters of this
 // very process, never paths.Values.ProcRoot, which a test may point at a
-// fixture; /proc is a literal here for that reason alone.
-const kernelProc = "/proc"
+// fixture; it takes the kernel's root, never a configured one, for that reason.
+var kernelProc = paths.SystemProcRoot()
 
 // psiDir is where the kernel publishes pressure stall information.
-const psiDir = kernelProc + "/pressure"
+var psiDir = kernelProc + "/pressure"
 
 // maxRSSKB: Linux reports ru_maxrss in kilobytes.
 func maxRSSKB(v int64) int64 { return v }
@@ -70,4 +73,55 @@ func readPSI(dir string) (map[string]float64, error) {
 		}
 	}
 	return out, nil
+}
+
+// userHZ is the unit of /proc/{pid}/stat's starttime, clock ticks, fixed at 100 by the Linux ABI.
+const userHZ = 100
+
+// processStart is when process pid started, to the tick: its stat starttime after /proc/stat's
+// btime. Both are whole numbers, so readers agree to the second (CLOCK_BOOTTIME arithmetic, gather's
+// finer reading, can straddle a second between two readers); btime follows the wall clock, so only a
+// clock step between two readers moves it and splits one go test into two runs. gather owns this read for production; testjail cannot import it
+// (gather's dependencies test through testjail).
+func processStart(pid int) (time.Time, error) {
+	stat, err := os.ReadFile(fmt.Sprintf("%s/%d/stat", kernelProc, pid))
+	if err != nil {
+		return time.Time{}, err
+	}
+	kernel, err := os.ReadFile(kernelProc + "/stat")
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parseProcessStart(string(stat), string(kernel))
+}
+
+// parseProcessStart reads starttime (field 22) from a /proc/{pid}/stat line, whose command name
+// (field 2, in parentheses) may hold spaces and parentheses, and btime from /proc/stat's text.
+func parseProcessStart(stat, kernel string) (time.Time, error) {
+	end := strings.LastIndexByte(stat, ')')
+	if end < 0 {
+		return time.Time{}, fmt.Errorf("stat %q: no command name in parentheses", stat)
+	}
+	fields := strings.Fields(stat[end+1:]) // fields[0] is field 3, the state
+	if len(fields) < 20 {
+		return time.Time{}, fmt.Errorf(
+			"stat %q: %d fields after the command name, want starttime at the 20th",
+			stat,
+			len(fields),
+		)
+	}
+	ticks, err := strconv.ParseInt(fields[19], 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("stat starttime: %w", err)
+	}
+	for _, line := range strings.Split(kernel, "\n") {
+		if value, found := strings.CutPrefix(line, "btime "); found {
+			boot, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil {
+				return time.Time{}, fmt.Errorf("%s/stat btime: %w", kernelProc, err)
+			}
+			return time.Unix(boot, 0).Add(time.Duration(ticks) * (time.Second / userHZ)), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("%s/stat: no btime line", kernelProc)
 }

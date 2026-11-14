@@ -33,7 +33,7 @@ chrome="$(google-chrome-stable --version 2>/dev/null)" || fail "google-chrome-st
 mkdir -p "$HOME/.local/bin"
 go -C /worktree/pfm build -ldflags "-X main.version=$(cat /worktree/VERSION)" -o "$HOME/.local/bin/pfm" ./cmd/pfm >/tmp/sim-build.log 2>&1 ||
   fail "go build ./cmd/pfm from /worktree" /tmp/sim-build.log
-# The Codex/OpenCode compiler pfm install execs and the lanes run as engine-sync, from the
+# The Codex/OpenCode compiler pfm install execs as engine-sync, from the
 # engine-sync source docker-compose.yml mounts at /engine-sync.
 . /worktree/infra/fence/engine-sync.sh
 export ENGINE_SYNC_BIN="$HOME/.local/libexec/engine-sync/engine-sync"

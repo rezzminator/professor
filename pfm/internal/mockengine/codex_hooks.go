@@ -30,22 +30,14 @@ type codexNativeHook struct {
 // codexHookRPC models native trust using the account's real hook source and
 // persisted config. A handler edit invalidates its fingerprint across processes.
 func codexHookRPC(proc *process, method string, params json.RawMessage) (any, error) {
-	home := proc.env("CODEX_HOME")
-	if home == "" {
-		home = filepath.Join(proc.env("HOME"), ".codex")
-	}
-	home, err := filepath.EvalSymlinks(home)
+	home, err := filepath.EvalSymlinks(codexHomeDir(proc))
 	if err != nil {
 		return nil, fmt.Errorf("resolve Codex home: %w", err)
 	}
 	configPath := filepath.Join(home, "config.toml")
-	raw, err := os.ReadFile(configPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read native hook state: %w", err)
-	}
-	config := map[string]any{}
-	if _, err := toml.Decode(string(raw), &config); err != nil {
-		return nil, fmt.Errorf("parse native hook state: %w", err)
+	raw, config, err := readCodexHookState(home)
+	if err != nil {
+		return nil, err
 	}
 	hooks, err := codexNativeHooks(home, config)
 	if err != nil {
@@ -176,26 +168,11 @@ func codexNativeHooks(home string, config map[string]any) ([]codexNativeHook, er
 	path := filepath.Join(home, "hooks.json")
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		raw = []byte("{}")
-	} else if err != nil {
+		return []codexNativeHook{}, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("read native hooks: %w", err)
 	}
-	hooks, err := codexHooksFromDocument(raw, path, "user", path, config)
-	if err != nil {
-		return nil, err
-	}
-	plugins, err := codexPluginHooks(home, config)
-	if err != nil {
-		return nil, err
-	}
-	return append(hooks, plugins...), nil
-}
-
-func codexHooksFromDocument(
-	raw []byte,
-	path, source, keyPrefix string,
-	config map[string]any,
-) ([]codexNativeHook, error) {
 	var document hookDocument
 	if err := json.Unmarshal(raw, &document); err != nil {
 		return nil, fmt.Errorf("decode native hooks: %w", err)
@@ -228,7 +205,7 @@ func codexHooksFromDocument(
 					}
 					keyEvent += strings.ToLower(string(char))
 				}
-				key := fmt.Sprintf("%s:%s:%d:%d", keyPrefix, keyEvent, matcherIndex, handlerIndex)
+				key := fmt.Sprintf("%s:%s:%d:%d", path, keyEvent, matcherIndex, handlerIndex)
 				hash := fmt.Sprintf("sha256:%x", sha256.Sum256(fingerprint))
 				hookState, _ := state[key].(map[string]any)
 				enabled := true
@@ -241,7 +218,7 @@ func codexHooksFromDocument(
 				}
 				hooks = append(hooks, codexNativeHook{
 					Key: key, HandlerType: handler.Type, Command: handler.Command,
-					Matcher: entry.Matcher, SourcePath: path, Source: source, CurrentHash: hash,
+					Matcher: entry.Matcher, SourcePath: path, Source: "user", CurrentHash: hash,
 					EventName: strings.ToLower(event[:1]) + event[1:], Enabled: enabled, TrustStatus: trust,
 				})
 			}

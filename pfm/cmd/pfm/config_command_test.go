@@ -12,41 +12,85 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// A knob nobody can read is a knob nobody has: both new keys must show up in
-// `pfm config show` with their source, like every other resolved value.
-func TestConfigShowDisplaysTheTmuxTitlesAndNameSyncKeys(t *testing.T) {
-	home := t.TempDir()
-	machine := pfmconfig.Defaults(home, nil)
-	var stdout bytes.Buffer
-	printResolvedConfig(
-		&stdout,
-		commandRuntime{
-			Config: machine,
-			Paths:  paths.Values{Home: home, StateDB: machine.State.DB, CacheDB: machine.State.CacheDB},
-		},
-	)
-	for _, want := range []string{
-		"config tmux.titles.enabled=true (default)",
-		"config nameSync.interval=15m0s (default)",
-		"config state.db=" + machine.State.DB + " (default)",
-		"config state.cacheDb=" + machine.State.CacheDB + " (default)",
+func TestConfigShowNamesEveryKeyAndItsSource(t *testing.T) {
+	var shown strings.Builder
+	for _, body := range []string{
+		`{"version":2}`,
+		`{"version":2,"mcp":{"thirdParty":{"b":{"type":"stdio","command":"b"},"a":{"type":"stdio","command":"a"}}},` +
+			`"doctor":{"ignoreWarnings":["vscode-link","vscode-index"]},"chat":{"backend":"tmux"}}`,
+		`{"version":2,"mcp":{"thirdParty":{}},"chat":{"backend":"auto"}}`,
+		`{"version":2,"chat":{"backend":"herdr"}}`,
 	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("config show missing %q:\n%s", want, stdout.String())
+		home := t.TempDir()
+		path := filepath.Join(home, pfmconfig.FileName)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
 		}
+		machine, err := pfmconfig.Load(path, home, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stdout bytes.Buffer
+		printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
+		shown.WriteString("## " + body + "\n" + rooted(stdout.String(), home))
+	}
+	t.Setenv(paths.EnvStateDB, "/env/state.db")
+	t.Setenv(paths.EnvCacheDB, "/env/cache.db")
+	home := t.TempDir()
+	var stdout bytes.Buffer
+	printResolvedConfig(&stdout, commandRuntime{
+		Config: pfmconfig.Defaults(home, nil),
+		Paths:  paths.Values{StateDB: "/env/state.db", CacheDB: "/env/cache.db"},
+	})
+	shown.WriteString("## env state databases\n" + rooted(stdout.String(), home))
+	golden(t, "config_show.txt", shown.String())
+}
+
+// golden compares got with testdata/{file}.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Fatalf(
+			"testdata/%s: %v · %s\nwant:\n%s\nactual:\n%s\nGOLDEN cmd/pfm/testdata/%s = %q",
+			file,
+			err,
+			goldenFirstDifference(string(want), got),
+			want,
+			got,
+			file,
+			got,
+		)
 	}
 }
 
-func TestConfigShowDisplaysTheSubagentStatuslineTraceSwitch(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		home := t.TempDir()
-		machine := pfmconfig.Defaults(home, nil)
-		machine.Claude.SubagentStatuslineTrace = enabled
-		var stdout bytes.Buffer
-		printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
-		want := fmt.Sprintf("config claude.subagentStatuslineTrace=%t (default)", enabled)
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("config show missing %q:\n%s", want, stdout.String())
+// goldenFirstDifference names the first line a golden and the output disagree on, so the failure's
+// first line carries it where only that line survives (a CI log's per-test excerpt).
+func goldenFirstDifference(want, got string) string {
+	wantLines, gotLines := strings.Split(want, "\n"), strings.Split(got, "\n")
+	for index := 0; index < len(wantLines) || index < len(gotLines); index++ {
+		var wantLine, gotLine string
+		if index < len(wantLines) {
+			wantLine = wantLines[index]
+		}
+		if index < len(gotLines) {
+			gotLine = gotLines[index]
+		}
+		if index >= len(wantLines) || index >= len(gotLines) || wantLine != gotLine {
+			return fmt.Sprintf("line %d: actual %q, want %q", index+1, gotLine, wantLine)
+		}
+	}
+	return "no line differs"
+}
+
+func TestGoldenFirstDifferenceNamesTheFirstLineThatDiffers(t *testing.T) {
+	for _, row := range []struct{ want, got, diff string }{
+		{"a\nb\n", "a\nb\n", "no line differs"},
+		{"a\nb\nc\n", "a\nB\nc\n", `line 2: actual "B", want "b"`},
+		{"a\nb\n", "a\n", `line 2: actual "", want "b"`},
+	} {
+		if got := goldenFirstDifference(row.want, row.got); got != row.diff {
+			t.Errorf("goldenFirstDifference(%q, %q) = %q, want %q", row.want, row.got, got, row.diff)
 		}
 	}
 }
@@ -85,121 +129,5 @@ func TestConfigClaude(t *testing.T) {
 	}
 	if got := stderr.String(); got != "pfm config claude: account 99 is not configured (configured: 1,2,3)\n" {
 		t.Errorf("unknown account stderr=%q", got)
-	}
-}
-
-func TestConfigShowThirdPartyMCP(t *testing.T) {
-	for _, tc := range []struct{ name, mcp, want string }{
-		{"two from file", `{"thirdParty":{"b":{"type":"stdio","command":"b"},"a":{"type":"stdio","command":"a"}}}`, "config mcp.thirdParty=a,b (file)\n"},
-		{"absent", `{}`, "config mcp.thirdParty=none (default)\n"},
-		{"empty from file", `{"thirdParty":{}}`, "config mcp.thirdParty=none (file)\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			path := filepath.Join(home, pfmconfig.FileName)
-			if err := os.WriteFile(path, []byte(`{"version":2,"mcp":`+tc.mcp+`}`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			machine, err := pfmconfig.Load(path, home, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var stdout bytes.Buffer
-			printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
-			portLine := fmt.Sprintf(
-				"config mcp.http.port=%d (%s)\n",
-				machine.MCP.HTTP.Port,
-				machine.Source("mcp.http.port"),
-			)
-			if !strings.Contains(stdout.String(), portLine+tc.want) {
-				t.Fatalf("config show lacks consecutive lines %q:\n%s", portLine+tc.want, stdout.String())
-			}
-		})
-	}
-}
-
-func TestConfigShowStateDatabaseSources(t *testing.T) {
-	t.Setenv(paths.EnvStateDB, "/env/state.db")
-	t.Setenv(paths.EnvCacheDB, "/env/cache.db")
-	machine := pfmconfig.Defaults(t.TempDir(), nil)
-	var stdout bytes.Buffer
-	printResolvedConfig(&stdout, commandRuntime{
-		Config: machine,
-		Paths:  paths.Values{StateDB: "/env/state.db", CacheDB: "/env/cache.db"},
-	})
-	want := "config state.db=/env/state.db (env)\nconfig state.cacheDb=/env/cache.db (env)\n"
-	if !strings.Contains(stdout.String(), want) {
-		t.Fatalf("config show lacks consecutive lines %q:\n%s", want, stdout.String())
-	}
-}
-
-func TestConfigShowDoctorIgnoreWarnings(t *testing.T) {
-	for _, tc := range []struct{ name, body, want string }{
-		{"absent", `{"version":2}`, "config doctor.ignoreWarnings=none (default)\n"},
-		{
-			"from file", `{"version":2,"doctor":{"ignoreWarnings":["vscode-link","vscode-index"]}}`,
-			"config doctor.ignoreWarnings=vscode-link,vscode-index (file)\n",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			path := filepath.Join(home, pfmconfig.FileName)
-			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			machine, err := pfmconfig.Load(path, home, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var stdout bytes.Buffer
-			printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
-			if !strings.Contains(stdout.String(), tc.want) {
-				t.Fatalf("config show lacks %q:\n%s", tc.want, stdout.String())
-			}
-		})
-	}
-}
-
-func TestConfigShowChatBackendSources(t *testing.T) {
-	for _, tc := range []struct{ name, body, want string }{
-		{"absent", `{"version":2}`, "config chat.backend=auto (default)\n"},
-		{"explicit auto", `{"version":2,"chat":{"backend":"auto"}}`, "config chat.backend=auto (file)\n"},
-		{"tmux", `{"version":2,"chat":{"backend":"tmux"}}`, "config chat.backend=tmux (file)\n"},
-		{"herdr", `{"version":2,"chat":{"backend":"herdr"}}`, "config chat.backend=herdr (file)\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			path := filepath.Join(home, pfmconfig.FileName)
-			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			machine, err := pfmconfig.Load(path, home, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var stdout bytes.Buffer
-			printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
-			if !strings.Contains(stdout.String(), tc.want) {
-				t.Fatalf("config show missing %q:\n%s", tc.want, stdout.String())
-			}
-		})
-	}
-}
-
-func TestConfigShowExtensionsWithSource(t *testing.T) {
-	root := jailTest(t)
-	path := writeConfigFixture(
-		t,
-		root,
-		`{"version":2,"extensions":{"ponytail":{"enabled":true,"engines":["codex"],"env":{"PONYTAIL_SUBAGENT_MATCHER":"^worker$"}}}}`,
-	)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("code %d stderr %s", code, stderr.String())
-	}
-	for _, want := range []string{"config extensions.ponytail.enabled=true (file)", "config extensions.ponytail.engines=codex (file)", "PONYTAIL_SUBAGENT_MATCHER"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("missing %q in %s", want, stdout.String())
-		}
 	}
 }

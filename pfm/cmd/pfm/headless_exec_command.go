@@ -17,6 +17,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
 )
@@ -25,6 +26,8 @@ const (
 	textFormat   = "text"
 	nativeFormat = "native"
 )
+
+var headlessExecRunner deps.Runner // the engine child's Runner; nil is the real one, a test sets a fake
 
 func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
 	flags := cli.NewFlagSet("headless exec", "usage: pfm headless exec [options] [-- ENGINE_ARGS...]\n"+
@@ -132,8 +135,8 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		Model: *model, Effort: *effort, Prompt: *prompt, CWD: *cwd, TempDir: runtime.Paths.SIDDir,
 		Timeout: time.Duration(*timeout * float64(time.Second)), StrictMCP: *strictMCP,
 		NoSessionPersistence: *noPersistence, Sealed: *sealed, Native: *format == nativeFormat,
-		AllowUnsupported: *allowUnsupported,
-		Args:             append([]string(engineArgs), tail...),
+		AllowUnsupported: *allowUnsupported, Runner: headlessExecRunner,
+		Args: append([]string(engineArgs), tail...),
 	}
 	if err := headlessrun.ApplyEngineSelector(&request, *engine); err != nil {
 		fmt.Fprintf(stderr, "pfm headless: %v\n", err)
@@ -273,13 +276,21 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			fmt.Fprintf(stderr, "pfm headless: write result: %v\n", err)
 			code = 4
 		}
-	} else if *format == textFormat && runErr == nil {
-		if _, err := fmt.Fprintln(stdout, result.Answer); err != nil {
+	}
+	// A schema miss still paid for its answer: it is printed and written, exit 5 names the miss.
+	answered := runErr == nil || errors.Is(runErr, headlessrun.ErrStructuredOutput) &&
+		(result.Answer != "" || len(result.StructuredOutput) != 0)
+	if *format == textFormat && answered {
+		answer := result.Answer
+		if answer == "" {
+			answer = string(result.StructuredOutput)
+		}
+		if _, err := fmt.Fprintln(stdout, answer); err != nil {
 			fmt.Fprintf(stderr, "pfm headless: write answer: %v\n", err)
 			code = 4
 		}
 	}
-	if *out != "" && runErr == nil {
+	if *out != "" && answered {
 		body := []byte(result.Answer)
 		if len(result.StructuredOutput) != 0 {
 			body = result.StructuredOutput

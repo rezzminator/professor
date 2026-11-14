@@ -2,6 +2,8 @@ package spawn
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -73,22 +75,22 @@ func (fake *untrustedCodex) SendKey(ctx context.Context, target pfmcall.Target, 
 	return fake.fakeCodex.SendKey(ctx, target, key)
 }
 
-func requireUntrustedRefusal(t *testing.T, result Result, err error) {
+func requireUntrustedRefusal(t *testing.T, result Result, err error, want string) {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("Run() reported a thread-less Codex as started: %#v", result)
-	}
-	for _, want := range []string{"no active thread", "untrusted", "/work/alpha", codexNoThread} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q does not name %q", err, want)
-		}
+	if got := fmt.Sprint(err); got != want {
+		t.Fatalf("Run() error = %q, want %q (result %#v)", got, want, result)
 	}
 }
 
 func TestCodexWithoutAThreadFailsAtRename(t *testing.T) {
 	fake := newUntrustedCodex()
 	result, err := Run(context.Background(), fake, codexRequest())
-	requireUntrustedRefusal(t, result, err)
+	requireUntrustedRefusal(
+		t,
+		result,
+		err,
+		"the folder /work/alpha is untrusted, so Codex has no active thread: it answers \"No active thread is available.\" and the first prompt only queues; trust the folder by running codex there yourself, then start the chat again (the thread-less chat is still at tmux -L cx-1-2-3 attach -t cx-1-2-3)",
+	)
 	if countKey(fake.keys, "literal:/rename") != 1 {
 		t.Fatalf("a thread-less Codex was asked to rename more than once: %v", fake.keys)
 	}
@@ -103,7 +105,12 @@ func TestCodexWithoutAThreadFailsAtThePrompt(t *testing.T) {
 	fake := newUntrustedCodex()
 	fake.offersRename = false
 	result, err := Run(context.Background(), fake, codexRequest())
-	requireUntrustedRefusal(t, result, err)
+	requireUntrustedRefusal(
+		t,
+		result,
+		err,
+		"the folder /work/alpha is untrusted, so Codex has no active thread: it answers \"No active thread is available.\" and the first prompt only queues; trust the folder by running codex there yourself, then start the chat again (the thread-less chat is still at tmux -L cx-1-2-3 attach -t cx-1-2-3)",
+	)
 }
 
 // TestCodexFolderTrustDialogIsNeverEscaped is 0.159's "Trust this folder?"
@@ -135,7 +142,12 @@ func TestCodexFolderTrustDialogThatHoldsFailsLoudly(t *testing.T) {
 	fake := newUntrustedCodex()
 	fake.trustAsked, fake.holdsTrust = true, true
 	result, err := Run(context.Background(), fake, codexRequest())
-	requireUntrustedRefusal(t, result, err)
+	requireUntrustedRefusal(
+		t,
+		result,
+		err,
+		"the folder /work/alpha is untrusted, so Codex has no active thread: it answers \"No active thread is available.\" and the first prompt only queues; trust the folder by running codex there yourself, then start the chat again (the thread-less chat is still at tmux -L cx-1-2-3 attach -t cx-1-2-3)",
+	)
 	for _, key := range fake.keys {
 		if key != "key:1" {
 			t.Fatalf("a held trust dialog got more than its option key: %v", fake.keys)
@@ -198,5 +210,41 @@ func TestCodexFolderTrustKeyReadsTheDialogsOwnOption(t *testing.T) {
 		if key := startupOverlayKey(testCase.capture); testCase.want != "" && key != testCase.want {
 			t.Errorf("%s: startupOverlayKey = %q, want %q", testCase.name, key, testCase.want)
 		}
+	}
+}
+
+// blindAfterPrompt is a Codex chat whose pane stops answering captures once the
+// first prompt was pasted: the chat is running, only its thread is unverified.
+type blindAfterPrompt struct{ *fakeCodex }
+
+func (fake *blindAfterPrompt) Pane(socket, pane string) (pfmcall.Screen, pfmcall.Target, error) {
+	return fake, fakeTarget(socket, pane), nil
+}
+
+func (fake *blindAfterPrompt) CaptureScreen(ctx context.Context, target pfmcall.Target) (string, error) {
+	fake.mutex.Lock()
+	pasted := false
+	for _, key := range fake.keys {
+		pasted = pasted || strings.HasPrefix(key, "paste:")
+	}
+	fake.mutex.Unlock()
+	if pasted {
+		return "", errors.New("pane capture failed")
+	}
+	return fake.fakeCodex.CaptureScreen(ctx, target)
+}
+
+// TestCodexThreadCheckThatCannotReadTheScreenWarnsAndKeepsTheChat: a screen the
+// thread check cannot read leaves a chat that is already running reported as
+// started, with the unverified thread named, never as a failed spawn.
+func TestCodexThreadCheckThatCannotReadTheScreenWarnsAndKeepsTheChat(t *testing.T) {
+	result, err := Run(context.Background(), &blindAfterPrompt{newFakeCodex()}, codexRequest())
+	if err != nil {
+		t.Fatalf("Run() reported a running chat as failed: %v", err)
+	}
+	want := "could not read the Codex chat on socket cx-1-2-3 to confirm it started a thread: " +
+		"pane capture failed; the chat is running, unverified"
+	if len(result.Warnings) == 0 || result.Warnings[0] != want || !result.Named {
+		t.Fatalf("result = %#v, want Named with first warning %q", result, want)
 	}
 }

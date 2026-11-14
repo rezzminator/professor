@@ -1,3 +1,5 @@
+//go:build jail
+
 package call
 
 import (
@@ -10,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -43,7 +46,7 @@ func newCallTmuxJail(t *testing.T) *callTmuxJail {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed")
 	}
-	tmuxJailRoot := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	tmuxJailRoot := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(tmuxJailRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -338,6 +341,7 @@ func (jail *callTmuxJail) startCompactTranscriptPane(
 // real tmux server: the waiter rides out the busy turn (chat.sh:1062-1077) and
 // the steer lands once, after idle, with the submit confirmed.
 func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newCallTmuxJail(t)
 	socket := "probe-pfm-call-then"
 	pane := jail.startBusyPane(t, socket, "steer-session", 900*time.Millisecond, "")
@@ -417,6 +421,7 @@ func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 // "BUSY-TYPED:" echo, and the auto-file store is never touched — see the
 // comment at the long-body assertion below.
 func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newCallTmuxJail(t)
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
 	// Deliberately keep a non-Codex socket spelling: the verified foreground
@@ -495,6 +500,7 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 }
 
 func TestJailedBusyClaudeQueuesWithoutControlKeys(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newCallTmuxJail(t)
 	socket := "probe-pfm-call-claude-queue"
 	pane := jail.startBusyPane(t, socket, "claude-queue-session", 30*time.Second, "")
@@ -561,6 +567,7 @@ func TestJailedBusyClaudeQueuesWithoutControlKeys(t *testing.T) {
 // paced-literal/full-transcript guarantee is proven the way DeliverThen's
 // waiter actually reaches this transaction.
 func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newCallTmuxJail(t)
 	socket := "probe-pfm-call-compact-focus"
 	session := "compact-focus-session"
@@ -658,6 +665,7 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 // TestJailedCaptureReturnsWholeScrollback covers chat.sh:1215-1219: capture
 // reads the entire retained buffer, not only the visible fold.
 func TestJailedCaptureReturnsWholeScrollback(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newCallTmuxJail(t)
 	socket := "probe-pfm-call-scrollback"
 	session := "scrollback-session"
@@ -730,6 +738,7 @@ func TestJailedCaptureReturnsWholeScrollback(t *testing.T) {
 // that never had a server answers a real error, which must never be read
 // as "unattended" — an error is a failure to look, not an answer.
 func TestJailedClientActivityReportsUnattendedAndDeadSocket(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newCallTmuxJail(t)
 	socket := "probe-pfm-client-activity"
 	session := "probe-pfm-client-activity-session"

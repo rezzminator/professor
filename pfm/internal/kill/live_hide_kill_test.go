@@ -76,6 +76,7 @@ func TestKillSpawnsTheExitFinisherWheneverTheTargetIsLive(t *testing.T) {
 			}()
 			spawner := &captureSpawner{}
 			manager, err := New(database, Dependencies{
+				Paths:   jail.resolved(),
 				Spawner: spawner,
 				Now:     func() time.Time { return time.Unix(900, 0) },
 			})

@@ -46,6 +46,10 @@ const StaleHorizon = time.Hour
 // while nothing usable is cached to answer with meanwhile.
 var ErrRefreshHeld = errors.New("another pfm process is refreshing this account's usage and nothing is cached yet")
 
+// ErrUsageOffline reports that paths.EnvUsageOffline stopped the request: the
+// endpoint was not asked, so the answer is the cache alone, never "no usage".
+var ErrUsageOffline = errors.New("usage endpoint not asked: " + paths.EnvUsageOffline + "=1")
+
 // StatusError is a non-2xx usage response other than 429. ErrorType and
 // Message are the provider's own reading of it, from the body's
 // `{"error":{"type","message"}}`, empty when the body carried none; the json
@@ -114,10 +118,12 @@ func NamesDeadCredential(text string) bool {
 //     five-hour reset still ahead, answers without a request;
 //  2. this seat's cache record fresh within options.TTL answers;
 //  3. an active shared backoff answers with the cached usage and its error;
-//  4. the O_EXCL refresh lock (RefreshLockPath) is taken — while a peer holds it no
+//  4. with options.Offline (paths.EnvUsageOffline=1) the cache answers with
+//     ErrUsageOffline and no request is sent;
+//  5. the O_EXCL refresh lock (RefreshLockPath) is taken — while a peer holds it no
 //     request is sent and the cache answers; holding it, the cache is read
 //     again and answers if a peer refreshed or backed off meanwhile;
-//  5. the request: success writes the record — a window the response leaves
+//  6. the request: success writes the record — a window the response leaves
 //     out is off the account's plan, so it is no failure and nothing of it is
 //     carried over — a 429 writes the shared backoff (BackoffFor), any other
 //     failure a one-minute backoff.
@@ -143,9 +149,10 @@ func Fetch(ctx context.Context, options Options, account int) (usage Usage, conf
 		ClaudeRateLimitDir(options.Env.Get(paths.EnvHome)), account, options.ConfigDir, now, options.TTL,
 	)
 	if err != nil {
-		notes = append(notes, fmt.Errorf("statusline snapshot not used: %w", err))
-	} else if found && snapshot.FiveHour.Utilization != nil {
-		return snapshot, snapshotAt, nil
+		notes = append(notes, fmt.Errorf("statusline snapshot: %w", err))
+	}
+	if found && snapshot.FiveHour.Utilization != nil {
+		return finish(doorAnswer{usage: snapshot, confirmedAt: snapshotAt})
 	}
 	cachePath := CachePath(options.CacheDir, account)
 	view := readCacheView(cachePath, options.ConfigDir, now)
@@ -155,11 +162,12 @@ func Fetch(ctx context.Context, options Options, account int) (usage Usage, conf
 	if answer, ok := view.answer(ctx, options, now); ok {
 		return finish(answer)
 	}
+	if options.Offline {
+		return finish(view.staleAnswer(now, ErrUsageOffline))
+	}
 	lockPath := RefreshLockPath(options.CacheDir, account)
-	held, lockErr := false, EnsurePrivateDir(options.CacheDir)
-	if lockErr != nil {
-		lockErr = fmt.Errorf("usage cache directory %s: %w", options.CacheDir, lockErr)
-	} else {
+	held, lockErr := false, paths.EnsurePrivateDir("usage cache directory", options.CacheDir)
+	if lockErr == nil {
 		held, lockErr = takeRefreshLock(lockPath, options.Clock.Now())
 	}
 	if held {
@@ -237,7 +245,7 @@ func refreshHeld(ctx context.Context, options Options, cachePath string, now tim
 		cacheErr := WriteCacheRecord(cachePath, CacheRecord{
 			Usage: previousUsage, ConfigDir: options.ConfigDir, FetchedAt: previousFetchedAt,
 			Backoff: &CacheBackoff{
-				Message: message, RetryAfter: retryAfter, RecordedAt: now, Credential: credentialID, Refusal: refusal,
+				Message: message, RetryAfter: retryAfter, Credential: credentialID, Refusal: refusal,
 			},
 		})
 		var rateLimit *RateLimitError
@@ -500,13 +508,15 @@ func request(ctx context.Context, options Options) (usageResult Usage, credentia
 	}
 	var decoded Usage
 	if err := json.Unmarshal(fresh, &decoded); err != nil {
-		return Usage{}, credentialID, fmt.Errorf("decode usage response: %w", err)
+		return Usage{}, credentialID, fmt.Errorf("decode usage response: %w; body: %s", err, bodyExcerpt(fresh))
 	}
 	// A window the response leaves out is not on the account's plan: an
 	// answer, not a failure. A body naming no usage key at all (an error
 	// object, null) answers nothing and fails.
 	if !logUnknownUsageKeys(fresh, options.Log) {
-		return Usage{}, credentialID, fmt.Errorf("decode usage response: no usage key in %d-byte body", len(fresh))
+		return Usage{}, credentialID, fmt.Errorf(
+			"decode usage response: no usage key in %d-byte body: %s", len(fresh), bodyExcerpt(fresh),
+		)
 	}
 	return decoded, credentialID, nil
 }
@@ -537,11 +547,17 @@ func providerError(body io.Reader) (errorType, message string, err error) {
 	if json.Unmarshal(raw, &decoded) == nil && (decoded.Error.Type != "" || decoded.Error.Message != "") {
 		return decoded.Error.Type, decoded.Error.Message, nil
 	}
+	return "", bodyExcerpt(raw), nil
+}
+
+// bodyExcerpt is a provider body as one line of at most 200 bytes, the text a
+// failure carries of a body it could not use.
+func bodyExcerpt(raw []byte) string {
 	text := strings.Join(strings.Fields(string(raw)), " ")
 	if len(text) > 200 {
 		text = text[:200]
 	}
-	return "", text, nil
+	return text
 }
 
 // joinBodyErr keeps the status typed (errors.As still finds it) while an
@@ -590,7 +606,10 @@ func claudeCodeVersion(ctx context.Context, binary string) (string, error) {
 	if binary == "" {
 		binary = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	path := deps.Executable(binary)
+	path, err := usageRunner.LookPath(binary)
+	if err != nil {
+		return "", fmt.Errorf("resolve Claude Code binary %q: %w", binary, err)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", fmt.Errorf("stat Claude Code binary %s: %w", path, err)
@@ -614,7 +633,7 @@ func claudeCodeVersion(ctx context.Context, binary string) (string, error) {
 	}()
 	ctx, cancel := context.WithTimeout(ctx, deps.ProbeTimeout)
 	defer cancel()
-	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, []string{path, "--version"}, deps.RunOptions{
+	result, err := usageRunner.Run(ctx, []string{path, "--version"}, deps.RunOptions{
 		Env:       home.Env(herdr.StripPane(os.Environ())),
 		WaitDelay: time.Second,
 	})

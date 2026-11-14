@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +15,8 @@ import (
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // CaptureScreen, CaptureStyled, CaptureTarget, SendKey, SendLiteral,
@@ -155,7 +158,7 @@ func TestReapTeammatesRetainsFailedChildren(t *testing.T) {
 				serverErr, paneErr = errors.New("no server running on /x"), errors.New("can't find pane: %7")
 			}
 			tmux := &reapTmux{fakeTmux: &fakeTmux{killPaneErr: paneErr}, serverErr: serverErr}
-			finisher, err := NewFinisher(database, Dependencies{Tmux: tmux, Screen: tmux})
+			finisher, err := NewFinisher(database, Dependencies{Paths: jail.resolved(), Tmux: tmux, Screen: tmux})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -206,6 +209,55 @@ func TestReapTeammatesRetainsFailedChildren(t *testing.T) {
 				t.Errorf("detached socket stat = %v; gone=%v", statErr, gone)
 			}
 		})
+	}
+}
+
+// An unreadable children table never hides a chat's flat-file teammates: they
+// are reaped, their registrations kept for the retry the table's failure
+// forces, and that failure returned beside them.
+func TestReapTeammatesReadsTheFlatFileWhenTheTableIsUnreadable(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	ctx := context.Background()
+	tmux := &fakeTmux{}
+	finisher, err := NewFinisher(database, Dependencies{Paths: jail.resolved(), Tmux: tmux, Screen: tmux})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "parent"
+	registrations := map[string]string{fleetdb.KindNew: "cc-legacy", fleetdb.KindPane: "shared\t%7"}
+	for kind, value := range registrations {
+		flat := filepath.Join(jail.home, ".claude", ".cc-"+kind+"-children", id)
+		if err := os.MkdirAll(filepath.Dir(flat), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(flat, []byte(value+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = finisher.reapTeammates(ctx, id)
+	const closed = "sql: database is closed"
+	want := "read new children of parent: query shared children: " + closed + "\n" +
+		`reaped new child "cc-legacy" of parent; its registration stays: clear shared new child "cc-legacy" of parent: ` +
+		closed + "\n" +
+		"read pane children of parent: query shared children: " + closed + "\n" +
+		`reaped pane child "shared\t%7" of parent; its registration stays: clear shared pane child "shared\t%7" of parent: ` +
+		closed
+	if got := fmt.Sprint(err); got != want {
+		t.Errorf("reap error = %q, want %q", got, want)
+	}
+	if got, want := fmt.Sprint(tmux.killedServers, tmux.killedPanes), "[cc-legacy] [shared\t%7]"; got != want {
+		t.Errorf("reaped servers and panes = %q, want %q", got, want)
+	}
+	for kind, value := range registrations {
+		flat := filepath.Join(jail.home, ".claude", ".cc-"+kind+"-children", id)
+		if contents, err := os.ReadFile(flat); err != nil || string(contents) != value+"\n" {
+			t.Errorf("%s flat registrations = %q, %v; want %q kept", kind, contents, err, value+"\n")
+		}
 	}
 }
 
@@ -417,6 +469,7 @@ func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T)
 			database := jail.open(t)
 			var log bytes.Buffer
 			finisher, err := NewFinisher(database, Dependencies{
+				Paths:        jail.resolved(),
 				Log:          &log,
 				Tmux:         test.tmux,
 				Screen:       test.tmux,
@@ -471,5 +524,41 @@ func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T)
 				t.Fatalf("log = %q, want one no-exit-command line naming %q", log.String(), test.wantReason)
 			}
 		})
+	}
+}
+
+// One engine's index pass failing costs only that engine: the post-exit
+// refresh of the others stands, and the failure is logged, not returned.
+func TestIndexRefresherWarnsOnAPartialIndexAndRefreshes(t *testing.T) {
+	jail := newKillJail(t)
+	database := jail.open(t)
+	ctx, recorder := obs.Test(t)
+	raw, err := sqlitedb.OpenReadWrite(database.Path(), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec("DROP TABLE transcripts"); err != nil { // the Claude pass's own table
+		t.Fatal(errors.Join(err, raw.Close()))
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	refresher := indexRefresher{
+		database:    database,
+		claudeRoots: []string{filepath.Join(jail.home, ".claude", "projects")},
+		codexHomes:  []string{jail.codexHome},
+	}
+	if err := refresher.Refresh(ctx); err != nil {
+		t.Fatalf("Refresh() = %v, want nil: the Codex pass indexed", err)
+	}
+	var warned any
+	for _, record := range recorder.Records() {
+		if record.Message == "kill: post-exit index refreshed partially" {
+			warned, _ = record.Field(obs.FieldErr)
+		}
+	}
+	want := "index engine cc: query transcripts: SQL logic error: no such table: transcripts (1)"
+	if warned != want {
+		t.Fatalf("warned error = %v, want %q", warned, want)
 	}
 }

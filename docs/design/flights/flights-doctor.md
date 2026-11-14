@@ -47,7 +47,8 @@ Each row names its transcript `path:line`.
 | Full suites outside the lander | any full suite or gate run by a foreman |
 | Gate repeats | a lander full gate run again with no red gate between, or a red gate's fix checked by rerunning the gate |
 | Idle gaps | a gap over 5 minutes, with who waited on what |
-| Needless children | a child spawned while the foreman was idle, or on files shared with the foreman's own: the foreman's written bytes against its children's |
+| Reading rounds | a foreman's requests before its first edit, past the third; a read-only request of its that carries one command |
+| Unprobed returns | a foreman return whose `PROBES` line carries no printed result over a change that runs code |
 | Silent agents | agents that wrote nothing, ranked by input tokens |
 
 ## The report

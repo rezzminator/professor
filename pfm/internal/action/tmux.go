@@ -225,8 +225,12 @@ func (runner ExecRunner) Run(
 	name string,
 	args ...string,
 ) error {
+	path, err := deps.Resolve(name)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", name, err)
+	}
 	process, err := obs.Runner(deps.RealRunner{}).
-		Start(ctx, append([]string{deps.Executable(name)}, args...), deps.StartOptions{
+		Start(ctx, append([]string{path}, args...), deps.StartOptions{
 			Stdin:  runner.Stdin,
 			Stdout: runner.Stdout,
 			Stderr: runner.Stderr,

@@ -14,7 +14,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/stale"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type mcpServeProcTable struct {
@@ -89,7 +88,7 @@ func newMCPServeDoctorFixture(t *testing.T) (config.Runtime, gather.FileID, gath
 	t.Helper()
 	home := t.TempDir()
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	if err := writeExecutable(binary); err != nil {
+	if err := writePFMBinary(binary); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := gather.FileIDOf(binary)
@@ -101,11 +100,13 @@ func newMCPServeDoctorFixture(t *testing.T) (config.Runtime, gather.FileID, gath
 	return config.Runtime{Paths: paths.Values{Home: home}}, fresh, staleImage
 }
 
-func writeExecutable(path string) error {
+// writePFMBinary writes the pfm binary whose file identity the check compares;
+// nothing stats its mode or runs it.
+func writePFMBinary(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return testjail.WriteExecutable(path, []byte("fixture"), 0o700)
+	return os.WriteFile(path, []byte("fixture"), 0o600)
 }
 
 func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
@@ -285,11 +286,11 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
-			warnings := printMCPServeProcessesDoctorWithSignaler(
+			warnings := printMCPServeProcessesDoctorWithProbe(
 				&output,
 				runtime,
 				test.table,
-				func(int, syscall.Signal) error { return nil },
+				func(int) error { return nil },
 			)
 			if warnings != test.wantWarnings {
 				t.Fatalf("warnings=%d, want %d\n%s", warnings, test.wantWarnings, output.String())
@@ -310,6 +311,9 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 
 func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 	runtime, _, replaced := newMCPServeDoctorFixture(t)
+	// A jail proc root that does not exist: the descriptor census has no table
+	// and the fixture's links alone decide, so the host's /proc is never read.
+	runtime.Paths.ProcRoot = filepath.Join(t.TempDir(), "proc")
 	handle, err := stale.HoldCompatibleProxy(runtime.Paths.Home)
 	if err != nil {
 		t.Fatal(err)
@@ -326,7 +330,7 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 	tests := []struct {
 		name         string
 		table        mcpServeProcTable
-		signalErr    map[int]error
+		probeErr     map[int]error
 		wantWarnings int
 		want         []string
 		notWant      []string
@@ -407,19 +411,19 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 				images:    map[int]gather.FileID{50000215: replaced},
 				fdLinkErr: map[int]error{50000215: errors.New("process vanished")},
 			},
-			signalErr: map[int]error{50000215: syscall.ESRCH},
-			want:      []string{"doctor: mcp-serve clean checked=1"},
-			notWant:   []string{"pid=50000215", "STALE", "COMPATIBLE", "UNREAD"},
+			probeErr: map[int]error{50000215: syscall.ESRCH},
+			want:     []string{"doctor: mcp-serve clean checked=1"},
+			notWant:  []string{"pid=50000215", "STALE", "COMPATIBLE", "UNREAD"},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
-			warnings := printMCPServeProcessesDoctorWithSignaler(
+			warnings := printMCPServeProcessesDoctorWithProbe(
 				&output,
 				runtime,
 				test.table,
-				func(pid int, _ syscall.Signal) error { return test.signalErr[pid] },
+				func(pid int) error { return test.probeErr[pid] },
 			)
 			if warnings != test.wantWarnings {
 				t.Fatalf("warnings=%d, want %d\n%s", warnings, test.wantWarnings, output.String())
@@ -550,11 +554,11 @@ func TestMCPServeProcessesDoctorScopesCommandReadsByIdentity(t *testing.T) {
 				commandReads: make(map[int]int),
 			}
 			var output bytes.Buffer
-			warnings := printMCPServeProcessesDoctorWithSignalerAndUID(
+			warnings := printMCPServeProcessesDoctorWithProbeAndUID(
 				&output,
 				runtime,
 				table,
-				func(int, syscall.Signal) error { return nil },
+				func(int) error { return nil },
 				currentUID,
 			)
 			if warnings != test.wantWarnings {
@@ -580,7 +584,7 @@ func TestMCPServeProcessesDoctorChecksUnreadableCommandLiveness(t *testing.T) {
 	tests := []struct {
 		name         string
 		pid          int
-		signalErr    error
+		probeErr     error
 		wantWarnings int
 		want         []string
 		notWant      []string
@@ -588,7 +592,7 @@ func TestMCPServeProcessesDoctorChecksUnreadableCommandLiveness(t *testing.T) {
 		{
 			name:         "process exited while reading command",
 			pid:          50000555,
-			signalErr:    syscall.ESRCH,
+			probeErr:     syscall.ESRCH,
 			wantWarnings: 0,
 			want:         []string{"doctor: mcp-serve clean checked=0"},
 			notWant:      []string{"pid=50000555", "UNREAD"},
@@ -596,7 +600,7 @@ func TestMCPServeProcessesDoctorChecksUnreadableCommandLiveness(t *testing.T) {
 		{
 			name:         "liveness probe is indeterminate",
 			pid:          50000556,
-			signalErr:    syscall.EPERM,
+			probeErr:     syscall.EPERM,
 			wantWarnings: 1,
 			want: []string{
 				"doctor: mcp-serve UNREAD — pid=50000556  read command: permission denied; " +
@@ -611,25 +615,25 @@ func TestMCPServeProcessesDoctorChecksUnreadableCommandLiveness(t *testing.T) {
 				pids:       []int{test.pid},
 				cmdlineErr: map[int]error{test.pid: errors.New("permission denied")},
 			}
-			var signals []syscall.Signal
+			var probes []int
 			var output bytes.Buffer
-			warnings := printMCPServeProcessesDoctorWithSignaler(
+			warnings := printMCPServeProcessesDoctorWithProbe(
 				&output,
 				runtime,
 				table,
-				func(pid int, signal syscall.Signal) error {
+				func(pid int) error {
 					if pid != test.pid {
-						t.Fatalf("signaled pid=%d, want %d", pid, test.pid)
+						t.Fatalf("probed pid=%d, want %d", pid, test.pid)
 					}
-					signals = append(signals, signal)
-					return test.signalErr
+					probes = append(probes, pid)
+					return test.probeErr
 				},
 			)
 			if warnings != test.wantWarnings {
 				t.Fatalf("warnings=%d, want %d\n%s", warnings, test.wantWarnings, output.String())
 			}
-			if len(signals) != 1 || signals[0] != 0 {
-				t.Fatalf("signals=%v, want one signal-zero liveness probe", signals)
+			if len(probes) != 1 || probes[0] != test.pid {
+				t.Fatalf("probes=%v, want one liveness probe of pid %d", probes, test.pid)
 			}
 			for _, want := range test.want {
 				if !strings.Contains(output.String(), want) {
@@ -652,8 +656,8 @@ func TestMCPServeProcessesDoctorChecksUnreadableIdentityLiveness(t *testing.T) {
 		name         string
 		pid          int
 		commandErr   error
-		signalErr    error
-		wantSignals  int
+		probeErr     error
+		wantProbes   int
 		wantWarnings int
 		want         []string
 		notWant      []string
@@ -661,8 +665,8 @@ func TestMCPServeProcessesDoctorChecksUnreadableIdentityLiveness(t *testing.T) {
 		{
 			name:         "process exits after identity failure",
 			pid:          50000557,
-			signalErr:    syscall.ESRCH,
-			wantSignals:  1,
+			probeErr:     syscall.ESRCH,
+			wantProbes:   1,
 			wantWarnings: 0,
 			want:         []string{"doctor: mcp-serve clean checked=1"},
 			notWant:      []string{"pid=50000557", "UNREAD"},
@@ -670,8 +674,8 @@ func TestMCPServeProcessesDoctorChecksUnreadableIdentityLiveness(t *testing.T) {
 		{
 			name:         "identity liveness is indeterminate",
 			pid:          50000558,
-			signalErr:    syscall.EPERM,
-			wantSignals:  1,
+			probeErr:     syscall.EPERM,
+			wantProbes:   1,
 			wantWarnings: 1,
 			want: []string{
 				"doctor: mcp-serve UNREAD — pid=50000558  read process identity: status denied; " +
@@ -683,7 +687,7 @@ func TestMCPServeProcessesDoctorChecksUnreadableIdentityLiveness(t *testing.T) {
 			name:         "both failed probes share one row",
 			pid:          50000559,
 			commandErr:   errors.New("command denied"),
-			wantSignals:  1,
+			wantProbes:   1,
 			wantWarnings: 1,
 			want: []string{
 				"doctor: mcp-serve UNREAD — pid=50000559  read process identity: status denied; " +
@@ -704,31 +708,26 @@ func TestMCPServeProcessesDoctorChecksUnreadableIdentityLiveness(t *testing.T) {
 				identityErr:  map[int]error{test.pid: errors.New("status denied")},
 				commandReads: make(map[int]int),
 			}
-			var signals []syscall.Signal
+			var probes []int
 			var output bytes.Buffer
-			warnings := printMCPServeProcessesDoctorWithSignalerAndUID(
+			warnings := printMCPServeProcessesDoctorWithProbeAndUID(
 				&output,
 				runtime,
 				table,
-				func(pid int, signal syscall.Signal) error {
+				func(pid int) error {
 					if pid != test.pid {
-						t.Fatalf("signaled pid=%d, want %d", pid, test.pid)
+						t.Fatalf("probed pid=%d, want %d", pid, test.pid)
 					}
-					signals = append(signals, signal)
-					return test.signalErr
+					probes = append(probes, pid)
+					return test.probeErr
 				},
 				currentUID,
 			)
 			if warnings != test.wantWarnings {
 				t.Fatalf("warnings=%d, want %d\n%s", warnings, test.wantWarnings, output.String())
 			}
-			if len(signals) != test.wantSignals {
-				t.Fatalf("signals=%v, want %d signal-zero liveness probes", signals, test.wantSignals)
-			}
-			for _, signal := range signals {
-				if signal != 0 {
-					t.Fatalf("signal=%v, want signal zero", signal)
-				}
+			if len(probes) != test.wantProbes {
+				t.Fatalf("probes=%v, want %d liveness probes", probes, test.wantProbes)
 			}
 			for _, want := range test.want {
 				if !strings.Contains(output.String(), want) {
@@ -780,11 +779,11 @@ func TestMCPServeProcessesDoctorReportsUnreadableStates(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
-			warnings := printMCPServeProcessesDoctorWithSignaler(
+			warnings := printMCPServeProcessesDoctorWithProbe(
 				&output,
 				runtime,
 				test.table,
-				func(int, syscall.Signal) error { return nil },
+				func(int) error { return nil },
 			)
 			if warnings != 1 {
 				t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
@@ -809,11 +808,11 @@ func TestMCPServeProcessesDoctorUsesOneCommandSnapshot(t *testing.T) {
 		images:     map[int]gather.FileID{50000603: replaced},
 	}}
 	var output bytes.Buffer
-	warnings := printMCPServeProcessesDoctorWithSignaler(
+	warnings := printMCPServeProcessesDoctorWithProbe(
 		&output,
 		runtime,
 		table,
-		func(int, syscall.Signal) error { return nil },
+		func(int) error { return nil },
 	)
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
@@ -833,11 +832,11 @@ func TestMCPServeProcessesDoctorReportsMissingInstalledBinary(t *testing.T) {
 	home := t.TempDir()
 	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 	var output bytes.Buffer
-	warnings := printMCPServeProcessesDoctorWithSignaler(
+	warnings := printMCPServeProcessesDoctorWithProbe(
 		&output,
 		runtime,
 		mcpServeProcTable{},
-		func(int, syscall.Signal) error { return nil },
+		func(int) error { return nil },
 	)
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())

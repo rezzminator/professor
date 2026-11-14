@@ -32,7 +32,13 @@ func TestVscodeAckPublicationFailureOverridesSameGenerationSuccess(t *testing.T)
 	if err := os.WriteFile(failure, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, h.status(), surfaceVscode, VerdictError, "ACK mutex")
+	wantVerdict(
+		t,
+		h.status(),
+		surfaceVscode,
+		VerdictError,
+		"themesync: acknowledgement publication {tmp}/.local/state/pfm/theme/vscode-ack-failures/owner.json (global): ACK mutex held by another window",
+	)
 	if flip := session.flipWithAck(); flip == nil || flip.Ack != nil {
 		t.Error("failed ACK publication claimed successful flip latency")
 	}
@@ -50,7 +56,13 @@ func TestVscodeAckPublicationFailureOverridesSameGenerationSuccess(t *testing.T)
 	); err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, h.status(), surfaceVscode, VerdictError, "unreadable contract ACK")
+	wantVerdict(
+		t,
+		h.status(),
+		surfaceVscode,
+		VerdictError,
+		"themesync: acknowledgement publication {tmp}/.local/state/pfm/theme/vscode-ack-failures/owner.json (): unreadable contract ACK",
+	)
 	if err := os.Remove(failure); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +76,66 @@ func TestVscodeAckPublicationFailureOverridesSameGenerationSuccess(t *testing.T)
 	if err := os.Remove(filepath.Join(h.stateDir, vscodeAckFile)); err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, h.status(), surfaceVscode, VerdictError, "ACK mutex")
+	wantVerdict(
+		t,
+		h.status(),
+		surfaceVscode,
+		VerdictError,
+		"themesync: acknowledgement publication {tmp}/.local/state/pfm/theme/vscode-ack-failures/owner.json (global): ACK mutex held by another window",
+	)
+}
+
+// A failure record that cannot be parsed, or that names no error, never takes the
+// extension's ack with it: the unreadable one is skipped and named in the row, an
+// older generation's one is ignored whatever it holds, and one for the current
+// generation with no error text still fails the row.
+func TestVscodeAckFailureRecordsThatCannotBeReadCostOnlyThemselves(t *testing.T) {
+	h := newHarness(t)
+	report := h.on()
+	h.ackVscode(report.Generation)
+	dir := filepath.Join(h.stateDir, "vscode-ack-failures")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	torn := filepath.Join(dir, "torn.json")
+	if err := os.WriteFile(torn, []byte(`{"generation":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(
+		t,
+		h.status(),
+		surfaceVscode,
+		VerdictInSync,
+		"acknowledgement failure {tmp}/.local/state/pfm/theme/vscode-ack-failures/torn.json unreadable, skipped: unexpected end of JSON input",
+	)
+	session := newSession(h.env, stateStore{dir: h.stateDir}, h.state())
+	session.state.LastFlip = &Flip{At: time.Now().Format(time.RFC3339Nano)}
+	if flip := session.flipWithAck(); flip == nil || flip.Ack != nil {
+		t.Errorf("flipWithAck() = %+v, want no ack offset past an unreadable failure record", flip)
+	}
+	older := fmt.Sprintf(`{"generation":%d,"error":""}`, report.Generation-1)
+	if err := os.WriteFile(filepath.Join(dir, "older.json"), []byte(older), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(
+		t,
+		h.status(),
+		surfaceVscode,
+		VerdictInSync,
+		"acknowledgement failure {tmp}/.local/state/pfm/theme/vscode-ack-failures/torn.json unreadable, skipped: unexpected end of JSON input",
+	)
+	current := fmt.Sprintf(`{"generation":%d,"target":"global","error":""}`, report.Generation)
+	failure := filepath.Join(dir, "current.json")
+	if err := os.WriteFile(failure, []byte(current), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantVerdict(
+		t,
+		h.status(),
+		surfaceVscode,
+		VerdictError,
+		"themesync: acknowledgement publication {tmp}/.local/state/pfm/theme/vscode-ack-failures/current.json (global): no error text recorded",
+	)
 }
 
 func TestVscodeContractKeysAndValues(t *testing.T) {
@@ -274,7 +345,7 @@ func TestVscodeVerdictJudgesWindowChrome(t *testing.T) {
 func TestVscodeChromeOfAGoneWorkspaceNoLongerCounts(t *testing.T) {
 	h := newHarness(t)
 	h.on()
-	h.psVscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n"
+	h.processes = [][]string{{"/Applications/Visual Studio Code.app/Contents/MacOS/Electron"}}
 	h.rearm()
 	present := h.path("work/kept.code-workspace")
 	h.write("work/kept.code-workspace", "{}\n")
@@ -322,7 +393,13 @@ func TestOffNamesTheWorkspacesStillCarryingChrome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, off, "vscode", VerdictPending, painted)
+	wantVerdict(
+		t,
+		off,
+		"vscode",
+		VerdictPending,
+		"VS Code colours stay in {tmp}/.local/state/pfm/theme/vscode-chrome.json target {tmp}/work/gone.code-workspace: statusBar.background; {tmp}/.local/state/pfm/theme/vscode-chrome.json target {tmp}/work/painted.code-workspace: statusBar.background until VS Code with the Professor extension consumes the disabled current.json",
+	)
 	if !strings.Contains(row(t, off, "vscode").Detail, "gone.code-workspace") {
 		t.Errorf(
 			"off hid an ownership record merely because its workspace disappeared: %q",
@@ -336,7 +413,7 @@ func TestOffNamesTheWorkspacesStillCarryingChrome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, off, "vscode", VerdictApplied, "the extension clears the colours")
+	wantVerdict(t, off, "vscode", VerdictApplied, "the extension clears the colours when it next reads current.json")
 
 	h.on()
 	h.write(".local/state/pfm/theme/vscode-chrome.json", "not json")
@@ -344,7 +421,13 @@ func TestOffNamesTheWorkspacesStillCarryingChrome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, off, "vscode", VerdictError, "vscode-chrome.json")
+	wantVerdict(
+		t,
+		off,
+		"vscode",
+		VerdictError,
+		"parse VS Code recovery record {tmp}/.local/state/pfm/theme/vscode-chrome.json: invalid character 'o' in literal null (expecting 'u')",
+	)
 }
 
 func TestVscodeContractWithoutChromeReadsDriftUntilTheNextSync(t *testing.T) {
@@ -387,7 +470,15 @@ func TestVscodeVerdictMatrix(t *testing.T) {
 		detail  string
 	}{
 		{"ack at the generation", vscodeAck{Generation: 4}, true, true, stale, VerdictInSync, ""},
-		{"ack error", vscodeAck{Generation: 4, Error: "boom"}, true, true, stale, VerdictError, "boom"},
+		{
+			"ack error",
+			vscodeAck{Generation: 4, Error: "boom"},
+			true,
+			true,
+			stale,
+			VerdictError,
+			"extension reported: boom",
+		},
 		{
 			"stale ack and VS Code closed",
 			vscodeAck{Generation: 3},
@@ -413,7 +504,7 @@ func TestVscodeVerdictMatrix(t *testing.T) {
 			true,
 			fresh,
 			VerdictPending,
-			"waiting for the extension",
+			"waiting for the extension to apply generation 4",
 		},
 		{
 			"no ack ever after the grace window",
@@ -431,25 +522,14 @@ func TestVscodeVerdictMatrix(t *testing.T) {
 			true,
 			stale,
 			VerdictDrift,
-			"generation 2, want 4",
-		},
-		{
-			// A Remote-SSH window can run Professor on the client's side, against the
-			// client's contract: the stale ack says where to look.
-			"older generation names the window that runs Professor elsewhere",
-			vscodeAck{Generation: 2},
-			true,
-			true,
-			stale,
-			VerdictDrift,
-			"no VS Code window running Professor on this machine applied it",
+			"extension ack is at generation 2, want 4: no VS Code window running Professor on this machine applied it; a Remote-SSH window runs Professor here only when the client's Professor is 0.6.0 or later: update it there and reload the window",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			verdict, detail := vscodeVerdict(tc.ack, tc.haveAck, 4, tc.running, tc.age, "/s/vscode-ack.json")
-			if verdict != tc.want || !strings.Contains(detail, tc.detail) {
-				t.Fatalf("vscodeVerdict = %s %q, want %s containing %q", verdict, detail, tc.want, tc.detail)
+			if verdict != tc.want || detail != tc.detail {
+				t.Fatalf("vscodeVerdict = %s %q, want %s %q", verdict, detail, tc.want, tc.detail)
 			}
 		})
 	}
@@ -502,7 +582,13 @@ func TestVscodeRemoteChromeSurvivesLocalPruning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, off, "vscode", VerdictPending, target)
+	wantVerdict(
+		t,
+		off,
+		"vscode",
+		VerdictPending,
+		"VS Code colours stay in {tmp}/.local/state/pfm/theme/vscode-chrome.json target vscode-remote://ssh-remote+fixture/project.code-workspace: window.activeBorder until VS Code with the Professor extension consumes the disabled current.json",
+	)
 }
 
 func TestShippedProfileFramesUseOnlyTheirDefinedColors(t *testing.T) {
@@ -526,7 +612,7 @@ func TestShippedProfileFramesUseOnlyTheirDefinedColors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tokens, side := customPalette(profile.Base, profile.Overrides)
+			tokens, side, _ := customPalette(profile.Base, profile.Overrides)
 			variant, err := deriveVariant(CustomValue(entry.Name()), tokens)
 			if err != nil {
 				t.Fatal(err)

@@ -82,7 +82,13 @@ func TestUnstatableSurfaceFileReadsBackAsError(t *testing.T) {
 	if err := os.Symlink(h.path(rel), h.path(rel)); err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, h.status(), "vscode", VerdictError, filepath.Base(rel))
+	wantVerdict(
+		t,
+		h.status(),
+		"vscode",
+		VerdictError,
+		"themesync: stat {tmp}/Library/Application Support/Code/User/settings.json: stat {tmp}/Library/Application Support/Code/User/settings.json: too many levels of symbolic links",
+	)
 }
 
 // flakyPriorTmux fails every read of one captured prior, as a tmux call that
@@ -133,7 +139,9 @@ func TestOffPreservesTmuxPriorsWhenReadsFail(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantVerdict(t, report, surfaceTmux, VerdictError, read)
+			failed := ": tmux: server timed out"
+			wantVerdict(t, report, surfaceTmux, VerdictError,
+				"tmux cc-a: read "+read+failed+"; tmux cc-b: read "+read+failed)
 			if got := h.tmux.servers["cc-a"]; got["mode-style"] != before ||
 				got[tmuxPriorName("mode-style")] != prior || got[tmuxPriorName("@host_accent")] != "v:#123456" {
 				t.Errorf("failed observation changed settings or priors: %v", got)
@@ -154,7 +162,14 @@ func TestOffPreservesTmuxPriorsWhenReadsFail(t *testing.T) {
 
 // A real tmux Apply can fail after a prefix, leaving saved priors and themed styles but no marker.
 func TestApplyPreservesTmuxPriorsAfterPartialApply(t *testing.T) {
-	for _, read := range []string{tmuxPriorName("mode-style"), tmuxGenerationKey, tmuxChipsKey} {
+	// Only cc-a holds a prior to re-read; both servers read the generation and the chips.
+	for read, want := range map[string]string{
+		tmuxPriorName("mode-style"): "1 of 2 servers failed: tmux cc-a: read @pfm-theme-prior-mode-style: tmux: server timed out",
+		tmuxGenerationKey: "2 of 2 servers failed: tmux cc-a: read @pfm-theme-generation: tmux: server timed out;" +
+			" tmux cc-b: read @pfm-theme-generation: tmux: server timed out",
+		tmuxChipsKey: "2 of 2 servers failed: tmux cc-a: read @pfm-theme-chips: tmux: server timed out;" +
+			" tmux cc-b: read @pfm-theme-chips: tmux: server timed out",
+	} {
 		t.Run(read, func(t *testing.T) {
 			h := newHarness(t)
 			h.on()
@@ -165,7 +180,7 @@ func TestApplyPreservesTmuxPriorsAfterPartialApply(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantVerdict(t, report, surfaceTmux, VerdictError, read)
+			wantVerdict(t, report, surfaceTmux, VerdictError, want)
 			if got := h.tmux.servers["cc-a"][tmuxPriorName("mode-style")]; got != "v:bg=yellow,fg=black" {
 				t.Errorf("retry overwrote original prior with %q", got)
 			}
@@ -186,7 +201,7 @@ func TestSyncReappliesOnlyTheDriftedSurfaceAndRewritesNoState(t *testing.T) {
 	if err := os.Chtimes(h.path(".local/state/pfm/theme/current.json"), minuteAgo, minuteAgo); err != nil {
 		t.Fatal(err)
 	}
-	h.psVscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Electron\n"
+	h.processes = [][]string{{"/Applications/Visual Studio Code.app/Contents/MacOS/Electron"}}
 	h.rearm()
 	// An ack left at another generation while VS Code runs is the one drift.
 	h.ackVscode(9)
@@ -196,7 +211,13 @@ func TestSyncReappliesOnlyTheDriftedSurfaceAndRewritesNoState(t *testing.T) {
 	}
 	applyCalls := h.tmux.applyCalls
 	report := h.sync(false)
-	wantVerdict(t, report, "vscode", VerdictDrift, "extension ack is at generation 9, want 1")
+	wantVerdict(
+		t,
+		report,
+		"vscode",
+		VerdictDrift,
+		"extension ack is at generation 9, want 1: no VS Code window running Professor on this machine applied it; a Remote-SSH window runs Professor here only when the client's Professor is 0.6.0 or later: update it there and reload the window",
+	)
 	wantVerdict(t, report, "tmux", VerdictInSync, "2 servers")
 	if h.tmux.applyCalls != applyCalls {
 		t.Errorf("a vscode-only drift re-applied tmux: %d apply calls, want %d", h.tmux.applyCalls, applyCalls)
@@ -263,7 +284,7 @@ func TestOffThatFailsASurfaceLeavesTheOffPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVerdict(t, off, "tmux", VerdictError, "lost connection")
+	wantVerdict(t, off, "tmux", VerdictError, "tmux cc-b: restore: lost connection")
 	if !RestorePending(h.stateDir) {
 		t.Fatal("RestorePending = false after an off left tmux server cc-b themed, want true")
 	}

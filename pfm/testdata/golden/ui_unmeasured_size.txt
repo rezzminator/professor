@@ -1,0 +1,17 @@
+ ◆ pfm   no live chats   ↻ 2 resumable                                                                                                           ·           ·  
+ tabs   Chats   Stats   Limits   cosmos    tab/shift+tab                                                                                                        
+ Chats · 🥈 account 2 · ⚡ 1h · 2 rows · 1 hidden · 0 empty                                                                                              ·      
+find › t                                                                                                                                             2/2 visible
+╭─ fleet 2 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────  ╭─ dossier ───────────────────────────
+│╭─ alpha ───────────────────────────────────────────────────────────────────────────────────────────────────────── ↻ 2     RESUMABLE   OpenCode                
+│› ↻ OC session                                               ◇                              1p     — ◖▶ open◗        1m   OC session                           
+││ ↻ CC session                                                                                   1p    0B ▰▰▰▰▰▰▰▰   1m   ───────────────────────────────────  
+│                                                                                                                          ┃ no prompt recorded for this chat   
+│                                                                                                                                                               
+│                                                                                                                          project  alpha                       
+│                                                                                                                          active   ▰▰▰▰▰▰▰▰  1m ago            
+│                                                                                                                                                               
+│                                                                                                               ◆          ◖ ▶ open                        ⏎ ◗  
+╰───────────────┴7d─────────────────┴1d────────────┴6h───────────────┴1h────────────────┴10m────────────────────▲1m─────  ╰─────────────────────────────────────
+  ↑↓  move   ←→  action   ⏎  open   esc  close  type to find · @ go · ⇧←→ place                                                                                 
+  ⌃X  hide   ⌃O  reboot                                                                                                                                         

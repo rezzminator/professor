@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 )
 
-// SymlinkOverDir replaces the real directory at target with a link to source
-// without target ever being absent: the link is staged beside target, then
-// exchanged with the directory in one atomic swap (renameat2 RENAME_EXCHANGE
-// on Linux, renamex_np RENAME_SWAP on macOS), and the displaced directory,
-// now at the staged name, is removed last. macOS's swap of a directory can
-// still let a concurrent lookup miss target for an instant; no darwin
-// primitive does better. A platform without the swap, or a
-// filesystem refusing it, returns an error and leaves target untouched.
+// SymlinkOverDir replaces the real directory or file at target with a link to
+// source without target ever being absent: the link is staged beside target,
+// then exchanged with the entry in one atomic swap (renameat2 RENAME_EXCHANGE
+// on Linux, renamex_np RENAME_SWAP on macOS), and the displaced entry, now at
+// the staged name, is removed last. macOS's swap, of a directory or a file,
+// can still let a concurrent lookup miss target for an instant; no darwin
+// primitive does better. A platform without the swap, or a filesystem
+// refusing it, returns an error and leaves target untouched.
 func SymlinkOverDir(target, source string, validate ...func(string) error) error {
 	return replaceDirectoryWithSymlink(target, source, nil, validate...)
 }

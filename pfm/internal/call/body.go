@@ -130,7 +130,12 @@ func (engine *Engine) prepareMessage(
 	}
 	path, warnings, err := engine.persistBody(body, target)
 	if err != nil {
-		return PreparedMessage{}, err
+		// The file only keeps the turn short; without it the body still travels.
+		return PreparedMessage{
+			Message:  signed,
+			Unsigned: unsigned,
+			Warnings: append(warnings, fmt.Sprintf("long body not saved to a file (%v) — delivered inline", err)),
+		}, nil
 	}
 	pointer := bodyCaption(body) + " — read " + path + " fully"
 	pointerUnsigned := false
@@ -175,10 +180,7 @@ func (engine *Engine) persistBody(body, target string) (string, []string, error)
 	if err := os.Chmod(root, 0o700); err != nil {
 		return "", nil, fmt.Errorf("secure call body directory %q: %w", root, err)
 	}
-	warnings, err := engine.pruneBodies(root)
-	if err != nil {
-		return "", nil, err
-	}
+	warnings := engine.pruneBodies(root)
 	stamp := engine.options.Clock.Now().UTC().Format("20060102T150405.000000000Z")
 	stem := stamp + "-" + safeBodyTarget(target)
 	for sequence := 0; sequence < 1000; sequence++ {
@@ -199,10 +201,12 @@ func (engine *Engine) persistBody(body, target string) (string, []string, error)
 	return "", warnings, fmt.Errorf("allocate call body name under %q: 1000 collisions", root)
 }
 
-func (engine *Engine) pruneBodies(root string) ([]string, error) {
+// pruneBodies removes expired bodies; housekeeping never blocks a write, so
+// every failure is a warning.
+func (engine *Engine) pruneBodies(root string) []string {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return nil, fmt.Errorf("enumerate call bodies in %q: %w", root, err)
+		return []string{fmt.Sprintf("enumerate call bodies in %q: %v — nothing pruned", root, err)}
 	}
 	cutoff := engine.options.Clock.Now().Add(-engine.options.BodyMaxAge)
 	warnings := make([]string, 0)
@@ -223,7 +227,7 @@ func (engine *Engine) pruneBodies(root string) ([]string, error) {
 			warnings = append(warnings, fmt.Sprintf("prune stale body %q: %v", path, err))
 		}
 	}
-	return warnings, nil
+	return warnings
 }
 
 func writeExclusive(path, body string) error {

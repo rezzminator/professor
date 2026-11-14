@@ -88,6 +88,16 @@ func TestLadderOrderAndFailureKinds(t *testing.T) {
 			name: "unknown", target: "ghost", wantCode: CodeUnknown,
 			wantDetail: `target "ghost" matched no live chat`,
 		},
+		{
+			name: "unknown past an unreadable pane", target: "ghost", wantCode: CodeUnknown,
+			wantDetail: `target "ghost" matched no live chat; ` +
+				`could not read the screen of pane %3 (socket /jail/cc-1-2-3): exit status 1`,
+			ladder: Ladder{Raw: &ladderRaw{outcomes: map[Kind]Outcome{
+				Session:  {Code: 1},
+				Label:    {Code: 1, Stderr: "could not read the screen of pane %3 (socket /jail/cc-1-2-3): exit status 1\n"},
+				CxWindow: {Code: 1},
+			}}},
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			seat, code, detail, err := testCase.ladder.Resolve(ctx, testCase.target, LadderOptions{})
@@ -219,7 +229,8 @@ func TestLadderRawPaneSocketScopeAndAmbientFallback(t *testing.T) {
 func TestDurableSeatMissNeverFallsBackToRawName(t *testing.T) {
 	raw := &ladderRaw{outcomes: map[Kind]Outcome{Session: {Code: 0, Stdout: "/fixture/socket\t%9"}}}
 	seat, code, detail, err := (Ladder{Raw: raw}).Resolve(context.Background(), "seat:retired", LadderOptions{})
-	if err != nil || code != CodeUnknown || seat.Pane != "" || !strings.Contains(detail, "no live chat") {
+	if err != nil || code != CodeUnknown || seat.Pane != "" ||
+		detail != "target \"seat:retired\" matched no live chat" {
 		t.Fatalf("gone durable seat: seat=%+v code=%d detail=%q err=%v", seat, code, detail, err)
 	}
 }

@@ -97,6 +97,8 @@ var declaredKeys = map[string]bool{
 	"caller_source":    true,
 	"caller_err":       true,
 	"recorded_socket":  true,
+	"revive":           true,
+	"herdr_server":     true,
 	"chosen":           true,
 	"in_place":         true,
 	"place_err":        true,

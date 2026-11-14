@@ -63,7 +63,7 @@ func decodeCodexHooks(t *testing.T, raw string) codexHandlerDoc {
 func TestCodexHerdrHandlersAreWrittenOnceOwnedAndKeepForeignHooks(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	account, _, _ := stageResumeUnkillAccount(t, home)
+	account, _, _ := stageCodexAccount(t, home)
 	path := filepath.Join(account, "hooks.json")
 	writeFixture(
 		t,
@@ -157,7 +157,7 @@ func TestCodexHerdrHandlersAreWrittenOnceOwnedAndKeepForeignHooks(t *testing.T) 
 func TestCodexHerdrHandlerTimeoutsOverCodexsCapAreRewritten(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	account, _, _ := stageResumeUnkillAccount(t, home)
+	account, _, _ := stageCodexAccount(t, home)
 	path := filepath.Join(account, "hooks.json")
 	hooks := map[string]any{
 		"Interrupt": []any{map[string]any{"hooks": []any{
@@ -218,7 +218,7 @@ func TestCodexHerdrHandlerTimeoutsOverCodexsCapAreRewritten(t *testing.T) {
 func TestCodexHerdrHandlersAreRemovedOnUninstallAndForeignLookalikesStay(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	account, _, _ := stageResumeUnkillAccount(t, home)
+	account, _, _ := stageCodexAccount(t, home)
 	path := filepath.Join(account, "hooks.json")
 	foreignLookalike := "/opt/other/bin/pfm internal herdr-state --engine codex idle"
 	writeFixture(t, path, `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"},`+
@@ -275,7 +275,7 @@ func TestCodexHerdrHandlersAreRemovedOnUninstallAndForeignLookalikesStay(t *test
 func TestCodexHerdrHandlerLedgerRowsAreExpectedNotDrift(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	account, _, _ := stageResumeUnkillAccount(t, home)
+	account, _, _ := stageCodexAccount(t, home)
 	if err := resumeUnkillEngine(home, account, "", ModeApply, &bytes.Buffer{}).wireCodexHooks(); err != nil {
 		t.Fatal(err)
 	}

@@ -87,27 +87,43 @@ func renderedPinKeys() (pinKeys, error) {
 // would read as a changed theme every minute. An unknown key or a bad value is
 // an error naming the surface and the key.
 func canonicalPins(pins *SurfacePins) (*SurfacePins, error) {
+	out, dropped, err := keepPins(pins)
+	if len(dropped) > 0 {
+		return nil, errors.New(dropped[0])
+	}
+	return out, err
+}
+
+// keepPins is canonicalPins for a profile already installed: a pin naming a key
+// no renderer emits (one a renderer stopped emitting after a pfm upgrade) is
+// dropped and named in dropped, every other pin kept; a bad value is still an
+// error. canonicalPins, the authoring check, refuses what keepPins drops.
+func keepPins(pins *SurfacePins) (kept *SurfacePins, dropped []string, err error) {
 	if pins == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	keys, err := renderedPinKeys()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := &SurfacePins{}
-	if out.Tmux, err = canonicalMap("tmux", pins.Tmux, keys.tmux); err != nil {
-		return nil, err
+	var notes []string
+	if out.Tmux, notes, err = canonicalMap("tmux", pins.Tmux, keys.tmux); err != nil {
+		return nil, notes, err
 	}
+	dropped = append(dropped, notes...)
 	if pins.Herdr != nil {
 		herdrOut := &HerdrPins{}
-		if herdrOut.Tokens, err = canonicalMap("herdr", pins.Herdr.Tokens, keys.herdr); err != nil {
-			return nil, err
+		if herdrOut.Tokens, notes, err = canonicalMap("herdr", pins.Herdr.Tokens, keys.herdr); err != nil {
+			return nil, append(dropped, notes...), err
 		}
-		if herdrOut.TabGlyphs, err = canonicalGlyphs(
+		dropped = append(dropped, notes...)
+		if herdrOut.TabGlyphs, notes, err = canonicalGlyphs(
 			"herdr "+herdrTabGlyphsKey, pins.Herdr.TabGlyphs, keys.herdrGlyphs,
 		); err != nil {
-			return nil, err
+			return nil, append(dropped, notes...), err
 		}
+		dropped = append(dropped, notes...)
 		if len(herdrOut.Tokens) > 0 || len(herdrOut.TabGlyphs) > 0 {
 			out.Herdr = herdrOut
 		}
@@ -118,59 +134,98 @@ func canonicalPins(pins *SurfacePins) (*SurfacePins, error) {
 		// The theme itself never reaches the result, so state.json stays the
 		// pins alone; only its colours for the contract's keys do.
 		if theme := pins.VSCode.Theme; theme != nil {
+			theme, notes = dropUnknownColours(theme)
+			dropped = append(dropped, notes...)
 			if err := validateVSCodeTheme(theme); err != nil {
-				return nil, err
+				return nil, dropped, err
 			}
 			colors = foldThemePins(colors, theme.Colors, keys.vscodeColors)
 			chrome = foldThemePins(chrome, theme.Colors, keys.vscodeChrome)
 		}
-		if code.Colors, err = canonicalMap("vscode colors", colors, keys.vscodeColors); err != nil {
-			return nil, err
+		if code.Colors, notes, err = canonicalMap("vscode colors", colors, keys.vscodeColors); err != nil {
+			return nil, append(dropped, notes...), err
 		}
-		if code.Chrome, err = canonicalMap("vscode chrome", chrome, keys.vscodeChrome); err != nil {
-			return nil, err
+		dropped = append(dropped, notes...)
+		if code.Chrome, notes, err = canonicalMap("vscode chrome", chrome, keys.vscodeChrome); err != nil {
+			return nil, append(dropped, notes...), err
 		}
+		dropped = append(dropped, notes...)
 		if len(code.Colors) > 0 || len(code.Chrome) > 0 {
 			out.VSCode = code
 		}
 	}
 	if len(out.Tmux) == 0 && out.Herdr == nil && out.VSCode == nil {
-		return nil, nil
+		return nil, dropped, nil
 	}
-	return out, nil
+	return out, dropped, nil
 }
 
-// canonicalMap checks one surface's pins in key order, so the first error is stable.
-func canonicalMap(surface string, values map[string]string, allowed map[string]pinKind) (map[string]string, error) {
+// dropUnknownColours is theme without the colour ids VS Code's registry
+// (vscode_color_ids.txt) does not list, each named in dropped: VS Code ignores an
+// id it does not know, so one a later VS Code added costs that colour, never the
+// theme.
+func dropUnknownColours(theme *VSCodeTheme) (kept *VSCodeTheme, dropped []string) {
+	var unknown []string
+	for _, key := range slices.Sorted(maps.Keys(theme.Colors)) {
+		if !vscodeColorIDs[key] {
+			unknown = append(unknown, key)
+			dropped = append(dropped, unknownColourNote(key))
+		}
+	}
+	if len(unknown) == 0 {
+		return theme, nil
+	}
+	copied := *theme
+	copied.Colors = maps.Clone(theme.Colors)
+	for _, key := range unknown {
+		delete(copied.Colors, key)
+	}
+	return &copied, dropped
+}
+
+// canonicalMap checks one surface's pins in key order, so the first error is
+// stable. A pin naming a key the surface renders none of is left out and named
+// in dropped; any other bad pin is the error.
+func canonicalMap(
+	surface string,
+	values map[string]string,
+	allowed map[string]pinKind,
+) (kept map[string]string, dropped []string, err error) {
 	if len(values) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	out := make(map[string]string, len(values))
 	for _, key := range slices.Sorted(maps.Keys(values)) {
 		kind, known := allowed[key]
 		if !known {
-			return nil, fmt.Errorf("%s pin %q: %s renders no such key", surface, key, surface)
+			dropped = append(dropped, fmt.Sprintf("%s pin %q: %s renders no such key", surface, key, surface))
+			continue
 		}
 		value := values[key]
 		if strings.TrimSpace(value) == "" {
-			return nil, fmt.Errorf("%s pin %q: empty value", surface, key)
+			return nil, dropped, fmt.Errorf("%s pin %q: empty value", surface, key)
 		}
 		switch kind {
 		case pinColour:
 			colour, err := parseColor(value)
 			if err != nil {
-				return nil, fmt.Errorf("%s pin %q: %w", surface, key, err)
+				return nil, dropped, fmt.Errorf("%s pin %q: %w", surface, key, err)
 			}
 			value = colour.String()
 		case pinHex:
 			if !vscodeHexColour.MatchString(value) {
-				return nil, fmt.Errorf("%s pin %q: %q is not #rgb, #rgba, #rrggbb or #rrggbbaa", surface, key, value)
+				return nil, dropped, fmt.Errorf(
+					"%s pin %q: %q is not #rgb, #rgba, #rrggbb or #rrggbbaa", surface, key, value,
+				)
 			}
 		case pinText:
 		}
 		out[key] = value
 	}
-	return out, nil
+	if len(out) == 0 {
+		return nil, dropped, nil // an all-dropped map is none, as state.json round-trips it
+	}
+	return out, dropped, nil
 }
 
 // canonicalGlyphs checks the tab glyph pins in key order, each state's
@@ -179,21 +234,25 @@ func canonicalGlyphs(
 	surface string,
 	values map[string]herdr.TabFrames,
 	allowed map[string]bool,
-) (map[string]herdr.TabFrames, error) {
+) (kept map[string]herdr.TabFrames, dropped []string, err error) {
 	if len(values) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	out := make(map[string]herdr.TabFrames, len(values))
 	for _, key := range slices.Sorted(maps.Keys(values)) {
 		if !allowed[key] {
-			return nil, fmt.Errorf("%s pin %q: %s renders no such key", surface, key, surface)
+			dropped = append(dropped, fmt.Sprintf("%s pin %q: %s renders no such key", surface, key, surface))
+			continue
 		}
 		if err := herdr.ValidTabStateFrames(key, values[key]); err != nil {
-			return nil, fmt.Errorf("%s pin %q: %w", surface, key, err)
+			return nil, dropped, fmt.Errorf("%s pin %q: %w", surface, key, err)
 		}
 		out[key] = slices.Clone(values[key])
 	}
-	return out, nil
+	if len(out) == 0 {
+		return nil, dropped, nil
+	}
+	return out, dropped, nil
 }
 
 // validatePins is canonicalPins' verdict alone: ParseProfile refuses a
@@ -242,6 +301,8 @@ type pinSource struct {
 	pins *SurfacePins
 	file string
 	at   time.Time
+	// notes name the pins dropped for a key no renderer emits any more.
+	notes []string
 }
 
 // profilePins reads the pins of the profile a `custom:{name}` value names, at
@@ -279,13 +340,20 @@ func profilePins(home, value string) (pinSource, error) {
 	if err != nil {
 		return pinSource{}, fmt.Errorf("theme profile %s: %w", path, err)
 	}
-	profile, err := ParseProfile(content)
+	profile, err := decodeProfile(content, false)
 	if err != nil {
 		return pinSource{}, fmt.Errorf("theme profile %s: %w", path, err)
 	}
-	pins, err := canonicalPins(profile.Surfaces)
+	pins, dropped, err := keepPins(profile.Surfaces)
 	if err != nil {
 		return pinSource{}, fmt.Errorf("theme profile %s: %w", path, err)
 	}
-	return pinSource{pins: pins, file: path, at: info.ModTime()}, nil
+	var notes []string
+	for _, note := range unknownOverrideNotes(profile) {
+		notes = append(notes, "profile "+path+": "+note)
+	}
+	for _, note := range dropped {
+		notes = append(notes, "profile "+path+": "+note+" (dropped)")
+	}
+	return pinSource{pins: pins, file: path, at: info.ModTime(), notes: notes}, nil
 }

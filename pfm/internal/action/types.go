@@ -6,6 +6,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -154,18 +155,33 @@ type LaunchPaneState struct {
 	Dead    bool
 }
 
-// Process is one candidate for _cc_solo's stray-Claude sweep.
+// Process is one candidate for _cc_solo's stray-Claude sweep, read with the
+// identity a signal needs. Unidentified says why the table could not read its
+// start time and owner; such a process is matched but never signalled.
 type Process struct {
-	PID  int
-	Argv []string
-	TTY  string
+	PID          int
+	Start        uint64
+	UID          uint32
+	Argv         []string
+	Executable   string
+	TTY          string
+	Unidentified error
+}
+
+// Identity is the process generation the scan saw.
+func (process Process) Identity() gather.Identity {
+	return gather.Identity{
+		PID: process.PID, Start: process.Start, UID: process.UID,
+		Argv: process.Argv, Executable: process.Executable,
+	}
 }
 
 // ProcessTable supplies process snapshots and TERM without exposing /proc to
-// the action core.
+// the action core. Terminate goes through gather's signal door: it sends
+// nothing to a process that is no longer the target's identity.
 type ProcessTable interface {
 	Processes(ctx context.Context) ([]Process, error)
-	Terminate(pid int) error
+	Terminate(target gather.Target) (gather.Outcome, error)
 }
 
 // Gate asks on /dev/tty whether a mismatched live Claude chat should reboot.
@@ -192,17 +208,17 @@ type Dependencies struct {
 	// Place is the request's one placement of a birth (chat's placeChat):
 	// door names the asking door, requested the configured chat.backend. A
 	// nil Place births every chat in tmux.
-	Place     func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
-	Tmux      TmuxClient
-	Processes ProcessTable
-	Gate      Gate
-	Runner    CommandRunner
-	Stderr    io.Writer
+	Place            func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
+	Tmux             TmuxClient
+	Processes        ProcessTable
+	Gate             Gate
+	Runner           CommandRunner
+	Stderr           io.Writer
+	EngineSyncRunner deps.Runner // runs PersonaMirror's engine-sync child; nil is the real one
 	// Heal repairs a Codex thread's history projection before it is resumed,
-	// reporting in one line what it repaired and saying nothing when there
-	// was nothing to repair. It is injected rather than imported because the
-	// repair reads Codex's own SQLite stores, and action must stay free of
-	// the store layer. A nil Heal simply skips the check.
+	// reporting in one line what it repaired and nothing when there was nothing
+	// to repair. It is injected, not imported: the repair reads Codex's own
+	// SQLite stores, and action must stay free of the store layer. Nil skips it.
 	Heal HealFunc
 }
 
@@ -212,12 +228,13 @@ type HealFunc func(ctx context.Context, threadID string) string
 // Executor performs preparations and returns the only line the caller may
 // write to stdout.
 type Executor struct {
-	place     func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
-	tmux      TmuxClient
-	processes ProcessTable
-	gate      Gate
-	runner    CommandRunner
-	stderr    io.Writer
-	sidDir    string
-	heal      HealFunc
+	place      func(ctx context.Context, door, requested string) (spawn.BackendChoice, error)
+	tmux       TmuxClient
+	processes  ProcessTable
+	gate       Gate
+	runner     CommandRunner
+	stderr     io.Writer
+	sidDir     string
+	heal       HealFunc
+	engineSync deps.Runner
 }

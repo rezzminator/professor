@@ -8,14 +8,15 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestPromptBaselineKillLiftsButPermanentKillDoesNot(t *testing.T) {
 	baseline := int64(2)
 	chat := transcript(
 		"clear-killed",
-		"/accounts/1/projects/clear/clear-killed.jsonl",
-		"/work/clear",
+		testjail.Place("/accounts/1/projects/clear/clear-killed.jsonl"),
+		testjail.Place("/work/clear"),
 		"Clear killed",
 		100,
 		3,
@@ -52,8 +53,8 @@ func TestCrumbPrecedenceAndSocketTrust(t *testing.T) {
 
 	distrusted := transcript(
 		"gone",
-		"/accounts/1/projects/gone/gone.jsonl",
-		"/work/gone",
+		testjail.Place("/accounts/1/projects/gone/gone.jsonl"),
+		testjail.Place("/work/gone"),
 		"Stale socket crumb",
 		10,
 		1,
@@ -80,8 +81,8 @@ func TestCrumbPrecedenceAndSocketTrust(t *testing.T) {
 func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 	claude := transcript(
 		"aliased-claude",
-		"/canonical/projects/live/aliased-claude.jsonl",
-		"/work/proja",
+		testjail.Place("/canonical/projects/live/aliased-claude.jsonl"),
+		testjail.Place("/work/proja"),
 		"Aliased Claude",
 		900,
 		37,
@@ -89,10 +90,10 @@ func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 	)
 	codex := store.Rollout{
 		ID:          "019f-live-codex",
-		Path:        "/canonical/codex/rollout-2026-01-01T00-00-00-019f-live-codex.jsonl",
+		Path:        testjail.Place("/canonical/codex/rollout-2026-01-01T00-00-00-019f-live-codex.jsonl"),
 		Size:        800,
 		MTimeNS:     1300,
-		CWD:         "/work/projb-fe",
+		CWD:         testjail.Place("/work/projb-fe"),
 		UserThread:  true,
 		FirstPrompt: "Aliased Codex",
 		PromptCount: 21,
@@ -121,7 +122,7 @@ func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 		},
 		Options: Options{
 			View:       AllView,
-			CurrentDir: "/work/projd",
+			CurrentDir: testjail.Place("/work/projd"),
 		},
 	}
 	output := Compose(input)
@@ -147,7 +148,7 @@ func TestLiveProjectFallsBackToPaneCurrentPath(t *testing.T) {
 			Panes: []gather.ProbePane{{
 				Socket:      "cc-7-8-9",
 				PaneID:      "%7",
-				CurrentPath: "/work/proja",
+				CurrentPath: testjail.Place("/work/proja"),
 			}},
 			Crumbs: []gather.Crumb{{
 				Filename:       "cc-7-8-9.%7",
@@ -156,7 +157,7 @@ func TestLiveProjectFallsBackToPaneCurrentPath(t *testing.T) {
 				TranscriptPath: "/missing/zero-prompt.jsonl",
 			}},
 		},
-		Options: Options{View: AllView, CurrentDir: "/work/projd"},
+		Options: Options{View: AllView, CurrentDir: testjail.Place("/work/projd")},
 	})
 	row, found := rowByID(output.Rows, "zero-prompt")
 	if !found || row.Kind != LiveClaude || row.Project != "proja" ||
@@ -193,8 +194,8 @@ func TestSplitMergeAndNewestServerCollapse(t *testing.T) {
 func splitFixtureInput() Input {
 	splitOne := transcript(
 		"split-one",
-		"/accounts/1/projects/split/split-one.jsonl",
-		"/work/split",
+		testjail.Place("/accounts/1/projects/split/split-one.jsonl"),
+		testjail.Place("/work/split"),
 		"One",
 		100,
 		2,
@@ -202,8 +203,8 @@ func splitFixtureInput() Input {
 	)
 	splitTwo := transcript(
 		"split-two",
-		"/accounts/2/projects/split/split-two.jsonl",
-		"/work/split",
+		testjail.Place("/accounts/2/projects/split/split-two.jsonl"),
+		testjail.Place("/work/split"),
 		"Two",
 		250,
 		3,
@@ -211,8 +212,8 @@ func splitFixtureInput() Input {
 	)
 	duplicate := transcript(
 		"duplicate",
-		"/accounts/1/projects/dup/duplicate.jsonl",
-		"/work/dup",
+		testjail.Place("/accounts/1/projects/dup/duplicate.jsonl"),
+		testjail.Place("/work/dup"),
 		"Duplicate",
 		500,
 		8,
@@ -262,7 +263,7 @@ func splitFixtureInput() Input {
 				{Socket: "cc-300-1-1", PaneID: "%4"},
 			},
 		},
-		Options: Options{CurrentDir: "/work/split"},
+		Options: Options{CurrentDir: testjail.Place("/work/split")},
 	}
 }
 
@@ -364,12 +365,12 @@ func TestBootingRowSurfacesFromCrumblessLiveAndResistsHiding(t *testing.T) {
 				WindowName:    "Promptless worker",
 				PaneID:        "%1",
 				PID:           900,
-				CWD:           "/work/booting-project",
+				CWD:           testjail.Place("/work/booting-project"),
 				PaneStartUnix: 0,
 			}},
 		},
 		Killed:  []store.Killed{{ID: "cc-new-fixture-1", Engine: "cc"}},
-		Options: Options{View: DefaultView, CurrentDir: "/work/projd"},
+		Options: Options{View: DefaultView, CurrentDir: testjail.Place("/work/projd")},
 	}
 
 	output := Compose(input)
@@ -385,7 +386,7 @@ func TestBootingRowSurfacesFromCrumblessLiveAndResistsHiding(t *testing.T) {
 		row.PaneID != "%1" ||
 		row.Name != "Promptless worker" ||
 		row.Project != "booting-project" ||
-		row.CWD != "/work/booting-project" ||
+		row.CWD != testjail.Place("/work/booting-project") ||
 		row.Killed {
 		t.Fatalf("booting row = %#v", row)
 	}
@@ -428,13 +429,13 @@ func TestLiveCodexRequiresProcessAndCurrentPane(t *testing.T) {
 func capsFixtureInput() Input {
 	input := Input{
 		ClaudeSeats: fixtureClaudeSeats(),
-		Options:     Options{CurrentDir: "/work/caps"},
+		Options:     Options{CurrentDir: testjail.Place("/work/caps")},
 	}
 	for index := 0; index < 35; index++ {
 		input.Transcripts = append(input.Transcripts, transcript(
 			idNumber("claude", index),
-			"/accounts/1/projects/caps/"+idNumber("claude", index)+".jsonl",
-			"/work/caps",
+			testjail.Place("/accounts/1/projects/caps/")+idNumber("claude", index)+".jsonl",
+			testjail.Place("/work/caps"),
 			idNumber("Claude", index),
 			100,
 			1,
@@ -444,10 +445,10 @@ func capsFixtureInput() Input {
 	for index := 0; index < 20; index++ {
 		input.Rollouts = append(input.Rollouts, store.Rollout{
 			ID:          idNumber("codex", index),
-			Path:        "/codex/" + idNumber("codex", index) + ".jsonl",
+			Path:        testjail.Place("/codex/") + idNumber("codex", index) + ".jsonl",
 			Size:        100,
 			MTimeNS:     int64(index + 1),
-			CWD:         "/work/caps",
+			CWD:         testjail.Place("/work/caps"),
 			UserThread:  true,
 			FirstPrompt: idNumber("Codex", index),
 			PromptCount: 1,
@@ -468,7 +469,7 @@ func TestNaturalProjectOrderAndProjectDirTarget(t *testing.T) {
 			t.Fatalf("new row has stale launch target: %#v", row)
 		}
 	}
-	if got := output.ProjectDirs["alpha"]; got != "/work/alpha" {
+	if got := output.ProjectDirs["alpha"]; got != testjail.Place("/work/alpha") {
 		t.Fatalf("PWD-seeded ProjectDirs[alpha] = %q", got)
 	}
 
@@ -486,8 +487,8 @@ func fixtureInput(view View) Input {
 	transcripts := []store.Transcript{
 		transcript(
 			"live-socket",
-			"/accounts/1/projects/alpha/live-socket.jsonl",
-			"/work/alpha",
+			testjail.Place("/accounts/1/projects/alpha/live-socket.jsonl"),
+			testjail.Place("/work/alpha"),
 			"Socket Live",
 			100,
 			5,
@@ -495,8 +496,8 @@ func fixtureInput(view View) Input {
 		),
 		transcript(
 			"pane",
-			"/accounts/2/projects/alpha/pane.jsonl",
-			"/work/alpha",
+			testjail.Place("/accounts/2/projects/alpha/pane.jsonl"),
+			testjail.Place("/work/alpha"),
 			"Pane Wins",
 			200,
 			7,
@@ -504,8 +505,8 @@ func fixtureInput(view View) Input {
 		),
 		transcript(
 			"killed",
-			"/accounts/1/projects/beta/killed.jsonl",
-			"/work/beta",
+			testjail.Place("/accounts/1/projects/beta/killed.jsonl"),
+			testjail.Place("/work/beta"),
 			"Killed",
 			100,
 			3,
@@ -513,8 +514,8 @@ func fixtureInput(view View) Input {
 		),
 		transcript(
 			"grown",
-			"/accounts/1/projects/gamma/grown.jsonl",
-			"/work/gamma",
+			testjail.Place("/accounts/1/projects/gamma/grown.jsonl"),
+			testjail.Place("/work/gamma"),
 			"Grown Killed",
 			100,
 			5,
@@ -522,18 +523,18 @@ func fixtureInput(view View) Input {
 		),
 		{
 			UUID:        "bg",
-			Path:        "/accounts/1/projects/beta/bg.jsonl",
+			Path:        testjail.Place("/accounts/1/projects/beta/bg.jsonl"),
 			Size:        100,
 			MTimeNS:     600,
-			CWD:         "/work/beta",
+			CWD:         testjail.Place("/work/beta"),
 			CustomTitle: "BG Twin",
 			PromptCount: 2,
 			IsBG:        true,
 		},
 		transcript(
 			"zero",
-			"/accounts/1/projects/beta/zero.jsonl",
-			"/work/beta",
+			testjail.Place("/accounts/1/projects/beta/zero.jsonl"),
+			testjail.Place("/work/beta"),
 			"Zero",
 			0,
 			0,
@@ -541,8 +542,8 @@ func fixtureInput(view View) Input {
 		),
 		transcript(
 			"promptless",
-			"/accounts/1/projects/delta/promptless.jsonl",
-			"/work/delta",
+			testjail.Place("/accounts/1/projects/delta/promptless.jsonl"),
+			testjail.Place("/work/delta"),
 			"Promptless",
 			100,
 			0,
@@ -550,16 +551,16 @@ func fixtureInput(view View) Input {
 		),
 		{
 			UUID:        "agent",
-			Path:        "/accounts/3/projects/agents/agent.jsonl",
+			Path:        testjail.Place("/accounts/3/projects/agents/agent.jsonl"),
 			MTimeNS:     1100,
-			CWD:         "/work/agents",
+			CWD:         testjail.Place("/work/agents"),
 			CustomTitle: "Worker",
 			IsBG:        true,
 		},
 		transcript(
 			"resume",
-			"/accounts/1/projects/newest/resume.jsonl",
-			"/work/newest",
+			testjail.Place("/accounts/1/projects/newest/resume.jsonl"),
+			testjail.Place("/work/newest"),
 			"Resume",
 			100,
 			4,
@@ -569,40 +570,40 @@ func fixtureInput(view View) Input {
 	rollouts := []store.Rollout{
 		{
 			ID:          "cx-live",
-			Path:        "/codex/sessions/rollout-2026-01-01T00-00-00-cx-live.jsonl",
+			Path:        testjail.Place("/codex/sessions/rollout-2026-01-01T00-00-00-cx-live.jsonl"),
 			Size:        300,
 			MTimeNS:     1300,
-			CWD:         "/work/codex",
+			CWD:         testjail.Place("/work/codex"),
 			UserThread:  true,
 			FirstPrompt: "Codex live fallback",
 			PromptCount: 8,
 		},
 		{
 			ID:          "cx-resume",
-			Path:        "/codex/sessions/rollout-2026-01-01T00-00-00-cx-resume.jsonl",
+			Path:        testjail.Place("/codex/sessions/rollout-2026-01-01T00-00-00-cx-resume.jsonl"),
 			Size:        250,
 			MTimeNS:     650,
-			CWD:         "/work/beta",
+			CWD:         testjail.Place("/work/beta"),
 			UserThread:  true,
 			FirstPrompt: "Codex Resume",
 			PromptCount: 6,
 		},
 		{
 			ID:          "cx-killed",
-			Path:        "/codex/sessions/rollout-2026-01-01T00-00-00-cx-killed.jsonl",
+			Path:        testjail.Place("/codex/sessions/rollout-2026-01-01T00-00-00-cx-killed.jsonl"),
 			Size:        150,
 			MTimeNS:     550,
-			CWD:         "/work/beta",
+			CWD:         testjail.Place("/work/beta"),
 			UserThread:  true,
 			FirstPrompt: "Codex Killed",
 			PromptCount: 2,
 		},
 		{
 			ID:          "cx-subagent",
-			Path:        "/codex/sessions/subagents/rollout-cx-subagent.jsonl",
+			Path:        testjail.Place("/codex/sessions/subagents/rollout-cx-subagent.jsonl"),
 			Size:        100,
 			MTimeNS:     2000,
-			CWD:         "/work/sub",
+			CWD:         testjail.Place("/work/sub"),
 			FirstPrompt: "Subagent",
 			PromptCount: 1,
 		},
@@ -692,12 +693,12 @@ func fixtureInput(view View) Input {
 				Socket:    "cc-400-1-1",
 				PaneID:    "%4",
 				SessionID: "agent",
-				ConfigDir: "/accounts/3",
+				ConfigDir: testjail.Place("/accounts/3"),
 			}},
 		},
 		Options: Options{
 			View:                view,
-			CurrentDir:          "/work/alpha",
+			CurrentDir:          testjail.Place("/work/alpha"),
 			CurrentSocket:       "cc-200-1-1",
 			PrimaryAccount:      2,
 			CodexAccountIDs:     []int{1},
@@ -726,9 +727,9 @@ func transcript(
 
 func fixtureClaudeSeats() []ClaudeSeat {
 	return []ClaudeSeat{
-		{Account: 1, ConfigDir: "/accounts/1"},
-		{Account: 2, ConfigDir: "/accounts/2"},
-		{Account: 3, ConfigDir: "/accounts/3"},
+		{Account: 1, ConfigDir: testjail.Place("/accounts/1")},
+		{Account: 2, ConfigDir: testjail.Place("/accounts/2")},
+		{Account: 3, ConfigDir: testjail.Place("/accounts/3")},
 	}
 }
 
@@ -781,8 +782,8 @@ func idNumber(prefix string, number int) string {
 func TestLiveCodexWithoutARolloutFileIsOneKillableRow(t *testing.T) {
 	paginated := store.Rollout{
 		ID:          "019fed79-74c9-7c62-a224-4581ba81d4f6",
-		Path:        "/codex/sessions/019fed79-74c9-7c62-a224-4581ba81d4f6.jsonl",
-		CWD:         "/work/proja",
+		Path:        testjail.Place("/codex/sessions/019fed79-74c9-7c62-a224-4581ba81d4f6.jsonl"),
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		LineageRoot: "019fed79-74c9-7c62-a224-4581ba81d4f6",
 		FirstPrompt: "paginated first prompt",
@@ -803,7 +804,7 @@ func TestLiveCodexWithoutARolloutFileIsOneKillableRow(t *testing.T) {
 				Socket:      "cx-300-1-1",
 				SessionName: "cx-300-1-1",
 				PaneID:      "%3",
-				CurrentPath: "/work/proja",
+				CurrentPath: testjail.Place("/work/proja"),
 			}},
 		},
 		Options: Options{View: AllView},
@@ -821,7 +822,7 @@ func TestLiveCodexWithoutARolloutFileIsOneKillableRow(t *testing.T) {
 	if codexRows[0].Kind != LiveCodex || codexRows[0].ID != paginated.ID {
 		t.Fatalf("live Codex row = %#v, want the resolved thread id", codexRows[0])
 	}
-	if codexRows[0].PromptCount != 1 || codexRows[0].CWD != "/work/proja" {
+	if codexRows[0].PromptCount != 1 || codexRows[0].CWD != testjail.Place("/work/proja") {
 		t.Fatalf("live Codex row lost its indexed content: %#v", codexRows[0])
 	}
 
@@ -840,7 +841,7 @@ func TestLiveCodexWithoutARolloutFileIsOneKillableRow(t *testing.T) {
 				Socket:      "cx-300-1-1",
 				SessionName: "cx-300-1-1",
 				PaneID:      "%3",
-				CurrentPath: "/work/proja",
+				CurrentPath: testjail.Place("/work/proja"),
 			}},
 		},
 		Options: Options{View: DefaultView},
@@ -874,7 +875,7 @@ func TestLiveCodexIsExemptFromEmptinessSuppression(t *testing.T) {
 				Socket:      "cx-400-1-1",
 				SessionName: "cx-400-1-1",
 				PaneID:      "%4",
-				CurrentPath: "/work/paginated",
+				CurrentPath: testjail.Place("/work/paginated"),
 			}},
 		},
 		Options: Options{View: DefaultView},
@@ -913,7 +914,7 @@ func TestLiveMachineSpawnedCodexStaysSuppressed(t *testing.T) {
 				Socket:      "cx-401-1-1",
 				SessionName: "cx-401-1-1",
 				PaneID:      "%5",
-				CurrentPath: "/work/machine",
+				CurrentPath: testjail.Place("/work/machine"),
 			}},
 		},
 		Options: Options{View: DefaultView},
@@ -933,10 +934,10 @@ func TestLiveMachineSpawnedCodexStaysSuppressed(t *testing.T) {
 func TestKillOnAnyLineageMemberKillsTheWholeRow(t *testing.T) {
 	root := store.Rollout{
 		ID:          "root-thread",
-		Path:        "/codex/sessions/rollout-2026-01-01T00-00-00-root-thread.jsonl",
+		Path:        testjail.Place("/codex/sessions/rollout-2026-01-01T00-00-00-root-thread.jsonl"),
 		Size:        100,
 		MTimeNS:     100,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   "root-thread",
 		FirstPrompt: "root prompt",
@@ -946,10 +947,10 @@ func TestKillOnAnyLineageMemberKillsTheWholeRow(t *testing.T) {
 	// root by session_id — exactly what `codex resume` produces.
 	child := store.Rollout{
 		ID:          "child-thread",
-		Path:        "/codex/sessions/rollout-2026-01-02T00-00-00-child-thread.jsonl",
+		Path:        testjail.Place("/codex/sessions/rollout-2026-01-02T00-00-00-child-thread.jsonl"),
 		Size:        200,
 		MTimeNS:     200,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   "root-thread",
 		FirstPrompt: "root prompt",
@@ -1008,10 +1009,10 @@ func TestKillOnAnyLineageMemberKillsTheWholeRow(t *testing.T) {
 func threeHopLineage() (root, mid, leaf store.Rollout) {
 	root = store.Rollout{
 		ID:          "root-thread",
-		Path:        "/codex/sessions/rollout-2026-01-01T00-00-00-root-thread.jsonl",
+		Path:        testjail.Place("/codex/sessions/rollout-2026-01-01T00-00-00-root-thread.jsonl"),
 		Size:        100,
 		MTimeNS:     100,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   "root-thread",
 		FirstPrompt: "root prompt",
@@ -1019,10 +1020,10 @@ func threeHopLineage() (root, mid, leaf store.Rollout) {
 	}
 	mid = store.Rollout{
 		ID:          "mid-thread",
-		Path:        "/codex/sessions/rollout-2026-01-02T00-00-00-mid-thread.jsonl",
+		Path:        testjail.Place("/codex/sessions/rollout-2026-01-02T00-00-00-mid-thread.jsonl"),
 		Size:        200,
 		MTimeNS:     200,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   "root-thread",
 		FirstPrompt: "mid prompt",
@@ -1030,10 +1031,10 @@ func threeHopLineage() (root, mid, leaf store.Rollout) {
 	}
 	leaf = store.Rollout{
 		ID:          "leaf-thread",
-		Path:        "/codex/sessions/rollout-2026-01-03T00-00-00-leaf-thread.jsonl",
+		Path:        testjail.Place("/codex/sessions/rollout-2026-01-03T00-00-00-leaf-thread.jsonl"),
 		Size:        300,
 		MTimeNS:     300,
-		CWD:         "/work/proja",
+		CWD:         testjail.Place("/work/proja"),
 		UserThread:  true,
 		SessionID:   "mid-thread",
 		FirstPrompt: "leaf prompt",

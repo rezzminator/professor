@@ -2,23 +2,15 @@ package kill
 
 import (
 	"context"
-	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
-
-// fakeTmuxBinary plays tmux: exits 0 and prints nothing.
-func fakeTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
-}
 
 // requireTmuxRecord asserts the one comp=tmux record a façade call writes:
 // subcmd, target when given, exit 0 and dur_ms.
@@ -61,12 +53,8 @@ func TestPaneExistsPropagatesConnectionFailure(t *testing.T) {
 		{"error connecting to /x (Connection refused)", false},
 	} {
 		t.Run(test.message, func(t *testing.T) {
-			binary := filepath.Join(t.TempDir(), "tmux")
-			script := "#!/bin/sh\nprintf '%s\\n' '" + test.message + "' >&2\nexit 1\n"
-			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			exists, err := (TmuxKiller{Binary: binary}).PaneExists(context.Background(), "/x", "%4")
+			tmux := testjail.TmuxRunner(deps.RunResult{Stderr: []byte(test.message + "\n"), ExitCode: 1})
+			exists, err := (TmuxKiller{}).PaneExists(pfmtmux.WithClientRunner(context.Background(), tmux), "/x", "%4")
 			if exists || (err != nil) != test.wantErr {
 				t.Fatalf("PaneExists = %v, %v, want false, error=%v", exists, err, test.wantErr)
 			}
@@ -81,7 +69,8 @@ func TestPaneExistsPropagatesConnectionFailure(t *testing.T) {
 // the observed tmux command — one record per call.
 func TestTmuxKillerRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	tmux := TmuxKiller{Binary: fakeTmuxBinary(t)}
+	ctx = pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{}))
+	tmux := TmuxKiller{Binary: "tmux"}
 	if err := tmux.KillPane(ctx, "/sockets/cc-1", "%3"); err != nil {
 		t.Fatal(err)
 	}
@@ -94,4 +83,19 @@ func TestTmuxKillerRecordsEveryInvocation(t *testing.T) {
 		t.Fatalf("records = %d, want 2: %s", len(recorder.Records()), recorder.Raw())
 	}
 	_ = context.Background
+}
+
+func TestParseClientsSkipsOnlyTheUnreadableLine(t *testing.T) {
+	clients, skipped := parseClients("101 /dev/pts/1\nnot-a-pid\n\n102 client-102\n103\n")
+	wantClients := []Client{{PID: 101, Name: "/dev/pts/1"}, {PID: 102, Name: "client-102"}}
+	if !reflect.DeepEqual(clients, wantClients) {
+		t.Fatalf("clients = %v, want %v", clients, wantClients)
+	}
+	want := []string{
+		`client pid "not-a-pid" unreadable: strconv.Atoi: parsing "not-a-pid": invalid syntax`,
+		"client 103: tmux listed it with no name to detach it by",
+	}
+	if !reflect.DeepEqual(skipped, want) {
+		t.Fatalf("skipped = %#v, want %#v", skipped, want)
+	}
 }

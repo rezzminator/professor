@@ -1,6 +1,6 @@
 ---
 name: collector
-description: Copies exact code text for a caller — "these columns and their types", "this function's signature", "lines N–M of F", "the line an insert goes after", "the test names in T that assert X". Pass the repo root and numbered orders. Read-only. Returns a manifest per order, MISS with why, and the path of the verbatim text. A question → tracer.
+description: Copies exact code text for a caller — "these columns and their types", "this function's signature", "lines N–M of F", "the line an insert goes after", "the test names in T that assert X". Pass the repo root and numbered orders. Read-only. Returns a manifest per order, MISS with why, and the path of the verbatim text. A question → flights:tracer.
 tools: Bash, mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back
 model: haiku
 effort: medium

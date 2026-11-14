@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // linkedStoreEnv is a healthy host with ids accounts: every shared entry in
@@ -62,7 +63,7 @@ func assertNoBlock(t *testing.T, rows []Row) {
 func TestPerAccountEntriesRealYieldNoBlock(t *testing.T) {
 	env := linkedStoreEnv(t, 1, 2)
 	names := slices.Clone(installer.AccountEntries)
-	for _, name := range installer.RetiredStoreEntries {
+	for _, name := range env.Retired.StoreEntries {
 		if !slices.Contains(names, name) {
 			names = append(names, name)
 		}
@@ -81,7 +82,7 @@ func TestPerAccountEntriesRealYieldNoBlock(t *testing.T) {
 func TestRetiredStoreEntryPreFixShapeDoesNotBlock(t *testing.T) {
 	env := linkedStoreEnv(t, 1, 2, 3)
 	var want []Row
-	for _, name := range installer.RetiredStoreEntries {
+	for _, name := range env.Retired.StoreEntries {
 		storePath, linked := filepath.Join(env.Store, name), filepath.Join(env.Accounts[1].ConfigDir, name)
 		replaceWithFile(t, storePath, "store copy")
 		replaceWithFile(t, filepath.Join(env.Accounts[0].ConfigDir, name), "account 1's own")
@@ -126,7 +127,7 @@ func TestRetiredStoreEntryNamesALiveChatDeferral(t *testing.T) {
 	writeFile(t, filepath.Join(live, "sessions", "4242.json"), "{}")
 	reason := "; deferred: account " + live + " has live chats; close them and rerun pfm install --yes"
 	var want []Row
-	for _, name := range installer.RetiredStoreEntries {
+	for _, name := range env.Retired.StoreEntries {
 		storePath, linked := filepath.Join(env.Store, name), filepath.Join(live, name)
 		replaceWithFile(t, storePath, "store copy")
 		replaceWithFile(t, filepath.Join(env.Accounts[1].ConfigDir, name), "account 2's own")
@@ -150,4 +151,30 @@ func TestRetiredStoreEntryNamesALiveChatDeferral(t *testing.T) {
 		)
 	}
 	assertRows(t, detect(t, checkRetiredStoreEntry, env), want...)
+}
+
+// A check needing the retired lists that could not read them is one
+// UNREADABLE row naming the file, never a clean host.
+func TestRetiredListsUnreadableBlocksTheChecksNeedingThem(t *testing.T) {
+	env := linkedStoreEnv(t, 1)
+	env.RetiredErr = errors.New("decode: unexpected EOF")
+	file := filepath.Join(env.Home, ".professor", "templates", "global", "retired.json")
+	for _, check := range []string{checkRetiredStoreEntry, "pfm-settings"} {
+		assertRows(t, detect(t, check, env), Row{
+			Block, check, file,
+			"UNREADABLE " + file + ": decode: unexpected EOF",
+			"make " + file + " readable to you, then rerun",
+		})
+	}
+}
+
+// An absent retired file is no row: install skips every retirement step
+// naming it and doctor's retired_lists row fails, so the gate lets it pass.
+func TestRetiredListsAbsentLeavesTheChecksNeedingThemQuiet(t *testing.T) {
+	env := linkedStoreEnv(t, 1)
+	file := filepath.Join(env.Home, ".professor", "templates", "global", "retired.json")
+	env.Retired, env.RetiredErr = retired.Lists{}, &fs.PathError{Op: "open", Path: file, Err: fs.ErrNotExist}
+	for _, check := range []string{checkRetiredStoreEntry, "pfm-settings"} {
+		assertRows(t, detect(t, check, env))
+	}
 }

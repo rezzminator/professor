@@ -89,10 +89,9 @@ func TestReleaseProfileFetchFailureIsLoudAndNonFatal(t *testing.T) {
 		t.Fatalf("cosmetic theme fetch aborted host install: %v\n%s", err, output.String())
 	}
 	theme := releaseThemeURL("v1.0.0") + "sonar-gold/"
-	if !strings.Contains(output.String(), "theme sonar-gold fetch failed: "+theme+": claude.json: GET "+theme+
-		"claude.json: HTTP Not Found") {
-		t.Fatalf("theme fetch failure was silent or vague:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    theme sonar-gold fetch failed: " + theme + ": claude.json: GET " + theme + "claude.json: HTTP Not Found",
+	}, "fetch failed")
 	if _, statErr := os.Stat(filepath.Join(home, ".zshrc")); statErr != nil {
 		t.Fatalf("host install did not continue after theme failure: %v", statErr)
 	}
@@ -102,7 +101,7 @@ func TestThemeProfilesFallBackToReleaseWhenTheCloneHoldsNone(t *testing.T) {
 	listing := `[{"name":"README.md","type":"file"},{"name":"lagoon","type":"dir"}]`
 	client := releaseThemeClient(t, "v1.0.0", nil, listing)
 
-	profiles, err := loadThemeProfiles(context.Background(), Options{
+	profiles, _, err := loadThemeProfiles(context.Background(), Options{
 		SourceRepo:      t.TempDir(),
 		ThemeReleaseURL: releaseThemeURL("v1.0.0"),
 		ThemeHTTPClient: client,

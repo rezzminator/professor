@@ -8,16 +8,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+// jailLog is the jail's activity log's current segment, in its log root.
+func jailLog(t *testing.T) string {
+	t.Helper()
+	return paths.LogRoot(paths.OSEnv{}, jailPaths(t).Home).Activity()
+}
 
 // readJailLog decodes every record the jail's activity file holds.
 func readJailLog(t *testing.T) []obs.Record {
 	t.Helper()
-	path := jailPaths(t).LogFile
+	path := jailLog(t)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -95,21 +101,31 @@ func writeJailConfig(t *testing.T, root, body string) {
 }
 
 // TestRunHandsTheWholeLogPolicyToTheActivityLog pins the process entry: the
-// machine's log.components and log.keepDays reach obs.OpenLog, not just the
-// level — a component the config lifts to debug is enabled after run(), and
-// a rotated file past keepDays is gone.
+// machine's log.components, log.maxMB and log.keepFiles reach obs.OpenLog, not
+// just the level — a component the config lifts to debug is enabled after
+// run(), and a current segment one record from 1 MiB rolls at the run's first
+// record and stays whole, holding the newest MiB, while an older segment past
+// the one segment kept keeps none of its INFO records. A config still carrying
+// the retired log.keepDays loads.
 func TestRunHandsTheWholeLogPolicyToTheActivityLog(t *testing.T) {
 	root := jailTest(t)
-	writeJailConfig(t, root, `{"level": "error", "keepDays": 30, "components": {"cli": "debug"}}`)
-	aged := jailPaths(t).LogFile + ".1"
-	if err := os.MkdirAll(filepath.Dir(aged), 0o700); err != nil {
+	writeJailConfig(t, root,
+		`{"level": "info", "keepDays": 30, "maxMB": 1, "keepFiles": 1, "components": {"cli": "debug"}}`)
+	current := jailLog(t)
+	if err := os.MkdirAll(filepath.Dir(current), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(aged, []byte("{}\n"), 0o600); err != nil {
+	head := `{"ts":"2026-11-12T09:00:00Z","level":"INFO","msg":"`
+	planted := head + strings.Repeat("p", 1024*1024-len(head)-3) + "\"}\n"
+	if err := os.WriteFile(current, []byte(planted), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-31 * 24 * time.Hour)
-	if err := os.Chtimes(aged, old, old); err != nil {
+	segmentsDir := filepath.Join(filepath.Dir(current), "pfm.segments")
+	const older = "2026-11-12T08-00-00.000Z.jsonl"
+	if err := os.MkdirAll(segmentsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(segmentsDir, older), []byte(head+`older"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -120,11 +136,20 @@ func TestRunHandsTheWholeLogPolicyToTheActivityLog(t *testing.T) {
 	if !obs.Enabled(ctx, "cli", slog.LevelDebug) {
 		t.Fatal("log.components.cli=debug did not reach the process logger")
 	}
-	if obs.Enabled(ctx, "mcp", slog.LevelInfo) {
-		t.Fatal("log.level=error did not reach the process logger for an unlisted component")
+	if obs.Enabled(ctx, "mcp", slog.LevelDebug) {
+		t.Fatal("log.level=info did not reach the process logger for an unlisted component")
 	}
-	if _, err := os.Stat(aged); !os.IsNotExist(err) {
-		t.Fatalf("log.keepDays did not reach the rotator: %s still exists (err %v)", aged, err)
+	segments, err := os.ReadDir(segmentsDir)
+	if err != nil || len(segments) != 1 || segments[0].Name() == older {
+		t.Fatalf("pfm.segments = %v (err %v), want the rolled segment alone, %s reduced away", segments, err, older)
+	}
+	rolled, err := os.ReadFile(filepath.Join(segmentsDir, segments[0].Name()))
+	if err != nil || len(rolled) < len(planted) || string(rolled[:len(planted)]) != planted {
+		t.Fatalf("rolled segment %s: %d bytes (err %v), want the planted %d bytes whole first",
+			segments[0].Name(), len(rolled), err, len(planted))
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(current), "pfm.kept")); !os.IsNotExist(err) {
+		t.Fatalf("pfm.kept exists (err %v), want nothing kept of INFO records", err)
 	}
 }
 
@@ -137,8 +162,8 @@ func TestRunWithLogOffWritesNoFile(t *testing.T) {
 	if code := run([]string{"version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(version) = %d; stderr = %q", code, stderr.String())
 	}
-	if _, err := os.Stat(jailPaths(t).LogFile); !os.IsNotExist(err) {
-		t.Fatalf("log off still produced %s (err %v)", jailPaths(t).LogFile, err)
+	if _, err := os.Stat(jailLog(t)); !os.IsNotExist(err) {
+		t.Fatalf("log off still produced %s (err %v)", jailLog(t), err)
 	}
 	stdout.Reset()
 	if code := run([]string{"log", "--comp", "cli"}, &stdout, &stderr); code != 0 {

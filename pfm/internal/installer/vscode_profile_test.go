@@ -41,9 +41,12 @@ func TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape(t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got := readFixture(t, settings)
-	if !strings.Contains(got, `"icon": "mortar-board"`) || !strings.Contains(got, `"color": "terminal.ansiMagenta"`) {
-		t.Fatalf("owned icon-less canonical profile was not upgraded with icon/colour:\n%s", got)
+	if got := readFixture(t, settings); got != vscodeCanonicalSettings {
+		t.Fatalf(
+			"owned icon-less canonical profile =\n%s\nwant the icon/colour upgrade\n%s",
+			got,
+			vscodeCanonicalSettings,
+		)
 	}
 
 	ownershipPath := filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName)
@@ -77,8 +80,7 @@ func TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape(t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	afterEdit := readFixture(t, settings)
-	if !strings.Contains(afterEdit, `"color": "terminal.ansiGreen"`) {
+	if afterEdit := readFixture(t, settings); afterEdit != edited {
 		t.Fatalf("operator-edited profile was overwritten instead of relinquished:\n%s", afterEdit)
 	}
 }

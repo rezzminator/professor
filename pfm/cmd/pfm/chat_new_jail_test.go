@@ -1,10 +1,11 @@
+//go:build jail
+
 package main
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,7 +27,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
-	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 type runJail struct {
@@ -224,6 +224,7 @@ func (jail *runJail) await(t *testing.T, name, want string) string {
 // renamed through the engine's own UI, and only then is the first prompt
 // delivered.
 func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -299,12 +300,44 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 	}
 }
 
+// TestChatNewRefusesACodexModelTheCatalogueLacks: a model Codex does not offer is a usage error
+// before any tmux server or chat row exists.
+func TestChatNewRefusesACodexModelTheCatalogueLacks(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	root := filepath.Join(jail.root, "codex")
+	if err := os.WriteFile(
+		filepath.Join(root, "models_cache.json"),
+		[]byte(`{"models":[{"slug":"gpt-6-astra"}]}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"chat", "new", "--engine", "codex", "--model", "gpt-9-nova", "--name", "refused model",
+		"--cwd", filepath.Join(jail.root, "work"), "hello",
+	}, &stdout, &stderr)
+	want := "pfm chat new: codex model \"gpt-9-nova\" is not offered by Codex (catalogue " +
+		filepath.Join(root, "models_cache.json") + "); offered: gpt-6-astra\n"
+	if code != 2 || stderr.String() != want {
+		t.Fatalf("exit=%d stderr=%q, want exit 2 and %q", code, stderr.String(), want)
+	}
+	if entries, err := os.ReadDir(jail.tmuxDir); err != nil || len(entries) != 0 {
+		t.Fatalf("jailed tmux sockets = %v (err=%v), want none", entries, err)
+	}
+}
+
 // TestChatNewNamesACodexChatSlowToLeaveItsStartupOverlay is the rename under
 // a loaded machine: the engine repaints late after the Escape that clears its
 // startup overlay, so pfm, seeing the overlay hold, sends it spare Escapes.
 // Codex reads those as keys on an empty composer, and the chat is still named
 // and prompted.
 func TestChatNewNamesACodexChatSlowToLeaveItsStartupOverlay(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -339,6 +372,7 @@ func TestChatNewNamesACodexChatSlowToLeaveItsStartupOverlay(t *testing.T) {
 // non-zero exit, UNNAMED in the report — and the abandoned command must never
 // reach the model as a prompt.
 func TestRunReportsACodexBuildThatCannotBeRenamed(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -372,12 +406,26 @@ func TestRunReportsACodexBuildThatCannotBeRenamed(t *testing.T) {
 		t.Fatalf("delivered prompts = %q — the work must still be delivered, "+
 			"and the abandoned /rename must not be", prompts)
 	}
+	// The live, prompted chat still reaches the comms ledger.
+	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
+		StateDB: filepath.Join(jail.root, "home", ".local", "state", "pfm", "pfm.db"),
+	})
+	t.Cleanup(func() { _ = state.Close() })
+	events, err := state.CommsSince(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != fleetdb.KindSpawn || events[0].Target != "worker" ||
+		events[0].Message != "read the incident report" {
+		t.Fatalf("spawn comms = %#v, want the unnamed chat's one spawn row", events)
+	}
 }
 
 // TestChatNewSpawnsAClaudeChatWithItsNameOnTheCommandLine proves the other
 // route: Claude is named by its own flag, carries the autonomy flags, and is
 // never typed into.
 func TestChatNewSpawnsAClaudeChatWithItsNameOnTheCommandLine(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -419,6 +467,7 @@ func TestChatNewSpawnsAClaudeChatWithItsNameOnTheCommandLine(t *testing.T) {
 }
 
 func TestChatNewRecordsAssignedSessionAndAccountCache(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, testCase := range []struct {
 		name, configCache, cache, ambient string
 		want                              bool
@@ -497,6 +546,7 @@ func TestChatNewRejectsInvalidCacheChoice(t *testing.T) {
 }
 
 func TestChatNewRecordFailureReportsAndStillStartsPane(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -512,9 +562,13 @@ func TestChatNewRecordFailureReportsAndStillStartsPane(t *testing.T) {
 		"chat", "new", "--engine", "claude", "--name", "record-failure-worker",
 		"--cwd", filepath.Join(jail.root, "work"),
 	}, &stdout, &stderr)
-	if code != 0 || !strings.Contains(stderr.String(), "pfm: record launch ") ||
-		!strings.Contains(jail.await(t, "cc-argv", "--session-id"), "--name record-failure-worker") {
-		t.Fatalf("chat new rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	jail.await(t, "cc-argv", "--session-id")
+	if got, want := scrub(
+		stderr.String(),
+		jail.root,
+	), "pfm: record launch {uuid}: record launch {uuid}: inspect shared state database {root}/state-blocker/pfm.db: stat {root}/state-blocker/pfm.db: not a directory\npfm chat new: tmux chat exists; persist seat: write seat \"{socket}\": inspect shared state database {root}/state-blocker/pfm.db: stat {root}/state-blocker/pfm.db: not a directory\npfm: comms ledger: record comms event: inspect shared state database {root}/state-blocker/pfm.db: stat {root}/state-blocker/pfm.db: not a directory\n"; code != 0 ||
+		got != want {
+		t.Fatalf("chat new rc=%d stdout=%q stderr = %q, want %q", code, stdout.String(), got, want)
 	}
 }
 
@@ -523,6 +577,7 @@ func TestChatNewRecordFailureReportsAndStillStartsPane(t *testing.T) {
 // merely the decoded config struct. The default-path tests above separately
 // pin today's bypass flags when no config file exists.
 func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
+	testjail.TmuxServer(t)
 	for _, test := range []struct {
 		name      string
 		engine    string
@@ -611,38 +666,6 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 			}
 		})
 	}
-}
-
-type chatNewCallerVerbs struct {
-	row compose.Row
-}
-
-func (verbs chatNewCallerVerbs) Last(context.Context, pfmchat.LastRequest) (pfmchat.LastResult, error) {
-	return pfmchat.LastResult{}, errors.New("unexpected chat last")
-}
-
-func (verbs chatNewCallerVerbs) Status(context.Context, pfmchat.StatusRequest) (headless.Status, error) {
-	return headless.Status{}, errors.New("unexpected chat status")
-}
-
-func (verbs chatNewCallerVerbs) List(context.Context, pfmchat.ListRequest) (pfmchat.ListResult, error) {
-	return pfmchat.ListResult{Rows: []compose.Row{verbs.row}, Matched: 1}, nil
-}
-
-func (verbs chatNewCallerVerbs) Find(context.Context, pfmchat.FindRequest) ([]pfmchat.TranscriptMatch, error) {
-	return nil, errors.New("unexpected chat find")
-}
-
-func (verbs chatNewCallerVerbs) Read(
-	context.Context,
-	string,
-	int,
-) (headless.Chat, []transcript.Entry, bool, error) {
-	return headless.Chat{}, nil, false, errors.New("unexpected chat read")
-}
-
-func (verbs chatNewCallerVerbs) Exit(context.Context, headless.Chat) (string, error) {
-	return "", errors.New("unexpected chat exit")
 }
 
 func callJailedChatNew(
@@ -740,6 +763,7 @@ func assertJailedSpawnLineage(t *testing.T, jail *runJail, parent, forbiddenPare
 }
 
 func TestMCPChatNewResolvesRelativeCWDAndUsesRequestParent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -767,6 +791,7 @@ func TestMCPChatNewResolvesRelativeCWDAndUsesRequestParent(t *testing.T) {
 }
 
 func TestDirectChatNewKeepsAmbientParent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -804,6 +829,7 @@ func TestParentChatIDUsesScopedCallerIncludingEmptyID(t *testing.T) {
 }
 
 func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -823,7 +849,7 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 			"new", "--engine", "claude", "--name", "cancelled child",
 			"--cwd", filepath.Join(jail.root, "work"),
 		}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
-		if code != 1 || !strings.Contains(stderr.String(), context.Canceled.Error()) {
+		if code != 1 || stderr.String() != "pfm chat new: place the chat: context canceled\n" {
 			t.Fatalf("cancelled spawn exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		if entries, readErr := os.ReadDir(jail.tmuxDir); readErr != nil || len(entries) != 0 {
@@ -859,8 +885,7 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 			"new", "--engine", "claude", "--name", "await child",
 			"--cwd", filepath.Join(jail.root, "work"), "--await", "--timeout", "1", "cancel await",
 		}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
-		if code != 1 || !strings.Contains(stderr.String(), context.Canceled.Error()) ||
-			strings.Contains(stderr.String(), "died at birth") {
+		if code != 1 || stderr.String() != "pfm chat new: configure chat server: context canceled\n" {
 			t.Fatalf("cancelled await exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		content, err := os.ReadFile(jail.transcript)
@@ -873,53 +898,6 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 	})
 }
 
-func TestChatNewCodexRequiresLogin(t *testing.T) {
-	jail := newRunJail(t)
-	t.Cleanup(func() { jail.killSockets(t) })
-	home := filepath.Join(jail.root, "codex")
-	configPath := writeConfigFixture(t, jail.root,
-		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
-	if err := os.Remove(filepath.Join(home, "auth.json")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-logged-out-new")
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"--config", configPath, "chat", "new", "--engine", "codex", "x"}, &stdout, &stderr)
-	entries, err := os.ReadDir(jail.tmuxDir)
-	if code != 1 || !strings.Contains(stderr.String(), "run codex login") || err != nil || len(entries) != 0 {
-		t.Fatalf("chat new code=%d stderr=%q sockets=%v error=%v", code, stderr.String(), entries, err)
-	}
-}
-
-func TestChatNewCodexAdmitsAnAPIKeyHome(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	jail := newRunJail(t)
-	t.Cleanup(func() { jail.killSockets(t) })
-	home := filepath.Join(jail.root, "codex")
-	configPath := writeConfigFixture(t, jail.root,
-		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
-	if err := os.WriteFile(
-		filepath.Join(home, "auth.json"),
-		[]byte(`{"OPENAI_API_KEY":"sk-fixture","tokens":null}`),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-api-key-new")
-	var stdout, stderr bytes.Buffer
-	code := run([]string{
-		"--config", configPath, "chat", "new", "--engine", "codex",
-		"--cwd", filepath.Join(jail.root, "work"), "x",
-	}, &stdout, &stderr)
-	if code != 0 || strings.Contains(stderr.String(), "run codex login") ||
-		!strings.Contains(stdout.String(), "attach: tmux -L cx-") {
-		t.Fatalf("chat new code=%d stdout=%q stderr=%q; want API-key home to launch",
-			code, stdout.String(), stderr.String())
-	}
-}
-
 // firstTurnAPIError is the synthetic reply Claude writes when the model
 // server refuses the very first request, as a gateway rejecting a beta header
 // does.
@@ -929,6 +907,7 @@ const firstTurnAPIError = "API Error: 400 unsupported beta header"
 // server refused is not a launch that worked. Both the bare launch and the
 // --await launch say so with a non-zero exit naming the error.
 func TestChatNewReportsAFirstTurnAPIError(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -964,6 +943,7 @@ func TestChatNewReportsAFirstTurnAPIError(t *testing.T) {
 // TestMCPChatNewReportsAFirstTurnAPIError is the MCP door of the same
 // failure: the tool must not answer ok for a chat sitting in state error.
 func TestMCPChatNewReportsAFirstTurnAPIError(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -984,10 +964,11 @@ func TestMCPChatNewReportsAFirstTurnAPIError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode new content: %v", err)
 	}
-	if !result.IsError {
-		t.Fatalf("new answered ok for a refused first turn: %s", content)
-	}
-	if !strings.Contains(string(content), firstTurnAPIError) {
-		t.Fatalf("new content=%s, want it to name the API error", content)
+	if got, want := scrub(
+		string(content),
+		jail.root,
+	), "[{\"type\":\"text\",\"text\":\"pfm chat new --name refused child --engine claude --cwd {root}/work first question exited 8: pfm chat new: refused child's first turn ended on an API error (invalid_request): API Error: 400 unsupported beta header — the model server refused the prompt; attach it and look: tmux -L {socket} attach -t {socket}\"}]"; !result.IsError ||
+		got != want {
+		t.Fatalf("new IsError=%t content = %q, want %q", result.IsError, got, want)
 	}
 }

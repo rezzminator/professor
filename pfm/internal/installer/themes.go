@@ -52,7 +52,11 @@ func (installer *engine) installThemes(ctx context.Context) {
 	if !installer.options.InstallThemes {
 		return
 	}
-	profiles, err := loadThemeProfiles(ctx, installer.options)
+	profiles, refused, err := loadThemeProfiles(ctx, installer.options)
+	// One stray or badly named entry costs itself alone: every other theme installs.
+	for _, refusal := range refused {
+		installer.skip("theme NOT installed: " + refusal.Error())
+	}
 	if err != nil {
 		installer.skip("themes NOT installed: load " + themeProfilesRelative + ": " + err.Error())
 		return
@@ -198,52 +202,58 @@ const ownerPlaceholder = "{GH_USER}"
 // global skill sources with the blueprint repo owner registeredOwner
 // resolves. Content without the placeholder is returned untouched; a
 // resolution failure is an error naming the placeholder, never a silently
-// unresolved URL.
-func resolveOwnerPlaceholder(content []byte, sourceRepo, releaseURL string) ([]byte, error) {
+// unresolved URL. note names a manifest the owner could not come from.
+func resolveOwnerPlaceholder(content []byte, sourceRepo, releaseURL string) ([]byte, string, error) {
 	if !bytes.Contains(content, []byte(ownerPlaceholder)) {
-		return content, nil
+		return content, "", nil
 	}
-	owner, err := registeredOwner(sourceRepo, releaseURL)
+	owner, note, err := registeredOwner(sourceRepo, releaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("resolve registered placeholder %s: %w", ownerPlaceholder, err)
+		return nil, "", fmt.Errorf("resolve registered placeholder %s: %w", ownerPlaceholder, err)
 	}
-	return bytes.ReplaceAll(content, []byte(ownerPlaceholder), []byte(owner)), nil
+	return bytes.ReplaceAll(content, []byte(ownerPlaceholder), []byte(owner)), note, nil
 }
 
 // registeredOwner resolves {GH_USER}: the owner in the source clone's
 // .professor/manifest.json installed_from.repo, else the owner segment of the
-// release theme URL (ThemeReleaseURL).
-func registeredOwner(sourceRepo, releaseURL string) (string, error) {
+// release theme URL (ThemeReleaseURL). A manifest that cannot be read or names
+// no owner falls through to the release URL, named in note.
+func registeredOwner(sourceRepo, releaseURL string) (owner, note string, err error) {
+	var manifestErr error
 	if strings.TrimSpace(sourceRepo) != "" {
 		manifestPath := filepath.Join(sourceRepo, ".professor", "manifest.json")
-		content, err := os.ReadFile(manifestPath)
-		if err == nil {
+		content, readErr := os.ReadFile(manifestPath)
+		if readErr == nil {
 			var manifest struct {
 				InstalledFrom struct {
 					Repo string `json:"repo"`
 				} `json:"installed_from"`
 			}
 			if decodeErr := json.Unmarshal(content, &manifest); decodeErr != nil {
-				return "", fmt.Errorf("decode %s: %w", manifestPath, decodeErr)
+				manifestErr = fmt.Errorf("decode %s: %w", manifestPath, decodeErr)
+			} else if owner := repositoryOwner(manifest.InstalledFrom.Repo); owner != "" {
+				return owner, "", nil
+			} else {
+				manifestErr = fmt.Errorf("%s installed_from.repo does not name owner/repo", manifestPath)
 			}
-			if owner := repositoryOwner(manifest.InstalledFrom.Repo); owner != "" {
-				return owner, nil
-			}
-			return "", fmt.Errorf("%s installed_from.repo does not name owner/repo", manifestPath)
-		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("read %s: %w", manifestPath, err)
+		} else if !errors.Is(readErr, fs.ErrNotExist) {
+			manifestErr = fmt.Errorf("read %s: %w", manifestPath, readErr)
 		}
 	}
 	parsed, err := url.Parse(strings.TrimSpace(releaseURL))
 	if err != nil {
-		return "", fmt.Errorf("parse release theme URL: %w", err)
+		return "", "", errors.Join(manifestErr, fmt.Errorf("parse release theme URL: %w", err))
 	}
 	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(segments) < 2 || strings.TrimSpace(segments[0]) == "" {
-		return "", fmt.Errorf("release theme URL %q does not name an owner/repository", releaseURL)
+		return "", "", errors.Join(manifestErr,
+			fmt.Errorf("release theme URL %q does not name an owner/repository", releaseURL))
 	}
-	return segments[0], nil
+	if manifestErr != nil {
+		note = "SKILL-SOURCES-OWNER " + manifestErr.Error() + "; " + ownerPlaceholder +
+			" resolved from the release theme URL instead"
+	}
+	return segments[0], note, nil
 }
 
 func repositoryOwner(repository string) string {
@@ -278,75 +288,80 @@ func releaseUnpublishedAlpha(rawURL string) bool {
 
 // loadThemeProfiles finds the themes install ships, keyed by name: every
 // theme directory in the source clone's templates/themes/, or, with no source
-// clone or one without that directory, every one there at the release.
-func loadThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, error) {
+// clone or one without that directory, every one there at the release. Each
+// entry that is no theme (a stray file or link, a bad name) is refused by name
+// and costs itself alone.
+func loadThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, []error, error) {
 	if strings.TrimSpace(options.SourceRepo) == "" {
-		profiles, err := releaseThemeProfiles(ctx, options)
+		profiles, refused, err := releaseThemeProfiles(ctx, options)
 		if err != nil {
-			return nil, fmt.Errorf("no source repository: %w", err)
+			return nil, refused, fmt.Errorf("no source repository: %w", err)
 		}
-		return profiles, nil
+		return profiles, refused, nil
 	}
 	directory := filepath.Join(options.SourceRepo, filepath.FromSlash(themeProfilesRelative))
-	names, err := localProfileDirs(directory)
+	names, refused, err := localProfileDirs(directory)
 	if errors.Is(err, fs.ErrNotExist) {
-		profiles, releaseErr := releaseThemeProfiles(ctx, options)
+		profiles, releaseRefused, releaseErr := releaseThemeProfiles(ctx, options)
 		if releaseErr != nil {
-			return nil, fmt.Errorf("local themes unavailable: %v; %w", err, releaseErr)
+			return nil, releaseRefused, fmt.Errorf("local themes unavailable: %v; %w", err, releaseErr)
 		}
-		return profiles, nil
+		return profiles, releaseRefused, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	profiles := make(map[string]themeProfile, len(names))
 	for _, name := range names {
 		if err := validateThemeName(name); err != nil {
-			return nil, fmt.Errorf("theme %s: %w", name, err)
+			refused = append(refused, fmt.Errorf("theme %s: %w", name, err))
+			continue
 		}
 		profiles[name] = themeProfile{local: filepath.Join(directory, name)}
 	}
 	if len(profiles) == 0 {
-		return nil, fmt.Errorf("no theme in %s: a theme is a {name}/ directory there", directory)
+		return nil, refused, fmt.Errorf("no theme in %s: a theme is a {name}/ directory there", directory)
 	}
-	return profiles, nil
+	return profiles, refused, nil
 }
 
 // releaseThemeProfiles lists the profiles at Options.ThemeReleaseURL and
 // names each one's download URL: refused, before any fetch, for an
 // unpublished -alpha release or with the theme fetch switched off.
-func releaseThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, error) {
+func releaseThemeProfiles(ctx context.Context, options Options) (map[string]themeProfile, []error, error) {
 	base := strings.TrimSpace(options.ThemeReleaseURL)
 	if base == "" {
-		return nil, errors.New("no release theme URL is configured")
+		return nil, nil, errors.New("no release theme URL is configured")
 	}
 	if releaseUnpublishedAlpha(base) {
-		return nil, errors.New(
+		return nil, nil, errors.New(
 			"release themes for an unpublished -alpha build; run pfm install from the source clone",
 		)
 	}
 	if options.ThemesOffline {
-		return nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
+		return nil, nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
 	}
-	names, err := releaseProfileDirs(ctx, options.ThemeHTTPClient, base)
+	names, refused, err := releaseProfileDirs(ctx, options.ThemeHTTPClient, base)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	profiles := make(map[string]themeProfile, len(names))
 	for _, name := range names {
 		if err := validateThemeName(name); err != nil {
-			return nil, fmt.Errorf("theme %s: %w", name, err)
+			refused = append(refused, fmt.Errorf("theme %s: %w", name, err))
+			continue
 		}
 		raw := strings.TrimSuffix(base, "/") + "/" + name + "/"
 		if err := validateThemeURL(raw); err != nil {
-			return nil, fmt.Errorf("theme %s release URL: %w", name, err)
+			refused = append(refused, fmt.Errorf("theme %s release URL: %w", name, err))
+			continue
 		}
 		profiles[name] = themeProfile{raw: raw}
 	}
 	if len(profiles) == 0 {
-		return nil, fmt.Errorf("no theme in %s", base)
+		return nil, refused, fmt.Errorf("no theme in %s", base)
 	}
-	return profiles, nil
+	return profiles, refused, nil
 }
 
 // flatProfileError refuses a {name}.json file directly in templates/themes/:
@@ -360,31 +375,30 @@ func flatProfileError(file, where string) error {
 }
 
 // localProfileDirs are the themes in the source clone's templates/themes/,
-// sorted: every subdirectory, each a theme. A {name}.json file there is an
-// error (flatProfileError), a symlink or other non-regular entry too; any
+// sorted: every subdirectory, each a theme. A {name}.json file there is
+// refused (flatProfileError), a symlink or other non-regular entry too; any
 // other file (the README) is not a theme.
-func localProfileDirs(dir string) ([]string, error) {
+func localProfileDirs(dir string) (names []string, refused []error, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("list themes in %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("list themes in %s: %w", dir, err)
 	}
-	var names []string
 	for _, entry := range entries {
 		switch {
 		case entry.IsDir():
 			names = append(names, entry.Name())
 		case !entry.Type().IsRegular():
-			return nil, fmt.Errorf(
+			refused = append(refused, fmt.Errorf(
 				"%s in %s is neither a theme directory nor a file (%s)",
 				entry.Name(),
 				dir,
 				entry.Type(),
-			)
+			))
 		case strings.HasSuffix(entry.Name(), ".json"):
-			return nil, flatProfileError(entry.Name(), dir)
+			refused = append(refused, flatProfileError(entry.Name(), dir))
 		}
 	}
-	return names, nil
+	return names, refused, nil
 }
 
 // The contents API's types for a directory and a file entry, as against
@@ -397,34 +411,37 @@ const (
 // releaseProfileDirs lists the themes at a release theme URL on
 // raw.githubusercontent.com through GitHub's contents API, the one listing
 // that host has: the directories of templates/themes/ at the URL's ref. A
-// {name}.json file there is an error (flatProfileError).
-func releaseProfileDirs(ctx context.Context, client *http.Client, releaseURL string) ([]string, error) {
+// {name}.json file there is refused (flatProfileError).
+func releaseProfileDirs(
+	ctx context.Context,
+	client *http.Client,
+	releaseURL string,
+) (names []string, refused []error, err error) {
 	listing, err := themeListingURL(releaseURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	content, err := fetchTheme(ctx, client, listing)
 	if err != nil {
-		return nil, fmt.Errorf("list release profiles: %w", err)
+		return nil, nil, fmt.Errorf("list release profiles: %w", err)
 	}
 	var entries []struct {
 		Name string `json:"name"`
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(content, &entries); err != nil {
-		return nil, fmt.Errorf("list release profiles: decode %s: %w", listing, err)
+		return nil, nil, fmt.Errorf("list release profiles: decode %s: %w", listing, err)
 	}
-	var names []string
 	for _, entry := range entries {
 		switch {
 		case entry.Type == githubContentsDir:
 			names = append(names, entry.Name)
 		case entry.Type == githubContentsFile && strings.HasSuffix(entry.Name, ".json"):
-			return nil, flatProfileError(entry.Name, releaseURL)
+			refused = append(refused, flatProfileError(entry.Name, releaseURL))
 		}
 	}
 	sort.Strings(names)
-	return names, nil
+	return names, refused, nil
 }
 
 // themeListingURL turns a release theme URL,

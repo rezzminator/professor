@@ -11,9 +11,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -129,17 +130,19 @@ func codexSubcommand(args []string) (subcommand string, help bool) {
 
 // CodexLaunch applies the current primary account's Codex policy at launch time.
 func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
-	primary, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
-	if err != nil {
-		fmt.Fprintf(stderr, "resolve primary account: %v\n", err)
-		return 1
-	}
+	return CodexLaunchWith(args, stderr, runtime, nil)
+}
+
+// CodexLaunchWith is CodexLaunch with the runner of its children, the Codex binary's lookup and the
+// mirror's engine-sync; nil is the real one.
+func CodexLaunchWith(args []string, stderr io.Writer, runtime config.Runtime, runner deps.Runner) int {
+	primary := launchPrimaryAccount(runtime, stderr)
 	policy := runtime.Config.EffectiveCodex(primary)
 	binaryName := policy.Binary
 	if binaryName == "" {
 		binaryName = pfmengine.MustLookup(pfmengine.Codex).Binary
 	}
-	binary, err := obs.Runner(deps.RealRunner{}).LookPath(binaryName)
+	binary, err := obs.Runner(runner).LookPath(binaryName)
 	if err != nil {
 		fmt.Fprintf(stderr, "resolve Codex binary: %v\n", err)
 		return 1
@@ -148,7 +151,7 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	if policy.Yolo {
 		argv = append(argv, "--dangerously-bypass-approvals-and-sandbox")
 	}
-	personaArgs, err := codexWorkbenchArgs(args, runtime.Paths.Home)
+	personaArgs, envs, err := codexWorkbenchArgs(args, runtime.Paths.Home, runner, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "launch Codex: %v\n", err)
 		return 1
@@ -159,6 +162,9 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	for _, name := range claudelaunch.Hygiene() {
 		unset[name] = true
 	}
+	for name := range envs {
+		unset[name] = true
+	}
 	env := make([]string, 0, len(os.Environ()))
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
@@ -166,7 +172,7 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 			env = append(env, entry)
 		}
 	}
-	env = runtime.Config.ExtensionEnvironment(pfmengine.MustLookup(pfmengine.Codex).LongName, env)
+	env = claudelaunch.WithEnvs(envs, env)
 	if !codexRunsAsInteractiveChat(args) {
 		// A subcommand or a non-interactive turn is never the chat bound to the pane: its hooks must
 		// not find the parent's Herdr pane, by Herdr name or by tmux pane.
@@ -179,16 +185,23 @@ func CodexLaunch(args []string, stderr io.Writer, runtime config.Runtime) int {
 	return 0
 }
 
-func codexWorkbenchArgs(args []string, home string) ([]string, error) {
+// codexWorkbenchArgs is the persona's Codex arguments and the adopter
+// settings' envs. A part that cannot be resolved is left out with a warning
+// and the launch goes on; only a workbench that does not enable Codex refuses it.
+func codexWorkbenchArgs(
+	args []string, home string, runner deps.Runner, stderr io.Writer,
+) ([]string, map[string]string, error) {
+	const prefix = "launch Codex"
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("resolve cwd: %w", err)
+		fmt.Fprintf(stderr, "%s: resolve cwd (%v); launching without a workbench persona\n", prefix, err)
+		return nil, nil, nil
 	}
 	mode := workbench.New
 	var model, effort, prompt bool
 	for _, arg := range args {
 		if codexPassthrough[arg] {
-			return nil, nil
+			return nil, nil, nil
 		}
 		if codexSessionSubcommands[arg] {
 			mode = workbench.Resume
@@ -197,23 +210,23 @@ func codexWorkbenchArgs(args []string, home string) ([]string, error) {
 		effort = effort || strings.Contains(arg, "model_reasoning_effort=")
 		prompt = prompt || strings.Contains(arg, "developer_instructions=")
 	}
-	persona, err := action.WorkbenchPersona(cwd, pfmengine.Codex, mode)
+	persona, warnings, err := action.LaunchPersona(cwd, home, pfmengine.Codex, mode)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	warnings = append(warnings, action.PersonaMirror(persona, pfmengine.Codex, home, runner)...)
+	launchnotice.Print(stderr, prefix, warnings)
 	if !persona.Applies() {
-		return nil, nil
-	}
-	if err := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, home); err != nil {
-		return nil, err
+		return nil, persona.Envs, nil
 	}
 	var inserted []string
 	if persona.Model != "" && !model {
-		resolved, err := pfmengine.CodexModel(persona.Model, home)
+		resolved, err := pfmengine.CodexModel(persona.Model, home, paths.CodexHome(home))
 		if err != nil {
-			return nil, err
+			fmt.Fprintf(stderr, "%s: %v; launching on Codex's default model\n", prefix, err)
+		} else {
+			inserted = append(inserted, "--model", resolved)
 		}
-		inserted = append(inserted, "--model", resolved)
 	}
 	if persona.Effort != "" && !effort {
 		inserted = append(inserted, action.CodexEffortArg(persona.Effort)...)
@@ -221,5 +234,5 @@ func codexWorkbenchArgs(args []string, home string) ([]string, error) {
 	if !prompt {
 		inserted = append(inserted, action.CodexDeveloperInstructionsArg(persona.Body)...)
 	}
-	return inserted, nil
+	return inserted, persona.Envs, nil
 }

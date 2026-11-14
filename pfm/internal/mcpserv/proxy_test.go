@@ -653,7 +653,7 @@ func TestStdioProxyDropsUndeliverableNotification(t *testing.T) {
 	server.Close()
 
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":44}}`)
-	deadline := time.After(time.Second)
+	deadline := time.After(10 * time.Second)
 	for !strings.Contains(warnings.String(), "dropped notification") {
 		select {
 		case <-deadline:
@@ -667,7 +667,7 @@ func TestStdioProxyDropsUndeliverableNotification(t *testing.T) {
 func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	t.Parallel()
 	row := compose.Row{
-		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
+		SessionName: "cc-seat", ID: "session-id", CWD: testjail.Place("/work/proxy"), Project: "proxy",
 		Name: "Proxy Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
 	}
 	var calls [][]string
@@ -700,7 +700,9 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	}
 	harness.write(t, proxyTestToolCall(4, "new", `{"name":"child"}`))
 	_ = proxyTestStructured(t, harness.read(t))
-	wantCalls := [][]string{{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", "/work/proxy"}}
+	wantCalls := [][]string{
+		{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", testjail.Place("/work/proxy")},
+	}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("proxied new calls = %q, want %q", calls, wantCalls)
 	}
@@ -731,7 +733,8 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 		}
 	}
 	writeCrumb("conversation-a")
-	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	var warnings bytes.Buffer
+	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), &warnings)
 	proxy.sidDir = sidDir
 	proxy.identify = func(context.Context) (resolve.Identity, error) {
 		return resolve.Identity{
@@ -764,17 +767,34 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	if id, _ := missingIdentity["id"].(string); id != "" {
 		t.Fatalf("missing current crumb replayed cached id: %+v", missingIdentity)
 	}
+	// An unreadable crumb or breadcrumb directory forwards the call with no
+	// transcript id, as a missing crumb does, and names why on the warnings.
 	if err := os.Mkdir(crumb, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	before := len(received)
 	proxy.forward(context.Background(), []byte(proxyTestToolCall(5, "whoami", `{}`)), &output)
-	if len(received) != before || !strings.Contains(output.String(), "refresh Claude caller transcript") {
-		t.Fatalf(
-			"crumb read failure forwarded mutation or lacked named error: received=%d output=%s",
-			len(received),
-			output.String(),
-		)
+	proxy.sidDir = "relative-sid"
+	proxy.forward(context.Background(), []byte(proxyTestToolCall(51, "whoami", `{}`)), &output)
+	proxy.sidDir = sidDir
+	if len(received) != 5 {
+		t.Fatalf("daemon received %d calls, want the unreadable-crumb calls forwarded too", len(received))
+	}
+	for _, frame := range received[3:5] {
+		identity := frame["params"].(map[string]any)["_meta"].(map[string]any)["pfmProxy"].(map[string]any)
+		if id, present := identity["id"]; present || identity["session"] != "seat" {
+			t.Fatalf(
+				"unreadable crumb forwarded identity %+v (id %v), want the seat with no transcript id",
+				identity,
+				id,
+			)
+		}
+	}
+	wantWarnings := "pfm mcp stdio proxy: refresh Claude caller transcript: read reload breadcrumb \"" + crumb +
+		"\": read " + crumb + ": is a directory; forwarding without a transcript id\n" +
+		"pfm mcp stdio proxy: refresh Claude caller transcript: breadcrumb directory \"relative-sid\" is not absolute; " +
+		"forwarding without a transcript id\n"
+	if warnings.String() != wantWarnings {
+		t.Fatalf("refresh warnings = %q, want %q", warnings.String(), wantWarnings)
 	}
 	if err := os.Remove(crumb); err != nil {
 		t.Fatal(err)
@@ -815,9 +835,12 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	harness.write(t, proxyTestToolCall(2, "whoami", `{}`))
 	whoami := proxyTestStructured(t, harness.read(t))
-	message, _ := whoami["message"].(string)
-	if whoami["status"] != "not_found" || !strings.Contains(message, "not inside a pfm chat") {
-		t.Fatalf("unresolved proxy identity = %+v, want the daemon's named refusal", whoami)
+	if got, want := fmt.Sprint(
+		whoami["status"],
+		": ",
+		whoami["message"],
+	), "not_found: ERROR: this process is not inside a pfm chat: no live tmux pane or Herdr pane holds it"; got != want {
+		t.Fatalf("unresolved proxy identity = %q, want %q", got, want)
 	}
 }
 

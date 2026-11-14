@@ -54,7 +54,10 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 			}
 			var scan professor.RetiredNameScanner
 			if args[0] == "accept" {
-				scan = ScanRetiredNames // accept checks its path against the live hits
+				scan = RetiredNameScanner(
+					context.Background(),
+					runtime.Paths.Home,
+				) // accept checks its path against the live hits
 			}
 			return professor.RunProjectUpdate(args[0], args[1:], stdout, stderr, runtime, scan)
 		}
@@ -113,7 +116,9 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 	if *jsonOutput {
 		postArgs = append(postArgs, "--json")
 	}
-	return professor.RunProjectUpdate("", postArgs, stdout, stderr, runtime, ScanRetiredNames)
+	return professor.RunProjectUpdate(
+		"", postArgs, stdout, stderr, runtime, RetiredNameScanner(context.Background(), runtime.Paths.Home),
+	)
 }
 
 // refuseSourceDowngrade guards a target the source (previousRef, a commit)
@@ -662,7 +667,7 @@ func runUpdateDoctor(
 	// binary, not whichever source checkout invoked it, so run from a fresh
 	// non-repository directory and keep an unwired maintainer checkout from
 	// rolling back an otherwise healthy update.
-	doctorDir, err := os.MkdirTemp("", "pfm-update-doctor-")
+	doctorDir, err := paths.MkdirTemp("update-doctor", "run-")
 	if err != nil {
 		return doctorOutcome{}, fmt.Errorf("create isolated doctor directory: %w", err)
 	}

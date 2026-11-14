@@ -8,17 +8,19 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// A chat resumed from the picker opens on its engine's remembered account and
-// that account's remembered cache, falling back to the configured one.
+// A chat with no launch record resumed from the picker opens on its engine's
+// remembered account and that account's remembered cache, falling back to the
+// configured one.
 func TestResumeOpensOnTheRememberedAccountAndItsCache(t *testing.T) {
-	resume := compose.Row{Kind: compose.ResumeClaude, ID: "r", Name: "r", Project: "p", Account: 1}
+	resume := compose.Row{Kind: compose.ResumeClaude, ID: "r", Name: "r", Project: "p"}
 	for _, test := range []struct {
 		name    string
 		last    fleetdb.LaunchMemory
@@ -36,16 +38,13 @@ func TestResumeOpensOnTheRememberedAccountAndItsCache(t *testing.T) {
 				Cache1H: true, Cache1HByAccount: map[int]bool{1: true, 2: true},
 				LastLaunch: test.last,
 			})
-			model, _ = applyKey(t, model, specialKey(tea.KeyEnter))
+			model, _, _ = enterThrough(t, model)
 			result := model.Result()
-			if result.Kind != OutcomeSelected || result.PrimaryAccount != test.primary || result.Cache1H != test.want {
-				t.Fatalf(
-					"resume result account %d cache %t, want %d/%t",
-					result.PrimaryAccount,
-					result.Cache1H,
-					test.primary,
-					test.want,
-				)
+			want := &ResumeChoice{Account: test.primary, Cache1H: test.want}
+			if result.Kind != OutcomeSelected || result.PrimaryAccount != test.primary ||
+				!reflect.DeepEqual(result.Resume, want) {
+				t.Fatalf("resume result account %d resume %+v, want primary %d and %+v",
+					result.PrimaryAccount, result.Resume, test.primary, want)
 			}
 		})
 	}
@@ -208,11 +207,11 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 			{
 				Kind: compose.ProfessorUpdate, ID: "pfm-update-v0.61.2",
 				Name: "Professor v0.61.2 available — update", Project: ".professor",
-				CWD: "/home/test/.professor",
+				CWD: testjail.Place("/home/test/.professor"),
 			},
 			{
 				Kind: compose.LiveClaude, ID: "professor-work", Name: "Professor work",
-				Project: ".professor", CWD: "/home/test/.professor",
+				Project: ".professor", CWD: testjail.Place("/home/test/.professor"),
 			},
 			{Kind: compose.NewClaude, Name: "New Claude chat", Project: "project", CWD: "/work/project"},
 			{Kind: compose.NewCodex, Name: "New Codex chat", Project: "project", CWD: "/work/project"},
@@ -261,7 +260,7 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 	model, command = applyKey(t, model, specialKey(tea.KeyEnter))
 	result := model.Result()
 	if command == nil || result.Kind != OutcomeProfessorUpdate || result.Engine != pfmengine.Codex ||
-		result.PrimaryAccount != 2 || result.Row.CWD != "/home/test/.professor" {
+		result.PrimaryAccount != 2 || result.Row.CWD != testjail.Place("/home/test/.professor") {
 		t.Fatalf("update selection result=%#v command=%v", result, command)
 	}
 }
@@ -276,11 +275,11 @@ func TestProfessorUpdateFailureRowPersistsAcrossRefresh(t *testing.T) {
 			{
 				Kind: compose.ProfessorUpdateFailed, ID: "pfm-update-check-failed-2026-01-02T03:04:05Z",
 				Name: "failing since 2026-01-02 03:04 (network): 503", Project: ".professor",
-				CWD: "/home/test/.professor",
+				CWD: testjail.Place("/home/test/.professor"),
 			},
 			{
 				Kind: compose.LiveClaude, ID: "professor-work", Name: "Professor work",
-				Project: ".professor", CWD: "/home/test/.professor",
+				Project: ".professor", CWD: testjail.Place("/home/test/.professor"),
 			},
 		},
 		View:           compose.DefaultView,
@@ -312,25 +311,13 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 		Width: 120, Height: 20,
 	}
 	model := NewModel(snapshot)
-	line := model.renderGroupedRow(snapshot.Rows[0], false, 118, false)
-	plain := ansi.Strip(line)
-	for _, want := range []string{"✦ PROFESSOR UPDATE ✦", "v0.61.2", "◖ Claude ◗", "[ Codex ]", "[ OpenCode ]", "guided upgrade"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("update banner %q lacks %q", plain, want)
-		}
-	}
-	if ansi.StringWidth(line) != 118 || !strings.Contains(line, ";5;") {
-		t.Fatalf("update banner width=%d raw=%q, want full width and ANSI blink", ansi.StringWidth(line), line)
-	}
+	first := model.renderGroupedRow(snapshot.Rows[0], false, 118, false)
 	model.nowNS += int64(500 * time.Millisecond)
-	if next := ansi.Strip(
-		model.renderGroupedRow(snapshot.Rows[0], false, 118, false),
-	); !strings.Contains(
-		next,
-		"✧ PROFESSOR UPDATE ✧",
-	) {
-		t.Fatalf("animated update banner = %q, want alternate sparkle phase", next)
-	}
+	golden(
+		t,
+		"ui_update_banner.ansi",
+		quoteANSI(first)+quoteANSI(model.renderGroupedRow(snapshot.Rows[0], false, 118, false)),
+	)
 }
 
 func TestNewChatUsesOnlyPresentEnginesAndAsksTheirOwnRoster(t *testing.T) {
@@ -587,9 +574,11 @@ func TestEnterOutcomeEveryKindAndLiveReboot(t *testing.T) {
 			NowNS:               fixtureNowNS,
 		}
 		model := NewModel(snapshot)
-		selected, command := applyKey(t, model, specialKey(tea.KeyEnter))
+		// A resumable chat's ⏎ walks its steps first; every other row selects at once.
+		selected, command, walked := enterThrough(t, model)
 		result := selected.Result()
-		if command == nil ||
+		resumable := row.Kind.IsResumable() && row.Backend != spawn.BackendHerdr
+		if command == nil || walked != resumable || (result.Resume != nil) != resumable ||
 			result.Kind != OutcomeSelected ||
 			compose.RowKey(result.Row) != compose.RowKey(row) ||
 			result.PrimaryAccount != 3 ||
@@ -828,7 +817,7 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 				snapshot.Rows[1].Kind = compose.Booting
 				snapshot.Rows[1].Name = "boot-probe"
 			},
-			receipt: "still booting",
+			receipt: "⌃X refused — boot-probe is still booting (no identity yet); retry once it settles",
 		},
 		{
 			// The Kind arm matches before the empty-ID arm, so the cursor can
@@ -837,14 +826,14 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 			mutate: func(snapshot *Snapshot) {
 				snapshot.Rows[1].Kind = compose.LiveSplit
 			},
-			receipt: "split live window",
+			receipt: "⌃X refused — split live window; kill its chats individually",
 		},
 		{
 			name: "label-killed row is refused",
 			mutate: func(snapshot *Snapshot) {
 				snapshot.Rows[1].NameKilled = true
 			},
-			receipt: "_KILL label",
+			receipt: "⌃X refused — killed by its _KILL label; rename it to unkill",
 		},
 		{
 			name: "identityless row is refused",
@@ -852,7 +841,7 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 				snapshot.Rows[1].ID = ""
 				snapshot.Rows[1].Kind = compose.NewClaude
 			},
-			receipt: "not a chat yet",
+			receipt: "⌃X refused — RR is not a chat yet",
 			seek: func(row compose.Row) bool {
 				return row.ID == "" && row.Kind == compose.NewClaude
 			},
@@ -862,7 +851,7 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 			mutate: func(snapshot *Snapshot) {
 				snapshot.ApplyKill = nil
 			},
-			receipt: "cannot write kills",
+			receipt: "⌃X refused — this picker cannot write kills",
 		},
 		{
 			name: "failed store write names the chat and the error",
@@ -871,12 +860,12 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 					return errors.New("store is sealed")
 				}
 			},
-			receipt: "store is sealed",
+			receipt: "⌃X failed — RR: store is sealed",
 		},
 		{
 			name:    "landed kill prints its receipt",
 			mutate:  func(_ *Snapshot) {},
-			receipt: "hidden — ",
+			receipt: "hidden — RR",
 		},
 	}
 	for _, testCase := range cases {
@@ -897,15 +886,8 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 				}
 			}
 			model, _ = applyKey(t, model, controlKey('x'))
-			if model.killStatus == "" {
-				t.Fatal("⌃X left no receipt — the keystroke went silent")
-			}
-			if !strings.Contains(model.killStatus, testCase.receipt) {
-				t.Fatalf(
-					"receipt = %q, want it to mention %q",
-					model.killStatus,
-					testCase.receipt,
-				)
+			if model.killStatus != testCase.receipt {
+				t.Fatalf("receipt = %q, want %q", model.killStatus, testCase.receipt)
 			}
 		})
 	}

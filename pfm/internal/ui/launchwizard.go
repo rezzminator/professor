@@ -15,7 +15,8 @@ import (
 )
 
 // The new-chat wizard. ⏎ on a ✦ row walks the choices of a new chat inside that
-// row, one step at a time:
+// row, one step at a time (⏎ on a resumable chat walks the same steps for its
+// resume, its engine fixed and its last launch's account and cache first):
 //
 //	engine   when the row can launch more than one
 //	account  when the chosen engine has more than one configured
@@ -44,15 +45,18 @@ type wizardState struct {
 	remembered    fleetdb.LaunchMemory
 	memoryError   string // a failed read of remembered, named on the ✦ row
 	defaultEngine pfmengine.ID
+	resumeChoice  *ResumeChoice // what a finished resume walk chose (Outcome.Resume)
 }
 
-// launchWizard is one walk. engine, account and cache are the choices so far;
+// launchWizard is one walk; resume marks a walk on a resumable chat's row,
+// whose engine never changes. engine, account and cache are the choices so far;
 // accountEngine and cacheAccount name what the account and cache were last
 // defaulted for, so going back and forth keeps a choice until its cause moves;
 // cacheSet marks the cache as defaulted at all, since account 0 (a machine with
 // no named accounts) is also the zero value of cacheAccount.
 type launchWizard struct {
 	on            bool
+	resume        bool
 	rowKey        string
 	step          wizardStep
 	trail         []wizardStep
@@ -73,13 +77,25 @@ type wizardChoice struct {
 	cache   bool
 }
 
+// wizardRowKey names the row a walk is on: a ✦ row by its place, since its
+// kind follows the engine chosen; a resumable chat by its id.
 func wizardRowKey(row compose.Row) string {
+	if !isNewChatActionKind(row.Kind) {
+		return compose.RowKey(row)
+	}
 	return row.Workbench + "\x00" + row.CWD + "\x00" + row.Project
 }
 
-// wizardOn reports whether the wizard is open on this ✦ row.
+func isNewChatActionKind(kind compose.Kind) bool {
+	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
+}
+
+// wizardOn reports whether the wizard is open on this row. A resume walk is
+// off a chat that turned live since (resumed elsewhere), whose row keeps the
+// chat's id.
 func (model Model) wizardOn(row compose.Row) bool {
-	return model.wizard.on && model.wizard.rowKey == wizardRowKey(row)
+	return model.wizard.on && model.wizard.resume == row.Kind.IsResumable() &&
+		model.wizard.rowKey == wizardRowKey(row)
 }
 
 // hasCacheChoice reports whether engine offers a prompt-cache choice.
@@ -160,7 +176,7 @@ func mergedCache(configured, remembered map[int]bool) map[int]bool {
 func (model Model) wizardApplies(row compose.Row, step wizardStep, engine pfmengine.ID) bool {
 	switch step {
 	case wizardEngine:
-		return len(model.newChatEnginesFor(row)) > 1
+		return isNewChatActionKind(row.Kind) && len(model.newChatEnginesFor(row)) > 1
 	case wizardAccount:
 		return len(model.accountsOf(engine)) > 1
 	case wizardCache:
@@ -207,14 +223,15 @@ func (model Model) wizardChoices(row compose.Row, step wizardStep, engine pfmeng
 // first chip, already highlighted, is what ⏎ repeats.
 func (model Model) orderedChoices(row compose.Row, wizard launchWizard) []wizardChoice {
 	choices := model.wizardChoices(row, wizard.step, wizard.engine)
+	account, cache := model.stepDefaults(row, wizard)
 	lead := func(choice wizardChoice) bool {
 		switch wizard.step {
 		case wizardEngine:
 			return choice.engine == model.idleEngine(row)
 		case wizardAccount:
-			return choice.account == model.defaultAccount(wizard.engine)
+			return choice.account == account
 		case wizardCache:
-			return choice.cache == model.defaultCache(wizard.account)
+			return choice.cache == cache
 		}
 		return false
 	}
@@ -277,6 +294,48 @@ func (model Model) beginWizard(row compose.Row) (tea.Model, tea.Cmd) {
 	return model.wizardEnter(row, 0)
 }
 
+// selectRow is ⏎ on a chat row's open action. A resumable chat opens its
+// resume steps when they ask anything, a native seat whose seat is gone
+// (lost, failed, ended: compose.SeatKindFor) as a tmux chat does; every other
+// row, a live native seat among them, is selected as it is.
+func (model Model) selectRow(row compose.Row) (tea.Model, tea.Cmd) {
+	if row.Kind.IsResumable() {
+		engine := compose.EngineForKind(row.Kind)
+		if _, asks := model.wizardNext(row, 0, engine); asks {
+			return model.beginResumeWizard(row, engine)
+		}
+	}
+	if isNewChatActionKind(row.Kind) {
+		row.Account = model.accountForKind(row.Kind)
+	}
+	model.outcome = OutcomeSelected
+	model.outcomeRow = row
+	return model, tea.Quit
+}
+
+// beginResumeWizard opens the steps of a resume, each on the chat's last
+// launch (stepDefaults).
+func (model Model) beginResumeWizard(row compose.Row, engine pfmengine.ID) (tea.Model, tea.Cmd) {
+	model.wizard = launchWizard{on: true, resume: true, rowKey: wizardRowKey(row), engine: engine}
+	return model.wizardEnter(row, 0)
+}
+
+// stepDefaults is the account and cache a walk's steps open on: a new chat's
+// last launch, else the configured values; a resume's own recorded launch
+// while the roster still has its account, else the engine's default account
+// and that account's cache — the account a plain resume launches under
+// (action.deadClaudeAccount), so ⏎ through every step resumes as one would.
+func (model Model) stepDefaults(row compose.Row, wizard launchWizard) (account int, cache bool) {
+	account, cache = model.defaultAccount(wizard.engine), model.defaultCache(wizard.account)
+	if !wizard.resume || row.Account == 0 || validAccount(row.Account, model.accountsOf(wizard.engine)) != row.Account {
+		return account, cache
+	}
+	if wizard.account == row.Account {
+		cache = row.C1H
+	}
+	return row.Account, cache
+}
+
 // wizardEnter moves to the first applicable step after the given one, or
 // starts the chat when none is left.
 func (model Model) wizardEnter(row compose.Row, after wizardStep) (tea.Model, tea.Cmd) {
@@ -287,10 +346,12 @@ func (model Model) wizardEnter(row compose.Row, after wizardStep) (tea.Model, te
 	}
 	wizard.step = step
 	if step >= wizardAccount && wizard.accountEngine != wizard.engine {
-		wizard.account, wizard.accountEngine = model.defaultAccount(wizard.engine), wizard.engine
+		wizard.account, _ = model.stepDefaults(row, wizard)
+		wizard.accountEngine = wizard.engine
 	}
 	if step == wizardCache && (!wizard.cacheSet || wizard.cacheAccount != wizard.account) {
-		wizard.cache, wizard.cacheAccount, wizard.cacheSet = model.defaultCache(wizard.account), wizard.account, true
+		_, wizard.cache = model.stepDefaults(row, wizard)
+		wizard.cacheAccount, wizard.cacheSet = wizard.account, true
 	}
 	model.wizard = model.seek(row, wizard)
 	return model, nil
@@ -301,6 +362,17 @@ func (model Model) wizardEnter(row compose.Row, after wizardStep) (tea.Model, te
 func (model Model) finishWizard(row compose.Row) (tea.Model, tea.Cmd) {
 	wizard := model.wizard
 	model.wizard = launchWizard{}
+	if wizard.resume {
+		// The choice is this resume's alone: the primary account stays.
+		choice := ResumeChoice{Account: wizard.account, Cache1H: model.cache1H}
+		if hasCacheChoice(wizard.engine) {
+			choice.Cache1H = wizard.cache
+		}
+		model.resumeChoice = &choice
+		model.outcome = OutcomeSelected
+		model.outcomeRow = row
+		return model, tea.Quit
+	}
 	if wizard.account > 0 {
 		switch wizard.engine {
 		case pfmengine.Codex:
@@ -329,7 +401,7 @@ func (model Model) finishWizard(row compose.Row) (tea.Model, tea.Cmd) {
 // caller then closes the wizard and handles the key as usual.
 func (model Model) wizardKey(key string) (tea.Model, tea.Cmd, bool) {
 	row, ok := model.selectedRow()
-	if !ok || model.tab != TabChats || !isNewChatActionKind(row.Kind) || !model.wizardOn(row) {
+	if !ok || model.tab != TabChats || !model.wizardOn(row) {
 		return model, nil, false
 	}
 	wizard := model.wizard
@@ -393,7 +465,11 @@ func (model Model) wizardPosition(row compose.Row) (index, total int) {
 // wizardStatus says which step the open wizard is on, for the footer.
 func (model Model) wizardStatus(row compose.Row) string {
 	index, total := model.wizardPosition(row)
-	return "new chat · step " + strconv.Itoa(index) + " of " + strconv.Itoa(total) +
+	what := "new chat"
+	if model.wizard.resume {
+		what = "resume"
+	}
+	return what + " · step " + strconv.Itoa(index) + " of " + strconv.Itoa(total) +
 		" · " + wizardStepNames[model.wizard.step]
 }
 
@@ -517,8 +593,11 @@ func (model Model) wizardSpans(row compose.Row, width int, bg, engineHex string)
 	wizard := model.wizard
 	dim := tone{fg: palette.Dim, bg: bg}
 	lead := "New chat"
-	if wizard.step > wizardEngine && len(wizard.trail) > 0 {
+	if wizard.resume || wizard.step > wizardEngine && len(wizard.trail) > 0 {
 		parts := []string{pfmengine.MustLookup(wizard.engine).Short}
+		if wizard.resume {
+			parts[0] = "Resume " + parts[0] // shown, never a choice
+		}
 		if wizard.step == wizardCache && len(model.accountsOf(wizard.engine)) > 1 {
 			parts = append(parts, accountChip(wizard.engine, wizard.account))
 		}

@@ -1,13 +1,9 @@
-// Package deps owns the external-command contract for pfm.
 package deps
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"runtime"
 	"strings"
-	"sync"
 	"unicode"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -45,11 +41,12 @@ type Entry struct {
 
 // Options materializes the config- and platform-owned registry entries.
 type Options struct {
-	Home         string
-	ClaudeBinary string
-	CodexBinary  string
-	GOOS         string
-	GOARCH       string
+	Home           string
+	ClaudeBinary   string
+	CodexBinary    string
+	OpenCodeBinary string
+	GOOS           string
+	GOARCH         string
 }
 
 var fixedCommands = []Entry{
@@ -74,16 +71,16 @@ var fixedCommands = []Entry{
 		InstallHint: "install git",
 	},
 	// python3 is checked, never provisioned: pfm install does not install it. The
-	// tracer's tracetree kit is Python 3 standard library only and states no
+	// flights:tracer's tracetree kit is Python 3 standard library only and states no
 	// minimum version, so none is pinned here.
 	{
 		Name:        "python3",
-		Purpose:     "the tracer's tracetree kit",
+		Purpose:     "flights:tracer's tracetree kit",
 		Required:    true,
 		Platforms:   []string{platformLinux, platformDarwin},
 		VersionArgs: []string{versionFlag},
 		Parse:       prefixedVersion("Python"),
-		InstallHint: "install python3; the tracer's tracetree kit runs on it",
+		InstallHint: "install python3; flights:tracer's tracetree kit runs on it",
 	},
 	{Name: "sh", Purpose: "portable shell command execution", Required: true, InstallHint: "install a POSIX shell"},
 	{
@@ -136,21 +133,6 @@ var fixedCommands = []Entry{
 		InstallHint: "install util-linux or the BSD script command",
 	},
 	{
-		Name:        "setsid",
-		Purpose:     "detached Linux helper processes",
-		Required:    true,
-		Platforms:   []string{platformLinux},
-		VersionArgs: []string{versionFlag},
-		Parse:       firstVersion,
-		InstallHint: "install util-linux (setsid)",
-	},
-	{
-		Name:        "nohup",
-		Purpose:     "detached helper fallback where setsid is absent",
-		Platforms:   []string{platformLinux, platformDarwin},
-		InstallHint: "install coreutils (nohup)",
-	},
-	{
 		Name:        "sleep",
 		Purpose:     "bounded shell-side polling",
 		Required:    true,
@@ -180,6 +162,33 @@ var fixedCommands = []Entry{
 		InstallHint: "install systemd to spawn chats from the MCP service",
 	},
 	{
+		Name:        "vm_stat",
+		Purpose:     "Darwin host memory sampling",
+		Platforms:   []string{platformDarwin},
+		InstallHint: "restore the system vm_stat command",
+	},
+	{
+		Name:        "defaults",
+		Purpose:     "Darwin appearance detection for theme following",
+		Platforms:   []string{platformDarwin},
+		InstallHint: "restore the system defaults command",
+	},
+	{
+		Name:        "sudo",
+		Purpose:     "removing root-owned managed files during install cleanup",
+		InstallHint: "install sudo",
+	},
+	{
+		Name:        "uv",
+		Purpose:     "provisioning rumdl during pfm install",
+		InstallHint: "install uv (https://docs.astral.sh/uv/)",
+	},
+	{
+		Name:        "herdr",
+		Purpose:     "attaching to Herdr chat panes",
+		InstallHint: "install Herdr to attach Herdr chats",
+	},
+	{
 		Name:        "launchctl",
 		Purpose:     "Darwin launch-agent wiring",
 		Required:    true,
@@ -190,7 +199,7 @@ var fixedCommands = []Entry{
 	// keeps every account's OAuth credential on macOS, so it must never
 	// resolve to something a $PATH entry shadowed.
 	{
-		Name:        "security",
+		Name:        KeychainCommand,
 		Command:     "/usr/bin/security",
 		Purpose:     "Darwin login-keychain OAuth credential reads",
 		Required:    true,
@@ -210,6 +219,10 @@ var fixedCommands = []Entry{
 		InstallHint: "run pfm install to provision rumdl, or: uv tool install rumdl",
 	},
 }
+
+// KeychainCommand names the registry row of the macOS keychain's command: usagehook's credential
+// read resolves it, and testjail serves it as an empty keychain in an armed unit binary.
+const KeychainCommand = "security"
 
 // Registry is the one complete dependency table. Configured engine names and
 // configured engine paths are materialized here rather than copied into
@@ -252,6 +265,19 @@ func Registry(options ...Options) []Entry {
 			ProbeHome: true, AccountChecks: accountChecks,
 		})
 	}
+	// OpenCode has no self-doctor command, so its row probes the version only,
+	// and outside a throwaway home: --version writes no engine state.
+	openCode := pfmengine.MustLookup(pfmengine.OpenCode)
+	openCodeBinary := strings.TrimSpace(resolved.OpenCodeBinary)
+	if openCodeBinary == "" {
+		openCodeBinary = openCode.Binary
+	}
+	entries = append(entries, Entry{
+		Name: openCode.LongName, Command: openCodeBinary, Engine: pfmengine.OpenCode,
+		Purpose:     "configured " + openCode.Short + " engine",
+		VersionArgs: []string{versionFlag}, Parse: firstVersion,
+		InstallHint: "install the configured " + openCode.Short + " CLI",
+	})
 	for index := range entries {
 		if entries[index].Command == "" {
 			entries[index].Command = entries[index].Name
@@ -270,127 +296,6 @@ func Registered(name string) bool {
 		}
 	}
 	return false
-}
-
-// resolveCache memoizes Resolve's successful lookups, keyed by binary name
-// and the $PATH they were resolved under. Every tmux capture-pane, every
-// spawned codex app-server, and every other exec that runs through
-// deps.Executable paid for a fresh Registry() build (a slice allocation plus
-// a walk of every fixed and engine-configured entry) and a fresh
-// exec.LookPath PATH walk on EVERY call — cheap once, ruinous at the cadence
-// a parked picker's Codex idle-identity poll and Codex limits sampler drive
-// it (2026-09-08 measurement, devbox). Keying on $PATH rather than name alone
-// keeps this invisible to tests that vary PATH per case: a changed PATH is a
-// cache miss, not a stale hit.
-var (
-	resolveCacheMu sync.Mutex
-	resolveCache   = map[string]string{}
-)
-
-func resolveCacheKey(name string) string {
-	return name + "\x00" + os.Getenv("PATH")
-}
-
-// resolveCached returns a memoized resolution for name, invalidating it if
-// the file it names no longer exists — a binary can move or be uninstalled
-// mid-process, and a cache must never outlive the thing it names.
-func resolveCached(name string) (string, bool) {
-	resolveCacheMu.Lock()
-	defer resolveCacheMu.Unlock()
-	key := resolveCacheKey(name)
-	path, ok := resolveCache[key]
-	if !ok {
-		return "", false
-	}
-	if _, err := os.Stat(path); err != nil {
-		delete(resolveCache, key)
-		return "", false
-	}
-	return path, true
-}
-
-func rememberResolved(name, path string) {
-	resolveCacheMu.Lock()
-	defer resolveCacheMu.Unlock()
-	resolveCache[resolveCacheKey(name)] = path
-}
-
-// Resolve is the only production seam that obtains an executable path.
-// Config-owned names are permitted even though source-literal names are held
-// to the registry by the source guard.
-func Resolve(name string) (string, error) {
-	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("dependency command is empty")
-	}
-	if cached, ok := resolveCached(name); ok {
-		return cached, nil
-	}
-	command := name
-	entries := Registry(Options{Home: ".", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
-	for index := range entries {
-		entry := entries[index]
-		if entry.Name != name && entry.Command != name {
-			continue
-		}
-		if !entry.AppliesTo(runtime.GOOS) {
-			return "", fmt.Errorf("dependency %s is not supported on %s", entry.Name, runtime.GOOS)
-		}
-		command = entry.Command
-		break
-	}
-	path, err := exec.LookPath(command)
-	if err != nil {
-		return path, err
-	}
-	rememberResolved(name, path)
-	return path, nil
-}
-
-// Executable preserves exec.Cmd's normal not-found error while ensuring that
-// every successful PATH lookup crosses Resolve.
-func Executable(name string) string {
-	path, err := Resolve(name)
-	if err != nil {
-		return name
-	}
-	return path
-}
-
-// DetachLauncher resolves how this host detaches a helper into its own
-// session: setsid where it exists (Linux), nohup as the documented POSIX
-// fallback (macOS, and any other host without setsid). setsidOverride and
-// nohupOverride let a caller pin a specific binary (tests, config); an empty
-// override falls back to the bare name for a normal PATH lookup through
-// Resolve.
-//
-// prefixArgs carries setsid's own "-f" flag, prepended ahead of the caller's
-// argv; nohup takes no such flag, so prefixArgs is empty on that branch.
-// forked reports whether the launcher forks into the background and returns
-// immediately (setsid -f) or IS the detached helper itself (nohup) — a
-// caller may Run() the former but must Start() and Release() the latter, or
-// it blocks until the helper it meant to detach from finishes.
-func DetachLauncher(setsidOverride, nohupOverride string) (path string, prefixArgs []string, forked bool, err error) {
-	setsid := setsidOverride
-	if setsid == "" {
-		setsid = "setsid"
-	}
-	setsidPath, setsidErr := Resolve(setsid)
-	if setsidErr == nil {
-		return setsidPath, []string{"-f"}, true, nil
-	}
-	nohup := nohupOverride
-	if nohup == "" {
-		nohup = "nohup"
-	}
-	nohupPath, nohupErr := Resolve(nohup)
-	if nohupErr != nil {
-		return "", nil, false, fmt.Errorf(
-			"setsid unavailable (%v) and nohup unavailable (%w)",
-			setsidErr,
-			nohupErr,
-		)
-	}
-	return nohupPath, nil, false, nil
 }
 
 // AppliesTo reports whether the entry belongs to goos.

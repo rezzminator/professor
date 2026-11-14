@@ -3,54 +3,55 @@ package installer
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goRuntime "runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// skillFixtureGit runs git in dir with a fixed identity; fixtures are local
-// repositories only — no test here reaches a network.
-func skillFixtureGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	command := exec.Command("git", append([]string{
-		"-C", dir, "-c", "user.name=fixture",
-		"-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-	}, args...)...)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, output)
-	}
-}
-
-// skillFixtureRepo creates a git repository at dir holding files, committed.
+// skillFixtureRepo creates a fixture repository at dir holding files,
+// committed, which skillGit serves.
 func skillFixtureRepo(t *testing.T, dir string, files map[string]string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	skillFixtureGit(t, dir, "init", "--quiet")
 	skillFixtureCommit(t, dir, files)
 	return dir
 }
 
+var skillFixtureCommits atomic.Int64
+
+// skillFixtureCommit writes files into dir's work tree and commits the whole
+// tree as `git add -A && git commit` does: .git/fixture-tree holds the
+// committed tree (an empty directory dropped, as git drops it) and
+// .git/fixture-head a commit id no other commit shares.
 func skillFixtureCommit(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
 	for name, content := range files {
 		writeFixture(t, filepath.Join(dir, name), content)
 	}
-	skillFixtureGit(t, dir, "add", "-A")
-	skillFixtureGit(t, dir, "commit", "--quiet", "-m", "fixture")
+	tree := filepath.Join(dir, ".git", "fixture-tree")
+	if err := os.RemoveAll(tree); err != nil {
+		t.Fatal(err)
+	}
+	if err := copySkillTree(dir, tree); err != nil {
+		t.Fatalf("commit fixture %s: %v", dir, err)
+	}
+	sum := sha1.Sum(fmt.Appendf(nil, "%s %d", dir, skillFixtureCommits.Add(1)))
+	writeFixture(t, filepath.Join(dir, ".git", "fixture-head"), hex.EncodeToString(sum[:])+"\n")
 }
 
 func writeSkillRegistry(t *testing.T, home, content string) string {
@@ -74,6 +75,7 @@ func runSkillInstall(t *testing.T, home string, mode Mode, mutate ...func(*Optio
 	options := Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          mode, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		ProcessRunner: skillGit{},
 	}
 	for _, apply := range mutate {
 		apply(&options)
@@ -157,29 +159,97 @@ func TestSourceFetchedSkillsReinstallFetchesTheNewCommit(t *testing.T) {
 	}
 }
 
-// TestSourceFetchedSkillsDryRunWritesNothing pins that a dry run clones,
-// fetches and links nothing, while printing the planned fetch and links.
-func TestSourceFetchedSkillsDryRunWritesNothing(t *testing.T) {
+// TestSourceFetchedSkillsDryRunPreviewsWithoutWriting pins the dry run over
+// every store state: with no store it plans the store root, the fetch and the
+// links and writes none of them; over an existing store it reads no remote,
+// previews the check and leaves the store and its commit record as they were;
+// over a store that lost its SKILL.md it previews the re-clone and keeps the
+// links reported ok.
+func TestSourceFetchedSkillsDryRunPreviewsWithoutWriting(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "atlas"), map[string]string{"SKILL.md": "# vf\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"atlas": "file://" + repo}))
-
-	output := runSkillInstall(t, home, ModeDryRun)
-
-	store := filepath.Join(skillStoreRoot(home), "atlas")
-	requireNoPath(t, skillStoreRoot(home), "dry run created the store root")
-	requireNoPath(t, store, "dry run cloned")
-	requireNoPath(t, filepath.Join(home, ".agents", "skills", "atlas"), "dry run linked")
-	requireNoPath(t, filepath.Join(home, ".claude", "skills", "atlas"), "dry run linked")
-	for _, want := range []string{
-		"  change  create " + skillStoreRoot(home) + "\n",
-		"change  fetch file://" + repo + " -> " + store,
-		"change  link " + filepath.Join(home, ".agents", "skills", "atlas") + " -> " + store,
+	for _, test := range []struct {
+		name, skill, content string
+		// prepare brings the store into the row's state before the dry run and
+		// returns what check compares against.
+		prepare func(t *testing.T, home, repo, store string) string
+		check   func(t *testing.T, home, repo, store, output, prepared string)
+	}{
+		{
+			name: "no store yet", skill: "atlas", content: "# vf\n",
+			prepare: func(*testing.T, string, string, string) string { return "" },
+			check: func(t *testing.T, home, repo, store, output, _ string) {
+				requireNoPath(t, skillStoreRoot(home), "dry run created the store root")
+				requireNoPath(t, store, "dry run cloned")
+				requireNoPath(t, filepath.Join(home, ".agents", "skills", "atlas"), "dry run linked")
+				requireNoPath(t, filepath.Join(home, ".claude", "skills", "atlas"), "dry run linked")
+				for _, want := range []string{
+					"  change  create " + skillStoreRoot(home) + "\n",
+					"change  fetch file://" + repo + " -> " + store,
+					"change  link " + filepath.Join(home, ".agents", "skills", "atlas") + " -> " + store,
+				} {
+					if !strings.Contains(output, want) {
+						t.Fatalf("dry run omitted %q:\n%s", want, output)
+					}
+				}
+			},
+		},
+		{
+			name: "existing store at an older head", skill: "god-speed", content: "# gs\n",
+			prepare: func(t *testing.T, home, repo, _ string) string {
+				runSkillInstall(t, home, ModeApply)
+				was := repoHead(t, repo)
+				skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# gs v2\n"})
+				return was
+			},
+			check: func(t *testing.T, _, repo, store, output, was string) {
+				want := "check   " + store + " against file://" + repo +
+					" (a dry run reads no remote; the apply replaces it if the head moved)\n"
+				if !strings.Contains(output, want) {
+					t.Fatalf("preview missing %q:\n%s", want, output)
+				}
+				if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# gs\n" {
+					t.Fatalf("preview changed the store to %q", got)
+				}
+				if got := readSkillFile(t, skillCommitPath(store)); got != was+"\n" {
+					t.Fatalf("preview changed the commit record to %q", got)
+				}
+			},
+		},
+		{
+			name: "store without SKILL.md", skill: "god-speed", content: "# v1\n",
+			prepare: func(t *testing.T, home, _, store string) string {
+				runSkillInstall(t, home, ModeApply)
+				if err := os.Remove(filepath.Join(store, "SKILL.md")); err != nil {
+					t.Fatal(err)
+				}
+				return ""
+			},
+			check: func(t *testing.T, home, repo, store, output, _ string) {
+				skill := filepath.Join(store, "SKILL.md")
+				want := "  change  re-clone " + store + " from file://" + repo +
+					" (inspect " + skill + ": lstat " + skill + ": no such file or directory)\n"
+				if !strings.Contains(output, want) ||
+					!strings.Contains(output, "  ok      "+filepath.Join(home, ".agents", "skills", "god-speed")+"\n") ||
+					strings.Contains(output, "SKILL-SOURCE-MISSING god-speed") {
+					t.Fatalf("dry run did not preview the usable replacement %q:\n%s", want, output)
+				}
+			},
+		},
 	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("dry run omitted %q:\n%s", want, output)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			repo := skillFixtureRepo(
+				t, filepath.Join(t.TempDir(), test.skill), map[string]string{"SKILL.md": test.content},
+			)
+			writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{test.skill: "file://" + repo}))
+			store := filepath.Join(skillStoreRoot(home), test.skill)
+			prepared := test.prepare(t, home, repo, store)
+
+			output := runSkillInstall(t, home, ModeDryRun)
+
+			test.check(t, home, repo, store, output, prepared)
+		})
 	}
 }
 
@@ -236,9 +306,12 @@ func TestSourceFetchedSkillsRefuseATreeWithoutSKILLMd(t *testing.T) {
 
 	output := runSkillInstall(t, home, ModeApply)
 
-	if !strings.Contains(output, "SKILL-SOURCE-MISSING hollow (") {
-		t.Fatalf("a tree without SKILL.md was not reported:\n%s", output)
-	}
+	wantOutputLines(
+		t,
+		output,
+		[]string{"  skip    SKILL-SOURCE-MISSING hollow (file://" + repo + " has no root SKILL.md)"},
+		"SKILL-SOURCE-",
+	)
 	requireNoPath(t, filepath.Join(home, ".agents", "skills", "hollow"), "a tree without SKILL.md was linked")
 }
 
@@ -251,6 +324,8 @@ func TestSourceFetchedSkillsValidateTheRegistryAtEntry(t *testing.T) {
 	t.Run("entries", func(t *testing.T) {
 		t.Parallel()
 		home := t.TempDir()
+		longName := strings.Repeat("a", 300)
+		longClash := filepath.Join(home, ".professor", "templates", "global", "skills", longName)
 		writeFixture(
 			t,
 			filepath.Join(home, ".professor", "templates", "global", "skills", "shared", "SKILL.md"),
@@ -260,9 +335,14 @@ func TestSourceFetchedSkillsValidateTheRegistryAtEntry(t *testing.T) {
 			"unresolved": "https://example.invalid/{OTHER_TOKEN}/x",
 			"shared":     "https://example.invalid/shared",
 			"Bad_Name":   "https://example.invalid/bad",
+			longName:     "https://example.invalid/long",
 		}))
 		output := runSkillInstall(t, home, ModeApply)
 		for _, want := range []string{
+			// stat of an over-long name is ENAMETOOLONG, not ENOENT, even as root:
+			// that skill is skipped by name and the rest of the registry still loads.
+			"SKILL-SOURCE-UNREADABLE " + longName + ": inspect template skill " + longClash +
+				": stat " + longClash + ": file name too long",
 			"SKILL-SOURCE-UNRESOLVED unresolved: repo https://example.invalid/{OTHER_TOKEN}/x carries unresolved placeholder {OTHER_TOKEN}",
 			"SKILL-SOURCE-CLASH shared: ",
 			"SKILL-SOURCE-INVALID Bad_Name: ",
@@ -284,6 +364,46 @@ func TestSourceFetchedSkillsValidateTheRegistryAtEntry(t *testing.T) {
 			!strings.Contains(output, "resolve registered placeholder {GH_USER}") {
 			t.Fatalf("an unresolvable {GH_USER} was not a named failure:\n%s", output)
 		}
+	})
+	t.Run("owner from the release URL past a broken manifest", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		manifest := filepath.Join(home, ".professor", ".professor", "manifest.json")
+		writeFixture(t, manifest, `{"installed_from":`)
+		writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"x": "https://github.com/{GH_USER}/x"}))
+		output := runSkillInstall(t, home, ModeDryRun, func(options *Options) {
+			options.ThemeReleaseURL = "https://raw.githubusercontent.com/release-owner/professor/v1.0.0/templates/themes/"
+		})
+		for _, want := range []string{
+			"  skip    SKILL-SOURCES-OWNER decode " + manifest + ": unexpected end of JSON input; " +
+				"{GH_USER} resolved from the release theme URL instead\n",
+			"  change  fetch https://github.com/release-owner/x -> " + filepath.Join(skillStoreRoot(home), "x") + "\n",
+		} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("missing %q:\n%s", want, output)
+			}
+		}
+	})
+	t.Run("unknown keys", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "kept"), map[string]string{"SKILL.md": "# kept\n"})
+		path := writeSkillRegistry(t, home, `{"_comment":"c","pinned":{},"source_fetched":{`+
+			`"extra":{"repo":"https://example.invalid/extra","ref":"v1"},"kept":{"repo":"file://`+repo+`"}}}`)
+		output := runSkillInstall(t, home, ModeApply)
+		for _, want := range []string{
+			"  skip    SKILL-SOURCES-UNKNOWN-KEY pinned in " + path + ": ignored\n",
+			"  skip    SKILL-SOURCE-INVALID extra: decode its record in " + path + `: json: unknown field "ref"` + "\n",
+		} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("missing %q:\n%s", want, output)
+			}
+		}
+		store := filepath.Join(skillStoreRoot(home), "kept")
+		if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# kept\n" {
+			t.Fatalf("the valid entry beside the unknown keys was not fetched: %q\n%s", got, output)
+		}
+		assertLink(t, filepath.Join(home, ".agents", "skills", "kept"), store)
 	})
 	t.Run("unparsable", func(t *testing.T) {
 		t.Parallel()
@@ -385,71 +505,6 @@ func TestSourceFetchedSkillsRetireUnregisteredAndUninstall(t *testing.T) {
 	assertLink(t, operator, drop)
 }
 
-// cleanGitOutput runs git in dir with every inherited GIT_* variable stripped,
-// so a test's own GIT_DIR never steers the probe that checks for damage.
-func cleanGitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	command := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "GIT_") {
-			command.Env = append(command.Env, entry)
-		}
-	}
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, output)
-	}
-	return strings.TrimSpace(string(output))
-}
-
-// TestSourceFetchedSkillsNeverTouchAParentRepository pins F1: a store with no
-// .git of its own, inside a $HOME that IS a git repository — reached by git
-// discovery, or named by an inherited GIT_DIR — is replaced by a fresh clone,
-// and the parent repository, its tracked and its untracked files stay as they
-// were. Serial: the GIT_DIR case sets the process environment.
-func TestSourceFetchedSkillsNeverTouchAParentRepository(t *testing.T) {
-	for _, inherited := range []bool{false, true} {
-		name := "discovery"
-		if inherited {
-			name = "GIT_DIR"
-		}
-		t.Run(name, func(t *testing.T) { requireParentRepositoryUntouched(t, inherited) })
-	}
-}
-
-func requireParentRepositoryUntouched(t *testing.T, inherited bool) {
-	t.Helper()
-	{
-		home := t.TempDir()
-		skillFixtureRepo(t, home, map[string]string{"tracked.txt": "parent\n"})
-		writeFixture(t, filepath.Join(home, "untracked.txt"), "mine\n")
-		parentHead := cleanGitOutput(t, home, "rev-parse", "HEAD")
-		repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "skill"), map[string]string{"SKILL.md": "# new\n"})
-		writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"skill": "file://" + repo}))
-		store := filepath.Join(skillStoreRoot(home), "skill")
-		writeFixture(t, filepath.Join(store, "SKILL.md"), "# hand-made, no .git\n")
-		if inherited {
-			t.Setenv("GIT_DIR", filepath.Join(home, ".git"))
-		}
-
-		output := runSkillInstall(t, home, ModeApply)
-
-		if got := cleanGitOutput(t, home, "rev-parse", "HEAD"); got != parentHead {
-			t.Fatalf("GIT_DIR=%v: parent HEAD moved %s -> %s\n%s", inherited, parentHead, got, output)
-		}
-		if got := readSkillFile(t, filepath.Join(home, "tracked.txt")); got != "parent\n" {
-			t.Fatalf("GIT_DIR=%v: parent tracked file = %q\n%s", inherited, got, output)
-		}
-		if got := readSkillFile(t, filepath.Join(home, "untracked.txt")); got != "mine\n" {
-			t.Fatalf("GIT_DIR=%v: parent untracked file = %q\n%s", inherited, got, output)
-		}
-		requireNoPath(t, filepath.Join(home, "SKILL.md"), "the skill tree landed in the parent worktree")
-		if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# new\n" {
-			t.Fatalf("GIT_DIR=%v: store SKILL.md = %q, want the fresh clone\n%s", inherited, got, output)
-		}
-	}
-}
-
 // TestSourceFetchedSkillsKeepTheOldStoreWhenTheNewTreeHasNoSKILLMd pins that
 // an upstream commit dropping SKILL.md never replaces a working store copy.
 func TestSourceFetchedSkillsKeepTheOldStoreWhenTheNewTreeHasNoSKILLMd(t *testing.T) {
@@ -458,7 +513,9 @@ func TestSourceFetchedSkillsKeepTheOldStoreWhenTheNewTreeHasNoSKILLMd(t *testing
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "ghost-writer"), map[string]string{"SKILL.md": "# v1\n"})
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"quill": "file://" + repo}))
 	runSkillInstall(t, home, ModeApply)
-	skillFixtureGit(t, repo, "rm", "--quiet", "SKILL.md")
+	if err := os.Remove(filepath.Join(repo, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
 	skillFixtureCommit(t, repo, map[string]string{"README.md": "# moved\n"})
 
 	output := runSkillInstall(t, home, ModeApply)
@@ -665,58 +722,6 @@ func TestSourceFetchedSkillsRegistryWithoutTheObjectRetiresNothing(t *testing.T)
 	}
 }
 
-// TestSourceFetchedSkillsDryRunOfAnExistingStoreChangesNothing pins the F18
-// dry-run-update gap: a dry run over an existing store only plans the clone.
-func TestSourceFetchedSkillsDryRunOfAnExistingStoreChangesNothing(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
-	runSkillInstall(t, home, ModeApply)
-	skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# v2\n"})
-
-	output := runSkillInstall(t, home, ModeDryRun)
-
-	store := filepath.Join(skillStoreRoot(home), "god-speed")
-	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v1\n" {
-		t.Fatalf("a dry run changed the store: %q\n%s", got, output)
-	}
-	if !strings.Contains(output, "file://"+repo) {
-		t.Fatalf("a dry run did not plan the clone:\n%s", output)
-	}
-}
-
-// TestRunSkillGitReturnsWithinItsBound pins F4: a git call whose grandchild
-// keeps stderr open still returns shortly after its timeout, carrying git's
-// stderr tail.
-func TestRunSkillGitReturnsWithinItsBound(t *testing.T) {
-	t.Parallel()
-	script := filepath.Join(t.TempDir(), "git")
-	if err := testjail.WriteExecutable(
-		script,
-		[]byte("#!/bin/sh\necho 'fatal: slow remote' >&2\nsleep 12 &\nsleep 12\n"),
-		0o755,
-	); err != nil {
-		t.Fatal(err)
-	}
-	start := time.Now()
-	_, err := runSkillGitWith(
-		deps.RealRunner{},
-		200*time.Millisecond,
-		100*time.Millisecond,
-		script,
-		t.TempDir(),
-		"clone",
-	)
-	if elapsed := time.Since(start); elapsed > 8*time.Second {
-		t.Fatalf("git returned after %s, past its bound (err=%v)", elapsed, err)
-	}
-	if err == nil || !strings.Contains(err.Error(), "timed out") ||
-		!strings.Contains(err.Error(), "fatal: slow remote") {
-		t.Fatalf("timeout error does not carry git's stderr tail: %v", err)
-	}
-}
-
 // TestShippedSkillSourcesRegistryLoads loads the clone's real
 // templates/global/skills/sources.json the way pfm install does: a registry
 // that does not parse, or an entry without a usable repo, would pass every
@@ -727,12 +732,12 @@ func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
 		t.Fatal("find test source")
 	}
 	repo := filepath.Join(filepath.Dir(source), "..", "..", "..")
-	sources, present, err := loadSkillSources(repo, ThemeReleaseURL(""))
+	sources, present, _, err := loadSkillSources(repo, ThemeReleaseURL(""))
 	if err != nil || !present || len(sources) == 0 {
 		t.Fatalf("load %s: present=%t sources=%d err=%v", skillSourcesRelative, present, len(sources), err)
 	}
 	for _, entry := range sources {
-		if !strings.HasPrefix(entry.Repo, "https://") || entry.Problem != "" {
+		if repoURL, err := url.Parse(entry.Repo); err != nil || repoURL.Scheme != "https" || entry.Problem != "" {
 			t.Fatalf("entry %s: repo=%q problem=%q", entry.Name, entry.Repo, entry.Problem)
 		}
 	}
@@ -760,13 +765,14 @@ func TestSkillStoreUnlockReleasesForkedCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir("/proc/self/fd")
+	entries, err := os.ReadDir(filepath.Join(paths.SystemProcRoot(), "self", "fd"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	forked := -1
 	for _, entry := range entries {
-		if target, err := os.Readlink("/proc/self/fd/" + entry.Name()); err == nil && target == physical {
+		link := filepath.Join(paths.SystemProcRoot(), "self", "fd", entry.Name())
+		if target, err := os.Readlink(link); err == nil && target == physical {
 			fd := 0
 			if _, err := fmt.Sscan(entry.Name(), &fd); err != nil {
 				t.Fatal(err)

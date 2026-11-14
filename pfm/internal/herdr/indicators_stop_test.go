@@ -221,10 +221,10 @@ func TestStopPathsRefuseAFIFOOrADirectory(t *testing.T) {
 		path       func(*indicatorPainter) string
 		make       func(string) error
 	}{
-		{"a FIFO at the stop marker", "stop marker", (*indicatorPainter).stopPath, fifo},
-		{"a directory at the stop marker", "stop marker", (*indicatorPainter).stopPath, directory},
-		{"a FIFO at the stop lock", "stop lock", (*indicatorPainter).stopLockPath, fifo},
-		{"a directory at the stop lock", "stop lock", (*indicatorPainter).stopLockPath, directory},
+		{"a FIFO at the stop marker", "herdr indicators: {dir}/indicators-3e7c66b7.stop: indicator stop marker is not a regular file", (*indicatorPainter).stopPath, fifo},
+		{"a directory at the stop marker", "herdr indicators: {dir}/indicators-3e7c66b7.stop: indicator stop marker is not a regular file", (*indicatorPainter).stopPath, directory},
+		{"a FIFO at the stop lock", "indicator stop lock is not a regular file", (*indicatorPainter).stopLockPath, fifo},
+		{"a directory at the stop lock", "open indicator stop lock: is a directory", (*indicatorPainter).stopLockPath, directory},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := blockedHerdr()
@@ -239,8 +239,8 @@ func TestStopPathsRefuseAFIFOOrADirectory(t *testing.T) {
 			go func() { done <- painter.run(context.Background()) }()
 			select {
 			case err := <-done:
-				if err == nil || !strings.Contains(err.Error(), tc.what) {
-					t.Fatalf("run = %v, want an error naming the %s", err, tc.what)
+				if got := strings.ReplaceAll(fmt.Sprint(err), painter.lockDir, "{dir}"); got != tc.what {
+					t.Fatalf("run = %q, want %q", got, tc.what)
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatalf("run hung on %s", tc.name)

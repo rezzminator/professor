@@ -209,7 +209,6 @@ func TestExpiredWindowsUnderBackoffNeverFetchOnTheLivePath(t *testing.T) {
 			Backoff: &usagehook.CacheBackoff{
 				Message:    "limits unavailable: 429 Too Many Requests",
 				RetryAfter: now.Add(time.Hour),
-				RecordedAt: fetchedAt,
 			},
 		},
 	); err != nil {

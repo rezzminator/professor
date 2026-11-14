@@ -1,0 +1,26 @@
+# >>> pfm theme · light · gen 7 >>>
+[theme]
+name = "tokyo-night-day"
+auto_switch = false
+
+[theme.custom]
+accent = "#d77757"
+panel_bg = "#ffffff"
+sidebar_bg = "#f0f0f0"
+active_row_bg = "#b4d5ff"
+selection_bg = "#b4d5ff"
+surface0 = "#f0f0f0"
+surface1 = "#afafaf"
+surface_dim = "#f0f0f0"
+overlay0 = "#666666"
+overlay1 = "#5b5b5b"
+text = "#000000"
+subtext0 = "#5b5b5b"
+mauve = "#827dbd"
+green = "#5b5b5b"
+yellow = "#305d8c"
+red = "#7a5402"
+blue = "#256730"
+teal = "#256730"
+peach = "#d97757"
+# <<< pfm theme <<<

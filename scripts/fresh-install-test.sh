@@ -65,45 +65,12 @@ release=${version%%-*}
 tag="v$release"
 
 # 1. The tree under test as the repository INSTALL.md clones.
-src_git ls-files -z -co --exclude-standard |
-  (
-    cd "$root"
-    while IFS= read -r -d '' path; do
-      # A directory entry is a submodule checkout; a deleted file is gone.
-      if [ -L "$path" ] || [ -f "$path" ]; then printf '%s\0' "$path"; fi
-    done
-  ) |
-  (cd "$root" && tar -cf - --null -T -) |
-  (cd "$scratch/mirror" && tar -xf -) || fail "snapshot: cannot copy the working tree into $scratch/mirror"
-printf '%s\n' "$release" >"$scratch/mirror/VERSION"
-mirror_git() {
-  git -C "$scratch/mirror" -c user.name=fresh-install -c user.email=fresh-install@invalid \
-    -c commit.gpgsign=false -c tag.gpgsign=false "$@"
-}
-{
-  mirror_git init -q &&
-    mirror_git add -A -f &&
-    mirror_git commit -q -m "release $tag" &&
-    mirror_git tag "$tag"
-} || fail "snapshot: cannot commit and tag $tag in $scratch/mirror"
+# shellcheck source=scripts/install-snapshot.sh
+. "$root/scripts/install-snapshot.sh"
+install_snapshot_mirror "$root" "$scratch/mirror" "$release" || fail "$install_snapshot_why"
 
 # 2. INSTALL.md's own commands, marked blocks only.
-awk '
-  /^<!-- fresh-install/ { marked = 1; next }
-  marked && /^```bash$/ { inside = 1; marked = 0; blocks++; next }
-  marked { print "MARKER WITHOUT A BASH BLOCK"; exit 1 }
-  inside && /^```$/ { inside = 0; next }
-  inside { print }
-  END { if (blocks == 0) { print "NO MARKED BLOCK"; exit 1 } }
-' "$root/INSTALL.md" >"$scratch/install-blocks.sh" ||
-  fail "extract: $(tail -1 "$scratch/install-blocks.sh")"
-# shellcheck disable=SC2016 # the literal INSTALL.md writes
-url='https://github.com/${REPO}.git'
-grep -qF "$url" "$scratch/install-blocks.sh" || fail "extract: the marked blocks never name $url"
-sed "s#https://github.com/\${REPO}.git#file://$scratch/mirror#g" "$scratch/install-blocks.sh" >"$scratch/install.sh"
-if grep -n 'github.com' "$scratch/install.sh"; then
-  fail "extract: a marked block still reaches GitHub after the repository swap"
-fi
+install_snapshot_script "$root/INSTALL.md" "$scratch/mirror" "$scratch" || fail "$install_snapshot_why"
 echo "fresh-install: running INSTALL.md's marked blocks as $scratch/install.sh:"
 cat "$scratch/install.sh"
 
@@ -158,7 +125,7 @@ fi
 # 4. Updates from older releases and rollbacks, against the real tags.
 work_tree=$(src_git rev-parse --show-toplevel) || fail "e2e: cannot resolve the work tree"
 git_dir=$(src_git rev-parse --absolute-git-dir) || fail "e2e: cannot resolve the git dir"
-PFM_DEV_FENCE=1 PFM_HARVESTPY_OFFLINE=1 \
+PFM_DEV_FENCE=1 \
   PFM_E2E_SOURCE_REPO="${PFM_E2E_SOURCE_REPO:-$work_tree}" \
   PFM_DEV_REPO_WORK_TREE="${PFM_DEV_REPO_WORK_TREE:-$work_tree}" \
   PFM_DEV_REPO_GIT_DIR="${PFM_DEV_REPO_GIT_DIR:-$git_dir}" \

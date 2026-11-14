@@ -7,7 +7,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -498,9 +497,13 @@ func TestHerdrStateEndBlanksTheTmuxTitle(t *testing.T) {
 			return rig.engine("end", exit)
 		}, 0, "", true},
 		{"a reload's /exit", func(rig *chatRig) herdrRun {
-			rig.holdReload("cc-1", "%0")
+			holdReload(rig.t, rig.jail.sidDir, "cc-1", "%0", true)
 			return rig.engine("end", exit)
 		}, 0, "", true},
+		{"the owner's /exit while a reload waits", func(rig *chatRig) herdrRun {
+			holdReload(rig.t, rig.jail.sidDir, "cc-1", "%0", false)
+			return rig.engine("end", exit)
+		}, 1, "", true},
 		{"a reload probe that cannot run", func(rig *chatRig) herdrRun {
 			if err := os.Mkdir(reload.LockPath(rig.jail.sidDir, "cc-1", "%0"), 0o700); err != nil {
 				rig.t.Fatal(err)
@@ -539,20 +542,6 @@ func TestHerdrStateEndBlanksTheTmuxTitle(t *testing.T) {
 				rig.wantCalls(append([]string{listCall}, releaseCalls("w1:p1")...)...)
 			}
 		})
-	}
-}
-
-// holdReload takes the reload pane mutex the way reload.Run holds it across
-// the whole reboot of that pane.
-func (rig *chatRig) holdReload(socketName, pane string) {
-	rig.t.Helper()
-	lock, err := os.OpenFile(reload.LockPath(rig.jail.sidDir, socketName, pane), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		rig.t.Fatal(err)
-	}
-	rig.t.Cleanup(func() { _ = lock.Close() })
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		rig.t.Fatal(err)
 	}
 }
 

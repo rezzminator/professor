@@ -37,7 +37,7 @@ func printCostLedgerDoctor(stdout io.Writer, runtime config.Runtime, env paths.E
 		stdout, "doctor: cost ledger state=%s source=%s dir=%s\n",
 		state, runtime.Config.Source(config.KeyClaudeCostLedger), paths.CostLedgerDir(env, runtime.Paths.Home),
 	)
-	logPath := paths.CostSinkLog(runtime.Paths.Home)
+	logPath := paths.LogRoot(env, runtime.Paths.Home).CostSink()
 	size, tail, overlong, err := readLogTail(logPath, costSinkTailLines)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

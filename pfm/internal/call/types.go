@@ -1,4 +1,3 @@
-// Package call implements guarded, socket-scoped live chat delivery.
 package call
 
 import (
@@ -43,6 +42,7 @@ const (
 	// so this is additive: a caller that wants to tell the two apart can
 	// switch on it explicitly.
 	CodeCaptureFailed = 9
+	CodeHostRefused   = 10 // pfm refused to host or attach a chat where its caller is: in Herdr, or unproven
 	// ClaudeInlineMax and CodexInlineMax are configured boundaries, 10% below
 	// the composer edge each engine's boundary input names: Claude's smaller
 	// bracketed-paste edge is 801 characters; Codex's inline and paste edge is

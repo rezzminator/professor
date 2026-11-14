@@ -28,11 +28,14 @@ import (
 // config could not be read or parsed — a config that WAS read and holds the
 // wrong value reports Bytes/Want, never an error. ConfigAbsent is a config
 // known not to exist: looked at and not there, the MISSING state install
-// repairs, never a failed look.
+// repairs, never a failed look. Unverified is a report read while the prompt
+// could not be composed: a value is there, but whether it is the prompt is
+// unknown.
 type codexInstructionsReport struct {
 	Path         string
 	Present      bool
 	ConfigAbsent bool
+	Unverified   bool
 	Bytes        int
 	Want         int
 	Err          error
@@ -57,18 +60,22 @@ func PrintCodexDeveloperInstructions(stdout io.Writer, home string, homes []stri
 	if err == nil {
 		prompt, err = codexprompt.FleetPrompt(clone)
 	}
+	failures := 0
 	if err != nil {
+		failures++
 		fmt.Fprintf(
 			stdout,
 			"doctor: codex developer_instructions=CHECK FAILED error=%v — the Codex prompt could not be "+
 				"composed, so whether any account carries it is UNKNOWN, not clean\n",
 			err,
 		)
-		return 1
 	}
-	failures := 0
+	// Every account is still read: an absent config, an absent key or an
+	// unreadable value needs no prompt to be reported.
 	for _, home := range homes {
-		failures += printCodexInstructionsReport(stdout, inspectCodexInstructions(home, prompt))
+		report := inspectCodexInstructions(home, prompt)
+		report.Unverified = err != nil
+		failures += printCodexInstructionsReport(stdout, report)
 	}
 	return failures
 }
@@ -118,6 +125,22 @@ func printCodexInstructionsReport(stdout io.Writer, report codexInstructionsRepo
 		fmt.Fprintf(
 			stdout,
 			"doctor: codex developer_instructions=MISSING file=%s config=absent — run pfm install --yes\n",
+			report.Path,
+		)
+	case report.Unverified && report.Bytes != 0:
+		fmt.Fprintf(
+			stdout,
+			"doctor: codex developer_instructions=UNVERIFIED file=%s bytes=%d — the Codex prompt could not be "+
+				"composed, so whether this value is the fleet prompt is UNKNOWN\n",
+			report.Path,
+			report.Bytes,
+		)
+		return 0
+	case report.Unverified:
+		fmt.Fprintf(
+			stdout,
+			"doctor: codex developer_instructions=MISSING file=%s — every Codex session from this "+
+				"account starts with no fleet prompt; run pfm install --yes\n",
 			report.Path,
 		)
 	case report.Present:

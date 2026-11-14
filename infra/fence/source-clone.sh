@@ -3,7 +3,8 @@
 # and its Git directory stay untouched; this snapshot owns its own fixture Git
 # metadata so install can arm its pre-push hook without following a host gitdir.
 set -euo pipefail
-[ "${PFM_DEV_FENCE:-}" = 1 ] || { echo 'source-clone: requires the fence' >&2; exit 1; }
+. "$(dirname -- "${BASH_SOURCE[0]}")/../../scripts/platform.sh" || exit 2
+platform_in_fence || { echo 'source-clone: requires the fence' >&2; exit 1; }
 source_root="${1:?source-clone: source root required}"
 clone="${2:?source-clone: destination required}"
 snapshot="$clone.source"

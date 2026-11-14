@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -254,6 +255,16 @@ func TestPickerNativeDiscoveryFailures(t *testing.T) {
 						t.Error(err)
 					}
 				})
+				// A socket file nothing listens on: Herdr cannot be read, never proved gone.
+				dead := filepath.Join(values.Home, "dead.sock")
+				listener, err := net.Listen("unix", dead)
+				if err != nil {
+					t.Fatal(err)
+				}
+				listener.(*net.UnixListener).SetUnlinkOnClose(false)
+				if err := listener.Close(); err != nil {
+					t.Fatal(err)
+				}
 				if err := state.PutSeat(ctx, fleetdb.Seat{
 					SeatID:      "native-failure",
 					SessionID:   "native-sid",
@@ -262,7 +273,7 @@ func TestPickerNativeDiscoveryFailures(t *testing.T) {
 					State:       stateName,
 					Name:        "NATIVE",
 					HerdrPane:   "w1:p1",
-					HerdrSocket: filepath.Join(values.Home, "dead.sock"),
+					HerdrSocket: dead,
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -337,5 +348,60 @@ func TestPickerNativeDiscoveryFailures(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A resume walk's choice reaches the open: the row's account a Claude resume
+// launches under, the primary account a Codex resume launches under, and the
+// cache; without one, or on a chat turned live since, the open is as before.
+func TestResumeUnderAppliesTheWalksChoice(t *testing.T) {
+	choice := &ui.ResumeChoice{Account: 2, Cache1H: false}
+	for _, test := range []struct {
+		name        string
+		row         compose.Row
+		resume      *ui.ResumeChoice
+		wantAccount int
+		wantPrimary int
+		wantCache   bool
+	}{
+		{
+			"a Claude resume launches on the chosen account and cache",
+			compose.Row{Kind: compose.ResumeClaude, ID: "s", Account: 1},
+			choice, 2, 2, false,
+		},
+		{
+			"a Codex resume launches on the chosen account",
+			compose.Row{Kind: compose.ResumeCodex, ID: "s"},
+			choice, 2, 2, false,
+		},
+		{
+			"no walk keeps the recorded account, the primary and the picker's cache",
+			compose.Row{Kind: compose.ResumeClaude, ID: "s", Account: 1},
+			nil, 1, 3, true,
+		},
+		{
+			"a chat turned live since opens as it is",
+			compose.Row{Kind: compose.LiveClaude, ID: "s", Account: 1},
+			choice, 1, 3, true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			outcome := ui.Outcome{Kind: ui.OutcomeSelected, Row: test.row, PrimaryAccount: 3, Resume: test.resume}
+			row, primary, cache := resumeUnder(test.row, outcome, true)
+			if row.Account != test.wantAccount || row.ID != test.row.ID || row.Kind != test.row.Kind ||
+				primary != test.wantPrimary || cache != test.wantCache {
+				t.Fatalf(
+					"resumeUnder = row %s account %d, primary %d, cache %t; want row %s account %d, primary %d, cache %t",
+					row.ID,
+					row.Account,
+					primary,
+					cache,
+					test.row.ID,
+					test.wantAccount,
+					test.wantPrimary,
+					test.wantCache,
+				)
+			}
+		})
 	}
 }

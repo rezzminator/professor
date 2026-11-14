@@ -1,6 +1,7 @@
 package claudelaunch
 
 import (
+	"slices"
 	"strings"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -13,7 +14,6 @@ const (
 	knobSystemPrompt               = "systemPrompt"
 	knobNativeCursor               = "nativeCursor"
 	knobRemoteControl              = "remoteControl"
-	knobSubagentStatuslineTrace    = "subagentStatuslineTrace"
 	knobMaxSubagentSpawnDepth      = "maxSubagentSpawnDepth"
 	knobMaxConcurrentSubagents     = "maxConcurrentSubagents"
 	knobWebSearchesPerSession      = "webSearchesPerSession"
@@ -26,7 +26,6 @@ const (
 	knobMCP                        = "mcp"
 	knobHooks                      = "hooks"
 	knobStatusLine                 = "statusLine"
-	knobSubagentStatusLine         = "subagentStatusLine"
 	knobOutputStyle                = "outputStyle"
 	knobConfigDir                  = "configDir"
 	knobModel                      = "model"
@@ -64,37 +63,36 @@ const (
 	envGatewayDiscovery            = "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
 	envCodexThreadID               = "CODEX_THREAD_ID"
 	envNativeCursor                = "CLAUDE_CODE_NATIVE_CURSOR"
-	// EnvSubagentStatuslineTrace is the settings env variable claude.subagentStatuslineTrace sets
-	// to 1; the sub-agent status line reads it.
-	EnvSubagentStatuslineTrace = "PFM_SUBAGENT_STATUSLINE_TRACE"
-	envSpawnDepth              = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
-	envConcurrentSubagents     = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
-	envWebSearches             = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
-	envTmuxTruecolor           = "CLAUDE_CODE_TMUX_TRUECOLOR"
-	envAgentTeams              = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
-	envFunctionHooks           = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
-	flagSettings               = "--settings"
-	flagMCPConfig              = "--mcp-config"
-	flagModel                  = "--model"
-	flagEffort                 = "--effort"
-	flagSessionID              = "--session-id"
-	flagResume                 = "--resume"
-	flagResumeShort            = "-r"
-	flagContinue               = "--continue"
-	flagContinueShort          = "-c"
-	flagRemoteControl          = "--remote-control"
-	flagName                   = "--name"
-	flagNameShort              = "-n"
-	flagPromptFile             = "--system-prompt-file"
-	flagSystemPrompt           = "--system-prompt"
-	flagForkSession            = "--fork-session"
-	flagAllowBypass            = "--allow-dangerously-skip-permissions"
-	flagBypass                 = "--dangerously-skip-permissions"
+	envSpawnDepth                  = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
+	envConcurrentSubagents         = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
+	envWebSearches                 = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
+	envTmuxTruecolor               = "CLAUDE_CODE_TMUX_TRUECOLOR"
+	envAgentTeams                  = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+	envFunctionHooks               = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
+	flagSettings                   = "--settings"
+	flagMCPConfig                  = "--mcp-config"
+	flagModel                      = "--model"
+	flagEffort                     = "--effort"
+	flagSessionID                  = "--session-id"
+	flagResume                     = "--resume"
+	flagResumeShort                = "-r"
+	flagContinue                   = "--continue"
+	flagContinueShort              = "-c"
+	flagRemoteControl              = "--remote-control"
+	flagName                       = "--name"
+	flagNameShort                  = "-n"
+	flagPromptFile                 = "--system-prompt-file"
+	flagSystemPrompt               = "--system-prompt"
+	flagForkSession                = "--fork-session"
+	flagAllowBypass                = "--allow-dangerously-skip-permissions"
+	flagBypass                     = "--dangerously-skip-permissions"
+	flagPermissionMode             = "--permission-mode"
+	permissionModeAuto             = "auto"
 )
 
 const (
-	SettingsFlag  = flagSettings
-	MCPConfigFlag = flagMCPConfig
+	SettingsFlag       = flagSettings
+	PermissionModeFlag = flagPermissionMode
 )
 
 type Wire int
@@ -161,6 +159,31 @@ var hygiene = []string{
 	envAutoCompactWindow, envDisableNonessentialTraffic,
 	envDisableNonstreamingFallback, envGatewayDiscovery,
 	envCodexThreadID,
+}
+
+// codexToolCallID marks a Codex tool shell: Codex sets it on each exec tool call's shell and the
+// Codex process itself carries none of codexToolShell; CODEX_CI is not the marker, being a name a
+// CI runner may export on its own.
+const codexToolCallID = "CODEX_TOOL_CALL_ID"
+
+// codexToolShell is what Codex injects into a tool shell for a non-interactive command: a chat born
+// from one would start monochrome and pager-less, tagged with the caller's Codex call.
+var codexToolShell = []string{
+	"NO_COLOR", "PAGER", "GIT_PAGER", "GH_PAGER", "CODEX_CI", "CODEX_SESSION_ID",
+	codexToolCallID, "CODEX_VERSION", "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+}
+
+// WithoutCodexToolShell is environ without codexToolShell when environ is a Codex tool shell, else
+// environ unchanged: a NO_COLOR the user exported in a login shell stays.
+func WithoutCodexToolShell(environ []string) []string {
+	marked := func(entry string) bool { return strings.HasPrefix(entry, codexToolCallID+"=") }
+	if !slices.ContainsFunc(environ, marked) {
+		return environ
+	}
+	return slices.DeleteFunc(slices.Clone(environ), func(entry string) bool {
+		name, _, _ := strings.Cut(entry, "=")
+		return slices.Contains(codexToolShell, name)
+	})
 }
 
 // Knobs is the ordered inventory of values carried into a Claude launch.
@@ -241,14 +264,6 @@ var Knobs = func() []Knob {
 			SourceConfig,
 			false,
 			"Enable Claude's native cursor when configured.",
-		},
-		Knob{
-			knobSubagentStatuslineTrace,
-			WireSettings,
-			"env." + EnvSubagentStatuslineTrace,
-			SourceConfig,
-			false,
-			"Turn on the sub-agent status line's trace when configured.",
 		},
 		Knob{
 			knobMaxSubagentSpawnDepth,
@@ -346,21 +361,13 @@ var Knobs = func() []Knob {
 			36500,
 			"Keep managed transcripts.",
 		},
-		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "24 registrations", "Attach the fleet hook set."},
+		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "25 registrations", "Attach the fleet hook set."},
 		Knob{knobStatusLine, WireSettings, knobStatusLine, SourceConstant, "pfm-statusline", "Show fleet status."},
-		Knob{
-			knobSubagentStatusLine,
-			WireSettings,
-			knobSubagentStatusLine,
-			SourceConstant,
-			"pfm-statusline --subagents",
-			"Show agent status.",
-		},
 		Knob{knobMCP, WireFlag, flagMCPConfig, SourceMachineConfig, nil, "Attach enabled fleet MCP servers."},
 		Knob{
 			knobPermissionMode,
 			WireFlag,
-			flagAllowBypass + "|" + flagBypass,
+			flagAllowBypass + "|" + flagBypass + "|" + flagPermissionMode,
 			SourceConfig,
 			"bypass",
 			"Apply the configured autonomy mode.",

@@ -3,11 +3,9 @@ package installer
 import (
 	"path/filepath"
 	"strings"
-)
 
-// subagentStatusLineKey is Claude Code's settings key for the per-row body
-// of its agent panel.
-const subagentStatusLineKey = "subagentStatusLine"
+	"github.com/rezzminator/professor/pfm/internal/retired"
+)
 
 func rewriteCommandFields(value any, rewrite func(string) string) bool {
 	changed := false
@@ -37,69 +35,41 @@ func rewriteCommandFields(value any, rewrite func(string) string) bool {
 	return changed
 }
 
-// retiredHookCommands is the shared table of subcommands old account settings
-// or Codex hooks may carry. The pfm-settings host check reports them in account settings;
-// the Codex hook writer removes them and the Codex doctor probe reports them as STALE.
-var retiredHookCommands = []struct {
-	Name       string
-	Subcommand string
-}{
-	{Name: "bb", Subcommand: "bb"},
-	{Name: "bb", Subcommand: "chat bb"},
-	{Name: "callmeter", Subcommand: "internal callmeter"},
-	{Name: "clear-hide", Subcommand: "internal clear-hide"},
-	{Name: "compact-nudge", Subcommand: "internal compact-nudge"},
-	{Name: "dream-agent-inject", Subcommand: "dream hook agent-inject"},
-	{Name: "dream-nudge", Subcommand: "dream hook nudge"},
-	{Name: "dream-codex-subagent-inject", Subcommand: "dream hook codex-subagent-inject"},
-	{Name: "group", Subcommand: "chat group hook"},
-	// explore-deny was the PreToolUse Agent|Task hook of the Explore-agent denial. The launch line
-	// (`--settings`) of a chat started before the upgrade still calls it on every Agent spawn and
-	// no install can rewrite that line, so RetiredInternalHook answers it as a silent no-op.
-	{Name: "explore-deny", Subcommand: "internal explore-deny"},
-}
-
-// retiredHookShimHints are legacy shell-script hook file substrings that
-// predate the pfm/cc-fleet binary hooks entirely, matched by substring
-// rather than by binary-prefixed subcommand.
-var retiredHookShimHints = []struct {
-	Name string
-	Hint string
-}{
-	{Name: "bb", Hint: "bb-hook.sh"},
-	{Name: "dream-agent-inject", Hint: "dreamer-agent-inject.sh"},
-	{Name: "dream-nudge", Hint: "dreamer-nudge.sh"},
-}
-
 // RetiredInternalHook reports whether name is a `pfm internal` subcommand an
-// older pfm registered as a hook and this one retired. Install refuses while account settings carry it (host check pfm-settings),
-// but a Claude session keeps the hooks it read at start
-// and still runs it until that session restarts.
-func RetiredInternalHook(name string) bool {
-	for _, retired := range retiredHookCommands {
-		if retired.Subcommand == "internal "+name {
-			return true
+// older pfm registered as a hook and the clone's retired lists retire (an
+// absent list retires none). Install strips it from account settings (host
+// check pfm-settings reports it), but a Claude session keeps the hooks it read
+// at start and still runs it until that session restarts.
+func RetiredInternalHook(home, name string) (bool, error) {
+	lists, err := retired.LoadListsIfPresent(home)
+	if err != nil {
+		return false, err
+	}
+	for _, hook := range lists.HookCommands {
+		if hook.Subcommand == "internal "+name {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-// retiredHookCommandName reports whether command matches a retired hook
-// table entry and, if so, the name to report it under.
-func retiredHookCommandName(command string) (string, bool) {
+// retiredHookCommandName reports whether command matches a retired hook of
+// lists — a hook subcommand behind pfm or a former binary name, or a
+// shell-script hint — and, if so, the name to report it under.
+func retiredHookCommandName(lists retired.Lists, command string) (string, bool) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", false
 	}
-	for _, binary := range []string{MCPClientPFM, legacyFleetBinary} {
-		for _, retired := range retiredHookCommands {
-			full := binary + " " + retired.Subcommand
+	for _, binary := range append([]string{MCPClientPFM}, lists.HookBinaries...) {
+		for _, hook := range lists.HookCommands {
+			full := binary + " " + hook.Subcommand
 			if command == full || strings.HasSuffix(command, "/"+full) {
-				return retired.Name, true
+				return hook.Name, true
 			}
 		}
 	}
-	for _, hint := range retiredHookShimHints {
+	for _, hint := range lists.HookShimHints {
 		if strings.Contains(command, hint.Hint) {
 			return hint.Name, true
 		}
@@ -163,11 +133,11 @@ func subcommandIsImplemented(isInternal bool, name string) bool {
 
 // unknownPFMHookCommand reports whether command is shaped like a hook this
 // or a prior pfm binary would have written — "<pfmBinary> internal <name>"
-// or "<pfmBinary> <name>", or the bare "pfm"/"cc-fleet" and any-path "/pfm"/
-// "/cc-fleet" suffix forms retiredHookCommandName already accepts — naming a
+// or "<pfmBinary> <name>", or the bare "pfm" and any-path "/pfm" and the same
+// forms of a former binary name retiredHookCommandName accepts — naming a
 // subcommand this binary's OWN dispatch does not implement, per the registry
 // SetImplementedSubcommands fills in from cmd/pfm's topLevelSubcommands /
-// internalSubcommands (issue #24 F1). Unlike the table-retired shapes, that
+// internalSubcommands (issue #24 F1). Unlike the shapes the retired lists name, that
 // combination only arises when a newer or rolled-back pfm wrote it: this
 // binary can name the entry but not run it, and no exact-string removal path
 // this binary owns ever strips it. The guard is on the binary token alone —
@@ -177,7 +147,7 @@ func subcommandIsImplemented(isInternal bool, name string) bool {
 // an operator's own `pfm doctor` or `pfm internal claude-version` hook — is
 // never reported unknown, whether or not it also happens to be one of the
 // installer's own automatic templates.
-func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
+func unknownPFMHookCommand(lists retired.Lists, command, pfmBinary string) (string, bool) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", false
@@ -186,8 +156,10 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 	if !found || strings.TrimSpace(rest) == "" {
 		return "", false
 	}
-	isPFMBinary := head == pfmBinary || head == MCPClientPFM || head == legacyFleetBinary ||
-		strings.HasSuffix(head, "/pfm") || strings.HasSuffix(head, "/cc-fleet")
+	isPFMBinary := head == pfmBinary
+	for _, binary := range append([]string{MCPClientPFM}, lists.HookBinaries...) {
+		isPFMBinary = isPFMBinary || head == binary || strings.HasSuffix(head, "/"+binary)
+	}
 	if !isPFMBinary {
 		return "", false
 	}
@@ -197,7 +169,7 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 			return "", false
 		}
 	}
-	if _, retired := retiredHookCommandName(command); retired {
+	if _, isRetired := retiredHookCommandName(lists, command); isRetired {
 		return "", false
 	}
 	name := rest
@@ -216,11 +188,11 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 	return name, true
 }
 
-func isRetiredHookCommand(command, pfmBinary string) bool {
-	if _, retired := retiredHookCommandName(command); retired {
+func isRetiredHookCommand(lists retired.Lists, command, pfmBinary string) bool {
+	if _, isRetired := retiredHookCommandName(lists, command); isRetired {
 		return true
 	}
-	_, unknown := unknownPFMHookCommand(command, pfmBinary)
+	_, unknown := unknownPFMHookCommand(lists, command, pfmBinary)
 	return unknown
 }
 
@@ -228,11 +200,11 @@ func isRetiredHookCommand(command, pfmBinary string) bool {
 // not only from the event where the installer once wrote them. Operators and
 // older installers may have copied a hook under another event; a real pause
 // must not leave those copies firing while preserving unrelated neighbors.
-// Alongside the table-retired shapes, it also strips a hook of pfm's own
+// Alongside the shapes the retired lists name, it also strips a hook of pfm's own
 // shape naming a subcommand THIS binary does not implement — what a
 // rolled-back or newer-then-reverted update leaves behind
 // (unknownPFMHookCommand).
-func removeRetiredHookCommands(document map[string]any, pfmBinary string) bool {
+func removeRetiredHookCommands(lists retired.Lists, document map[string]any, pfmBinary string) bool {
 	events, _ := document["hooks"].(map[string]any)
 	changed := false
 	for event, eventValue := range events {
@@ -258,7 +230,7 @@ func removeRetiredHookCommands(document map[string]any, pfmBinary string) bool {
 			for _, hookValue := range hooks {
 				hook, _ := hookValue.(map[string]any)
 				command, _ := hook[configCommandKey].(string)
-				if isRetiredHookCommand(command, pfmBinary) {
+				if isRetiredHookCommand(lists, command, pfmBinary) {
 					entryChanged = true
 					eventChanged = true
 					changed = true

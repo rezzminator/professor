@@ -50,6 +50,9 @@ func TestShortModelDropsTheVendorPrefix(t *testing.T) {
 	if got := shortModel("claude-opus-4-7"); got != "opus-4-7" {
 		t.Errorf("shortModel = %q", got)
 	}
+	if got := shortModel("gw:catalog/claude-opus-5"); got != "opus-5" {
+		t.Errorf("a gateway asset path drops with the vendor prefix, got %q", got)
+	}
 	if got := shortModel("gpt-6-astra"); got != "gpt-6-astra" {
 		t.Errorf("a model without the prefix is unchanged, got %q", got)
 	}

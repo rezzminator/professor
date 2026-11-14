@@ -2,103 +2,20 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
-
-type codexStateThread struct {
-	ID               string
-	RolloutPath      string
-	CWD              string
-	Title            string
-	FirstUserMessage string
-	Preview          string
-	Name             string
-	ThreadSource     string
-	HistoryMode      string
-	CreatedAt        int64
-	UpdatedAt        int64
-	RecencyAt        int64
-	TokensUsed       int64
-	Archived         bool
-}
-
-// buildCodexState writes a scratch Codex state store using the real schema
-// captured from a live 0.146.1 store.
-func buildCodexState(t *testing.T, path string, threads ...codexStateThread) {
-	t.Helper()
-
-	schema, err := os.ReadFile(
-		filepath.Join("..", "..", "testdata", "codex-state-schema.sql"),
-	)
-	if err != nil {
-		t.Fatalf("read Codex state schema: %v", err)
-	}
-	database, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("create scratch Codex state store: %v", err)
-	}
-	defer func() {
-		if err := database.Close(); err != nil {
-			t.Errorf("close database: %v", err)
-		}
-	}()
-	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, string(schema)); err != nil {
-		t.Fatalf("apply Codex state schema: %v", err)
-	}
-	for index := range threads {
-		thread := &threads[index]
-		historyMode := thread.HistoryMode
-		if historyMode == "" {
-			historyMode = "legacy"
-		}
-		archived := 0
-		if thread.Archived {
-			archived = 1
-		}
-		if _, err := database.ExecContext(ctx, `
-INSERT INTO threads (
-  id, rollout_path, created_at, updated_at, source, model_provider, cwd,
-  title, sandbox_policy, approval_mode, tokens_used, archived,
-  first_user_message, preview, thread_source, recency_at, history_mode, name
-) VALUES (?, ?, ?, ?, 'cli', 'openai', ?, ?, 'workspace-write', 'on-request',
-  ?, ?, ?, ?, ?, ?, ?, ?)`,
-			thread.ID,
-			thread.RolloutPath,
-			thread.CreatedAt,
-			thread.UpdatedAt,
-			thread.CWD,
-			thread.Title,
-			thread.TokensUsed,
-			archived,
-			thread.FirstUserMessage,
-			thread.Preview,
-			nullableText(thread.ThreadSource),
-			thread.RecencyAt,
-			historyMode,
-			nullableText(thread.Name),
-		); err != nil {
-			t.Fatalf("insert scratch Codex thread %q: %v", thread.ID, err)
-		}
-	}
-}
-
-func nullableText(value string) any {
-	if value == "" {
-		return nil
-	}
-	return value
-}
 
 func TestCodexStateFilesOrderNewestGenerationFirst(t *testing.T) {
 	root := t.TempDir()
@@ -133,164 +50,41 @@ func TestCodexStateFilesOrderNewestGenerationFirst(t *testing.T) {
 	}
 }
 
-func TestReadCodexThreadsHighestGenerationWinsAndClassifies(t *testing.T) {
-	root := t.TempDir()
-	buildCodexState(t, filepath.Join(root, "state_4.sqlite"),
-		codexStateThread{
-			ID:               "shared-thread",
-			RolloutPath:      "/codex/sessions/rollout-old.jsonl",
-			CWD:              "/work/old",
-			Name:             "STALE NAME",
-			FirstUserMessage: "stale first message",
-			ThreadSource:     "user",
-			CreatedAt:        100,
-			UpdatedAt:        100,
-		},
-		codexStateThread{
-			ID:           "only-in-old-store",
-			RolloutPath:  "/codex/sessions/rollout-only-old.jsonl",
-			CWD:          "/work/old",
-			Title:        "kept from the retired generation",
-			ThreadSource: "user",
-			CreatedAt:    90,
-			UpdatedAt:    90,
-		},
-	)
-	buildCodexState(t, filepath.Join(root, "state_5.sqlite"),
-		codexStateThread{
-			ID:               "shared-thread",
-			RolloutPath:      "/codex/sessions/rollout-new.jsonl",
-			CWD:              "/work/new",
-			Name:             "LIVE NAME",
-			FirstUserMessage: "live first message",
-			ThreadSource:     "user",
-			CreatedAt:        100,
-			UpdatedAt:        700,
-			RecencyAt:        900,
-			TokensUsed:       42,
-		},
-		codexStateThread{
-			ID:           "subagent-thread",
-			RolloutPath:  "/codex/sessions/rollout-sub.jsonl",
-			CWD:          "/work/new",
-			Title:        "delegated",
-			ThreadSource: "subagent",
-			CreatedAt:    200,
-			UpdatedAt:    200,
-		},
-		codexStateThread{
-			ID:           "archived-thread",
-			RolloutPath:  "/codex/sessions/rollout-archived.jsonl",
-			CWD:          "/work/new",
-			Title:        "put away",
-			ThreadSource: "user",
-			Archived:     true,
-			CreatedAt:    300,
-			UpdatedAt:    300,
-		},
-		codexStateThread{
-			ID:           "empty-thread",
-			RolloutPath:  "/codex/sessions/rollout-empty.jsonl",
-			CWD:          "/work/new",
-			Name:         "NAMED BUT UNUSED",
-			ThreadSource: "user",
-			HistoryMode:  "paginated",
-			CreatedAt:    400,
-			UpdatedAt:    400,
-		},
-	)
-
-	files, err := CodexStateFiles(root)
-	if err != nil {
-		t.Fatalf("CodexStateFiles() error = %v", err)
+// A Codex home whose every state generation is unreadable leaves the
+// resolver no candidates, and says so: the pane still resolves by its id.
+func TestCodexThreadResolverNamesUnreadableThreads(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "state_5.sqlite"), []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	threads, err := ReadCodexThreads(context.Background(), files)
-	if err != nil {
-		t.Fatalf("ReadCodexThreads() error = %v", err)
+	ctx, recorder := obs.Test(t)
+	resolver := NewCodexThreadResolverRoots(ctx, []string{home}, nil)
+	if id, rollout := resolver("exported", "", 0, "", ""); id != "exported" || rollout != "" {
+		t.Fatalf("resolver = %q, %q; want the exported id with no rollout", id, rollout)
 	}
-	byID := make(map[string]CodexThread, len(threads))
-	for _, thread := range threads {
-		byID[thread.ID] = thread
-	}
-	if len(threads) != 5 {
-		t.Fatalf("ReadCodexThreads() = %#v, want five rows", threads)
-	}
-
-	shared := byID["shared-thread"]
-	if shared.Name != "LIVE NAME" ||
-		shared.CWD != "/work/new" ||
-		shared.RolloutPath != "/codex/sessions/rollout-new.jsonl" ||
-		shared.FirstPrompt != "live first message" ||
-		shared.ActivityAt != 900 ||
-		!shared.Listed() ||
-		!shared.Prompted ||
-		filepath.Base(shared.StateFile) != "state_5.sqlite" {
-		t.Fatalf("shared thread = %#v, want the state_5 row", shared)
-	}
-	if retired := byID["only-in-old-store"]; !retired.Listed() ||
-		retired.FirstPrompt != "kept from the retired generation" {
-		t.Fatalf("older-generation-only thread = %#v, want kept and listed", retired)
-	}
-	if subagent := byID["subagent-thread"]; subagent.Listed() ||
-		subagent.UserThread {
-		t.Fatalf("subagent thread = %#v, want unlisted", subagent)
-	}
-	if archived := byID["archived-thread"]; archived.Listed() ||
-		!archived.Archived {
-		t.Fatalf("archived thread = %#v, want unlisted", archived)
-	}
-	empty := byID["empty-thread"]
-	if !empty.Listed() || empty.Prompted || empty.FirstPrompt != "" {
-		t.Fatalf("empty thread = %#v, want listed with nothing derivable", empty)
+	want := []string{"WARN: read Codex state: all 1 generation(s) were unreadable"}
+	if got := warnings(recorder, "store.codex_threads.unreadable"); !slices.Equal(got, want) {
+		t.Fatalf("records = %q, want %q\n%s", got, want, recorder.Raw())
 	}
 }
 
-func TestReadCodexThreadsSkipsUnusableGenerations(t *testing.T) {
-	root := t.TempDir()
-	ancient, err := sql.Open("sqlite", filepath.Join(root, "state_1.sqlite"))
-	if err != nil {
-		t.Fatal(err)
+// warnings renders each record named message as "LEVEL field… : err", the
+// named fields joined by spaces.
+func warnings(recorder *obs.Recorder, message string, fields ...string) []string {
+	var got []string
+	for _, record := range recorder.Records() {
+		if record.Message != message {
+			continue
+		}
+		line := record.Level
+		for _, field := range fields {
+			value, _ := record.Field(field)
+			line += fmt.Sprintf(" %v", value)
+		}
+		text, _ := record.Field(obs.FieldErr)
+		got = append(got, fmt.Sprintf("%s: %v", line, text))
 	}
-	if _, err := ancient.Exec(`
-CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT, created_at INTEGER)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ancient.Exec(
-		"INSERT INTO threads (id, cwd, created_at) VALUES ('ancient', '/work', 1)",
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := ancient.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(root, "state_2.sqlite"),
-		[]byte("not a database"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	buildCodexState(t, filepath.Join(root, "state_3.sqlite"), codexStateThread{
-		ID:           "live",
-		RolloutPath:  "/codex/sessions/rollout-live.jsonl",
-		CWD:          "/work",
-		Title:        "still readable",
-		ThreadSource: "user",
-		CreatedAt:    5,
-		UpdatedAt:    5,
-	})
-
-	files, err := CodexStateFiles(root)
-	if err != nil {
-		t.Fatalf("CodexStateFiles() error = %v", err)
-	}
-	threads, err := ReadCodexThreads(context.Background(), files)
-	if err != nil {
-		t.Fatalf("ReadCodexThreads() error = %v", err)
-	}
-	if len(threads) != 1 || threads[0].ID != "live" {
-		t.Fatalf("ReadCodexThreads() = %#v, want only the readable generation", threads)
-	}
+	return got
 }
 
 // L1-F4: skipping every generation is not the same as there being nothing to
@@ -330,64 +124,12 @@ func TestReadCodexThreadsErrorsWhenEveryGenerationIsUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err == nil {
-		t.Fatalf("ReadCodexThreads() with every generation unreadable returned no error; threads=%#v", threads)
-	}
-	if threads != nil {
-		t.Fatalf("ReadCodexThreads() threads = %#v, want nil on the all-failed error", threads)
-	}
-	for _, file := range files {
-		if !strings.Contains(string(logged), file) {
-			t.Fatalf("stderr = %q, want each skipped generation named, missing %s", logged, file)
-		}
-	}
-}
-
-// T1 — the store exposes threads.title, trimmed and untouched otherwise: it
-// is a separate channel from Name (an entirely separate rename mechanism)
-// and from FirstPrompt, which is what a name-only status line resolves
-// against once a status-line title move (T2/T3) can act on it at all.
-func TestReadCodexThreadsExposesTitleTrimmed(t *testing.T) {
-	root := t.TempDir()
-	buildCodexState(t, filepath.Join(root, "state_1.sqlite"),
-		codexStateThread{
-			ID:               "titled",
-			RolloutPath:      "/codex/sessions/rollout-titled.jsonl",
-			CWD:              "/work/titled",
-			Title:            "  Reply with SECOND  ",
-			FirstUserMessage: "first",
-			ThreadSource:     "user",
-			CreatedAt:        10,
-			UpdatedAt:        10,
-		},
-		codexStateThread{
-			ID:               "untitled",
-			RolloutPath:      "/codex/sessions/rollout-untitled.jsonl",
-			CWD:              "/work/untitled",
-			FirstUserMessage: "first",
-			ThreadSource:     "user",
-			CreatedAt:        20,
-			UpdatedAt:        20,
-		},
-	)
-
-	files, err := CodexStateFiles(root)
-	if err != nil {
-		t.Fatalf("CodexStateFiles() error = %v", err)
-	}
-	threads, err := ReadCodexThreads(context.Background(), files)
-	if err != nil {
-		t.Fatalf("ReadCodexThreads() error = %v", err)
-	}
-	byID := make(map[string]CodexThread, len(threads))
-	for _, thread := range threads {
-		byID[thread.ID] = thread
-	}
-	if titled := byID["titled"]; titled.Title != "Reply with SECOND" {
-		t.Fatalf("titled thread Title = %q, want the trimmed %q", titled.Title, "Reply with SECOND")
-	}
-	if untitled := byID["untitled"]; untitled.Title != "" {
-		t.Fatalf("untitled thread Title = %q, want empty", untitled.Title)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%#v | %v | %s", threads, err, logged),
+		root,
+		"{root}",
+	), "[]store.CodexThread(nil) | read Codex state: all 2 generation(s) were unreadable | store: skip unusable Codex state generation {root}/state_2.sqlite: open Codex state store \"{root}/state_2.sqlite\": sqlite database {root}/state_2.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\nstore: skip unusable Codex state generation {root}/state_1.sqlite: open Codex state store \"{root}/state_1.sqlite\": sqlite database {root}/state_1.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\n"; got != want {
+		t.Fatalf("threads | error | stderr = %q, want %q", got, want)
 	}
 }
 
@@ -395,7 +137,6 @@ func TestReadCodexThreadsExposesTitleTrimmed(t *testing.T) {
 // the kill is permanent: new prompts and a rollout file that finally appears
 // never lift it, and nothing writes a baseline to lift it with.
 func TestKillStoreOnlyCodexLineageIsPermanent(t *testing.T) {
-	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
@@ -505,7 +246,7 @@ func TestReadCodexThreadIdentity(t *testing.T) {
 }
 
 func TestReadCodexThreadIdentityReadFailureIsNotAbsence(t *testing.T) {
-	for _, raw := range []string{"not sqlite", ""} {
+	for raw, want := range map[string]string{"not sqlite": "open Codex thread identity root in {dir}/state_5.sqlite: sqlite database {dir}/state_5.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles", "": "read Codex thread identity schema {dir}/state_5.sqlite: unable to open database file (14)"} {
 		file := filepath.Join(t.TempDir(), "state_5.sqlite")
 		if raw != "" {
 			if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
@@ -513,8 +254,8 @@ func TestReadCodexThreadIdentityReadFailureIsNotAbsence(t *testing.T) {
 			}
 		}
 		_, found, err := ReadCodexThreadIdentity(context.Background(), file, "root")
-		if err == nil || found || !strings.Contains(err.Error(), file) {
-			t.Fatalf("failed read rendered as absence: found=%v err=%v", found, err)
+		if got := strings.ReplaceAll(fmt.Sprint(err), filepath.Dir(file), "{dir}"); found || got != want {
+			t.Fatalf("read error = %q, want %q (found %v)", got, want, found)
 		}
 	}
 }

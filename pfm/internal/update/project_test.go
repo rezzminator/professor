@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -51,14 +50,31 @@ func TestProjectUpdatesReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T
 func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testing.T) {
 	t.Parallel()
 	fixture := newProjectUpdateFixture(t)
+	// A file whose template cannot be read costs its own pin only: the
+	// readable one still pins and saves, the unreadable one is named.
+	twoTemplate := filepath.Join(fixture.store, "templates", "project", "updated-two.md")
+	if err := os.Chmod(twoTemplate, 0); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
-	if code := Run(
-		[]string{"pin", ".claude/updated-one.md", "--root", fixture.project},
+	code := Run(
+		[]string{"pin", ".claude/updated-one.md", ".claude/updated-two.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
 		fixture.runtime,
-	); code != 0 {
-		t.Fatalf("pin one code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	)
+	wantStderr := "pfm update pin: skipped .claude/updated-two.md: UNREADABLE " + twoTemplate +
+		": read " + twoTemplate + ": permission denied\n" +
+		"pfm update pin: 1 file(s) skipped unreadable; nothing was written for them\n"
+	if code != 1 || stderr.String() != wantStderr ||
+		stdout.String() != "pinned 1 file(s) at "+fixture.headSHA+"\n" {
+		t.Fatalf(
+			"pin one code=%d stdout=%q stderr=%q, want 1 and stderr %q",
+			code, stdout.String(), stderr.String(), wantStderr,
+		)
+	}
+	if err := os.Chmod(twoTemplate, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	baseline, err := professor.Load(fixture.project)
 	if err != nil {
@@ -195,13 +211,31 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 	headSHA := projectGitShortSHA(t, store)
 
-	const planSize = 10
+	const planSize = 11
 
+	// An unreadable local file costs its own pin only: the readable one
+	// still pins and saves, the unreadable one is named and reads NEW.
+	devLocal := filepath.Join(project, ".claude", "commands", "dev.md")
+	if err := os.Chmod(devLocal, 0); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 1 ||
+		stderr.String() != "pfm update adopt: skipped .claude/commands/dev.md: UNREADABLE "+devLocal+
+			": permission denied\n" ||
+		!strings.Contains(stdout.String(), "adopted 1 file(s)") ||
+		!strings.Contains(stdout.String(), "  unreadable    1   (named above, not pinned — check reports NEW)\n") {
+		t.Fatalf("adopt with an unreadable local code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if err := os.Chmod(devLocal, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
 	if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("adopt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "adopted 2 file(s)") {
+	if !strings.Contains(stdout.String(), "adopted 1 file(s)") {
 		t.Fatalf("adopt stdout=%q", stdout.String())
 	}
 	wantAbsent := planSize - 2
@@ -270,6 +304,9 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 	if !strings.Contains(stdout.String(), "absent-at-ref 1") {
 		t.Fatalf("adopt --at stdout missing absent-at-ref: %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "  absent        10  (mapped template, no local file") {
+		t.Fatalf("adopt --at stdout missing absent 10 (project/rules mapped): %q", stdout.String())
+	}
 	baseline, err := professor.Load(project)
 	if err != nil {
 		t.Fatal(err)
@@ -306,8 +343,10 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 			t.Fatalf("check missing %q in dev.md UPDATED report:\n%s", want, stdout.String())
 		}
 	}
-	if !strings.Contains(stdout.String(), "project/commands/later.md — adopt:") {
-		t.Fatalf("check did not report later.md NEW:\n%s", stdout.String())
+	for _, want := range []string{"project/commands/later.md — adopt:", "project/rules/git-writes-through-gitter.md — adopt:"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("check did not report %q NEW:\n%s", want, stdout.String())
+		}
 	}
 
 	noGitStore := t.TempDir()
@@ -323,6 +362,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 		"templates/project/codex/config.toml":                              "model=\"x\"\n",
 		"templates/project/docs-commands/git/references/gitter-history.md": "# Gitter History\n",
 		"templates/project/docs-hub/_index.md":                             "# Documentation Hub\n",
+		"templates/project/rules/git-writes-through-gitter.md":             "# Only gitter writes git\n",
 	} {
 		writeProjectFixtureFile(t, noGitStore, relative, content)
 	}
@@ -898,6 +938,7 @@ func newProjectUpdateFixture(t *testing.T) projectUpdateFixture {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
+	stageRetiredLists(t, home, fixtureRetiredNames)
 	return projectUpdateFixture{
 		project: project,
 		store:   storeRoot,
@@ -920,13 +961,7 @@ func writeProjectFixtureFile(t *testing.T, root, relative, content string) {
 
 func projectGitShortSHA(t *testing.T, root string) string {
 	t.Helper()
-	command := exec.Command("git", "rev-parse", "--short", "HEAD")
-	command.Dir = root
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git rev-parse --short HEAD: %v\n%s", err, output)
-	}
-	return strings.TrimSpace(string(output))
+	return updateGit.Must(t, root, "rev-parse", "--short", "HEAD")
 }
 
 func projectTreeDigest(t *testing.T, root string) string {

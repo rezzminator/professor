@@ -1,3 +1,5 @@
+//go:build jail
+
 package picker
 
 import (
@@ -14,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestResolveSelectedRowAttachesALiveChatInsteadOfResumingAStaleCachedRow pins
@@ -26,6 +29,7 @@ import (
 // conversation. Re-resolving against the current fleet before OpenRow acts
 // is what turns the outcome into an attach instead.
 func TestResolveSelectedRowAttachesALiveChatInsteadOfResumingAStaleCachedRow(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

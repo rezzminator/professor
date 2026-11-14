@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestIsUnderRespectsSegmentBoundaries(t *testing.T) {
@@ -28,14 +29,22 @@ func TestIsUnderRespectsSegmentBoundaries(t *testing.T) {
 
 func TestFoldRootsFoldsNestedProjectsButNeverIntoHome(t *testing.T) {
 	folded := Fold([]string{
-		"/jail/me/src/app/plugins/gw", "/jail/me/src/app", "/jail/me", "/jail/me/ops", "/jail/me/src/app/.worktrees/f",
-	}, "/jail/me")
+		testjail.Place(
+			"/jail/me/src/app/plugins/gw",
+		),
+		testjail.Place("/jail/me/src/app"),
+		testjail.Place("/jail/me"),
+		testjail.Place("/jail/me/ops"),
+		testjail.Place("/jail/me/src/app/.worktrees/f"),
+	}, testjail.Place("/jail/me"))
 	want := map[string]string{
-		"/jail/me/src/app":              "/jail/me/src/app",
-		"/jail/me/src/app/plugins/gw":   "/jail/me/src/app",
-		"/jail/me/src/app/.worktrees/f": "/jail/me/src/app",
-		"/jail/me":                      "/jail/me",
-		"/jail/me/ops":                  "/jail/me/ops", // home holds it on disk, never on the rail
+		testjail.Place("/jail/me/src/app"):              testjail.Place("/jail/me/src/app"),
+		testjail.Place("/jail/me/src/app/plugins/gw"):   testjail.Place("/jail/me/src/app"),
+		testjail.Place("/jail/me/src/app/.worktrees/f"): testjail.Place("/jail/me/src/app"),
+		testjail.Place("/jail/me"):                      testjail.Place("/jail/me"),
+		testjail.Place("/jail/me/ops"): testjail.Place(
+			"/jail/me/ops",
+		), // home holds it on disk, never on the rail
 	}
 	if !reflect.DeepEqual(folded, want) {
 		t.Fatalf("Fold = %v\nwant %v", folded, want)
@@ -47,18 +56,23 @@ func TestFoldRootsFoldsNestedProjectsButNeverIntoHome(t *testing.T) {
 func fleetFixture() Fleet {
 	return Fleet{
 		Rows: []compose.Row{
-			{Kind: compose.NewClaude, Project: "ops", CWD: "/jail/me/ops"},
-			{Kind: compose.ProfessorUpdate, CWD: "/jail/me/elsewhere"},
-			{Kind: compose.LiveClaude, Project: "meter", CWD: "/jail/me/fw/plugins/meter", Backend: "herdr"},
-			{Kind: compose.ResumeClaude, Project: ".fw", CWD: "/jail/me/fw/pfm"},
-			{Kind: compose.LiveCodex, Project: "ops", CWD: "/jail/me/ops/deep"},
+			{Kind: compose.NewClaude, Project: "ops", CWD: testjail.Place("/jail/me/ops")},
+			{Kind: compose.ProfessorUpdate, CWD: testjail.Place("/jail/me/elsewhere")},
+			{
+				Kind:    compose.LiveClaude,
+				Project: "meter",
+				CWD:     testjail.Place("/jail/me/fw/plugins/meter"),
+				Backend: "herdr",
+			},
+			{Kind: compose.ResumeClaude, Project: ".fw", CWD: testjail.Place("/jail/me/fw/pfm")},
+			{Kind: compose.LiveCodex, Project: "ops", CWD: testjail.Place("/jail/me/ops/deep")},
 		},
 		ProjectDirs: map[string]string{
-			".fw":   "/jail/me/fw",
-			"meter": "/jail/me/fw/plugins/meter",
-			"ops":   "/jail/me/ops",
+			".fw":   testjail.Place("/jail/me/fw"),
+			"meter": testjail.Place("/jail/me/fw/plugins/meter"),
+			"ops":   testjail.Place("/jail/me/ops"),
 		},
-		Home: "/jail/me",
+		Home: testjail.Place("/jail/me"),
 	}
 }
 
@@ -71,16 +85,19 @@ func TestBuildFilesANestedRootUnderTheOuterPlace(t *testing.T) {
 	if want := []string{
 		"",
 		"",
-		"/jail/me/fw",
-		"/jail/me/fw",
-		"/jail/me/ops",
+		testjail.Place("/jail/me/fw"),
+		testjail.Place("/jail/me/fw"),
+		testjail.Place("/jail/me/ops"),
 	}; !reflect.DeepEqual(
 		index.RowPlace,
 		want,
 	) {
 		t.Fatalf("RowPlace = %q, want %q", index.RowPlace, want)
 	}
-	want := []Place{{Root: "/jail/me/fw", Label: ".fw"}, {Root: "/jail/me/ops", Label: "ops"}}
+	want := []Place{
+		{Root: testjail.Place("/jail/me/fw"), Label: ".fw"},
+		{Root: testjail.Place("/jail/me/ops"), Label: "ops"},
+	}
 	if !reflect.DeepEqual(index.Places, want) {
 		t.Fatalf("Places = %+v, want %+v", index.Places, want)
 	}
@@ -94,9 +111,9 @@ func TestBuildFilesANestedRootUnderTheOuterPlace(t *testing.T) {
 
 func TestLabelNamesHomeAndBareRoots(t *testing.T) {
 	for _, test := range []struct{ root, home, want string }{
-		{"/jail/me", "/jail/me/", "~"},
-		{"/jail/me/ops", "/jail/me", "ops"},
-		{"/", "/jail/me", "/"},
+		{testjail.Place("/jail/me"), testjail.Place("/jail/me/"), "~"},
+		{testjail.Place("/jail/me/ops"), testjail.Place("/jail/me"), "ops"},
+		{"/", testjail.Place("/jail/me"), "/"},
 	} {
 		if got := RootLabel(test.root, test.home); got != test.want {
 			t.Errorf("RootLabel(%q, %q) = %q, want %q", test.root, test.home, got, test.want)

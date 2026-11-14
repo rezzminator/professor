@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ type fakeActionTmux struct {
 	mutex        sync.Mutex
 	panes        map[string][]ActionPane
 	alive        map[string]bool
+	listErr      map[string]error
 	killedPanes  []string
 	killedServer []string
 	sized        []string
@@ -35,8 +37,9 @@ type fakeActionTmux struct {
 	// watch, per socket; a socket without an entry shows a settled chat.
 	launches map[string]fakeLaunch
 	remain   []string
-	// launchReads counts the launch watch's reads of a pane.
+	// launchReads counts the launch watch's reads of a pane; paneReads, per socket.
 	launchReads int
+	paneReads   map[string]int
 }
 
 func (tmux *fakeActionTmux) ListPanes(
@@ -45,6 +48,9 @@ func (tmux *fakeActionTmux) ListPanes(
 ) ([]ActionPane, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
+	if err := tmux.listErr[socket]; err != nil {
+		return nil, err
+	}
 	if !tmux.alive[socket] {
 		return nil, errors.New("dead socket")
 	}
@@ -241,9 +247,13 @@ func TestOpenStartsPaneWhenLaunchRecordFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tmux.created) != 1 ||
-		!strings.Contains(stderr.String(), "pfm: record launch 00000000-0000-4000-8000-000000000004:") {
-		t.Fatalf("pane=%d stderr=%q", len(tmux.created), stderr.String())
+	if got, want := strings.ReplaceAll(
+		stderr.String(),
+		root,
+		"{root}",
+	), "pfm: record launch 00000000-0000-4000-8000-000000000004: record launch 00000000-0000-4000-8000-000000000004: open shared state database: read sqlite database marker {root}: read {root}: is a directory\npfm: tmux picker chat exists; seat registration failed: write seat \"cc-record-error\": open shared state database: read sqlite database marker {root}: read {root}: is a directory\n"; len(tmux.created) != 1 ||
+		got != want {
+		t.Errorf("pane=%d stderr = %q, want %q", len(tmux.created), got, want)
 	}
 }
 
@@ -261,11 +271,11 @@ func (processes *fakeProcesses) Processes(
 	return append([]Process(nil), processes.processes...), nil
 }
 
-func (processes *fakeProcesses) Terminate(pid int) error {
+func (processes *fakeProcesses) Terminate(target gather.Target) (gather.Outcome, error) {
 	processes.mutex.Lock()
 	defer processes.mutex.Unlock()
-	processes.terminated = append(processes.terminated, pid)
-	return nil
+	processes.terminated = append(processes.terminated, target.PID)
+	return gather.OutcomeSent, nil
 }
 
 type fixedGate bool
@@ -303,7 +313,7 @@ func TestSoloReapsPaneAloneServerAndStrayWithKeepTTY(t *testing.T) {
 		"cc-400-1-1":    "/tx/" + id + ".jsonl",
 		"cc-500-1-1":    "/tx/" + id + ".jsonl",
 	} {
-		writeActionFile(t, filepath.Join(sidDir, name), content, 0o600)
+		writeActionFile(t, filepath.Join(sidDir, name), content)
 	}
 	tmux := &fakeActionTmux{
 		alive: map[string]bool{
@@ -377,42 +387,6 @@ func TestSoloReapsPaneAloneServerAndStrayWithKeepTTY(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sidDir, "cc-100-1-1")); err != nil {
 		t.Fatalf("keep crumb removed: %v", err)
-	}
-}
-
-// A failed pane probe is not an empty server. The socket may still be live
-// but temporarily unreadable; removing its crumb here makes the next sweep
-// treat a working chat as unowned. Cleanup is safe only after a successful
-// probe that returned no panes.
-func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
-	jailAction(t)
-	id := "55555555-5555-4555-8555-555555555555"
-	socket := "cc-900-1-1"
-	crumb := filepath.Join(os.Getenv("PFM_SID_DIR"), socket)
-	writeActionFile(t, crumb, "/tx/"+id+".jsonl", 0o600)
-
-	tmux := &fakeActionTmux{alive: map[string]bool{socket: false}}
-	var stderr bytes.Buffer
-	executor, err := New(Dependencies{
-		Tmux:      tmux,
-		Processes: &fakeProcesses{},
-		Gate:      fixedGate(false),
-		Runner:    &captureRunner{},
-		Stderr:    &stderr,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := executor.Solo(context.Background(), id, "", true); err != nil {
-		t.Fatalf("Solo() error = %v", err)
-	}
-	if _, err := os.Stat(crumb); err != nil {
-		t.Fatalf("Solo() removed crumb after a failed pane probe: %v", err)
-	}
-	// L1-F14: the pane probe failure has a sibling 30 lines below (the
-	// keep-socket probe) that already logs; this one was silent.
-	if !strings.Contains(stderr.String(), socket) || !strings.Contains(stderr.String(), "dead socket") {
-		t.Fatalf("Solo() did not log the failed pane probe: stderr=%q", stderr.String())
 	}
 }
 
@@ -829,7 +803,7 @@ func TestSelfSwitchLogsAListPanesFailure(t *testing.T) {
 	if !executor.SelfSwitch(ctx, "/tmp/jail/cc-unreadable,1,0", "cc-unreadable") {
 		t.Fatal("SelfSwitch() did not recognize its own socket")
 	}
-	if !strings.Contains(stderr.String(), "refusing to nest") {
+	if stderr.String() != "pfm: already inside this chat's tmux — refusing to nest it inside itself; switch windows yourself (prefix + w)\n" {
 		t.Fatalf("stderr = %q, want the refuse-to-nest message", stderr.String())
 	}
 	found := false
@@ -976,12 +950,11 @@ func TestOpenCodexRequiresLogin(t *testing.T) {
 					t.Fatalf("live self-switch line=%q error=%v selected=%v", line, err, tmux.selected)
 				}
 			} else {
-				// the refusal's own text is CodexLoginError's (TestCodexLoginError); the door owns its prefix and home
-				want := "Codex account 1: " + authPath + " "
-				if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) ||
+				want := map[string]string{"new missing auth": "Codex account 1: {root}/002/.codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login", "resume empty auth": "Codex account 1: {root}/002/.codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"}[name]
+				if got := rooted(t, fmt.Sprint(err)); !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || got != want ||
 					line != "" || len(tmux.created) != 0 || heals != 0 {
-					t.Fatalf("Open line=%q error=%v created=%d heals=%d; want %q before effects",
-						line, err, len(tmux.created), heals, want)
+					t.Errorf("Open line=%q created=%d heals=%d error = %q, want %q before effects",
+						line, len(tmux.created), heals, got, want)
 				}
 			}
 		})

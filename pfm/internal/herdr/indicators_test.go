@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -405,10 +406,10 @@ func TestCancelledContextEndsTheBlinkerCleanly(t *testing.T) {
 func TestPaintWithoutASocketNamesTheEnvironmentVariable(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	err := PaintIndicators(context.Background(), "", t.TempDir(), stderr, allowPaneProof)
-	if err == nil || !strings.Contains(err.Error(), EnvSocket) {
+	if err == nil || err.Error() != "herdr indicators: no Herdr socket: HERDR_SOCKET_PATH is not set" {
 		t.Fatalf("PaintIndicators with no socket = %v, want an error naming %s", err, EnvSocket)
 	}
-	if !strings.Contains(stderr.String(), EnvSocket) {
+	if stderr.String() != "herdr indicators: no Herdr socket: HERDR_SOCKET_PATH is not set\n" {
 		t.Fatalf("stderr = %q, want the error written there too", stderr)
 	}
 }
@@ -416,8 +417,10 @@ func TestPaintWithoutASocketNamesTheEnvironmentVariable(t *testing.T) {
 func TestPaintWithoutALockDirIsRefusedAtEntry(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	err := PaintIndicators(context.Background(), "/fake/herdr.sock", "", stderr, allowPaneProof)
-	if err == nil || !strings.Contains(err.Error(), "lock") || !strings.Contains(stderr.String(), "lock") {
-		t.Fatalf("PaintIndicators with no lock dir = %v, stderr %q, want a lock-directory error on both", err, stderr)
+	if got, want := fmt.Sprint(
+		err,
+	)+" | "+stderr.String(), "herdr indicators: no lock directory for the blinker of socket /fake/herdr.sock | herdr indicators: no lock directory for the blinker of socket /fake/herdr.sock\n"; got != want {
+		t.Fatalf("PaintIndicators with no lock dir: error | stderr = %q, want %q", got, want)
 	}
 }
 
@@ -425,13 +428,9 @@ func TestPaintReportsAnUnreachableSocketWithItsContext(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "missing.sock")
 	stderr := &bytes.Buffer{}
 	err := PaintIndicators(context.Background(), socket, t.TempDir(), stderr, allowPaneProof)
-	if err == nil {
-		t.Fatal("PaintIndicators on a missing socket = nil, want the dial error")
-	}
-	for _, want := range []string{socket, "pane.list"} {
-		if !strings.Contains(err.Error(), want) || !strings.Contains(stderr.String(), want) {
-			t.Fatalf("error %v / stderr %q lack %q", err, stderr, want)
-		}
+	got := strings.ReplaceAll(fmt.Sprint(err)+" | "+stderr.String(), filepath.Dir(socket), "{dir}")
+	if want := "herdr indicators: list panes and workspaces: herdr socket {dir}/missing.sock: dial for pane.list pfm-1: dial unix {dir}/missing.sock: connect: no such file or directory | herdr indicators: list panes and workspaces: herdr socket {dir}/missing.sock: dial for pane.list pfm-1: dial unix {dir}/missing.sock: connect: no such file or directory\n"; got != want {
+		t.Fatalf("PaintIndicators on a missing socket: error | stderr = %q, want %q", got, want)
 	}
 }
 
@@ -685,8 +684,8 @@ func TestBlinkerCountsMetadataRefusalsTowardItsFailureBound(t *testing.T) {
 	}
 	painter, stepping, stderr := newTestPainter(t, herdr, phaseOn)
 	err := painter.run(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "metadata_token_limit") ||
-		!strings.Contains(err.Error(), "3 failed repaints in a row") {
+	if err == nil ||
+		err.Error() != "herdr indicators: blinker on socket /fake/herdr.sock gave up after 3 failed repaints in a row: herdr indicators: paint pane w1:p2: herdr refused pane.report_metadata: metadata_token_limit: pane metadata may contain at most 32 tokens" {
 		t.Fatalf("run = %v, want metadata refusal after exactly three failed ticks; stderr %q", err, stderr)
 	}
 	if herdr.lists != 4 || len(stepping.sleeps) != 3 || strings.Count(stderr.String(), "metadata_token_limit") != 3 {
@@ -761,9 +760,10 @@ func TestBlinkerStopsAtThemeOffWhileAClearIsRetried(t *testing.T) {
 		t.Fatalf("the retry record must stay: %v", err)
 	}
 	logged, err := os.ReadFile(filepath.Join(painter.lockDir, "indicators"+ErrorLogSuffix))
-	if err != nil || !strings.Contains(string(logged), "clear socket /fake/herdr.sock") ||
-		!strings.Contains(string(logged), "pane w1:p1") {
-		t.Fatalf("indicators log = %q, %v; want the clear failure naming pane w1:p1", logged, err)
+	stamped := regexp.MustCompile(`(?m)^[^\t]+\t`).ReplaceAllString(string(logged), "{ts}\t")
+	if want := "{ts}\therdr indicators: socket /fake/herdr.sock: pane w1:p1 ownership unproved: no durable owner\n{ts}\therdr indicators: clear socket /fake/herdr.sock: pane ownership unproved: pane w1:p1: no durable owner\n"; err != nil ||
+		stamped != want {
+		t.Fatalf("indicators log = %q (err %v), want %q", stamped, err, want)
 	}
 	// The theme on retires the stop marker; a run after it blinks again.
 	if err := RetireIndicatorStops(painter.lockDir); err != nil {

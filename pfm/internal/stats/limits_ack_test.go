@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
@@ -17,15 +18,15 @@ import (
 
 func TestDefaultAckUsesLeanSettingsAndInheritedEnvironment(t *testing.T) {
 	root := t.TempDir()
-	argvPath := filepath.Join(root, "argv")
-	envPath := filepath.Join(root, "environment")
-	t.Setenv("PFM_ACK_ARGV", argvPath)
-	t.Setenv("PFM_ACK_ENV", envPath)
 	binary := filepath.Join(root, "claude")
-	body := "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > \"$PFM_ACK_ARGV\"\nprintenv CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT > \"$PFM_ACK_ENV\" || true\n"
-	if err := testjail.WriteExecutable(binary, []byte(body), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	runner := &deps.FakeRunner{}
+	runner.ScriptStartOutput([]string{binary}, deps.StartOutput{})
+	previous := ackRunner
+	ackRunner = runner
+	t.Cleanup(func() { ackRunner = previous })
 	account := LimitAccount{ID: 2, ClaudeBinary: binary, ConfigDir: filepath.Join(root, "config")}
 	if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -33,21 +34,25 @@ func TestDefaultAckUsesLeanSettingsAndInheritedEnvironment(t *testing.T) {
 	if err := defaultAck(context.Background(), account); err != nil {
 		t.Fatal(err)
 	}
-	argv, err := os.ReadFile(argvPath)
-	if err != nil {
-		t.Fatal(err)
+	starts := runner.Starts()
+	if len(starts) != 1 {
+		t.Fatalf("ACK starts = %v, want exactly 1", starts)
 	}
-	want := "-p\n--model\nclaude-haiku-4-5\n--max-turns\n1\n--settings\n"
-	if !strings.HasPrefix(string(argv), want) ||
-		!strings.Contains(string(argv), `"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"`) {
+	argv := strings.Join(starts[0].Argv[1:], "\n") + "\n"
+	if argv != `-p
+--model
+claude-haiku-4-5
+--max-turns
+1
+--settings
+{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default"}
+` {
 		t.Fatalf("ACK argv = %q", argv)
 	}
-	env, err := os.ReadFile(envPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(env) != 0 {
-		t.Fatalf("ACK ambient simple-prompt env = %q", env)
+	for _, entry := range starts[0].Opts.Env {
+		if strings.HasPrefix(entry, "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=") {
+			t.Fatalf("ACK ambient simple-prompt env = %q", entry)
+		}
 	}
 }
 

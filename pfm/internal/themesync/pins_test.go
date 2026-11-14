@@ -52,25 +52,6 @@ func TestProfileDoneGlyphPinsValidateAndLegacyProfilesKeepDefaults(t *testing.T)
 	}
 }
 
-func TestProfilePinsOnlyBlockedAndErrorMayAnimate(t *testing.T) {
-	for _, state := range []string{"working", "done", "idle", "dead", "unknown", "blocked", "error"} {
-		t.Run(state, func(t *testing.T) {
-			surfaces := `{"herdr":{"tabGlyphs":{"` + state + `":["🔵","⚪"]}}}`
-			_, err := ParseProfile([]byte(profileJSON(surfaces)))
-			if state == "blocked" || state == "error" {
-				if err != nil {
-					t.Errorf("animated %s: %v", state, err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), state) ||
-				!strings.Contains(err.Error(), "only blocked and error") {
-				t.Errorf("animated %s: error = %v, want state named and only blocked and error may animate", state, err)
-			}
-		})
-	}
-}
-
 func TestPinnableKeysAreTheKeysTheRenderersEmit(t *testing.T) {
 	keys, err := renderedPinKeys()
 	if err != nil {
@@ -177,107 +158,107 @@ func TestValidatePinsRejectsAnUnknownKeyOrABadValueNamingBoth(t *testing.T) {
 	cases := []struct {
 		name string
 		pins SurfacePins
-		want []string
+		want string
 	}{
 		{
 			"unknown tmux key",
 			SurfacePins{Tmux: map[string]string{"@pfm-nope": "#ffffff"}},
-			[]string{"tmux", "@pfm-nope"},
+			"tmux pin \"@pfm-nope\": tmux renders no such key",
 		},
 		{
 			"tmux bookkeeping @pfm-theme",
 			SurfacePins{Tmux: map[string]string{"@pfm-theme": "x"}},
-			[]string{"tmux", "@pfm-theme"},
+			"tmux pin \"@pfm-theme\": tmux renders no such key",
 		},
 		{
 			"tmux bookkeeping generation",
 			SurfacePins{Tmux: map[string]string{"@pfm-theme-generation": "9"}},
-			[]string{"tmux", "@pfm-theme-generation"},
+			"tmux pin \"@pfm-theme-generation\": tmux renders no such key",
 		},
 		{
 			"tmux bookkeeping chip marker",
 			SurfacePins{Tmux: map[string]string{"@pfm-theme-chips": "0"}},
-			[]string{"tmux", "@pfm-theme-chips"},
+			"tmux pin \"@pfm-theme-chips\": tmux renders no such key",
 		},
 		{
 			"tmux bookkeeping state format",
 			SurfacePins{Tmux: map[string]string{"@pfm-state-colour": "x"}},
-			[]string{"tmux", "@pfm-state-colour"},
+			"tmux pin \"@pfm-state-colour\": tmux renders no such key",
 		},
 		{
 			"bad tmux chip colour",
 			SurfacePins{Tmux: map[string]string{"@host_accent": "purple"}},
-			[]string{"tmux", "@host_accent", "purple"},
+			"tmux pin \"@host_accent\": themesync: colour \"purple\" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name",
 		},
 		{
 			"bad tmux @pfm-c colour",
 			SurfacePins{Tmux: map[string]string{"@pfm-c-bg": "#12"}},
-			[]string{"tmux", "@pfm-c-bg", "#12"},
+			"tmux pin \"@pfm-c-bg\": themesync: colour \"#12\" is not #rgb or #rrggbb",
 		},
 		{
 			"empty tmux style",
 			SurfacePins{Tmux: map[string]string{"status-style": " "}},
-			[]string{"tmux", "status-style", "empty"},
+			"tmux pin \"status-style\": empty value",
 		},
 		{
 			"unknown herdr token",
 			SurfacePins{Herdr: &HerdrPins{Tokens: map[string]string{"accent_fg": "#ffffff"}}},
-			[]string{"herdr", "accent_fg"},
+			"herdr pin \"accent_fg\": herdr renders no such key",
 		},
 		{
 			"bad herdr colour",
 			SurfacePins{Herdr: &HerdrPins{Tokens: map[string]string{"accent": "ultraviolet"}}},
-			[]string{"herdr", "accent", "ultraviolet"},
+			"herdr pin \"accent\": themesync: colour \"ultraviolet\" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name",
 		},
 		{
 			"unknown herdr tab glyph state",
 			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"blink": {"⭕"}}}},
-			[]string{"herdr tabGlyphs", "blink"},
+			"herdr tabGlyphs pin \"blink\": herdr tabGlyphs renders no such key",
 		},
 		{
 			"empty herdr tab glyph",
 			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"blocked": {"🔴", ""}}}},
-			[]string{"herdr tabGlyphs", "blocked", "frame 1", "empty"},
+			"herdr tabGlyphs pin \"blocked\": frame 1: empty glyph",
 		},
 		{
 			"herdr tab glyph with no frames",
 			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"working": {}}}},
-			[]string{"herdr tabGlyphs", "working", "no frames"},
+			"herdr tabGlyphs pin \"working\": no frames: a glyph string or an array of 1 to 12 glyph frames",
 		},
 		{
 			"herdr tab glyph over the prefix budget",
 			SurfacePins{Herdr: &HerdrPins{TabGlyphs: map[string]herdr.TabFrames{"error": {"🔴🔴🔴🔴🔴🔴🔴🔴🔴"}}}},
-			[]string{"herdr tabGlyphs", "error", "budget"},
+			"herdr tabGlyphs pin \"error\": frame 0: glyph \"🔴🔴🔴🔴🔴🔴🔴🔴🔴\" is 9 runes, over the 8-rune tab prefix budget",
 		},
 		{
 			"unknown vscode colour",
 			SurfacePins{VSCode: &VSCodePins{Colors: map[string]string{"terminal.nope": "#ffffff"}}},
-			[]string{"vscode colors", "terminal.nope"},
+			"vscode colors pin \"terminal.nope\": vscode colors renders no such key",
 		},
 		{
 			"chrome key under colors",
 			SurfacePins{VSCode: &VSCodePins{Colors: map[string]string{"titleBar.activeBackground": "#ffffff"}}},
-			[]string{"vscode colors", "titleBar.activeBackground"},
+			"vscode colors pin \"titleBar.activeBackground\": vscode colors renders no such key",
 		},
 		{
 			"unknown vscode chrome",
 			SurfacePins{VSCode: &VSCodePins{Chrome: map[string]string{"editor.background": "#ffffff"}}},
-			[]string{"vscode chrome", "editor.background"},
+			"vscode chrome pin \"editor.background\": vscode chrome renders no such key",
 		},
 		{
 			"colour key under chrome",
 			SurfacePins{VSCode: &VSCodePins{Chrome: map[string]string{"terminal.background": "#ffffff"}}},
-			[]string{"vscode chrome", "terminal.background"},
+			"vscode chrome pin \"terminal.background\": vscode chrome renders no such key",
 		},
 		{
 			"bad vscode colour",
 			SurfacePins{VSCode: &VSCodePins{Colors: map[string]string{"terminal.background": "red"}}},
-			[]string{"vscode colors", "terminal.background", "red"},
+			"vscode colors pin \"terminal.background\": \"red\" is not #rgb, #rgba, #rrggbb or #rrggbbaa",
 		},
 		{
 			"vscode hex of five digits",
 			SurfacePins{VSCode: &VSCodePins{Chrome: map[string]string{"sash.hoverBorder": "#12345"}}},
-			[]string{"vscode chrome", "sash.hoverBorder", "#12345"},
+			"vscode chrome pin \"sash.hoverBorder\": \"#12345\" is not #rgb, #rgba, #rrggbb or #rrggbbaa",
 		},
 	}
 	for _, tc := range cases {
@@ -286,10 +267,8 @@ func TestValidatePinsRejectsAnUnknownKeyOrABadValueNamingBoth(t *testing.T) {
 			if err == nil {
 				t.Fatalf("validatePins accepted %+v", tc.pins)
 			}
-			for _, want := range tc.want {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error %q lacks %q", err, want)
-				}
+			if err.Error() != tc.want {
+				t.Errorf("error = %q, want %q", err, tc.want)
 			}
 		})
 	}
@@ -329,6 +308,70 @@ func TestCanonicalPinsWriteColoursAsHexAndDropEmptyMaps(t *testing.T) {
 	} {
 		if got, err := canonicalPins(empty); err != nil || got != nil {
 			t.Errorf("%s: canonical pins = %+v, %v, want nil so a state.json round trip is stable", name, got, err)
+		}
+	}
+}
+
+// An installed profile outlives the pfm that validated it: a pin for a key no
+// renderer emits any more is dropped and named, every other pin is kept, and
+// authoring (canonicalPins) still refuses it.
+func TestProfilePinsDropsAKeyNoRendererEmitsAndKeepsTheRest(t *testing.T) {
+	home := t.TempDir()
+	path := ProfilePath(home, "orchid")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		path,
+		[]byte(profileJSON(`{"tmux":{"@pfm-retired":"#ffffff"},"herdr":{"accent":"#ff2e93"}}`)),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	got, err := profilePins(home, "custom:orchid")
+	wantNotes := []string{"profile " + path + `: tmux pin "@pfm-retired": tmux renders no such key (dropped)`}
+	if err != nil || got.pins == nil || got.pins.Tmux != nil || got.pins.Herdr.Tokens["accent"] != "#ff2e93" ||
+		!reflect.DeepEqual(got.notes, wantNotes) {
+		t.Fatalf("profilePins = %+v, %v; want the herdr accent kept, no tmux pin and notes %q", got, err, wantNotes)
+	}
+	if _, err := ParseProfile([]byte(profileJSON(`{"tmux":{"@pfm-retired":"#ffffff"}}`))); err == nil {
+		t.Fatal("authoring accepted a pin for a key no renderer emits")
+	}
+}
+
+// A profile installed by a pfm that knew a Claude token or a VS Code colour id
+// this build does not costs only that entry: the override stays, the colour is
+// left out, each is named in the notes, and every pin beside it is kept; authoring
+// still refuses both.
+func TestProfilePinsKeepsAnOverrideAndDropsAColourThisBuildDoesNotKnow(t *testing.T) {
+	home := t.TempDir()
+	path := ProfilePath(home, "orchid")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"name":"Orchid","overrides":{"claude":"#ff2e93","nextTokenIdAClaudeReleaseAdded":"#fff"},` +
+		`"surfaces":{"herdr":{"accent":"#ff2e93"},"vscode":{"theme":{"colors":` +
+		`{"editor.background":"#101010","nextColourIdAVSCodeReleaseAdded":"#fff"}}}}}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := profilePins(home, "custom:orchid")
+	wantNotes := []string{
+		"profile " + path + `: overrides "nextTokenIdAClaudeReleaseAdded": ` +
+			"not a Claude Code theme token this pfm build knows (kept)",
+		"profile " + path + `: vscode theme colors "nextColourIdAVSCodeReleaseAdded": ` +
+			"not a VS Code colour id (vscode_color_ids.txt) (dropped)",
+	}
+	if err != nil || got.pins == nil || got.pins.Herdr.Tokens["accent"] != "#ff2e93" ||
+		!reflect.DeepEqual(got.notes, wantNotes) {
+		t.Fatalf("profilePins = %+v, %v; want the herdr accent kept and notes %q", got, err, wantNotes)
+	}
+	for _, authoring := range []string{
+		`{"overrides":{"nextTokenIdAClaudeReleaseAdded":"#fff"}}`,
+		`{"overrides":{},"surfaces":{"vscode":{"theme":{"colors":{"nextColourIdAVSCodeReleaseAdded":"#fff"}}}}}`,
+	} {
+		if _, err := ParseProfile([]byte(authoring)); err == nil {
+			t.Errorf("authoring accepted %s", authoring)
 		}
 	}
 }

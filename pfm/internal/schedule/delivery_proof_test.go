@@ -332,6 +332,36 @@ func TestScheduleTranscriptProofSurvivesCorruptReceipt(t *testing.T) {
 	}
 }
 
+func TestScheduleDamagedReceiptWithNoTagSendsIdleOnlyAndWarns(t *testing.T) {
+	d, store, r, _ := scheduleProofRig(t)
+	ctx, activity := obs.Test(t)
+	receiptPath := scheduleReceiptPath(d.runtime.Paths.StateDB, r.ID)
+	if err := os.MkdirAll(filepath.Dir(receiptPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(receiptPath, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var requests []pfmcall.Request
+	d.call = func(_ context.Context, _ fleetdb.Schedule, request pfmcall.Request) (pfmcall.Result, error) {
+		requests = append(requests, request)
+		return pfmcall.Result{Status: "delivered", Typed: true}, nil
+	}
+	report, err := Fire(ctx, store, d, filepath.Join(t.TempDir(), "fire.lock"), time.Now())
+	if err != nil || len(report.Fired) != 1 || len(requests) != 1 || !requests[0].RequireIdle {
+		t.Fatalf("damaged receipt: report=%+v err=%v requests=%+v; want one idle-only submission",
+			report, err, requests)
+	}
+	warned := false
+	for _, record := range activity.Records() {
+		prefix := fmt.Sprintf("schedule %d: damaged delivery receipt: decode %s: ", r.ID, receiptPath)
+		warned = warned || record.Level == "WARN" && strings.HasPrefix(record.Message, prefix)
+	}
+	if !warned {
+		t.Fatalf("activity log hid the damaged receipt %s: %s", receiptPath, activity.Raw())
+	}
+}
+
 func TestRemovingUnprovenScheduleRemovesItsReceipt(t *testing.T) {
 	d, store, r, _ := scheduleProofRig(t)
 	d.call = func(context.Context, fleetdb.Schedule, pfmcall.Request) (pfmcall.Result, error) {

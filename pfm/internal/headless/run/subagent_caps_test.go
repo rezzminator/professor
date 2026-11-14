@@ -12,19 +12,17 @@ func TestSubagentCapsRequirePassedSettings(t *testing.T) {
 	machine := pfmconfig.Config{Claude: pfmconfig.ClaudePrefs{MaxSubagentSpawnDepth: 9, MaxConcurrentSubagents: 32}}
 	for _, test := range []struct {
 		settings map[string]any
-		want     bool
+		want     string
 	}{
-		{nil, false},
-		{map[string]any{"maxSubagentSpawnDepth": 4, "maxConcurrentSubagents": 2}, true},
+		{nil, "-p --output-format json --settings {\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\"},\"outputStyle\":\"default\"}"},
+		{map[string]any{"maxSubagentSpawnDepth": 4, "maxConcurrentSubagents": 2}, "-p --output-format json --settings {\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS\":\"2\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"4\"},\"outputStyle\":\"default\"}"},
 	} {
 		args, err := arguments(Request{Engine: pfmengine.Claude, Config: machine, Settings: test.settings})
 		if err != nil {
 			t.Fatal(err)
 		}
-		payload := strings.Join(args, " ")
-		if strings.Contains(payload, "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != test.want ||
-			strings.Contains(payload, "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS") != test.want {
-			t.Fatalf("settings=%v, argv=%q", test.settings, args)
+		if got := strings.Join(args, " "); got != test.want {
+			t.Errorf("settings %v argv = %q, want %q", test.settings, got, test.want)
 		}
 	}
 }

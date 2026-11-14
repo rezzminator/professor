@@ -13,10 +13,10 @@ import (
 var claudeAgentPanelHint = regexp.MustCompile(`to select · Enter to view`)
 
 // agentPanelFocused reports whether Claude's background-agents panel holds the
-// keyboard: its footer hint is on screen and the cursor sits on an agent row.
+// keyboard: its footer hint is among the pane's last 16 non-blank rows and the cursor sits on an agent row.
 // Keys typed then drive the panel, and an Enter opens the selected agent.
 func agentPanelFocused(capture string) bool {
-	tail := captureLastLines(capture, 16)
+	tail := lastNonEmptyLines(capture, 16)
 	if !claudeAgentPanelHint.MatchString(tail) {
 		return false
 	}

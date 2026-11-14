@@ -169,13 +169,15 @@ var (
 	// names no model the catalog serves.
 	previewPattern = regexp.MustCompile(`(?i)\bpreview\b`)
 	// groupPattern is a whole label of generation ranges ("Claude 4.6 and
-	// earlier models") and preview names, joined by "and" or commas: it names no
-	// model.
+	// earlier models"), preview names and the catch-all "All other models",
+	// joined by "and" or commas: it names no model.
 	groupPattern = regexp.MustCompile(`(?i)^(?:` + groupPart + `)(?:\s*,?\s+(?:and\s+)?(?:` + groupPart + `))*$`)
 )
 
-// groupPart is one part of a group label: a generation range or a preview name.
-const groupPart = `claude\s+\d+(?:\.\d+)?\s+and\s+(?:earlier|later)\s+models|claude\s+[a-z]+(?:\s+\d+(?:\.\d+)?)?\s+preview`
+// groupPart is one part of a group label: a generation range, a preview name
+// or the catch-all that sends a reader back to the Model pricing table (the
+// prompt caching cache hit table's "All other models").
+const groupPart = `all\s+other\s+models|claude\s+\d+(?:\.\d+)?\s+and\s+(?:earlier|later)\s+models|claude\s+[a-z]+(?:\s+\d+(?:\.\d+)?)?\s+preview`
 
 func parseCatalog(provider string, source Source) (Catalog, error) {
 	catalog := Catalog{
@@ -284,7 +286,8 @@ func parseCatalog(provider string, source Source) (Catalog, error) {
 
 // groupLabel reports a Claude row whose whole label is a group label: generation
 // ranges and preview names ("Claude 4.7 and later models and Claude Mythos
-// Preview", as the Bash tool table publishes its token overhead). The row stays
+// Preview", as the Bash tool table publishes its token overhead) and the
+// catch-all "All other models" (the prompt caching cache hit table's last row). The row stays
 // in its table and is attributed to no model; parseCatalog refuses one in the
 // Model pricing table, where it would price models the page never names.
 func groupLabel(provider, label string) bool {

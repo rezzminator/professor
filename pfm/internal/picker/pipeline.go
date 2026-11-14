@@ -131,6 +131,10 @@ type scanRequest struct {
 	// transcript tail; nil — every non-interactive caller, so --plain and --tsv
 	// stay byte-identical — leaves the rows as composed.
 	Facts *rowfacts.Reader
+	// HerdrBlocked reads which panes of one Herdr socket wait on their owner
+	// (gather.HerdrBlockedPanes); the parked re-read refreshes a native seat's
+	// blocked mark with it. Nil leaves the mark as composed.
+	HerdrBlocked func(ctx context.Context, socket string) (map[string]bool, error)
 }
 
 // resolveCosmosSafe decides whether the cosmos tab renders in vscode-safe
@@ -384,7 +388,11 @@ func streamFleetRefreshesWith(
 			PriorityCWD:  environment.CurrentDir,
 			PriorityOnly: true,
 		}); err != nil {
-			return stop(" project index", err)
+			var partial *fleetindex.PartialError
+			if !errors.As(err, &partial) {
+				return stop(" project index", err)
+			}
+			warn(fmt.Sprintf("project index: %v", err))
 		}
 		data, err = fleet.LoadData(ctx, database)
 		if err != nil {
@@ -514,7 +522,7 @@ func streamFleetRefreshesWith(
 		}
 		reread := environment
 		reread.NowNS = refreshClock.Now().UnixNano()
-		snapshot := rereadFacts(reread, request, lastSent)
+		snapshot := rereadFacts(ctx, reread, request, lastSent)
 		if !rowFactsMoved(lastSent.snapshot, snapshot) {
 			return true
 		}
@@ -645,10 +653,14 @@ func streamFleetRefreshesWith(
 			PriorityCWD:  environment.CurrentDir,
 			PriorityOnly: true,
 		}); err != nil {
-			if !fail(" index", err, passStart) {
-				return
+			var partial *fleetindex.PartialError
+			if !errors.As(err, &partial) {
+				if !fail(" index", err, passStart) {
+					return
+				}
+				continue
 			}
-			continue
+			warn(fmt.Sprintf("project index: %v", err))
 		}
 		data, err = fleet.LoadData(ctx, database)
 		if err != nil {
@@ -733,6 +745,10 @@ func refreshWorkbenches(request scanRequest, discover func([]string) ([]workbenc
 	var roots []string
 	var faults []workbench.WalkError
 	currentDir, err := os.Getwd()
+	if err == nil {
+		// macOS's getcwd still names a deleted directory; Linux's fails.
+		_, err = os.Stat(currentDir)
+	}
 	if err != nil {
 		faults = append(faults, workbench.WalkError{
 			Root: ".", Path: ".", Err: fmt.Errorf("read workbench discovery directory: %w", err),

@@ -22,7 +22,7 @@ Files: `.claude/commands/**/*.md`
 - **Doc path references:** every `$CDOCS`, `$REFS`, `docs/` path → verify target exists on disk
 - **Subcommand structure:** if command defines subcommands via table/args, verify each is handled in the body
 - **Size limit:** no command file >35KB
-- **Registry coverage:** every command carries `name:` + `description:` frontmatter — the routing signal the harness injects — and the `description:` matches what the command body actually handles and names every subcommand/mode/flag the body defines (`/quality:description`); `disable-model-invocation: true` only on user-triggered-by-design commands
+- **Registry coverage:** every command carries `name:` + `description:` frontmatter — the routing signal the harness injects — and the `description:` matches what the command body actually handles and names every subcommand/mode/flag the body defines (`/law:description`); `disable-model-invocation: true` only on user-triggered-by-design commands
 
 ## `skills` — Walk every SKILL.md
 
@@ -38,7 +38,7 @@ Files: `templates/**`, `docs/{SETUP,PLACEHOLDERS,RELEASE}.md`, `templates/refres
 This is the scope with adopters downstream of it — a FAIL here ships.
 
 - **Internal reference resolution:** every template referencing another template, agent, command, script, or reference card → the target exists under `templates/` (a pointer that only resolves in the source project is a broken install)
-- **Return tokens ↔ their writers:** every token a `flights-*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes (`templates/global/agents/flights-*.md`)
+- **Return tokens ↔ their writers:** every token a `flights:*` agent's `description:` returns (`DONE`, `PARTIAL`, `PASS`, `FIXED`, `FAIL`) is one its body's § Return writes (`plugins/flights/plugins/flights/agents/*.md`)
 - **Placeholder integrity:** every `{TOKEN}` in a template is registered in `PLACEHOLDERS.md`; every registered token is used or knowingly retired; no template carries a source-project value where a token belongs
 - **SETUP coverage:** every file under `templates/` has a write step in `SETUP.md`; every path `SETUP.md` writes has a template
 - **Cast consistency:** `README.md` agent/command/skill lists match a live `ls` of `templates/project/agents/` and `templates/project/commands/`
@@ -74,7 +74,7 @@ Catches what no single-domain audit can see. Reads across ALL domains simultaneo
 - **Command count ↔ reality:** every `.claude/commands/*.md` carries `name:` + `description:` frontmatter (the harness registry)
 - **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter
 - **Frontmatter validity:** every agent has non-empty `name`/`description`/`tools`; root agent `name` matches its `subagent_type` registry entry
-- **Orientation files:** `/quality:claude-md check` over `CLAUDE.md` and `pfm/CLAUDE.md` — each verdict line verbatim; a REJECTED or UNREAD file is a FAIL
+- **Orientation files:** `/law:claude-md check` over `CLAUDE.md` and `pfm/CLAUDE.md` — each verdict line verbatim; a REJECTED or UNREAD file is a FAIL
 - **Invariant spot-check:** sample 3 critical invariants from the `pcm` agent § Critical invariants → verify they hold in the actual files
-- **Co-loaded duplication sweep:** the same rule stated in two co-loaded files (pcm.md ↔ root CLAUDE.md ↔ quality/prompt.md; child CLAUDE.md ↔ root; a command ↔ its reference cards) — each rule lives in exactly ONE canonical home, others carry at most a pointer (quality/prompt anti-patterns 3 & 11)
+- **Co-loaded duplication sweep:** the same rule stated in two co-loaded files (pcm.md ↔ root CLAUDE.md ↔ `/law:prompt`; child CLAUDE.md ↔ root; a command ↔ its reference cards) — each rule lives in exactly ONE canonical home, others carry at most a pointer (`/law:prompt` anti-patterns 3 & 11)
 - **Claims ↔ code:** spot-check factual claims (paths, mechanisms, configs, counts) in root + child CLAUDE.md against the code — a claim wrong in the reassuring direction is CRITICAL, never INFO

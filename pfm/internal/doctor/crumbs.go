@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
-
-const probeHomeLeakAge = 10 * time.Minute
 
 func printLeakedProbeHomes(stdout io.Writer, sidDir string, now time.Time) int {
 	return printLeakedProbeHomesWith(stdout, sidDir, now, os.ReadDir)
@@ -49,7 +48,7 @@ func printLeakedProbeHomesWith(
 			continue
 		}
 		age := now.Sub(info.ModTime())
-		if age <= probeHomeLeakAge {
+		if age <= deps.ProbeHomeLeakAge {
 			continue
 		}
 		path := filepath.Join(sidDir, entry.Name())
@@ -165,7 +164,7 @@ func sidScratchFile(name string) bool {
 // schedule file, paths.SIDReloadHerdrPrefix+seat+".pid" (the worker's record)
 // or ".log" (its log). The seat id is whatever reload.LockWorkerSchedule built
 // from the seat row, so any non-empty one is accepted; ending the seat removes
-// both files.
+// the record and keeps the log.
 func nativeReloadScheduleFile(name string) bool {
 	rest, ok := strings.CutPrefix(name, paths.SIDReloadHerdrPrefix)
 	if !ok {

@@ -8,15 +8,13 @@ import (
 	"sort"
 	"time"
 
-	modernsqlite "modernc.org/sqlite"
-
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const (
-	sqliteBusyCode = 5
 	busyRetryDelay = 25 * time.Millisecond
 
 	// effectiveKilled is a per-connection mirror of the shared store's killed
@@ -103,7 +101,7 @@ func (s *Store) killedWrite(
 	// table, and this record adds the retry count around the whole attempt.
 	op := obs.SQL(ctx, storeKind, "UPDATE hidden")
 	err := write()
-	if !isSQLiteBusy(err) {
+	if !sqlitedb.Busy(err) {
 		op.End(1, err)
 		return err
 	}
@@ -119,7 +117,7 @@ func (s *Store) killedWrite(
 
 	op.Retries++
 	err = write()
-	if !isSQLiteBusy(err) {
+	if !sqlitedb.Busy(err) {
 		op.End(1, err)
 		return err
 	}
@@ -144,12 +142,6 @@ func (s *Store) killedWrite(
 		)
 	}
 	return err
-}
-
-func isSQLiteBusy(err error) bool {
-	var sqliteError *modernsqlite.Error
-	return errors.As(err, &sqliteError) &&
-		sqliteError.Code()&0xff == sqliteBusyCode
 }
 
 // UpsertKilled inserts or replaces a row in the RETIRED local killed table.
@@ -231,11 +223,12 @@ func (s *Store) KilledChats(ctx context.Context) ([]Killed, error) {
 
 // activeKilledRecords expires prompt-baseline kills whose indexed transcript
 // has grown. The conditional shared-store delete protects a concurrent newer
-// /clear or explicit permanent kill from the stale read/delete race.
+// /clear or explicit permanent kill from the stale read/delete race. A kill it
+// cannot expire stays killed, warned, and is tried again on the next read.
 func (s *Store) activeKilledRecords(
 	ctx context.Context,
 ) (map[string]fleetdb.KilledRecord, error) {
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 1; ; attempt++ {
 		records, err := s.state.KilledRecords(ctx)
 		if err != nil {
 			return nil, err
@@ -262,7 +255,11 @@ func (s *Store) activeKilledRecords(
 				return deleteErr
 			})
 			if err != nil {
-				return nil, err
+				if !sqlitedb.Busy(err) { // killedWrite already warned a busy store
+					s.warningf("WARNING: pfm could not lift the expired clear-kill of %q in %s; it stays killed: %v\n",
+						id, s.state.Path(), err)
+				}
+				continue
 			}
 			if removed {
 				delete(records, id)
@@ -273,8 +270,12 @@ func (s *Store) activeKilledRecords(
 		if !raced {
 			return records, nil
 		}
+		if attempt == 3 {
+			s.warningf("WARNING: pfm's clear-kill state in %s changed during each of %d auto-unkill passes; "+
+				"the chats whose kill changed stay killed until the next read\n", s.state.Path(), attempt)
+			return records, nil
+		}
 	}
-	return nil, errors.New("clear-kill state changed repeatedly during auto-unkill")
 }
 
 func (s *Store) transcriptPromptCounts(
@@ -377,7 +378,7 @@ SELECT uuid, ? FROM transcripts WHERE uuid IN (` + marks + `)
 UNION ALL
 SELECT id, ? FROM rollouts WHERE id IN (` + marks + `)
 UNION ALL
-SELECT lineage_root, ? FROM rollouts WHERE lineage_root IN (` + marks + `)
+SELECT DISTINCT lineage_root, ? FROM rollouts WHERE lineage_root IN (` + marks + `)
 UNION ALL
 SELECT id, ? FROM cx_names WHERE id IN (` + marks + `)
 UNION ALL

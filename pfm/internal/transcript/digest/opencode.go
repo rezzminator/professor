@@ -198,8 +198,8 @@ func lastTextPart(parts []index.OpenCodeRow) string {
 	last := ""
 	for _, row := range parts {
 		var part openCodePart
-		if json.Unmarshal([]byte(row.Data), &part) != nil || part.Type != "text" || part.Ignored || part.Text == nil ||
-			pyvalue.Strip(*part.Text) == "" {
+		if transcript.DecodeTolerant([]byte(row.Data), &part) != nil || part.Type != "text" || part.Ignored ||
+			part.Text == nil || pyvalue.Strip(*part.Text) == "" {
 			continue
 		}
 		last = row.ID
@@ -261,6 +261,9 @@ func openCodeError(raw json.RawMessage) string {
 	return pyvalue.Dumps(raw)
 }
 
+// unknownRole is the role of a part whose message row could not be read.
+const unknownRole = "?"
+
 func typeOr(kind string) string {
 	if kind == "" {
 		return "?"
@@ -274,14 +277,14 @@ func (p *parsed) openCodePart(n int, row index.OpenCodeRow, role string, final b
 	ts := msStamp(row.TimeCreatedMS)
 	p.stamp(ts)
 	var part openCodePart
-	if err := json.Unmarshal([]byte(row.Data), &part); err != nil {
+	if err := transcript.DecodeTolerant([]byte(row.Data), &part); err != nil {
 		p.mark(n, dispSkipped, "part (unparseable)")
 		return
 	}
 	label := "part." + typeOr(part.Type)
 	if role == "" {
-		p.mark(n, dispSkipped, label+" (of an unreadable message)")
-		return
+		// Its message row could not be read: the part still shows, its role unknown.
+		role, label = unknownRole, label+" (of an unreadable message)"
 	}
 	note := func(text string) { p.add(&event{line: n, ts: ts, kind: kindNote, text: text}, label) }
 	switch part.Type {
@@ -334,7 +337,7 @@ func (p *parsed) openCodeText(n int, ts, label string, part *openCodePart, role 
 		p.add(&event{line: n, ts: ts, kind: kindPrompt, text: text}, label)
 	case role == transcript.RoleAssistant && final:
 		p.add(&event{line: n, ts: ts, kind: kindFinal, text: text}, label)
-	case role == transcript.RoleAssistant:
+	case role == transcript.RoleAssistant || role == unknownRole:
 		p.add(&event{line: n, ts: ts, kind: kindReply, text: text}, label)
 	default:
 		p.mark(n, dispSkipped, label)
@@ -485,7 +488,7 @@ func readOpenCodeAgentRow(ctx context.Context, root string, child store.OpenCode
 	for _, row := range rows.Parts {
 		note(row.TimeCreatedMS)
 		var part openCodePart
-		if json.Unmarshal([]byte(row.Data), &part) == nil && part.Type == openCodeToolPart {
+		if transcript.DecodeTolerant([]byte(row.Data), &part) == nil && part.Type == openCodeToolPart {
 			calls++
 		}
 	}

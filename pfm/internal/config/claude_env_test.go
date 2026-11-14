@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestClaudeEnvKey pins claude.env: a machine-wide map of upper-snake
@@ -141,6 +143,44 @@ func TestClaudeEnvKey(t *testing.T) {
 			}
 			if !found || !reflect.DeepEqual(got, any(want)) {
 				t.Fatalf("Marshal env = %#v (found %v), want %#v", got, found, want)
+			}
+		})
+	}
+}
+
+// TestEffectiveClaudeEnvHandsCallmeterTheCostLedger pins the ledger handoff:
+// only while callmeter is a claude.plugins entry, and never over a value
+// claude.env names itself.
+func TestEffectiveClaudeEnvHandsCallmeterTheCostLedger(t *testing.T) {
+	env := &paths.MapEnv{Values: map[string]string{paths.EnvCostLedgerDir: "/ledger/dir"}}
+	callmeter := []ClaudePlugin{{ID: "callmeter"}}
+	other := []ClaudePlugin{{ID: "auto-effort"}}
+	for _, tc := range []struct {
+		name    string
+		plugins []ClaudePlugin
+		env     map[string]string
+		home    string
+		want    map[string]string
+	}{
+		{"callmeter listed", callmeter, nil, "/h", map[string]string{CallmeterCostLedgerDirEnv: "/ledger/dir"}},
+		{
+			"callmeter by marketplace id",
+			[]ClaudePlugin{{ID: "callmeter@professor"}},
+			nil, "/h",
+			map[string]string{CallmeterCostLedgerDirEnv: "/ledger/dir"},
+		},
+		{"callmeter absent", other, map[string]string{"X": "1"}, "/h", map[string]string{"X": "1"}},
+		{
+			"claude.env names it", callmeter,
+			map[string]string{CallmeterCostLedgerDirEnv: "/mine"},
+			"/h",
+			map[string]string{CallmeterCostLedgerDirEnv: "/mine"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := Config{Claude: Claude{Plugins: tc.plugins, Env: tc.env}}
+			if got := machine.EffectiveClaudeEnv(env, tc.home); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("env = %v, want %v", got, tc.want)
 			}
 		})
 	}

@@ -4,27 +4,36 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// fakeTmux writes a shell script that plays tmux: it prints its arguments
-// and exits with the code the test names.
-func fakeTmux(t *testing.T, exit int) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux-fake")
-	script := "#!/bin/sh\nprintf '%s ' \"$@\"\nexit " + strconv.Itoa(exit) + "\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+// fakeTmux is a deps.FakeRunner playing tmux: found on the runner's PATH, it
+// prints its arguments and exits with the code the test names.
+func fakeTmux(exit int) *deps.FakeRunner {
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath(Binary, "/usr/bin/tmux", nil)
+	fake.Handle([]string{Binary}, func(_ context.Context, call deps.RunCall) (deps.RunResult, error) {
+		return deps.RunResult{Stdout: []byte(strings.Join(call.Argv[1:], " ") + " "), ExitCode: exit}, nil
+	})
+	return fake
+}
+
+// hangingTmux is a tmux that never answers, as a client of a stopped server
+// waits: only its caller's deadline ends it.
+func hangingTmux() *deps.FakeRunner {
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath(Binary, "/usr/bin/tmux", nil)
+	fake.Handle([]string{Binary}, func(ctx context.Context, _ deps.RunCall) (deps.RunResult, error) {
+		<-ctx.Done()
+		return deps.RunResult{ExitCode: -1}, ctx.Err()
+	})
+	return fake
 }
 
 func oneRecord(t *testing.T, recorder *obs.Recorder) obs.Record {
@@ -47,7 +56,15 @@ func oneRecord(t *testing.T, recorder *obs.Recorder) obs.Record {
 // wall clock underneath it.
 func TestExecOutputRecordsSubcommandTargetExitOnce(t *testing.T) {
 	ctx, recorder := obs.Test(t, obs.WithTestClock(clock.NewFake(time.Unix(1700000000, 0))))
-	output, err := Exec(ctx, fakeTmux(t, 0), "/sockets/cc-1", "send-keys", "-t", "%7", "PLANTED prompt body").Output()
+	output, err := Exec(
+		WithClientRunner(ctx, fakeTmux(0)),
+		Binary,
+		"/sockets/cc-1",
+		"send-keys",
+		"-t",
+		"%7",
+		"PLANTED prompt body",
+	).Output()
 	if err != nil || !strings.Contains(string(output), "PLANTED") {
 		t.Fatalf("Output = %q, %v — the wrapper changed the command's result", output, err)
 	}
@@ -72,23 +89,45 @@ func TestExecOutputRecordsSubcommandTargetExitOnce(t *testing.T) {
 // TestExecRecordsAtTheLevelOfItsOutcome: a clean, fast tmux call is DEBUG (it
 // was the bulk of every log line); one that took obs.SlowCall or longer, and
 // a tmux that answered with a non-zero exit, are INFO; a tmux that never
-// started is ERROR.
+// started is ERROR; a call its deadline ended — a stopped or wedged server
+// that never answered, whichever way exec reports it — is WARN, the server's
+// fault its caller classifies (gather.ErrServerUnresponsive), never pfm's.
 func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		binary  func(t *testing.T) string
-		elapsed time.Duration
-		want    string
+		name      string
+		runner    func() *deps.FakeRunner
+		elapsed   time.Duration
+		cancelled bool
+		// deadline bounds the call: 0 none, negative already past at Start.
+		deadline time.Duration
+		want     string
 	}{
-		{"fast success", func(t *testing.T) string { return fakeTmux(t, 0) }, time.Millisecond, "DEBUG"},
-		{"slow success", func(t *testing.T) string { return fakeTmux(t, 0) }, obs.SlowCall, "INFO"},
-		{"tmux answers non-zero", func(t *testing.T) string { return fakeTmux(t, 1) }, time.Millisecond, "INFO"},
-		{"never started", func(t *testing.T) string { return filepath.Join(t.TempDir(), "no-tmux") }, time.Millisecond, "ERROR"},
+		{"fast success", func() *deps.FakeRunner { return fakeTmux(0) }, time.Millisecond, false, 0, "DEBUG"},
+		{"slow success", func() *deps.FakeRunner { return fakeTmux(0) }, obs.SlowCall, false, 0, "INFO"},
+		{"tmux answers non-zero", func() *deps.FakeRunner { return fakeTmux(1) }, time.Millisecond, false, 0, "INFO"},
+		// Nothing on the runner's PATH: Start's lookup fails, as exec's does.
+		{"never started", func() *deps.FakeRunner { return &deps.FakeRunner{} }, time.Millisecond, false, 0, "ERROR"},
+		// The caller ended the call on purpose, as a closing picker cancels its refresh.
+		{"caller cancelled", func() *deps.FakeRunner { return fakeTmux(0) }, time.Millisecond, true, 0, "INFO"},
+		// A stopped server: the deadline passed before the client could start (exec reports
+		// "context deadline exceeded"), or cut off a client left waiting ("signal: killed").
+		{"deadline passed before start", func() *deps.FakeRunner { return fakeTmux(0) }, time.Millisecond, false, -time.Second, "WARN"},
+		{"deadline cut off a waiting client", hangingTmux, time.Millisecond, false, 50 * time.Millisecond, "WARN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := clock.NewFake(time.Unix(1700000000, 0))
 			ctx, recorder := obs.Test(t, obs.WithTestClock(fake))
-			command := Exec(ctx, tc.binary(t), "/sockets/cc-1", "list-panes", "-a")
+			if tc.cancelled {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			if tc.deadline != 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tc.deadline)
+				defer cancel()
+			}
+			command := Exec(WithClientRunner(ctx, tc.runner()), Binary, "/sockets/cc-1", "list-panes", "-a")
 			if err := command.Start(); err == nil {
 				fake.Advance(tc.elapsed)
 				_ = command.Wait() // a non-zero exit is the case under test, recorded by Wait
@@ -105,9 +144,13 @@ func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 // caller's error untouched.
 func TestExecRunAndCombinedOutputCarryTheExitCode(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	binary := fakeTmux(t, 3)
-	if err := Exec(ctx, binary, "/sockets/cc-1", "kill-server").Run(); err == nil {
+	ctx, binary := WithClientRunner(ctx, fakeTmux(3)), Binary
+	killServer := Exec(ctx, binary, "/sockets/cc-1", "kill-server")
+	if err := killServer.Run(); err == nil {
 		t.Fatal("Run swallowed the exit status")
+	}
+	if killServer.TimedOut() {
+		t.Fatal("TimedOut() = true for a tmux that exited 3 on its own, want false")
 	}
 	if _, err := Exec(ctx, binary, "/sockets/cc-1", "list-panes", "-a").CombinedOutput(); err == nil {
 		t.Fatal("CombinedOutput swallowed the exit status")
@@ -137,7 +180,7 @@ func TestExecRunAndCombinedOutputCarryTheExitCode(t *testing.T) {
 // ERROR record with exit -1.
 func TestExecStartRecordsAtWait(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	command := Exec(ctx, fakeTmux(t, 0), "/sockets/cc-1", "wait-for", "pfm-done")
+	command := Exec(WithClientRunner(ctx, fakeTmux(0)), Binary, "/sockets/cc-1", "wait-for", "pfm-done")
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +194,7 @@ func TestExecStartRecordsAtWait(t *testing.T) {
 	if subcmd, _ := record.Field("subcmd"); subcmd != "wait-for" {
 		t.Fatalf("subcmd = %v", subcmd)
 	}
-	missing := Exec(ctx, filepath.Join(t.TempDir(), "no-tmux"), "/sockets/cc-1", "list-panes")
+	missing := Exec(WithClientRunner(ctx, fakeTmux(0)), "/missing/no-tmux", "/sockets/cc-1", "list-panes")
 	if err := missing.Start(); err == nil {
 		t.Fatal("a missing binary started")
 	}
@@ -164,43 +207,18 @@ func TestExecStartRecordsAtWait(t *testing.T) {
 	}
 }
 
-// TestExecKeepsCommandsContract: the terminal is Command plus completion —
-// same binary, same -S socket argv, same cleared TMUX, and the embedded
-// *exec.Cmd still takes Stdin and exposes Process for the façades that
-// set or kill them.
-func TestExecKeepsCommandsContract(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/caller-server,1,0")
-	binary := fakeTmux(t, 0)
-	command := Exec(context.Background(), binary, "/sockets/cc-1", "load-buffer", "-b", "buf", "-")
-	if command.Path != binary || command.Args[1] != "-S" || command.Args[2] != "/sockets/cc-1" {
-		t.Fatalf("argv = %q", command.Args)
-	}
-	command.Stdin = strings.NewReader("body")
-	if err := command.Run(); err != nil {
-		t.Fatal(err)
-	}
-	if command.Process == nil {
-		t.Fatal("the embedded exec.Cmd lost its Process")
-	}
-}
-
 // TestObserveRecordsALauncherAssembledCommand: a new-session run under
 // another launcher (spawn's systemd scope) still writes the tmux record,
 // shaped from the tmux arguments, not the launcher's.
 func TestObserveRecordsALauncherAssembledCommand(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	launcher := exec.CommandContext(
-		ctx,
-		fakeTmux(t, 0),
-		"--scope",
-		"--",
-		"tmux",
-		"-S",
-		"/sockets/cc-1",
-		"new-session",
-		"-d",
-	)
-	if _, err := Observe(ctx, launcher, "new-session", "-d").CombinedOutput(); err != nil {
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{"systemd-run"}, deps.RunResult{}, nil)
+	launcher := &exec.Cmd{
+		Path: "/usr/bin/systemd-run",
+		Args: []string{"systemd-run", "--scope", "--", "tmux", "-S", "/sockets/cc-1", "new-session", "-d"},
+	}
+	if _, err := Observe(WithClientRunner(ctx, fake), launcher, "new-session", "-d").CombinedOutput(); err != nil {
 		t.Fatal(err)
 	}
 	record := oneRecord(t, recorder)

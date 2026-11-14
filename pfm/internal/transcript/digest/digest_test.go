@@ -3,9 +3,7 @@ package digest
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,8 +13,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // goldenCase is one captured run of the Python reader this package replaced,
@@ -72,7 +73,7 @@ func replayGolden(t *testing.T, folder string) {
 		t.Fatalf("case.json: %v", err)
 	}
 	home := filepath.Join(t.TempDir(), "home")
-	if _, err := os.Stat(filepath.Join(folder, "home")); errors.Is(err, fs.ErrNotExist) {
+	if !hasEntry(t, folder, "home") {
 		if err := os.MkdirAll(home, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -112,8 +113,7 @@ func replayGolden(t *testing.T, folder string) {
 	if outFile == "" {
 		return
 	}
-	_, wantErr := os.Stat(filepath.Join(folder, "outfile"))
-	if errors.Is(wantErr, fs.ErrNotExist) {
+	if !hasEntry(t, folder, "outfile") {
 		if info, err := os.Stat(outFile); err == nil && !info.IsDir() {
 			t.Errorf("--out wrote %s where the capture wrote nothing", outFile)
 		}
@@ -178,7 +178,7 @@ func seedOpenCodeStore(t *testing.T, root, seed string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("create the OpenCode root: %v", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatalf("open the OpenCode fixture store: %v", err)
 	}
@@ -211,16 +211,33 @@ func homeMask(t *testing.T, home string) *strings.Replacer {
 	return strings.NewReplacer(home, "{HOME}", resolved, "{HOME}")
 }
 
+// hasEntry reports whether folder lists name: a directory listing, so an absent
+// optional golden file is never a stat of a path outside the tracked tree.
+func hasEntry(t *testing.T, folder, name string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
 // compareGolden compares got with the case's override file label.intended, else its
 // capture label.
 func compareGolden(t *testing.T, folder, label, got string) {
 	t.Helper()
-	want, err := os.ReadFile(filepath.Join(folder, label+".intended"))
-	if errors.Is(err, fs.ErrNotExist) {
-		want, err = os.ReadFile(filepath.Join(folder, label))
-	}
-	if errors.Is(err, fs.ErrNotExist) {
-		want, err = nil, nil
+	var want []byte
+	var err error
+	for _, name := range []string{label + ".intended", label} {
+		if hasEntry(t, folder, name) {
+			want, err = os.ReadFile(filepath.Join(folder, name))
+			break
+		}
 	}
 	if err != nil {
 		t.Fatalf("read golden %s: %v", label, err)

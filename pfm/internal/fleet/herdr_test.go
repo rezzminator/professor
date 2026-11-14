@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -44,6 +45,16 @@ func TestNativeSeatsAcrossFleetViews(t *testing.T) {
 						t.Error(err)
 					}
 				})
+				// A socket file nothing listens on: Herdr cannot be read, never proved gone.
+				dead := filepath.Join(values.Home, "dead.sock")
+				listener, err := net.Listen("unix", dead)
+				if err != nil {
+					t.Fatal(err)
+				}
+				listener.(*net.UnixListener).SetUnlinkOnClose(false)
+				if err := listener.Close(); err != nil {
+					t.Fatal(err)
+				}
 				for _, item := range []struct{ id, name, state string }{
 					{"live", "REVIEW", "live"},
 					{"hidden", "_KILL_hidden", "live"},
@@ -59,7 +70,7 @@ func TestNativeSeatsAcrossFleetViews(t *testing.T) {
 							Backend:     "herdr",
 							State:       item.state,
 							Name:        item.name,
-							HerdrSocket: filepath.Join(values.Home, "dead.sock"),
+							HerdrSocket: dead,
 							HerdrPane:   "w6:" + item.id,
 							LostNote:    "engine exited",
 						},
@@ -292,18 +303,14 @@ func TestNativeReadFailurePreservesLiveTmuxSnapshot(t *testing.T) {
 		},
 		ClaudeProcesses: []gather.ClaudeProcess{{Socket: "cc-1-2-3"}},
 	}
-	output, failures, err := composeNativeFleet(
+	output, failures := composeNativeFleet(
 		context.Background(),
 		nil,
 		environment,
-		compose.DefaultView,
+		Request{View: compose.DefaultView, ReadOnly: true},
 		data,
 		live,
-		true,
 	)
-	if err != nil {
-		t.Fatalf("native DB failure discarded healthy live snapshot: %v", err)
-	}
 	if len(failures) != 1 || !strings.Contains(failures[0], "durable seats") {
 		t.Fatalf("native DB failure not explicit beside live snapshot: %v", failures)
 	}
@@ -317,6 +324,35 @@ func TestNativeReadFailurePreservesLiveTmuxSnapshot(t *testing.T) {
 		}
 	}
 	t.Fatalf("native DB error omitted healthy live tmux row: %+v", output.Rows)
+}
+
+// One seat whose store read fails must cost only that seat's enrichment: the
+// loaded rows and every other seat survive, and the error names the seat.
+func TestEnrichNativeKeepsTheDataPastAnUnreadableSeat(t *testing.T) {
+	testjail.Fleet(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	loaded := Data{
+		CachedCounts: &store.CachedCounts{},
+		Transcripts:  []store.Transcript{{UUID: "claude-chat", CustomTitle: "LOADED"}},
+	}
+	native := []gather.HerdrSeat{
+		{Seat: fleetdb.Seat{SeatID: "seat-claude", SessionID: "claude-chat", Engine: "cc"}},
+		{Seat: fleetdb.Seat{SeatID: "seat-codex", SessionID: "codex-thread", Engine: "cx"}},
+	}
+	data, err := EnrichNative(context.Background(), database, loaded, native)
+	want := `native seat seat-codex rollout: query rollout "codex-thread": sql: database is closed`
+	if err == nil || err.Error() != want {
+		t.Fatalf("EnrichNative() error = %v, want %q", err, want)
+	}
+	if len(data.Transcripts) != 1 || data.Transcripts[0].CustomTitle != "LOADED" || data.CachedCounts == nil {
+		t.Fatalf("EnrichNative() data = %+v, want the loaded transcript and cached counts kept", data)
+	}
 }
 
 func TestReadOnlyNativeScanDoesNotCreateState(t *testing.T) {
@@ -369,6 +405,8 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 					"10/stat":    "10 (sh) S 1" + ticks + "3 0\n",
 					"20/stat":    "20 (pfm) S 10" + ticks + "9 0\n",
 					"20/cmdline": "pfm\x00internal\x00seat-host\x00healthy\x00",
+					"50/stat":    "50 (pfm) S 1" + ticks + "9 0\n",
+					"50/cmdline": "pfm\x00internal\x00seat-host\x00ending\x00",
 				} {
 					path := filepath.Join(proc, name)
 					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -378,7 +416,9 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				socket := nativePaneServer(t, map[string]string{"w6:p3": "healthy", "w6:p4": "recycled"})
+				socket := nativePaneServer(t, map[string]string{
+					"w6:p3": "healthy", "w6:p4": "recycled", "w6:p5": "birthing",
+				})
 				values, err := config.ResolvePaths()
 				if err != nil {
 					t.Fatal(err)
@@ -390,14 +430,27 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 						t.Error(err)
 					}
 				})
+				// "stopped" lived on a Herdr server that is gone, its supervisor with it.
+				stopped := filepath.Join(testjail.ShortRoot(t), "stopped.sock")
+				// Every row is written now, as spawn and the seat-host stamp it: "birthing" is inside its birth window.
+				written := time.Now().Unix()
 				for _, item := range []struct {
-					id, pane string
-					pid      int
-				}{{"healthy", "w6:p3", 20}, {"dead", "w6:p4", 30}} {
+					id, pane, socket string
+					pid              int
+				}{
+					{"healthy", "w6:p3", socket, 20},
+					{"dead", "w6:p4", socket, 30},
+					{"stopped", "w1:p1", stopped, 40},
+					// "birthing" is reserved, its supervisor not yet started under the pane shell.
+					{"birthing", "w6:p5", socket, 0},
+					// "ending" is ended: its end worker closed the pane, its supervisor still exiting.
+					{"ending", "w6:p6", socket, 50},
+				} {
 					if err := state.PutSeat(ctx, fleetdb.Seat{
 						SeatID: item.id, SessionID: item.id, Engine: "cc", Backend: "herdr", State: "live",
-						Name: strings.ToUpper(item.id), HerdrSocket: socket, HerdrPane: item.pane,
+						Name: strings.ToUpper(item.id), HerdrSocket: item.socket, HerdrPane: item.pane,
 						HerdrWorkspace: "w6", HerdrTerminalID: item.id, SeatHostPID: item.pid, SeatHostStart: 9,
+						EndPending: item.id == "ending", UpdatedAt: written,
 					}); err != nil {
 						t.Fatal(err)
 					}
@@ -431,8 +484,13 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 					}
 				}
 				healthy, dead := got["healthy"], got["dead"]
+				if want := "HERDR DEAD stopped: Herdr socket " + stopped + " is gone and the seat's supervisor with it"; got["stopped"].Kind != compose.ResumeClaude ||
+					got["stopped"].BackendError != want {
+					t.Fatalf("seat of a stopped Herdr server = %+v, want resumable with %q", got["stopped"], want)
+				}
+				delete(got, "stopped")
 				if len(got) != 2 || healthy.Kind != compose.LiveClaude || healthy.BackendError != "" ||
-					healthy.CWD != "/jail/healthy" {
+					healthy.CWD != testjail.Place("/jail/healthy") {
 					t.Fatalf("healthy seat lost beside a dead one: %+v", got)
 				}
 				if dead.Kind != compose.ResumeClaude || !strings.Contains(dead.BackendError, "HERDR DEAD dead") ||
@@ -492,7 +550,10 @@ func nativePaneServer(t *testing.T, panes map[string]string) string {
 					for pane, name := range panes {
 						workspace, _, _ := strings.Cut(pane, ":")
 						list = append(list, map[string]any{
-							"pane_id": pane, "workspace_id": workspace, "terminal_id": name, "cwd": "/jail/" + name,
+							"pane_id":      pane,
+							"workspace_id": workspace,
+							"terminal_id":  name,
+							"cwd":          testjail.Place("/jail/") + name,
 						})
 					}
 					result = map[string]any{"type": "pane_list", "panes": list}

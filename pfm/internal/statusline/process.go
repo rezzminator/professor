@@ -69,9 +69,13 @@ func ReadCodexRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome 
 	if binary == "" {
 		binary = pfmengine.MustLookup(pfmengine.Codex).Binary
 	}
+	path, err := deps.Resolve(binary)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Codex binary %q: %w", binary, err)
+	}
 	child, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	command := exec.CommandContext(child, deps.Executable(binary), "app-server")
+	command := exec.CommandContext(child, path, "app-server")
 	// The App Server runs no turn: it is never the chat bound to the parent's Herdr pane.
 	command.Env = herdr.StripPane(os.Environ())
 	if codexHome != "" {

@@ -2,10 +2,12 @@ package gather
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,61 +15,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/naming"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
-
-// TestNativeProcFSSmokeOwnProcessOnly drives whichever reader this platform
-// actually uses — /proc on Linux, sysctl and lsof on macOS — against the one
-// process every platform lets a caller read in full: its own. Asking for the
-// native reader rather than naming RealProcFS is the point; it is what makes
-// this a contract both implementations must satisfy.
-func TestNativeProcFSSmokeOwnProcessOnly(t *testing.T) {
-	proc := NewProcFS("")
-	pid := os.Getpid()
-
-	cmdline, err := proc.Cmdline(pid)
-	if err != nil {
-		t.Fatalf("Cmdline(own pid) error = %v", err)
-	}
-	if len(cmdline) == 0 {
-		t.Fatal("Cmdline(own pid) is empty")
-	}
-	if _, err := proc.Environ(pid); err != nil {
-		t.Fatalf("Environ(own pid) error = %v", err)
-	}
-	if _, err := proc.FDLinks(pid); err != nil {
-		t.Fatalf("FDLinks(own pid) error = %v", err)
-	}
-	stat, err := proc.Stat(pid)
-	if err != nil {
-		t.Fatalf("Stat(own pid) error = %v", err)
-	}
-	if stat.ParentPID <= 0 || stat.StartTime == 0 {
-		t.Fatalf("Stat(own pid) = %+v, want parent and start time", stat)
-	}
-	birther, ok := proc.(ProcBirth)
-	if !ok {
-		t.Fatal("native ProcFS does not report a birth time")
-	}
-	birth, err := birther.Birth(pid)
-	if err != nil {
-		t.Fatalf("Birth(own pid) error = %v", err)
-	}
-	if birth <= 0 || birth > time.Now().Unix() {
-		t.Fatalf("Birth(own pid) = %d, want a past epoch second", birth)
-	}
-	memory, ok := proc.(ProcMemory)
-	if !ok {
-		t.Fatal("native ProcFS does not report resident memory")
-	}
-	resident, err := memory.RSSKB(pid)
-	if err != nil {
-		t.Fatalf("RSSKB(own pid) error = %v", err)
-	}
-	if resident <= 0 {
-		t.Fatalf("RSSKB(own pid) = %d, want a positive size", resident)
-	}
-}
 
 func TestDetectCodexRootMetadataAndAncestorMatching(t *testing.T) {
 	codexHome := t.TempDir()
@@ -185,6 +134,38 @@ func TestDetectAgentsAndClaudeProcesses(t *testing.T) {
 	}
 }
 
+// A Claude argv names a session only in the forms Claude takes one; an id
+// elsewhere in argv claims nothing, so the stray sweep never kills on it.
+func TestClaudeSessionIDs(t *testing.T) {
+	const id = "01234567-89ab-cdef-0123-456789abcdef"
+	const other = "fedcba98-7654-3210-fedc-ba9876543210"
+	for _, test := range []struct {
+		name    string
+		cmdline []string
+		want    []string
+	}{
+		{name: "session-id word", cmdline: []string{"claude", "--session-id", id}, want: []string{id}},
+		{name: "session-id equals", cmdline: []string{"claude", "--session-id=" + id}, want: []string{id}},
+		{name: "resume word", cmdline: []string{"claude", "--resume", id}, want: []string{id}},
+		{name: "resume equals", cmdline: []string{"claude", "--resume=" + id}, want: []string{id}},
+		{name: "short resume", cmdline: []string{"claude", "-r", id}, want: []string{id}},
+		{name: "resume transcript path", cmdline: []string{"claude", "--resume", "/tx/" + id + ".jsonl"}, want: []string{id}},
+		{name: "both flags", cmdline: []string{"claude", "--session-id", id, "-r", other}, want: []string{id, other}},
+		{name: "named twice", cmdline: []string{"claude", "--session-id", id, "--resume", id}, want: []string{id}},
+		{name: "id inside a prompt", cmdline: []string{"claude", "-p", "resume " + id}, want: []string{}},
+		{name: "id inside a path argument", cmdline: []string{"claude", "--add-dir", "/work/" + id}, want: []string{}},
+		{name: "id as the binary", cmdline: []string{id, "--resume"}, want: []string{}},
+		{name: "not a uuid", cmdline: []string{"claude", "--resume", "../../not-a-uuid"}, want: []string{}},
+		{name: "flag without value", cmdline: []string{"claude", "--resume"}, want: []string{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ClaudeSessionIDs(test.cmdline); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("ClaudeSessionIDs(%q) = %q, want %q", test.cmdline, got, test.want)
+			}
+		})
+	}
+}
+
 func TestWindowConvergenceClipsRunesOnlyHere(t *testing.T) {
 	longName := strings.Repeat("界", 25)
 	panes := []ProbePane{{
@@ -265,37 +246,6 @@ func TestRealProcFSBirthIsBootTimePlusStartTicksNotTheProcDirMtime(t *testing.T)
 	}
 }
 
-// Image names the file a process EXECUTES by device and inode — the identity
-// an install's rename-over changes and a running process keeps.
-func TestRealProcFSImageIsTheExecutablesFileID(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "pfm")
-	if err := testjail.WriteExecutable(binary, []byte("image"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "proc", "7"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(binary, filepath.Join(root, "proc", "7", "exe")); err != nil {
-		t.Fatal(err)
-	}
-	table, ok := NewProcFS(filepath.Join(root, "proc")).(ProcImage)
-	if !ok {
-		t.Fatal("RealProcFS does not report process images")
-	}
-	got, err := table.Image(7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := FileIDOf(binary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want || want.Inode == 0 {
-		t.Fatalf("Image = %+v, want %+v", got, want)
-	}
-}
-
 func TestProcExecutablePathUsesKernelPathNotArgv(t *testing.T) {
 	for _, test := range []struct {
 		raw, want string
@@ -313,27 +263,223 @@ func TestProcExecutablePathUsesKernelPathNotArgv(t *testing.T) {
 	}
 }
 
+// A refused kern.procargs2 read is told apart by the independent probe and
+// the kernel's identity of the process: a vanished process or a zombie is
+// absent, another uid's (kill 0 answers EPERM) or a setuid one the owner
+// started (another effective uid) is withheld, foreign as on Linux, so the
+// caller lookup and the chat-call guard pass over it; a live process of the
+// owner's own stays a failed look naming what it runs.
 func TestProcessReadErrorUsesIndependentExistence(t *testing.T) {
+	euid := uint32(os.Geteuid())
 	for _, tc := range []struct {
-		name  string
-		probe error
-		gone  bool
+		name          string
+		probe         error
+		identity      ProcessIdentity
+		identityErr   error
+		gone, foreign bool
+		want          string
 	}{
-		{"same uid EINVAL", nil, false},
-		{"other uid EINVAL", syscall.EPERM, false},
-		{"vanished EINVAL", syscall.ESRCH, true},
-		{"unknown probe", syscall.EIO, false},
+		{
+			"same uid EINVAL", nil,
+			ProcessIdentity{EffectiveUID: euid, Command: "sleep"},
+			nil, false, false,
+			fmt.Sprintf(`invalid argument (command "sleep", effective uid %d)`, euid),
+		},
+		{
+			"other uid EINVAL", syscall.EPERM,
+			ProcessIdentity{},
+			nil, false, true,
+			"gather: process environment withheld: another uid's, non-dumpable or privileged: invalid argument " +
+				"(probe: operation not permitted)",
+		},
+		{
+			"setuid EINVAL", nil,
+			ProcessIdentity{EffectiveUID: euid + 1, Command: "sudo"},
+			nil, false, true,
+			fmt.Sprintf("gather: process environment withheld: another uid's, non-dumpable or privileged: "+
+				"invalid argument (effective uid %d: permission denied)", euid+1),
+		},
+		{
+			"zombie EINVAL", nil,
+			ProcessIdentity{EffectiveUID: euid, Zombie: true},
+			nil, true, false,
+			"invalid argument (a zombie: file does not exist)",
+		},
+		{"identity unread", nil, ProcessIdentity{}, syscall.EIO, false, false, "invalid argument\ninput/output error"},
+		{
+			"vanished EINVAL", syscall.ESRCH,
+			ProcessIdentity{},
+			nil, true, false,
+			"process 42 disappeared after invalid argument: no such process: file does not exist",
+		},
+		{
+			"unknown probe", syscall.EIO,
+			ProcessIdentity{},
+			nil, false, false,
+			"invalid argument\nprobe process 42 existence: input/output error",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := processReadError(42, syscall.EINVAL, tc.probe)
-			if errors.Is(err, fs.ErrNotExist) != tc.gone || !tc.gone && !errors.Is(err, syscall.EINVAL) {
-				t.Fatalf(
-					"process read error=%v gone=%t want gone=%t with unreadability preserved",
-					err,
-					errors.Is(err, fs.ErrNotExist),
-					tc.gone,
-				)
+			environ := environWithheld(err, tc.probe, tc.identity, tc.identityErr)
+			if errors.Is(environ, fs.ErrNotExist) != tc.gone || errors.Is(environ, ErrForeignProcess) != tc.foreign ||
+				errors.Is(environ, fs.ErrPermission) != tc.foreign || !tc.gone && !errors.Is(environ, syscall.EINVAL) ||
+				environ.Error() != tc.want {
+				t.Fatalf("environment read error=%q, want %q (gone %t, foreign and permission %t, EINVAL kept)",
+					environ, tc.want, tc.gone, tc.foreign)
 			}
 		})
+	}
+}
+
+// OpenProcFS: "" is the kernel's own table, a jail directory the Linux-shaped
+// reader on either OS, and a jail root never staged ErrNoProcRoot — never the
+// live table, so a caller keeps its own answer for "no table".
+//
+// The system root is the native table too, never stat'ed as a jail: macOS has
+// no /proc, and a missing one read as "no process" let pfm chat call append
+// into a live chat.
+func TestOpenProcFSSelectsTheTable(t *testing.T) {
+	for _, root := range []string{"", paths.SystemProcRoot()} {
+		native, err := OpenProcFS(root)
+		if err != nil {
+			t.Fatalf("OpenProcFS(%q) error = %v", root, err)
+		}
+		if _, isJail := native.(RealProcFS); isJail {
+			t.Fatalf("OpenProcFS(%q) = %#v, want the native table", root, native)
+		}
+	}
+	jail := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(jail, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeProcFixture(t, filepath.Join(jail, "4242", "stat"), "4242 (sh) S 1"+strings.Repeat(" 0", 50)+"\n")
+	table, err := OpenProcFS(jail)
+	if err != nil || table != (RealProcFS{Root: jail}) {
+		t.Fatalf("OpenProcFS(%s) = %#v, %v; want RealProcFS{Root: %s}", jail, table, err, jail)
+	}
+	missing := filepath.Join(jail, "missing-proc")
+	table, err = OpenProcFS(missing)
+	if table != nil || !errors.Is(err, ErrNoProcRoot) || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("OpenProcFS(%s) = %#v, %v; want ErrNoProcRoot wrapping fs.ErrNotExist", missing, table, err)
+	}
+}
+
+// Stat finds the parent after the LAST ") ", since a command name may hold a
+// closing parenthesis, and names a truncated record instead of panicking.
+func TestRealProcFSStatParsesAfterTheCommandName(t *testing.T) {
+	root := t.TempDir()
+	for pid, record := range map[string]string{
+		"4242": "4242 (worker ) helper) S 41 4242 4242 0 -1" + strings.Repeat(" 0", 47) + "\n",
+		"4243": "4243 (fixture) S\n",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, pid), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeProcFixture(t, filepath.Join(root, pid, "stat"), record)
+	}
+	proc := RealProcFS{Root: root}
+	if got, err := proc.Stat(4242); err != nil || got.ParentPID != 41 {
+		t.Fatalf("Stat(4242) = %+v, %v; want parent 41", got, err)
+	}
+	if _, err := proc.Stat(4243); err == nil || err.Error() != "short proc stat for pid 4243" {
+		t.Fatalf("Stat(4243) error = %v, want %q", err, "short proc stat for pid 4243")
+	}
+}
+
+// A refused environment of a process that can never be the caller's pane
+// (another uid's, or a terminal-less one holding capabilities the caller
+// lacks, as systemd --user) is ErrForeignProcess; a process with a terminal
+// keeps its plain read failure however privileged it is.
+func TestRealProcFSEnvironWithheldIsForeign(t *testing.T) {
+	root := t.TempDir()
+	proc := RealProcFS{Root: root}
+	for _, tc := range []struct {
+		name               string
+		pid                int
+		capabilities, stat string
+		otherOwner         bool
+		foreign            bool
+	}{
+		{"user manager", 4242, "0000000800000000", "4242 (systemd) S 1 4242 4242 0 -1", false, true},
+		{"unprivileged", 4243, "0000000000000000", "4243 (sh) S 1 4243 4243 0 -1", false, false},
+		{"privileged on a terminal", 4244, "0000000800000000", "4244 (claude) S 1 4244 4244 34816 4244", false, false},
+		{"privileged, terminal unread", 4245, "0000000800000000", "", false, false},
+		{"another uid's", 4246, "0000000000000000", "4246 (sh) S 1 4246 4246 34816 4246", true, true},
+	} {
+		dir := filepath.Join(root, strconv.Itoa(tc.pid))
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeProcFixture(t, filepath.Join(dir, "status"), "Name:\tfixture\nCapEff:\t"+tc.capabilities+"\n")
+		if tc.stat != "" {
+			writeProcFixture(t, filepath.Join(dir, "stat"), tc.stat+"\n")
+		}
+		environ := filepath.Join(dir, "environ")
+		writeProcFixture(t, environ, "A=1\x00")
+		if tc.otherOwner {
+			ownByAnotherUID(t, environ)
+		}
+		denied := &os.PathError{Op: "open", Path: environ, Err: syscall.EACCES}
+		err := proc.withheld(tc.pid, denied)
+		if !errors.Is(err, fs.ErrPermission) || errors.Is(err, ErrForeignProcess) != tc.foreign {
+			t.Errorf("%s: pid %d refused environ = %v, want foreign %t (fixture %s)",
+				tc.name, tc.pid, err, tc.foreign, dir)
+		}
+	}
+}
+
+// ownByAnotherUID makes path's owner differ from this process's effective uid:
+// root chowns it; any other uid points it at a root-owned file.
+func ownByAnotherUID(t *testing.T, path string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		if err := os.Chown(path, 4246, 4246); err != nil {
+			t.Fatalf("chown %s: %v", path, err)
+		}
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/", path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLinuxEnvironTagsForeignProcess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every environment")
+	}
+	if _, err := os.ReadFile(filepath.Join(paths.SystemProcRoot(), "1", "environ")); !errors.Is(err, os.ErrPermission) {
+		t.Skipf("pid 1's environment is not refused here: %v", err)
+	}
+	_, err := RealProcFS{}.Environ(1)
+	if !errors.Is(err, ErrForeignProcess) || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("pid 1 (root) was not tagged foreign: %v", err)
+	}
+}
+
+func TestLinuxEnvironKeepsOwnRefusedRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 file")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "4242", "environ"), []byte("A=1\x00"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (RealProcFS{Root: root}).Environ(4242)
+	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrForeignProcess) {
+		t.Fatalf("a refused read of the caller's own file must stay a read failure: %v", err)
+	}
+}
+
+func writeProcFixture(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

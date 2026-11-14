@@ -1,11 +1,16 @@
 package professor
 
 import (
+	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -18,6 +23,8 @@ func DiscoverSourceRepo() string {
 	}
 	current, err := os.Getwd()
 	if err != nil {
+		// Could not look: logged, so a missing source clone is never silent.
+		obs.Logger(context.Background()).Warn("professor.source_repo.unreadable", obs.FieldErr, err.Error())
 		return ""
 	}
 	for {
@@ -50,6 +57,9 @@ func mainWorktreeOf(root string) string {
 func IsSourceRepo(root string) bool {
 	for _, relative := range []string{ClaudeInstructionsFile, "pfm/go.mod", ".claude/settings.json"} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
+			if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+				obs.Logger(context.Background()).Warn("professor.source_repo.unreadable", obs.FieldErr, err.Error())
+			}
 			return false
 		}
 	}

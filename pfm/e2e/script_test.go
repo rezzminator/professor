@@ -27,6 +27,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/mockengine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -42,9 +43,14 @@ const (
 
 var e2eCoverageAtStart = os.Getenv("GOCOVERDIR")
 
-type jailedTestMain struct{ m *testing.M }
+type jailedTestMain struct {
+	m *testing.M
+	// restoreTMPDIR undoes stageCommandsBesideBinary before any test runs.
+	restoreTMPDIR func()
+}
 
 func (m jailedTestMain) Run() int {
+	m.restoreTMPDIR()
 	if os.Getenv("PFM_E2E_REQUIRE_FENCE_HELPER") == "1" ||
 		os.Getenv("PFM_E2E_CLAUDE_CAPTURE") == "1" ||
 		os.Getenv("PFM_E2E_CLAUDE_PLUGIN") == "1" ||
@@ -68,7 +74,7 @@ func (m jailedTestMain) Run() int {
 		return 1
 	}
 	var err error
-	e2eStageRoot, err = os.MkdirTemp("", "pfm-e2e-stage-")
+	e2eStageRoot, err = os.MkdirTemp(paths.TempRoot(), "pfm-e2e-stage-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create e2e stage root: %v\n", err)
 		return 1
@@ -102,7 +108,7 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	testscript.Main(jailedTestMain{m}, map[string]func(){
+	commands := map[string]func(){
 		"jail-pfm":      runPFMCommand,
 		"jail-tmux":     runTmuxCommand,
 		"jail-until":    runSleepUntilCommand,
@@ -110,7 +116,39 @@ func TestMain(m *testing.M) {
 		"jail-mcp-exit": runMCPExitCommand,
 		"jail-ls-lacks": runLSLacksCommand,
 		"jail-pfm-rc":   runPFMRCCommand,
-	})
+	}
+	restore := func() {}
+	if commands[filepath.Base(os.Args[0])] == nil {
+		restore = stageCommandsBesideBinary()
+	}
+	testscript.Main(jailedTestMain{m: m, restoreTMPDIR: restore}, commands)
+}
+
+// stageCommandsBesideBinary points TMPDIR at this test binary's directory while
+// testscript stages its commands, and returns the undo. testscript hard-links the
+// binary into a fresh TMPDIR directory per command and falls back to a full copy
+// across filesystems; with GOTMPDIR off the fence's capped /tmp, every shard's
+// copies filled that tmpfs. An unwritable binary directory keeps TMPDIR as it is.
+func stageCommandsBesideBinary() func() {
+	executable, err := os.Executable()
+	if err != nil || syscall.Access(filepath.Dir(executable), 2) != nil { // 2 = W_OK
+		return func() {}
+	}
+	previous, wasSet := os.LookupEnv("TMPDIR")
+	if err := os.Setenv("TMPDIR", filepath.Dir(executable)); err != nil {
+		fmt.Fprintf(os.Stderr, "stage testscript commands beside %s: %v\n", executable, err)
+		return func() {}
+	}
+	return func() {
+		restoreErr := os.Unsetenv("TMPDIR")
+		if wasSet {
+			restoreErr = os.Setenv("TMPDIR", previous)
+		}
+		if restoreErr != nil {
+			fmt.Fprintf(os.Stderr, "restore TMPDIR after staging testscript commands: %v\n", restoreErr)
+			os.Exit(1)
+		}
+	}
 }
 
 func prepareScriptBinary() error {
@@ -562,13 +600,12 @@ func runUntilGoneCommand() {
 }
 
 // runMCPExitCommand calls exit{} through `pfm mcp serve --stdio` as the
-// chat on <socket> itself — the _meta.pfmProxy identity Claude Code's
-// per-chat proxy stamps on every call — and prints the tool's answer, then
-// whether that pane was still on the socket the moment the answer arrived
-// (the proxy's id field stays empty, as OpenCode's does: the seat's own
-// session id is minted at launch, and the live row supplies it):
-// exit returns once the finisher is spawned, because its caller's pane
-// can close only after the very turn this call belongs to has ended.
+// chat on <socket> itself: the stdio server runs as the pane's child, with
+// the pane's tmux environment, and resolves its own caller as it does under
+// Claude Code. It prints the tool's answer, then whether that pane was still
+// on the socket the moment the answer arrived: exit returns once the finisher
+// is spawned, because its caller's pane can close only after the very turn
+// this call belongs to has ended.
 func runMCPExitCommand() {
 	if len(os.Args) != 2 {
 		fmt.Fprintln(os.Stderr, "usage: mcp-exit <socket>")
@@ -577,33 +614,25 @@ func runMCPExitCommand() {
 	socket := os.Args[1]
 	tmuxBinary := os.Getenv(e2eTmuxBinaryEnv)
 	address, err := exec.Command(
-		tmuxBinary, "-L", socket, "display-message", "-p", "#{session_name}\t#{pane_id}",
+		tmuxBinary, "-L", socket, "display-message", "-p",
+		"#{socket_path},#{pid},#{session_id}\t#{pane_id}\t#{pane_pid}",
 	).CombinedOutput()
-	session, pane, found := strings.Cut(strings.TrimSpace(string(address)), "\t")
-	if err != nil || !found {
+	seat := strings.Split(strings.TrimSpace(string(address)), "\t")
+	if err != nil || len(seat) != 3 {
 		fmt.Fprintf(os.Stderr, "mcp-exit: read the seat's address: %v: %q\n", err, address)
 		os.Exit(1)
 	}
+	tmuxEnv, pane, panePID := seat[0], seat[1], seat[2]
 	call, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-		"params": map[string]any{
-			"name": "exit", "arguments": map[string]any{},
-			"_meta": map[string]any{"pfmProxy": map[string]any{
-				"v":          1,
-				"session":    session,
-				"socketName": socket,
-				"socketPath": filepath.Join(os.Getenv("PFM_TMUX_DIR"), socket),
-				"pane":       pane,
-				"engine":     "claude",
-				"source":     "tmux",
-			}},
-		},
+		"params": map[string]any{"name": "exit", "arguments": map[string]any{}},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-exit: encode the call: %v\n", err)
 		os.Exit(1)
 	}
 	server := exec.Command(os.Getenv(e2eScriptBinaryEnv), "mcp", "serve", "--stdio", "--family", "chat")
+	server.Env = append(os.Environ(), "TMUX="+tmuxEnv, "TMUX_PANE="+pane)
 	server.Stderr = os.Stderr
 	stdin, err := server.StdinPipe()
 	if err != nil {
@@ -617,6 +646,21 @@ func runMCPExitCommand() {
 	}
 	if err := server.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-exit: start the stdio server: %v\n", err)
+		os.Exit(1)
+	}
+	// The jail's process table (PFM_PROC_ROOT) holds only what somebody writes there: the kernel's entry
+	// of this server, a child of the pane's process.
+	procDir := filepath.Join(os.Getenv("PFM_PROC_ROOT"), strconv.Itoa(server.Process.Pid))
+	stat := fmt.Sprintf("%d (pfm) S %s 1 1 0 -1 0 0 0 0 0 0 0 0 0 0 0 20 0 100\n", server.Process.Pid, panePID)
+	procErr := os.MkdirAll(procDir, 0o700)
+	for name, content := range map[string]string{
+		"cmdline": strings.Join(server.Args, "\x00") + "\x00", "stat": stat,
+		"environ": strings.Join(server.Env, "\x00") + "\x00",
+	} {
+		procErr = errors.Join(procErr, os.WriteFile(filepath.Join(procDir, name), []byte(content), 0o600))
+	}
+	if procErr != nil {
+		fmt.Fprintf(os.Stderr, "mcp-exit: write the server's process entry: %v\n", procErr)
 		os.Exit(1)
 	}
 	frames := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",` +
@@ -637,6 +681,9 @@ func runMCPExitCommand() {
 	panes, listErr := exec.Command(tmuxBinary, "-L", socket, "list-panes", "-a", "-F", "#{pane_id}").Output()
 	_ = stdin.Close()
 	waitErr := server.Wait()
+	if err := os.RemoveAll(procDir); err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-exit: remove the server's process entry: %v\n", err)
+	}
 	if answer == "" {
 		fmt.Fprintf(os.Stderr, "mcp-exit: no id-3 answer (scan %v, server %v)\n", lines.Err(), waitErr)
 		os.Exit(1)

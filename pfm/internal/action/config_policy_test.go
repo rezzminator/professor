@@ -11,12 +11,21 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func configuredMachinePolicy(home string) pfmconfig.Config {
 	configDir := filepath.Join(home, "profiles", "account 42")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		panic(fmt.Sprintf("fixture account dir %s: %v", configDir, err))
+	}
+	// A real executable, so ClaudeSpawn.Command resolves the configured binary.
+	claudeBinary := filepath.Join(home, "tools", "claude enterprise")
+	if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
+		panic(fmt.Sprintf("fixture tools dir %s: %v", filepath.Dir(claudeBinary), err))
+	}
+	if err := testjail.WriteExecutableNeverRun(claudeBinary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		panic(fmt.Sprintf("fixture claude binary %s: %v", claudeBinary, err))
 	}
 	return pfmconfig.Config{
 		Version: pfmconfig.Version,
@@ -30,7 +39,7 @@ func configuredMachinePolicy(home string) pfmconfig.Config {
 		}},
 		Claude: pfmconfig.Claude{
 			PermissionMode: pfmconfig.PermissionPrompt,
-			Binary:         "/opt/tools/claude enterprise",
+			Binary:         claudeBinary,
 		},
 		Codex: pfmconfig.Codex{
 			Yolo:   false,
@@ -96,13 +105,6 @@ func TestHeadlessRunUsesConfiguredClaudeAndCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun(Claude) error = %v", err)
 	}
-	if !claude.PromptOnCommandLine || !strings.Contains(claude.Run, cmdparse.Quote(machine.Claude.Binary)) {
-		t.Fatalf("headless Claude plan = %#v", claude)
-	}
-	if strings.Contains(claude.Run, "skip-permissions") {
-		t.Fatalf("headless Claude prompt policy still armed bypass flags: %q", claude.Run)
-	}
-
 	codex, err := HeadlessRun(HeadlessRequest{
 		Engine:         pfmengine.Codex,
 		Name:           "configured codex",
@@ -114,12 +116,10 @@ func TestHeadlessRunUsesConfiguredClaudeAndCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun(Codex) error = %v", err)
 	}
-	if !strings.Contains(codex.Run, cmdparse.Quote(machine.Codex.Binary)+" --no-daemon --sandbox workspace-write") {
-		t.Fatalf("headless Codex plan = %q", codex.Run)
+	if !claude.PromptOnCommandLine {
+		t.Error("headless Claude plan does not prompt on its command line")
 	}
-	if strings.Contains(codex.Run, "dangerously-bypass-approvals-and-sandbox") {
-		t.Fatalf("headless Codex yolo=false still armed bypass: %q", codex.Run)
-	}
+	actionGolden(t, "action_headless_configured_policy.txt", rooted(t, claude.Run+"\n"+codex.Run+"\n"))
 }
 
 func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.T) {
@@ -139,7 +139,7 @@ func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.
 	if err != nil {
 		t.Fatalf("Synthesize(NewClaude) error = %v", err)
 	}
-	if claudePlan.Line != attachLine("cc-configured-new-42", "cc-configured-new-42", false) ||
+	if claudePlan.Line != AttachLine("cc-configured-new-42", "cc-configured-new-42", false) ||
 		claudePlan.ChatServer == nil || claudePlan.ChatServer.Run != claudePlan.Run || claudePlan.ChatServer.CWD != "/work/project" {
 		t.Fatalf(
 			"new Claude picker line = %q, server = %#v, run = %q",

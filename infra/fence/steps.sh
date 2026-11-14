@@ -16,12 +16,11 @@ fence_config_values || return 1
 
 
 steps_reset() {
+  STEPS_LAST_FILTERED=0
   STEPS_NAMES=()
   STEPS_COMMANDS=()
   STEPS_HEAVY=()
   STEPS_BOUND=()
-  STEPS_PHASE=()
-  STEPS_PHASE_ID=0
 }
 
 steps_add() { # steps_add <name> <command> [args...]
@@ -36,17 +35,23 @@ steps_add() { # steps_add <name> <command> [args...]
       return 1
     fi
   done
+  # PFM_GATE_ONLY / PFM_GATE_SKIP (extended regexes, matched whole) register a slice of the
+  # list: one CI job per slice, the steps no ONLY slice claims landing in the SKIP job.
+  STEPS_LAST_FILTERED=1
+  if [[ -n "${PFM_GATE_ONLY:-}" && ! "$name" =~ ^(${PFM_GATE_ONLY})$ ]]; then return 0; fi
+  if [[ -n "${PFM_GATE_SKIP:-}" && "$name" =~ ^(${PFM_GATE_SKIP})$ ]]; then return 0; fi
+  STEPS_LAST_FILTERED=0
   shift
   printf -v quoted '%q ' "$@"
   STEPS_NAMES+=("$name")
   STEPS_COMMANDS+=("$quoted")
   STEPS_HEAVY+=(0)
   STEPS_BOUND+=("")
-  STEPS_PHASE+=("$STEPS_PHASE_ID")
 }
 
 steps_add_heavy() { # steps_add_heavy <name> <command> [args...]
   steps_add "$@" || return 1
+  (( STEPS_LAST_FILTERED == 0 )) || return 0
   STEPS_HEAVY[$((${#STEPS_HEAVY[@]} - 1))]=1
 }
 
@@ -55,15 +60,12 @@ steps_set_bound() { # steps_set_bound <seconds>: the bound of the step registere
     printf 'steps_set_bound: bound must be a positive integer: %s\n' "${1:-}" >&2
     return 1
   fi
+  (( ${STEPS_LAST_FILTERED:-0} == 0 )) || return 0 # the step it bounds was filtered out
   if (( ${#STEPS_NAMES[@]} == 0 )); then
     printf 'steps_set_bound: no step registered\n' >&2
     return 1
   fi
   STEPS_BOUND[$((${#STEPS_BOUND[@]} - 1))]="$1"
-}
-
-steps_barrier() {
-  STEPS_PHASE_ID=$((STEPS_PHASE_ID + 1))
 }
 
 steps_seconds() { # start and end as EPOCHREALTIME values
@@ -124,7 +126,7 @@ steps_prof_field() { # steps_prof_field <prof.tsv> <key>: the value, nothing whe
 }
 
 steps_run() { # steps_run <run-dir>
-  local run="$1" jobs heavy_jobs default_bound bound i n="${#STEPS_NAMES[@]}" active=0 heavy_active=0 completed=0 phase=0 red=0 first="" last=""
+  local run="$1" jobs heavy_jobs default_bound bound i n="${#STEPS_NAMES[@]}" active=0 heavy_active=0 completed=0 red=0 first="" last=""
   local name log meta prof command start finish elapsed pid rc failures done_pid row pick ended records
   local -a verdict=() seconds=() pids=() starts=() started=() launched=()
   local -A pid_index=()
@@ -140,7 +142,6 @@ steps_run() { # steps_run <run-dir>
       pick=-1
       for (( i=0; i<n; i++ )); do
         [[ "${started[$i]:-}" ]] && continue
-        (( ${STEPS_PHASE[$i]} == phase )) || continue
         if (( ${STEPS_HEAVY[$i]} == 0 || heavy_active < heavy_jobs )); then
           pick=$i
           break
@@ -201,8 +202,6 @@ steps_run() { # steps_run <run-dir>
       active=$((active - 1))
       if (( ${STEPS_HEAVY[$row]} )); then heavy_active=$((heavy_active - 1)); fi
       completed=$((completed + 1))
-    else
-      phase=$((phase + 1))
     fi
   done
   [[ -n "$first" ]] || first="$EPOCHREALTIME"

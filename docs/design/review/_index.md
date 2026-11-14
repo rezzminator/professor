@@ -2,4 +2,5 @@
 
 | Topic | File | Covers |
 | --- | --- | --- |
-| reviewer, reviewer-pro, reviewer-nt | [reviewer.md](reviewer.md) | The thread-first diff review, its 10,000+ code-line pro tier and its tracer-less variant: the run (one tracer run, up to three for the pro), `WORKTREE` mode, the thread kinds and the defect each catches, the report contract its callers read (the lander's tier pick by code lines), the benchmark rungs, open items |
+| flights:reviewer | [reviewer.md](reviewer.md) | The read-only diff review in the lander's shape: the run (the inventory script's plan, the three checkers, the lead's own share), what each seat checks, the report contract its callers read, each rule with its bench row, model and effort, open items |
+| flights:reviewer bench | [reviewer-bench.md](reviewer-bench.md) | The bench ledger: the three rungs, the metric, the judges, the price table, versions 1 to 4 and every run, negative results |

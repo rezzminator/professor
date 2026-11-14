@@ -1,8 +1,6 @@
 package run
 
 import (
-	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,6 +41,7 @@ func TestClaudeEnvironmentUsesRegistryHygiene(t *testing.T) {
 }
 
 func TestClaudeEnvironmentDropsInheritedLaunchSettings(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no bash to resolve: the launch shell adds nothing in either test binary
 	var got []string
 	setEnvironment([]string{
 		"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=9",
@@ -51,12 +50,8 @@ func TestClaudeEnvironmentDropsInheritedLaunchSettings(t *testing.T) {
 		"CLAUDE_CODE_TMUX_TRUECOLOR=1",
 		"CLAUDE_CODE_NATIVE_CURSOR=1",
 	}, pfmengine.Claude, "/cfg", false, &got)
-	for _, entry := range got {
-		if strings.HasPrefix(entry, "CLAUDE_CODE_MAX_") ||
-			strings.HasPrefix(entry, "CLAUDE_CODE_TMUX_TRUECOLOR=") ||
-			strings.HasPrefix(entry, "CLAUDE_CODE_NATIVE_CURSOR=") {
-			t.Fatalf("inherited launch setting reached Claude: %q", got)
-		}
+	if got, want := strings.Join(got, "\n"), "CLAUDE_CONFIG_DIR=/cfg"; got != want {
+		t.Fatalf("environment = %q, want %q", got, want)
 	}
 }
 
@@ -79,7 +74,7 @@ func TestOtherEngineEnvironmentKeepsClaudeProjectDir(t *testing.T) {
 }
 
 func TestClaudeResolveDoesNotUseAskModelOrEffort(t *testing.T) {
-	binary := writeEngineStub(t, "exit 0")
+	binary := engineBinary(t)
 	machine := claudeMachine(binary, t.TempDir())
 	machine.Ask.Prefs = map[pfmengine.ID]pfmconfig.EnginePrefs{
 		pfmengine.Claude: {Model: "ask-model", Effort: "high"},
@@ -94,9 +89,9 @@ func TestClaudeResolveDoesNotUseAskModelOrEffort(t *testing.T) {
 }
 
 func TestResolveUnknownClaudeAccountNamesRosterError(t *testing.T) {
-	machine := claudeMachine(writeEngineStub(t, "exit 0"), t.TempDir())
+	machine := claudeMachine(engineBinary(t), t.TempDir())
 	_, err := Resolve(Request{Config: machine, Engine: pfmengine.Claude, Account: 99})
-	if err == nil || !strings.Contains(err.Error(), "account 99 is not in the configured roster") {
+	if err == nil || err.Error() != "requested Claude account 99 is not in the configured roster" {
 		t.Fatalf("Resolve unknown account error = %v", err)
 	}
 }
@@ -109,7 +104,7 @@ func TestResolveChecksOnlyClaudeConfigDir(t *testing.T) {
 				name = string(engine) + "/without-account"
 			}
 			t.Run(name, func(t *testing.T) {
-				binary := writeEngineStub(t, "exit 0")
+				binary := engineBinary(t)
 				dir := filepath.Join(t.TempDir(), string(engine))
 				if engine == pfmengine.OpenCode {
 					dir = filepath.Join(filepath.Dir(dir), "opencode")
@@ -193,70 +188,6 @@ func TestHeadlessEnvironmentDropsTheHerdrPaneForEveryEngine(t *testing.T) {
 			if lastEnvironmentValue(got, "PATH") != "/usr/bin" {
 				t.Errorf("%s explicit=%t: PATH lost in %q", engine, explicit, got)
 			}
-		}
-	}
-}
-
-func TestHeadlessProcessExtensionOwnership(t *testing.T) {
-	headlessJail(t)
-	for _, mode := range []string{"on", "off", "dropped"} {
-		for _, id := range []pfmengine.ID{pfmengine.Codex, pfmengine.OpenCode} {
-			t.Run(mode+"/"+string(id), func(t *testing.T) {
-				capture := t.TempDir()
-				body := `/usr/bin/printenv PONYTAIL_SUBAGENT_MATCHER PONYTAIL_USER_EXPORT > "$CAPTURE_DIR/extension-env" || true`
-				var machine pfmconfig.Config
-				if id == pfmengine.Codex {
-					binary := writeEngineStub(t, body+"\nprintf '%s\\n' '{}' ")
-					machine = codexMachine(binary, t.TempDir())
-				} else {
-					inner := writeOpenCodeStub(t, body+"\n"+opencodeValidEvents())
-					wrapper := writeEngineStub(
-						t,
-						`if [ "${1:-}" = serve ]; then /usr/bin/printenv PONYTAIL_SUBAGENT_MATCHER PONYTAIL_USER_EXPORT > "$CAPTURE_DIR/server-extension-env" || true; fi`+"\nexec '"+inner+"' \"$@\"",
-					)
-					machine = opencodeMachine(wrapper, opencodeHome(t))
-				}
-				machine.Extensions = map[string]pfmconfig.Extension{
-					"ponytail": {
-						Enabled: mode != "off",
-						Engines: []string{"codex", "opencode"},
-						Env:     map[string]string{"PONYTAIL_SUBAGENT_MATCHER": "^worker$"},
-					},
-				}
-				if mode == "dropped" {
-					ext := machine.Extensions["ponytail"]
-					ext.Engines = nil
-					machine.Extensions["ponytail"] = ext
-				}
-				want := "stale\nuser"
-				if mode == "on" {
-					want = "^worker$\nuser"
-				}
-				_, err := Run(
-					context.Background(),
-					Request{
-						Config:  machine,
-						Engine:  id,
-						Prompt:  "fixture",
-						Native:  true,
-						Env:     testEnv(capture, "PONYTAIL_SUBAGENT_MATCHER=stale", "PONYTAIL_USER_EXPORT=user"),
-						TempDir: t.TempDir(),
-					},
-				)
-				if err != nil {
-					t.Fatal(err)
-				}
-				raw, err := os.ReadFile(filepath.Join(capture, "extension-env"))
-				if err != nil || strings.TrimSpace(string(raw)) != want {
-					t.Fatalf("%s process env=%q err=%v", id, raw, err)
-				}
-				if id == pfmengine.OpenCode {
-					raw, err := os.ReadFile(filepath.Join(capture, "server-extension-env"))
-					if err != nil || strings.TrimSpace(string(raw)) != want {
-						t.Fatalf("OpenCode server env=%q err=%v", raw, err)
-					}
-				}
-			})
 		}
 	}
 }

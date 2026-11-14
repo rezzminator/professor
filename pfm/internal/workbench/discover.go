@@ -38,8 +38,11 @@ func Discover(roots []string) ([]Bench, []WalkError) {
 		root = filepath.Clean(root)
 		var walk func(string)
 		walk = func(dir string) {
-			entries, err := os.ReadDir(dir)
+			entries, err := readDir(dir)
 			if err != nil {
+				if skippedUnreadable(root, dir, err) {
+					return
+				}
 				walkError := WalkError{Root: root, Path: dir, Err: err}
 				obs.Logger(context.Background()).Error("workbench discovery", "path", dir, obs.FieldErr, walkError)
 				walkErrors = append(walkErrors, walkError)
@@ -47,11 +50,14 @@ func Discover(roots []string) ([]Bench, []WalkError) {
 			}
 			if eligibleBench(root, dir) && !seen[dir] {
 				found, err := paths.HasWorkbenchManifest(dir)
-				if err != nil {
+				switch {
+				case err != nil && skippedUnreadable(root, dir, err):
+					return
+				case err != nil:
 					walkError := WalkError{Root: root, Path: dir, Err: err}
 					obs.Logger(context.Background()).Error("workbench discovery", "path", dir, obs.FieldErr, walkError)
 					walkErrors = append(walkErrors, walkError)
-				} else if found {
+				case found:
 					benches = append(benches, LoadBench(dir, root))
 					seen[dir] = true
 				}
@@ -136,28 +142,14 @@ func Owner(benches []Bench, cwd string) (Bench, bool) {
 // runs in: a linked worktree finds its managed root through the main checkout,
 // then reads its own bench, whose files its engines load.
 func Nearest(cwd string) (Bench, bool, error) {
-	dirs, err := launchDirectories(cwd)
-	if err != nil {
+	start, root, found, err := launchRoot(cwd)
+	if err != nil || !found {
 		return Bench{}, false, err
 	}
-	root, found, err := professor.ResolveProjectRoot(dirs.mapped)
-	if err != nil {
-		obs.Logger(context.Background()).Error("workbench managed root", "path", dirs.mapped, obs.FieldErr, err)
-		return Bench{}, false, err
-	}
-	if !found {
-		return Bench{}, false, nil
-	}
-	start := dirs.mapped
-	if dirs.top != "" && insideDirectory(dirs.main, root) {
-		relative, err := filepath.Rel(dirs.main, root)
-		if err != nil {
-			wrapped := fmt.Errorf("place managed root %s in worktree %s: %w", root, dirs.top, err)
-			obs.Logger(context.Background()).Error("workbench nearest", "path", dirs.own, obs.FieldErr, wrapped)
-			return Bench{}, false, wrapped
-		}
-		start, root = dirs.own, filepath.Join(dirs.top, relative)
-	}
+	return nearestFrom(start, root)
+}
+
+func nearestFrom(start, root string) (Bench, bool, error) {
 	for dir := start; dir != root; dir = filepath.Dir(dir) {
 		if !eligibleBench(root, dir) {
 			continue

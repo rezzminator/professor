@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -67,8 +66,7 @@ func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err e
 		}
 		if stop {
 			if err := painter.clear(ctx); err != nil {
-				painter.logf("%v", err)
-				return true, err
+				return true, painter.failed(err)
 			}
 			return true, nil
 		}
@@ -84,7 +82,9 @@ func (painter *indicatorPainter) blink(ctx context.Context) (stopped bool, err e
 			if ctx.Err() != nil {
 				return false, nil
 			}
-			painter.logf("%v", err)
+			if painter.failed(err) == nil {
+				return true, nil
+			}
 			if errors.Is(err, syscall.ECONNREFUSED) {
 				_, _ = fmt.Fprintf(painter.stderr,
 					"herdr indicators: blinker on socket %s stops: its Herdr server refuses connections\n",
@@ -213,41 +213,6 @@ func (painter *indicatorPainter) ownerIdentity() (int64, error) {
 		return info.ModTime().UnixNano(), nil
 	}
 	return read()
-}
-
-// nudgePath is the socket's nudge: a file a hook-fired painter that found the
-// blinker running leaves, so the blinker re-reads the tabs at its next tick.
-func (painter *indicatorPainter) nudgePath() string {
-	return filepath.Join(painter.lockDir, "indicators-"+socketKey(painter.socket)+".nudge")
-}
-
-// nudge leaves the socket's nudge; a failure is named, and the blinker's
-// idleRefresh still catches the change.
-func (painter *indicatorPainter) nudge() {
-	if err := os.WriteFile(painter.nudgePath(), nil, 0o600); err != nil {
-		painter.logf("herdr indicators: nudge the blinker of socket %s: %v", painter.socket, err)
-	}
-}
-
-// takeNudge removes the socket's nudge and says whether one was there; a
-// failure to remove it is named once while it lasts and reads as no nudge,
-// so a stuck nudge never turns every tick into a scan.
-func (painter *indicatorPainter) takeNudge() bool {
-	path := painter.nudgePath()
-	err := os.Remove(path)
-	switch {
-	case err == nil:
-		painter.cadence.nudgeFailed = false
-		return true
-	case errors.Is(err, os.ErrNotExist):
-		painter.cadence.nudgeFailed = false
-		return false
-	}
-	if !painter.cadence.nudgeFailed {
-		painter.cadence.nudgeFailed = true
-		painter.logf("herdr indicators: take the nudge %s: %v", path, err)
-	}
-	return false
 }
 
 // restoreContext bounds the restore a cancelled painter makes: it outlives the

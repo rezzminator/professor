@@ -113,7 +113,10 @@ func TestClaudeAccountFourDoesNotRenderCodexUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if strings.Contains(plain, "ChatGPT") || strings.Contains(plain, "proxy") {
+	if plain != `🍀 ● Claude·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("Claude account 4 rendered Codex usage: %q", plain)
 	}
 }
@@ -124,12 +127,17 @@ func TestStatuslineRendersFableRateAndSymbol(t *testing.T) {
   "rate_limits":{"limits":[{"kind":"weekly_scoped","percent":22.6,"resets_at":"2030-01-07T08:00:00Z","scope":{"model":{"display_name":" fAbLe "}},"is_active":true}]}
 }`), Runtime{
 		Home: t.TempDir(), Columns: 120, UID: 1000, Command: quietRunner{},
+		Now: func() time.Time { return time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC) },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "✦ Fable") || !strings.Contains(plain, "7d-fable-used:23%") {
+	if plain != `✦ Fable·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱ 5h-used:— │ ▰▱▱▱▱ 7d-fable-used:23% ↻6d8h │ ▱▱▱▱▱ 7d-used:—
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("fable statusline=%q", plain)
 	}
 }
@@ -192,7 +200,10 @@ func TestStatuslineDropsUnknownTopLevelWindows(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if strings.Contains(plain, "nimbus_quill") || strings.Contains(plain, "unknown[") {
+	if plain != `● Claude·effort unknown │ ~ │ · ·
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("unknown top-level key rendered as a window: %q", plain)
 	}
 }
@@ -371,17 +382,27 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	for _, want := range []string{
-		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "◆ Opus 4·▰▰▰ high", "sample",
-		"43% 10.3K", "💰$3.42/?/?/?", "⏳ 5m32s", "·2 ·1",
-	} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("render lacks %q:\n%q", want, got)
-		}
+	if want := "🥇 ◆ Opus 4·▰▰▰ high │ sample │ 🔖 BUILDER:1 │ ·2 ·1\n🟢 ▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱ 43% 10.3K ctx unknown │ 💰$3.42/?/?/? │ ⏳ 5m32s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"; plain != want {
+		t.Fatalf("render = %q, want %q", plain, want)
 	}
 }
 
 func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T) {
+	// The harness reports an empty window right after a compaction; a model
+	// switched there (/model after /compact) must not hand the gauge to it.
+	for name, model := range map[string]string{
+		"same model":              "claude-opus-4-1",
+		"model switched after it": "claude-sonnet-4-5",
+		"1M variant of the model": "claude-opus-4-1[1m]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			renderPostCompactEstimate(t, model)
+		})
+	}
+}
+
+func renderPostCompactEstimate(t *testing.T, model string) {
+	t.Helper()
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "session.jsonl")
 	transcriptBody := strings.Join([]string{
@@ -407,9 +428,10 @@ func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T
 		t.Fatal(err)
 	}
 	input := []byte(`{
-  "model":{"id":"claude-opus-4-1","display_name":"Opus 4"},
+  "model":{"id":"` + model + `","display_name":"Opus 4"},
   "cwd":"/work/sample",
-  "context_window":{"context_window_size":1000000,"used_percentage":77},
+  "context_window":{"context_window_size":1000000,"used_percentage":0,
+    "current_usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},
   "transcript_path":` + string(encodedTranscriptPath) + `
 }`)
 	got, err := Render(context.Background(), input, Runtime{
@@ -426,9 +448,12 @@ func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱ ~20%") || strings.Contains(plain, "77%") {
+	if plain != `◆ Opus 4·effort unknown │ sample │ · ·
+🟢 ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱ ~20% 200.0K │ 💰$?/700.0K/1.0K/0 │ ⏳ 0s
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf(
-			"post-compact gauge did not use floor + postTokens estimate, or retained stale self-report:\n%q",
+			"post-compact gauge is not the floor + postTokens estimate, want ~20%% 200.0K:\n%q",
 			plain,
 		)
 	}
@@ -463,7 +488,10 @@ func TestRenderMarksCompactBoundaryEstimateWithoutPostTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "~70%") || strings.Contains(plain, "77%") {
+	if plain != `◆ Opus 4·effort unknown │ sample │ · ·
+⚡ ▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱ ~70% 700.0K │ 💰$?/700.0K/0/0 │ ⏳ 0s
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("compact boundary without postTokens did not mark the prior occupancy as estimated:\n%q", plain)
 	}
 }
@@ -528,7 +556,7 @@ func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
 		"S",
 	)
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(segment, "")
-	if !strings.Contains(plain, "💾1h∞") || strings.Contains(plain, "1h?") {
+	if plain != " │ 💾1h∞" {
 		t.Fatalf("unknown default cache window = %q, want 1h∞", plain)
 	}
 }
@@ -556,8 +584,10 @@ func TestCodexSegmentDoesNotOverwriteTranscriptGauge(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "25% 68.0K of 272.0K") || strings.Contains(plain, "50%") ||
-		strings.Contains(plain, "77%") {
+	if plain != `● sol-5.6·effort unknown │ ~ │ · ·
+🟢 ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱ 25% 68.0K of 272.0K │ 💾– │ ⏳ 0s
+ChatGPT quota missing
+` {
 		t.Fatalf("Codex overwrote transcript gauge:\n%q", plain)
 	}
 }
@@ -577,7 +607,10 @@ func TestCodexEngineOwnsCodexUsageIndependentOfAccountID(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := stripANSICodes(got)
-	if !strings.Contains(plain, "33% 165.0K") || strings.Contains(plain, "💰$99.00") {
+	if plain != `● sol-6.1·effort unknown │ ~ │ ·1 ·
+🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K │ 💾– │ ⏳ 0s
+ChatGPT quota missing
+` {
 		t.Fatalf("Codex render: %s", plain)
 	}
 }
@@ -613,7 +646,10 @@ func TestFleetSnapshotCountsOnlySocketsPresentInProcOnLinux(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "·1 ·1 ·1") || strings.Contains(plain, "·2 ·1 ·1") {
+	if plain != `🥇 ● Claude·effort unknown │ ~ │ ·1 ·1 ·1
+🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/?/?/? │ ⏳ 0s
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+` {
 		t.Fatalf("graveyard socket affected live fleet count: %q", plain)
 	}
 }
@@ -639,11 +675,11 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 		columns int
 		want    string
 	}{
-		{name: "a readable transcript anchors the window", path: live, want: "💾5m✓3m:0s"},
-		{name: "a path with no file behind it", path: filepath.Join(root, "gone.jsonl"), want: "💾5m!"},
-		{name: "no path at all", path: "", want: "💾5m!"},
-		{name: "a path that is a directory", path: root, want: "💾5m!"},
-		{name: "a narrow pane keeps the timer", path: live, columns: 97, want: "💾5m✓3m:0s"},
+		{name: "a readable transcript anchors the window", path: live, want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 10% ? ctx unknown │ 💰$0.00/0/0/0 │ 💾5m✓3m:0s │ ⏳ 0s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
+		{name: "a path with no file behind it", path: filepath.Join(root, "gone.jsonl"), want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 10% ? ctx unknown │ 💰$?/?/?/? │ 💾5m! │ ⏳ 0s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
+		{name: "no path at all", path: "", want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 10% ? ctx unknown │ 💰$?/?/?/? │ 💾5m! │ ⏳ 0s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
+		{name: "a path that is a directory", path: root, want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 10% ? ctx unknown │ 💰$?/?/?/? │ 💾5m! │ ⏳ 0s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
+		{name: "a narrow pane keeps the timer", path: live, columns: 97, want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 10% ? ctx unknown │ 💰$0.00/0/0/0 │ 💾5m✓3m:0s │ ⏳ 0s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			columns := testcase.columns
@@ -677,8 +713,8 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-			if !strings.Contains(plain, testcase.want) {
-				t.Fatalf("cache window lacks %q:\n%q", testcase.want, plain)
+			if plain != testcase.want {
+				t.Errorf("render = %q, want %q", plain, testcase.want)
 			}
 		})
 	}
@@ -833,6 +869,28 @@ func TestEngineFromEnvironmentIgnoresTheLoginDefault(t *testing.T) {
 			got, err := EngineFromEnvironment(func(key string) string { return test.env[key] })
 			if got != test.want || (test.want == "") != errors.Is(err, ErrNoEngineInEnvironment) {
 				t.Fatalf("EngineFromEnvironment(%q) = (%q, %v), want %q", test.env, got, err, test.want)
+			}
+		})
+	}
+}
+
+// A render whose caller named no SID directory writes its breadcrumb where
+// every hook and resolver reads it — PFM_SID_DIR, else the host-wide
+// rendezvous — never under its own cache directory or TMPDIR.
+func TestNormalizedSIDDirIsTheSharedRendezvous(t *testing.T) {
+	cache := t.TempDir()
+	for _, row := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"named", map[string]string{"PFM_SID_DIR": "/jail/sid", "TMPDIR": "/jail/tmp"}, "/jail/sid"},
+		{"unnamed", map[string]string{"TMPDIR": "/jail/tmp"}, "/tmp/cc-sid"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			got := Runtime{Home: t.TempDir(), CacheDir: cache, Env: row.env}.normalized().SIDDir
+			if got != row.want {
+				t.Fatalf("SIDDir = %q, want %q", got, row.want)
 			}
 		})
 	}

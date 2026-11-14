@@ -69,7 +69,7 @@ func configuredHarnessCaptureWithDeps(
 	if HarnessCaptureOverride != nil {
 		return HarnessCaptureOverride(ctx, home, machine, model, verboseDir)
 	}
-	return captureHarnessPromptWithDeps(ctx, home, machine, model, verboseDir, dependencies)
+	return captureHarnessPrompt(ctx, home, machine, model, verboseDir, dependencies)
 }
 
 // harnessBuildStamp is the CLI build stamp inside the billing-header system
@@ -183,50 +183,54 @@ func normalizeHarnessPrompt(prompt string) string {
 // harnessPromptVerdict is the pure comparator: baseline hash + name, the
 // captured prompt, and the capture error map to exactly one doctor line.
 func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr error) (string, bool) {
-	residue, captureErr := splitHarnessScratchResidue(captureErr)
+	notes, captureErr := splitHarnessCaptureNotes(captureErr)
 	line, warn := harnessCaptureVerdict(baselineSHA, baselineName, captured, captureErr)
-	if residue != nil {
-		return line + "\ndoctor: " + residue.Error(), true
+	for _, note := range notes {
+		line += "\ndoctor: " + note.Error()
 	}
-	return line, warn
+	return line, warn || len(notes) != 0
 }
 
-// harnessScratchResidue is a capture's throwaway config dir that os.RemoveAll
-// could not remove. It travels in the capture's error, but it is no capture
-// failure: the verdict still reads the capture and adds a line naming the dir.
-type harnessScratchResidue struct {
-	path string
-	err  error
+// harnessCaptureNote is a capture side failure — a throwaway config dir
+// os.RemoveAll could not remove, or a --verbose evidence file not written. It
+// travels in the capture's error, but it is no capture failure: the verdict
+// still reads the capture and adds a line naming it.
+type harnessCaptureNote struct{ text string }
+
+func (note *harnessCaptureNote) Error() string { return note.text }
+
+func harnessScratchResidue(path string, err error) *harnessCaptureNote {
+	return &harnessCaptureNote{fmt.Sprintf("harness-prompt scratch dir %s not removed: %v", path, err)}
 }
 
-func (residue *harnessScratchResidue) Error() string {
-	return fmt.Sprintf("harness-prompt scratch dir %s not removed: %v", residue.path, residue.err)
+func harnessEvidenceNote(what string, err error) *harnessCaptureNote {
+	return &harnessCaptureNote{fmt.Sprintf("harness-prompt --verbose %s evidence not written: %v", what, err)}
 }
 
-// splitHarnessScratchResidue separates a scratch residue from the capture's
-// own error: the residue alone leaves a nil capture error.
-func splitHarnessScratchResidue(err error) (*harnessScratchResidue, error) {
-	var residue *harnessScratchResidue
-	if !errors.As(err, &residue) {
-		return nil, err
-	}
-	if err == error(residue) {
-		return residue, nil
+// splitHarnessCaptureNotes separates every capture note from the capture's
+// own error, through any errors.Join nesting: notes alone leave a nil
+// capture error.
+func splitHarnessCaptureNotes(err error) ([]*harnessCaptureNote, error) {
+	if note, ok := err.(*harnessCaptureNote); ok {
+		return []*harnessCaptureNote{note}, nil
 	}
 	joined, ok := err.(interface{ Unwrap() []error })
 	if !ok {
-		return residue, err
+		return nil, err
 	}
+	var notes []*harnessCaptureNote
 	var rest []error
 	for _, part := range joined.Unwrap() {
-		if part != error(residue) {
-			rest = append(rest, part)
+		partNotes, partErr := splitHarnessCaptureNotes(part)
+		notes = append(notes, partNotes...)
+		if partErr != nil {
+			rest = append(rest, partErr)
 		}
 	}
-	return residue, errors.Join(rest...)
+	return notes, errors.Join(rest...)
 }
 
-// harnessCaptureVerdict is harnessPromptVerdict without the scratch residue.
+// harnessCaptureVerdict is harnessPromptVerdict without the capture notes.
 func harnessCaptureVerdict(baselineSHA, baselineName, captured string, captureErr error) (string, bool) {
 	if errors.Is(captureErr, errClaudeAbsent) {
 		return "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare", false
@@ -307,11 +311,11 @@ func harnessPromptDetail(
 	captureErr error,
 	drift bool,
 ) []string {
-	if _, captureErr = splitHarnessScratchResidue(captureErr); captureErr != nil {
+	if _, captureErr = splitHarnessCaptureNotes(captureErr); captureErr != nil {
 		return nil
 	}
 	var detail []string
-	if captured.ResolvedModel != "" && captured.ResolvedModel != baselineModel {
+	if captured.ResolvedModel != "" && baselineModel != StateUnknown && captured.ResolvedModel != baselineModel {
 		detail = append(detail, fmt.Sprintf(
 			"doctor: harness-prompt:   model changed %s: %s → %s",
 			alias,
@@ -381,15 +385,6 @@ func captureHarnessPrompt(
 	home string,
 	machine config.Config,
 	model, verboseDir string,
-) (HarnessCapture, error) {
-	return captureHarnessPromptWithDeps(ctx, home, machine, model, verboseDir, normalizeDependencies(Dependencies{}))
-}
-
-func captureHarnessPromptWithDeps(
-	ctx context.Context,
-	home string,
-	machine config.Config,
-	model, verboseDir string,
 	dependencies Dependencies,
 ) (capture HarnessCapture, captureErr error) {
 	dependencies = normalizeDependencies(dependencies)
@@ -419,7 +414,7 @@ func captureHarnessPromptWithDeps(
 		if removeErr == nil {
 			return
 		}
-		residue := &harnessScratchResidue{path: configDir, err: removeErr}
+		residue := harnessScratchResidue(configDir, removeErr)
 		if captureErr == nil {
 			captureErr = residue
 			return
@@ -483,20 +478,23 @@ func captureHarnessPromptWithDeps(
 		Stdin:  devNull,
 		Runner: dependencies.Runner,
 	})
+	// --verbose evidence that cannot be written is a note beside the verdict;
+	// the capture is still judged.
+	var notes []error
 	if verboseDir != "" {
 		if writeErr := deps.WriteVerboseFile(
 			verboseDir,
 			"harness-prompt-"+model+".stdout",
 			[]byte(result.Stdout),
 		); writeErr != nil {
-			return HarnessCapture{}, fmt.Errorf("write harness capture stdout evidence: %w", writeErr)
+			notes = append(notes, harnessEvidenceNote("stdout", writeErr))
 		}
 		if writeErr := deps.WriteVerboseFile(
 			verboseDir,
 			"harness-prompt-"+model+".stderr",
 			[]byte(result.Stderr),
 		); writeErr != nil {
-			return HarnessCapture{}, fmt.Errorf("write harness capture stderr evidence: %w", writeErr)
+			notes = append(notes, harnessEvidenceNote("stderr", writeErr))
 		}
 	}
 	// The CLI exits nonzero by design — the sink refused its request; the
@@ -514,25 +512,25 @@ func captureHarnessPromptWithDeps(
 				"harness-prompt-"+model+".request.json",
 				body,
 			); writeErr != nil {
-				return captured, errors.Join(err, fmt.Errorf("write harness capture request evidence: %w", writeErr))
+				notes = append(notes, harnessEvidenceNote("request", writeErr))
 			}
 			if hitsErr := writeHarnessSinkHits(verboseDir, model, hits); hitsErr != nil {
-				return captured, errors.Join(err, fmt.Errorf("write harness sink hit evidence: %w", hitsErr))
+				notes = append(notes, harnessEvidenceNote("sink hit", hitsErr))
 			}
 		}
-		return captured, err
+		return captured, errors.Join(append([]error{err}, notes...)...)
 	case <-dependencies.Clock.After(harnessCaptureSinkGrace):
 		if verboseDir != "" {
 			if hitsErr := writeHarnessSinkHits(verboseDir, model, hits); hitsErr != nil {
-				return HarnessCapture{}, fmt.Errorf("write harness sink hit evidence: %w", hitsErr)
+				notes = append(notes, harnessEvidenceNote("sink hit", hitsErr))
 			}
 		}
 		if hits.count() == 0 && runErr == nil && claudeAnsweredWithoutSink(result.Stdout) {
-			return HarnessCapture{CLIVersion: version}, fmt.Errorf(
+			return HarnessCapture{CLIVersion: version}, errors.Join(append([]error{fmt.Errorf(
 				"%w (OAuth-only routing on cli=%s) — one minimal request may have been billed",
 				errHarnessBypassedSink,
 				version,
-			)
+			)}, notes...)...)
 		}
 		message := errors.New("no API request reached the capture sink")
 		if verboseDir != "" {
@@ -542,7 +540,7 @@ func captureHarnessPromptWithDeps(
 				filepath.Join(verboseDir, "harness-prompt-"+model+".stderr"),
 			)
 		}
-		return HarnessCapture{CLIVersion: version}, errors.Join(message, runErr)
+		return HarnessCapture{CLIVersion: version}, errors.Join(append([]error{message, runErr}, notes...)...)
 	}
 }
 
@@ -653,6 +651,9 @@ func joinSystemBlocks(body []byte) (string, error) {
 	return strings.Join(texts, "\n\n=== SYSTEM BLOCK ===\n\n") + "\n", nil
 }
 
+// decodeHarnessCapture keeps a capture whose request names no model: the
+// resolved model is provenance only, rendered unknown, never a gate on the
+// prompt comparison.
 func decodeHarnessCapture(body []byte) (HarnessCapture, error) {
 	var request struct {
 		Model string `json:"model"`
@@ -660,9 +661,6 @@ func decodeHarnessCapture(body []byte) (HarnessCapture, error) {
 	if err := json.Unmarshal(body, &request); err != nil {
 		return HarnessCapture{}, fmt.Errorf("parse captured request: %w", err)
 	}
-	if strings.TrimSpace(request.Model) == "" {
-		return HarnessCapture{}, errors.New("captured request carries no resolved model")
-	}
 	prompt, err := joinSystemBlocks(body)
-	return HarnessCapture{Prompt: prompt, ResolvedModel: request.Model}, err
+	return HarnessCapture{Prompt: prompt, ResolvedModel: strings.TrimSpace(request.Model)}, err
 }

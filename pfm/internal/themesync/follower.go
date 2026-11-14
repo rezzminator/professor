@@ -11,12 +11,11 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
-	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 const (
-	launchctlBinary  = "launchctl"
 	followerLabel    = "com.professor.pfm.theme"
 	followerInterval = 60
 	// followerThrottle is launchd's minimum gap between two runs, one second:
@@ -62,7 +61,8 @@ func followerWatchPaths(home string, darwin bool) ([]string, error) {
 // names a rebuilt pfm), whenever a
 // Claude account's settings.json or themes dir changes or macOS rewrites its
 // global preferences, with a one-minute backstop and at load, on the one
-// service PATH (launchd's bare default holds neither tmux nor herdr).
+// service PATH (launchd's bare default holds neither tmux nor herdr) and with
+// this install's mark, as every unit pfm writes carries it.
 func followerPlist(program, home, stateDir string) (string, error) {
 	watch, err := followerWatchPaths(home, true)
 	if err != nil {
@@ -98,6 +98,8 @@ func followerPlist(program, home, stateDir string) (string, error) {
 	<dict>
 		<key>PATH</key>
 		<string>` + followerEscape(paths.ServicePath(home)) + `</string>
+		<key>` + paths.EnvInstallMark + `</key>
+		<string>` + paths.InstallMark(home) + `</string>
 	</dict>
 	<key>StandardOutPath</key>
 	<string>` + followerEscape(logPath) + `</string>
@@ -109,33 +111,32 @@ func followerPlist(program, home, stateDir string) (string, error) {
 }
 
 func (s *session) followerPath() string {
-	return filepath.Join(s.env.Home, "Library", "LaunchAgents", followerLabel+".plist")
+	return filepath.Join(paths.LaunchAgentsDir(s.env.Home), followerLabel+".plist")
+}
+
+// launchd is the calling user's GUI domain over the session's runner, its
+// retries pausing on wallClock.
+func (s *session) launchd() servicemanager.Launchd {
+	return servicemanager.NewLaunchd(s.env.Runner, wallClock.Sleep)
 }
 
 func (s *session) followerTarget() string {
-	return fmt.Sprintf("gui/%d/%s", os.Getuid(), followerLabel)
+	return s.launchd().Target(followerLabel)
 }
 
 // followerLoaded asks launchd whether the agent is bootstrapped.
 func (s *session) followerLoaded(ctx context.Context) (bool, error) {
-	result, err := s.env.Runner.Run(ctx, []string{launchctlBinary, "print", s.followerTarget()}, deps.RunOptions{})
-	if err != nil {
-		return false, fmt.Errorf("themesync: launchctl print: %w", err)
+	answer := s.launchd().Print(ctx, followerLabel)
+	if answer.RunErr != nil {
+		return false, fmt.Errorf("themesync: launchctl print: %w", answer.RunErr)
 	}
-	return result.ExitCode == 0, nil
+	return answer.OK(), nil
 }
 
+// followerBootout unloads the agent, confirmed by launchd as the door does.
 func (s *session) followerBootout(ctx context.Context) error {
-	result, err := s.env.Runner.Run(ctx, []string{launchctlBinary, "bootout", s.followerTarget()}, deps.RunOptions{})
-	if err != nil {
-		return fmt.Errorf("themesync: launchctl bootout: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf(
-			"themesync: launchctl bootout exited %d: %s",
-			result.ExitCode,
-			strings.TrimSpace(string(result.Stderr)),
-		)
+	if err := s.launchd().Bootout(ctx, followerLabel); err != nil {
+		return fmt.Errorf("themesync: %w", err)
 	}
 	return nil
 }
@@ -177,7 +178,7 @@ var errFollowerReloadDue = errors.New(
 func (s *session) followerInOwnJob() bool { return s.env.LaunchdJob == followerLabel }
 
 func (s *session) applyFollower(ctx context.Context) SurfaceResult {
-	if !s.env.darwin() {
+	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.applySystemdFollower(ctx)
 	}
 	path := s.followerPath()
@@ -219,17 +220,16 @@ func (s *session) applyFollower(ctx context.Context) SurfaceResult {
 			return s.failed(surfaceFollower, path, err)
 		}
 	}
-	domain := fmt.Sprintf("gui/%d", os.Getuid())
-	result, err := s.env.Runner.Run(ctx, []string{launchctlBinary, "bootstrap", domain, path}, deps.RunOptions{})
-	if err != nil || result.ExitCode != 0 {
+	last, done, err := s.launchd().Bootstrap(ctx, path, servicemanager.BootstrapAttempts, nil)
+	if err != nil || !done {
 		return s.failed(surfaceFollower, path, fmt.Errorf("themesync: launchctl bootstrap: %v (exit %d): %s",
-			err, result.ExitCode, strings.TrimSpace(string(result.Stderr))))
+			err, last.Result.ExitCode, strings.TrimSpace(string(last.Result.Stderr))))
 	}
 	return s.settle(surfaceFollower, path, "", nil)
 }
 
 func (s *session) readFollower(ctx context.Context) SurfaceResult {
-	if !s.env.darwin() {
+	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.readSystemdFollower(ctx)
 	}
 	path := s.followerPath()
@@ -267,7 +267,7 @@ func (s *session) readFollower(ctx context.Context) SurfaceResult {
 }
 
 func (s *session) restoreFollower(ctx context.Context) SurfaceResult {
-	if !s.env.darwin() {
+	if s.env.platform().follower == servicemanager.KindSystemd {
 		return s.restoreSystemdFollower(ctx)
 	}
 	existed, err := s.followerRetire(ctx)

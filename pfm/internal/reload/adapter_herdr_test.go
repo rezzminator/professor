@@ -50,6 +50,21 @@ func TestNativeReloadAdapterTarget(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A chat retired from w6:p3 keeps that pane for its resume recipe; the
+	// live chat now in the pane still owns it. Its id sorts before the live one.
+	if err := db.PutSeat(
+		ctx,
+		fleetdb.Seat{
+			SeatID:      "retired-w6:p3",
+			Backend:     "herdr",
+			Engine:      string(pfmengine.Claude),
+			State:       "lost",
+			HerdrSocket: socket,
+			HerdrPane:   "w6:p3",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
 		name, sock, pane string
 		bad              bool
@@ -63,7 +78,7 @@ func TestNativeReloadAdapterTarget(t *testing.T) {
 		})
 	}
 	seat, err := SeatForReload(ctx, values, socket, "w6:p3")
-	if err != nil || seat == nil || seat.HerdrPane != "w6:p3" {
+	if err != nil || seat == nil || seat.SeatID != "w6:p3" {
 		t.Fatalf("seat=%+v err=%v", seat, err)
 	}
 }
@@ -92,8 +107,10 @@ func TestNotifyWorkerFailureDelivery(t *testing.T) {
 		{"no_foreground_client", `{"type":"notification_show","shown":false,"reason":"no_foreground_client"}`, "not shown (no_foreground_client)", "", 0, false},
 		{"wrong type", `{"type":"ok","shown":true,"reason":"shown"}`, "acknowledgement", "", 0, false},
 		{"missing shown", `{"type":"notification_show","reason":"shown"}`, "acknowledgement", "", 0, false},
-		{"missing reason", `{"type":"notification_show","shown":true}`, "acknowledgement", "", 0, false},
-		{"contradictory", `{"type":"notification_show","shown":true,"reason":"disabled"}`, "acknowledgement", "", 0, false},
+		// shown=true is the delivery: its reason is only a label.
+		{"shown without reason", `{"type":"notification_show","shown":true}`, "", "", 0, false},
+		{"shown with another reason", `{"type":"notification_show","shown":true,"reason":"disabled"}`, "", "", 0, false},
+		{"not shown without reason", `{"type":"notification_show","shown":false}`, "acknowledgement", "", 0, false},
 		{"wrong shown shape", `{"type":"notification_show","shown":"true","reason":"shown"}`, "decode", "", 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

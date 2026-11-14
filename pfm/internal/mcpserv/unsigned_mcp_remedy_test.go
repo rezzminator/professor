@@ -67,19 +67,8 @@ func TestMCPUnsignedRefusalNamesAnMCPReachableRemedy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) {
-		t.Fatalf("call message dropped the refusal cause: %q", output.Message)
-	}
-	if strings.Contains(output.Message, "--allow-unsigned") ||
-		strings.Contains(output.Message, pfmcall.SenderSessionEnv+"=$(pfm whoami)") ||
-		strings.Contains(output.Message, "DETACHED (setsid/nohup/disowned)") {
-		t.Fatalf(
-			"call message still tells an MCP caller to do something unreachable from MCP: %q",
-			output.Message,
-		)
-	}
-	if !strings.Contains(output.Message, "pfm chat") {
-		t.Fatalf("call message names no MCP-reachable remedy: %q", output.Message)
+	if got, want := output.Message, "refusing to send an UNSIGNED message: this process derived no identity of its own, so the recipient would be asked to act on an instruction from nobody. MCP request has no _meta.threadId, and this server is pfm's shared HTTP daemon (one process serving every chat on the machine), so it cannot derive who is calling: Claude Code does not attach per-call caller identity over this transport. Run the equivalent `pfm chat ...` command from the chat's own shell instead — that process IS the chat. A Codex chat should resolve automatically; if it does not, its MCP client is not attaching _meta.threadId to this call."; got != want {
+		t.Fatalf("call message = %q, want %q", got, want)
 	}
 }
 
@@ -121,8 +110,7 @@ func TestMCPUnsignedRefusalNamesTheFailedCallerBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.Message, pfmcall.ErrUnsigned.Error()) ||
-		!strings.Contains(output.Message, `no live Codex seat holds thread thread-gone`) {
-		t.Fatalf("call message hides the failed caller binding: %q", output.Message)
+	if got, want := output.Message, "refusing to send an UNSIGNED message: this process derived no identity of its own, so the recipient would be asked to act on an instruction from nobody. MCP request has no _meta.threadId, and this server is pfm's shared HTTP daemon (one process serving every chat on the machine), so it cannot derive who is calling: Claude Code does not attach per-call caller identity over this transport. Run the equivalent `pfm chat ...` command from the chat's own shell instead — that process IS the chat. A Codex chat should resolve automatically; if it does not, its MCP client is not attaching _meta.threadId to this call. The request's own caller identity did not bind: ERROR: this process is not inside a pfm chat: no live tmux pane or Herdr pane holds it: no live Codex seat holds thread thread-gone"; got != want {
+		t.Fatalf("call message = %q, want %q", got, want)
 	}
 }

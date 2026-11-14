@@ -106,13 +106,13 @@ func TestReadBackJudgesTheSurfacesAgainstThePinnedRender(t *testing.T) {
 
 	// A server reset to derive's value is out of sync, and the sync heals it to the pin.
 	h.tmux.servers["cc-a"]["@host_accent"] = "#c95cff"
-	wantVerdict(t, h.status(), "tmux", VerdictDrift, "@host_accent")
+	wantVerdict(t, h.status(), "tmux", VerdictDrift, "tmux cc-a: @host_accent = \"#c95cff\", want \"#ff2e93\"")
 	wantVerdict(t, h.sync(false), "tmux", VerdictInSync, "2 servers")
 	wantValues(t, "healed cc-a", h.tmux.servers["cc-a"], map[string]string{"@host_accent": "#ff2e93"})
 
 	config := h.read(".config/herdr/config.toml")
 	h.write(".config/herdr/config.toml", strings.Replace(config, "\naccent = \"#ff2e93\"", "\naccent = \"#c95cff\"", 1))
-	wantVerdict(t, h.status(), "herdr", VerdictDrift, "differs from the render")
+	wantVerdict(t, h.status(), "herdr", VerdictDrift, "block at generation 1 differs from the render at generation 1")
 	wantVerdict(t, h.sync(false), "herdr", VerdictInSync, "")
 	if got := h.read(".config/herdr/config.toml"); !strings.Contains(got, "\naccent = \"#ff2e93\"\n") {
 		t.Errorf("the sync did not put the pinned accent back:\n%s", got)
@@ -124,7 +124,7 @@ func TestReadBackJudgesTheSurfacesAgainstThePinnedRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.write(".local/state/pfm/theme/current.json", strings.Replace(string(raw), "#2a0a1a", "#221634", 1))
-	wantVerdict(t, h.status(), "vscode", VerdictDrift, "differs from the render")
+	wantVerdict(t, h.status(), "vscode", VerdictDrift, "current.json differs from the render")
 	h.sync(false)
 	if got := h.contract().Chrome["titleBar.activeBackground"]; got != "#2a0a1a" {
 		t.Errorf("the sync left titleBar.activeBackground at %q, want the pin #2a0a1a", got)
@@ -190,20 +190,31 @@ func TestAServerBornLaterRendersThePins(t *testing.T) {
 
 func TestAnUnreadableProfileIsASourceErrorNamingTheFile(t *testing.T) {
 	cases := []struct {
-		name    string
-		write   func(t *testing.T, path string)
-		mention string
+		name  string
+		write func(t *testing.T, path string)
+		want  string
 	}{
-		{"not json", writeFileAt(`{not json`), "parse profile"},
-		{"unknown top-level key", writeFileAt(`{"name":"x","overrides":{},"colours":{}}`), `"colours"`},
-		{"unknown pin key", writeFileAt(profileJSON(`{"tmux":{"@nope":"#ffffff"}}`)), "@nope"},
-		{"bad pin colour", writeFileAt(profileJSON(`{"herdr":{"accent":"purple"}}`)), "purple"},
+		{
+			"not json",
+			writeFileAt(`{not json`),
+			"{home}/.claude/settings.json: theme profile {home}/.local/share/pfm/install/themes/tokyo-night.json: parse profile: invalid character 'n' looking for beginning of object key string",
+		},
+		{
+			"unknown top-level key",
+			writeFileAt(`{"name":"x","overrides":{},"colours":{}}`),
+			"{home}/.claude/settings.json: theme profile {home}/.local/share/pfm/install/themes/tokyo-night.json: parse profile: json: unknown field \"colours\"",
+		},
+		{
+			"bad pin colour",
+			writeFileAt(profileJSON(`{"herdr":{"accent":"purple"}}`)),
+			"{home}/.claude/settings.json: theme profile {home}/.local/share/pfm/install/themes/tokyo-night.json: herdr pin \"accent\": themesync: colour \"purple\" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name",
+		},
 		{"a directory", func(t *testing.T, path string) {
 			t.Helper()
 			if err := os.MkdirAll(path, 0o755); err != nil {
 				t.Fatal(err)
 			}
-		}, "not a regular file"},
+		}, "{home}/.claude/settings.json: theme profile {home}/.local/share/pfm/install/themes/tokyo-night.json: not a regular file (d---------)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -212,15 +223,13 @@ func TestAnUnreadableProfileIsASourceErrorNamingTheFile(t *testing.T) {
 			tc.write(t, path)
 			report := h.on()
 			claude := row(t, report, "claude")
-			if claude.Verdict != VerdictError || !strings.Contains(claude.Detail, path) ||
-				!strings.Contains(claude.Detail, tc.mention) {
-				t.Errorf(
-					"claude row = %s %q, want ERROR naming %s and %q",
-					claude.Verdict,
-					claude.Detail,
-					path,
-					tc.mention,
-				)
+			if got := strings.ReplaceAll(
+				claude.Detail,
+				h.home,
+				"{home}",
+			); claude.Verdict != VerdictError ||
+				got != tc.want {
+				t.Errorf("claude row = %s %q, want ERROR %q", claude.Verdict, got, tc.want)
 			}
 			if report.OK() || len(report.Surfaces) != 1 {
 				t.Errorf("report = %+v, want the source error alone, nothing applied", report.Surfaces)
@@ -229,6 +238,26 @@ func TestAnUnreadableProfileIsASourceErrorNamingTheFile(t *testing.T) {
 				t.Error("a surface was written under a profile that could not be read")
 			}
 		})
+	}
+}
+
+// A pin for a key no renderer emits (one a renderer dropped since the profile was
+// installed) costs only itself: the run goes on, every other pin lands, and the
+// claude row names what it dropped.
+func TestAPinForAKeyNoRendererEmitsIsDroppedAndTheRunGoesOn(t *testing.T) {
+	h := newHarness(t)
+	path := ProfilePath(h.home, tokyoNightName)
+	writeFileAt(profileJSON(`{"tmux":{"@nope":"#ffffff","@host_accent":"#ff2e93"}}`))(t, path)
+	report := h.on()
+	wantVerdict(
+		t,
+		report,
+		"claude",
+		VerdictSource,
+		"~/.claude · custom:tokyo-night · Tokyo Night · neon pink · profile {tmp}/.local/share/pfm/install/themes/tokyo-night.json: tmux pin \"@nope\": tmux renders no such key (dropped)",
+	)
+	if got := h.tmux.servers["cc-a"]["@host_accent"]; got != "#ff2e93" {
+		t.Errorf("@host_accent = %q, want the pin kept beside the dropped one", got)
 	}
 }
 
@@ -342,12 +371,15 @@ func TestParseProfileIsStrictAndChecksItsPins(t *testing.T) {
 	if err != nil || palette.Surfaces != nil {
 		t.Errorf("a palette-only profile = %+v, %v, want no pins", palette, err)
 	}
+	unnamed, err := ParseProfile([]byte(`{"overrides":{}}`))
+	if err != nil || unnamed.Name != "" {
+		t.Errorf("an unnamed profile = %+v, %v, want it read with no name", unnamed, err)
+	}
 	for name, tc := range map[string]struct{ content, want string }{
 		"not json":             {`{not json`, "parse profile"},
 		"unknown top-level":    {`{"name":"x","overrides":{},"extra":1}`, `"extra"`},
 		"unknown nested":       {`{"name":"x","overrides":{},"surfaces":{"vscode":{"colours":{}}}}`, `"colours"`},
 		"trailing data":        {`{"name":"x","overrides":{}} {}`, "data after"},
-		"no name":              {`{"overrides":{}}`, "no name"},
 		"unknown tmux pin":     {`{"name":"x","overrides":{},"surfaces":{"tmux":{"@nope":"#fff"}}}`, "@nope"},
 		"bad herdr pin colour": {`{"name":"x","overrides":{},"surfaces":{"herdr":{"accent":"purple"}}}`, "purple"},
 		"unknown claude token": {`{"name":"x","overrides":{"claude":"#fff","promptBordr":"#fff"}}`, `overrides "promptBordr": not a Claude Code theme token`},

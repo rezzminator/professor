@@ -2,7 +2,6 @@ package reload
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +48,7 @@ func TestRunClearsTypedExitWhenItNeverRenders(t *testing.T) {
 			nil,
 		)
 	})
-	if err == nil || !strings.Contains(err.Error(), "refusing blind Enter") {
+	if err == nil || err.Error() != "typed /exit never rendered (composer showed \"\") — refusing blind Enter" {
 		t.Fatalf("never-rendered /exit error=%v, want 'refusing blind Enter'", err)
 	}
 	if tmux.backspaces != len("/exit") {

@@ -22,7 +22,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -31,21 +30,21 @@ import (
 )
 
 const (
-	reloadNewFlag     = "--new"
-	reloadHideFlag    = "--hide"
-	reloadThenFlag    = "--then"
-	reloadSocketFlag  = "--sock"
-	reloadModelFlag   = "--model"
-	reloadEffortFlag  = "--effort"
-	reloadPaneFlag    = "--pane"
-	reloadCacheFlag   = "--cache"
-	reloadAccountFlag = "--account"
+	reloadNewFlag     = reload.ArgumentNew
+	reloadHideFlag    = reload.ArgumentHide
+	reloadThenFlag    = reload.ArgumentThen
+	reloadSocketFlag  = reload.ArgumentSocket
+	reloadModelFlag   = reload.ArgumentModel
+	reloadEffortFlag  = reload.ArgumentEffort
+	reloadPaneFlag    = reload.ArgumentPane
+	reloadCacheFlag   = reload.ArgumentCache
+	reloadAccountFlag = reload.ArgumentAccount
 )
 
 // startReloadWorker launches the detached worker (Detach: true), releases it
 // and returns its pid; a test overrides this var to script the launch.
 var startReloadWorker = func(argv []string, opts deps.StartOptions) (int, error) {
-	process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, opts)
+	process, err := commandRunner.Start(context.Background(), argv, opts)
 	if err != nil {
 		return 0, err
 	}
@@ -64,7 +63,7 @@ func runChatReloadWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
-	args = normalizeReloadArgs(args)
+	args = reload.NormalizeArguments(args)
 	if len(args) == 1 && (args[0] == helpFlag || args[0] == "-h") {
 		fmt.Fprintln(stdout, reload.Usage)
 		return 0
@@ -184,9 +183,7 @@ func announceReloadWorkerFailure(
 	if handled {
 		return
 	}
-	lines := strings.Split(strings.TrimSpace(workerLog), "\n")
-	message := lines[len(lines)-1]
-	if err := display(context.Background(), socketPath, pane, message); err != nil {
+	if err := display(context.Background(), socketPath, pane, reload.WorkerFailureLine(workerLog)); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: display worker failure on %s %s: %v\n", sock, pane, err)
 	}
 }
@@ -194,7 +191,7 @@ func announceReloadWorkerFailure(
 func reloadWorkerConfigFailure(args []string, err error, stderr io.Writer) int {
 	line := fmt.Sprintf("pfm: config: %v", err)
 	fmt.Fprintln(stderr, line)
-	announceReloadWorkerFailure(normalizeReloadArgs(args), line, false, displayReloadWorkerFailure, stderr)
+	announceReloadWorkerFailure(reload.NormalizeArguments(args), line, false, displayReloadWorkerFailure, stderr)
 	return 1
 }
 
@@ -212,16 +209,19 @@ func runChatReloadWorkerWithRuntime(
 	workerStderr := io.MultiWriter(stderr, &workerLog)
 	stderr = workerStderr
 	defer func() {
-		if code == 0 || paneTold {
+		if code == 0 {
 			return
 		}
 		if workerLog.Len() == 0 {
 			fmt.Fprintf(workerStderr, "pfm chat reload: detached worker failed (exit %d)\n", code)
 		}
-		announceReloadWorkerFailure(args, workerLog.String(), nativeWorker, displayReloadWorkerFailure, stderr)
+		reload.RecordWorkerFailure(workerLog.String(), code)
+		if !paneTold {
+			announceReloadWorkerFailure(args, workerLog.String(), nativeWorker, displayReloadWorkerFailure, stderr)
+		}
 	}()
 	env = defaultEnv(env)
-	args = normalizeReloadArgs(args)
+	args = reload.NormalizeArguments(args)
 	if err := validateReloadArgs(args); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2
@@ -287,7 +287,7 @@ func runChatReloadWorkerWithRuntime(
 		return 0
 	}
 	engine := reload.EngineOf(socketPath)
-	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "", env)
+	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "", env, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
@@ -338,12 +338,15 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
-	birthAccount, birthCache, err := reload.BirthAccount(
-		resolved, runtime.Config, socketPath, leftBehind, paneState, stderr, defaultEnv(env),
-	)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
-		return 1
+	birthAccount, birthCache := 0, false
+	if account == "" || cacheOverride == "" { // both given: the birth record decides nothing
+		birthAccount, birthCache, err = reload.BirthAccount(
+			resolved, runtime.Config, socketPath, leftBehind, paneState, stderr, defaultEnv(env),
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
+			return 1
+		}
 	}
 	kept := account == ""
 	if kept {
@@ -417,7 +420,7 @@ func runChatReloadWorkerWithRuntime(
 			fmt.Fprintln(stdout, "pfm chat reload: no transcript yet — rebooted FRESH")
 		}
 	} else {
-		fmt.Fprintf(stdout, "pfm chat reload: respawned in place: %s %s\n", filepath.Base(socketPath), pane)
+		fmt.Fprintf(stdout, "pfm chat reload: %s: %s %s\n", result.Receipt(), filepath.Base(socketPath), pane)
 	}
 	if newSeat && hide {
 		// Hide the session Run says this pane left behind.
@@ -431,8 +434,7 @@ func runChatReloadWorkerWithRuntime(
 		if engine == pfmengine.Codex {
 			transcript, err = reload.SessionTranscript(resolved, runtime.Config, engine, leftBehind)
 			if err != nil {
-				fmt.Fprintf(stderr, "pfm chat reload: find conversation to hide: %v\n", err)
-				return 1
+				fmt.Fprintf(stderr, "pfm chat reload: find conversation to hide: %v; hiding it by id alone\n", err)
 			}
 		}
 		hidden, err := hideReloadedConversation(context.Background(), runtime, engine, leftBehind, transcript, stderr)
@@ -627,6 +629,7 @@ func resolveReloadSession(
 	socketPath, pane string,
 	allowAmbient bool,
 	env paths.Env,
+	stderr io.Writer,
 ) (string, string, error) {
 	env = defaultEnv(env)
 	id, crumbPath, err := reload.SessionFromCrumb(
@@ -690,20 +693,20 @@ func resolveReloadSession(
 	if engine == pfmengine.Claude {
 		// The crumb keeps the launch id after Claude Code continued the chat
 		// in a new session: the reload resumes the newest segment.
-		tail, path, err := reload.ContinuedSession(context.Background(), id, os.Stderr)
+		tail, path, err := reload.ContinuedSession(context.Background(), id, stderr)
 		if err != nil {
-			return "", "", err
+			fmt.Fprintf(stderr, "pfm chat reload: %v; a newer continued segment may exist, resuming %s\n", err, id)
+			tail = id
 		}
-		if tail != id {
-			if path == "" {
-				// The index lost the newest segment's path: find it on disk.
-				if path, err = reload.SessionTranscript(resolved, machine, engine, tail); err != nil {
-					return "", "", err
-				}
+		if tail != id && path == "" {
+			// The index lost the newest segment's path: find it on disk.
+			if path, err = reload.SessionTranscript(resolved, machine, engine, tail); err != nil {
+				fmt.Fprintf(stderr, "pfm chat reload: continued session %s: %v; resuming %s\n", tail, err, id)
+			} else if path == "" {
+				fmt.Fprintf(stderr, "pfm chat reload: continued session %s has no transcript; resuming %s\n", tail, id)
 			}
-			if path == "" {
-				return "", "", fmt.Errorf("chat %s continued in session %s, whose transcript pfm cannot find", id, tail)
-			}
+		}
+		if tail != id && path != "" {
 			id, transcript = tail, path
 		}
 	}

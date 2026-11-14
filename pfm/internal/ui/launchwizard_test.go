@@ -11,6 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // wizardSnapshot is a picker with a ✦ row per engine that has accounts.
@@ -58,6 +59,18 @@ func walk(t *testing.T, model Model, keys ...string) Model {
 		model, _ = applyKey(t, model, wizardKeys[key])
 	}
 	return model
+}
+
+// enterThrough presses ⏎ on the selected row, then on every step it opens,
+// each on its default; walked reports that a walk opened.
+func enterThrough(t *testing.T, model Model) (next Model, command tea.Cmd, walked bool) {
+	t.Helper()
+	next, command = applyKey(t, model, wizardKeys["enter"])
+	walked = next.wizard.on
+	for steps := 0; command == nil && next.wizard.on && steps <= int(wizardCache); steps++ {
+		next, command = applyKey(t, next, wizardKeys["enter"])
+	}
+	return next, command, walked
 }
 
 func TestWizardPaths(t *testing.T) {
@@ -330,11 +343,11 @@ func TestUnreadableLaunchMemoryIsNamedOnTheLaunchRow(t *testing.T) {
 	model := NewModel(snapshot)
 	row, _ := model.selectedRow()
 	idle := ansi.Strip(model.renderGroupedRow(row, true, 100, false))
-	if !strings.Contains(idle, "last launch unreadable") {
+	if idle != "› ✦ New chat → p  Claude · last launch unreadable  🥇                                               " {
 		t.Errorf("idle ✦ row = %q, want the unreadable memory named", idle)
 	}
 	dossier := strings.Join(strings.Fields(strings.Join(dossierText(model, row), " ")), " ")
-	if !strings.Contains(dossier, "parse launch memory: bad row") {
+	if dossier != "\x1b[1;38;2;255;255;255;48;2;51;65;85m NEW \x1b[m Claude 🥇 New Claude chat ──────────────────────────────────────── Enter chooses the engine, account and cache of a new chat in /p, each step opening on your last choice. Your last launch could not be read (parse launch memory: bad row): the steps open on the configured values. ◖ ⏎ choose ◗" {
 		t.Errorf("dossier = %q, want the read failure", dossier)
 	}
 }
@@ -348,5 +361,147 @@ func TestWizardOpensOnTheDefaultCacheOfAnUnnamedAccount(t *testing.T) {
 		!model.orderedChoices(model.rows[0], model.wizard)[model.wizard.pos].cache {
 		t.Fatalf("step %v account %d pos %d, want the cache step on unnamed account 0 opening on 1h",
 			model.wizard.step, model.wizard.account, model.wizard.pos)
+	}
+}
+
+// resumeSnapshot is a picker on one chat row, with two Claude and the given
+// Codex accounts configured; the configured cache is 1h for every account.
+func resumeSnapshot(row compose.Row, codex []int) Snapshot {
+	snapshot := wizardSnapshot([]int{1, 2}, codex, nil)
+	snapshot.Rows = []compose.Row{row}
+	return snapshot
+}
+
+func TestResumeWalkPaths(t *testing.T) {
+	claude := compose.Row{
+		Kind: compose.ResumeClaude, ID: "resume-claude", Name: "port", Project: "p", CWD: "/p",
+		Account: 2, C1H: false,
+	}
+	offRoster := claude
+	offRoster.Account = 9
+	codex := compose.Row{Kind: compose.ResumeCodex, ID: "resume-codex", Name: "port", Project: "p", CWD: "/p"}
+	live := claude
+	live.Kind = compose.LiveClaude
+	native := live
+	native.Backend = spawn.BackendHerdr
+	nativeGone := claude
+	nativeGone.Backend = spawn.BackendHerdr
+	for _, test := range []struct {
+		name  string
+		row   compose.Row
+		codex []int
+		keys  []string
+		want  *ResumeChoice // nil: selected at once, no walk
+	}{
+		{
+			name: "enter through resumes on the chat's recorded account and cache",
+			row:  claude, keys: []string{"enter", "enter", "enter"},
+			want: &ResumeChoice{Account: 2, Cache1H: false},
+		},
+		{
+			name: "a recorded account off the roster opens on the primary account",
+			row:  offRoster, keys: []string{"enter", "enter", "enter"},
+			want: &ResumeChoice{Account: 1, Cache1H: true},
+		},
+		{
+			name: "another account and cache chosen reach the outcome",
+			row:  claude, keys: []string{"enter", "right", "enter", "right", "enter"},
+			want: &ResumeChoice{Account: 1, Cache1H: false},
+		},
+		{
+			name: "back to the recorded account restores the chat's recorded cache",
+			row:  claude, keys: []string{"enter", "right", "enter", "esc", "left", "enter", "enter"},
+			want: &ResumeChoice{Account: 2, Cache1H: false},
+		},
+		{
+			name: "Codex asks the account and never the cache",
+			row:  codex, codex: []int{3, 4}, keys: []string{"enter", "right", "enter"},
+			want: &ResumeChoice{Account: 4, Cache1H: true},
+		},
+		{
+			name: "Codex with one account resumes at once",
+			row:  codex, codex: []int{3}, keys: []string{"enter"},
+		},
+		{
+			name: "a live chat attaches at once",
+			row:  live, keys: []string{"enter"},
+		},
+		{
+			name: "a live native seat's row opens at once",
+			row:  native, keys: []string{"enter"},
+		},
+		{
+			name: "a native seat that is gone walks the resume steps",
+			row:  nativeGone, keys: []string{"enter", "right", "enter", "right", "enter"},
+			want: &ResumeChoice{Account: 1, Cache1H: false},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := walk(t, NewModel(resumeSnapshot(test.row, test.codex)), test.keys...)
+			result := model.Result()
+			if result.Kind != OutcomeSelected || result.Row.ID != test.row.ID || result.Row.Kind != test.row.Kind ||
+				result.ClaudePrimaryAccount != 1 || !reflect.DeepEqual(result.Resume, test.want) || model.wizard.on {
+				t.Fatalf("result %#v resume %+v (wizard on %t), want %s %s selected with resume %+v and primary 1",
+					result, result.Resume, model.wizard.on, test.row.Kind, test.row.ID, test.want)
+			}
+		})
+	}
+}
+
+func TestResumeWalkShowsItsEngineAndEscLaunchesNothing(t *testing.T) {
+	row := compose.Row{
+		Kind: compose.ResumeClaude, ID: "resume-claude", Name: "port", Project: "p", CWD: "/p",
+		Account: 2, C1H: false,
+	}
+	model := walk(t, NewModel(resumeSnapshot(row, []int{3})), "enter")
+	if !model.wizard.on || model.wizard.step != wizardAccount || model.wizard.engine != pfmengine.Claude {
+		t.Fatalf("enter on a resumable chat: wizard on %t step %d engine %q, want the account step of Claude",
+			model.wizard.on, model.wizard.step, model.wizard.engine)
+	}
+	shown := ansi.Strip(model.renderGroupedRow(row, true, 120, false))
+	if !strings.Contains(shown, "Resume Claude › ◖ "+accountMedal(2)+" 2 ◗ ") || strings.Contains(shown, "Codex") {
+		t.Errorf("account step row = %q, want the fixed engine and the recorded account boxed", shown)
+	}
+	if footer := ansi.Strip(model.renderFooter(120)); !strings.Contains(footer, "resume · step 1 of 2 · account") {
+		t.Errorf("footer = %q, want the resume step", footer)
+	}
+	model = walk(t, model, "enter")
+	if shown := ansi.Strip(model.renderGroupedRow(row, true, 120, false)); !strings.Contains(
+		shown, "Resume Claude · "+accountMedal(2)+" 2 › ◖ 5m ◗ ") {
+		t.Errorf("cache step row = %q, want the recorded 5m boxed", shown)
+	}
+	model = walk(t, model, "esc", "esc")
+	if model.wizard.on || model.Result().Kind != OutcomeNone {
+		t.Fatalf("esc out of the walk: wizard on %t outcome %d, want it closed and nothing launched",
+			model.wizard.on, model.Result().Kind)
+	}
+	cancelled, command := applyKey(t, model, wizardKeys["esc"])
+	if result := cancelled.Result(); command == nil || result.Kind != OutcomeCancelled || result.Resume != nil {
+		t.Fatalf("esc after the walk closed = %#v, want the picker cancelled with no resume", result)
+	}
+}
+
+// A chat resumed elsewhere mid-walk turns live under the same id: the walk no
+// longer draws on its row, and ⏎ attaches it.
+func TestResumeWalkLeavesAChatTurnedLive(t *testing.T) {
+	row := compose.Row{
+		Kind: compose.ResumeClaude, ID: "resume-claude", Name: "port", Project: "p", CWD: "/p",
+		Account: 2, C1H: false,
+	}
+	model := walk(t, NewModel(resumeSnapshot(row, nil)), "enter")
+	if shown := ansi.Strip(model.renderGroupedRow(row, true, 120, false)); !strings.Contains(shown, "Resume Claude") {
+		t.Fatalf("account step row = %q, want the resume walk drawn", shown)
+	}
+	live := row
+	live.Kind = compose.LiveClaude
+	next, _ := model.Update(RefreshMsg{Snapshot: resumeSnapshot(live, nil)})
+	model = next.(Model)
+	if shown := ansi.Strip(model.renderGroupedRow(live, true, 120, false)); strings.Contains(shown, "Resume Claude") {
+		t.Errorf("live row = %q, want the walk gone from it", shown)
+	}
+	model = walk(t, model, "enter")
+	if result := model.Result(); result.Kind != OutcomeSelected || result.Row.Kind != compose.LiveClaude ||
+		result.Resume != nil {
+		t.Fatalf("enter on the chat turned live = %#v, want it selected live with no resume", result)
 	}
 }

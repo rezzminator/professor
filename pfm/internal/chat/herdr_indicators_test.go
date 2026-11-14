@@ -125,7 +125,7 @@ func TestHerdrTabProviderReadFailureIsVisible(t *testing.T) {
 	}
 	got, err := provider.tabs(context.Background(), "endpoint")
 	if err != nil || len(got) != 1 || got[0].State != "unknown" ||
-		!strings.Contains(warnings.String(), "transcript denied") {
+		warnings.String() != "Herdr tab status of s1: transcript denied\n" {
 		t.Fatalf("tabs=%+v err=%v warnings=%s", got, err, warnings)
 	}
 	provider.scan = func(context.Context) (FleetScan, error) { return FleetScan{}, fmt.Errorf("fleet denied") }
@@ -133,7 +133,7 @@ func TestHerdrTabProviderReadFailureIsVisible(t *testing.T) {
 		context.Background(),
 		"endpoint",
 	); err == nil ||
-		!strings.Contains(err.Error(), "fleet denied") {
+		err.Error() != "scan tab chats: fleet denied" {
 		t.Fatalf("fleet failure=%v", err)
 	}
 }
@@ -146,8 +146,12 @@ func TestHerdrTabStartupFailureIsVisible(t *testing.T) {
 	t.Setenv("PFM_CONFIG", path)
 	warnings := &bytes.Buffer{}
 	err := PaintHerdrIndicators(context.Background(), "endpoint", t.TempDir(), warnings)
-	if err == nil || !strings.Contains(warnings.String(), "herdrTabStatus must be") {
-		t.Fatalf("startup failure err=%v diagnostic=%q", err, warnings.String())
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%v\n%s", err, warnings),
+		path,
+		"{config}",
+	), "load tab indicator runtime: config {config}: chat.herdrTabStatus must be emoji, text or off\nload tab indicator runtime: config {config}: chat.herdrTabStatus must be emoji, text or off\n"; got != want {
+		t.Fatalf("startup failure = %q, want %q", got, want)
 	}
 }
 
@@ -172,6 +176,7 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 		},
 	}
 	generation := `{"session_id":"s1","seq":1,"clients":{"10":{"pane":"stale","socket":"endpoint"}}}`
+	warnings := &bytes.Buffer{}
 	reader := tabViewReader{
 		runtime: &config.Runtime{Paths: paths.Values{TmuxDir: "/fixture/tmux"}},
 		tmux: func(_ context.Context, socket string, args ...string) (string, error) {
@@ -179,12 +184,15 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 				return "", fmt.Errorf("tmux -S %s %s: exit status 1", socket, args[0])
 			}
 			if args[0] == "list-clients" {
-				return "10\n11\n12", nil
+				return "10\nbogus\n13\n11\n12", nil
 			}
 			return generation, nil
 		},
+		warn: warnings,
 		resolve: func(_ context.Context, pid int) (herdr.Location, bool, error) {
 			switch pid {
+			case 13:
+				return herdr.Location{}, false, errors.New("read environ of 13: no such process")
 			case 10:
 				return herdr.Location{Socket: "endpoint", Pane: "w1:p1", Terminal: "term1"}, true, nil
 			case 11:
@@ -209,8 +217,24 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0].Pane != "w1:p1" || got[1].Pane != "w2:p2" {
 		t.Fatalf("actual views=%+v err=%v", got, err)
 	}
+	if want := "Herdr tab client \"bogus\" of s1 skipped: not a pid\n" +
+		"Herdr tab client 13 of s1 skipped: read environ of 13: no such process\n"; warnings.String() != want {
+		t.Fatalf("unreadable clients named %q, want %q", warnings.String(), want)
+	}
 	if valid, err := got[0].Validate(context.Background()); err != nil || !valid {
 		t.Fatalf("current generation valid=%t err=%v", valid, err)
+	}
+	// A client mapping pfm cannot decode is rebuilt from the live clients, named.
+	generation = `{"seq":`
+	warnings.Reset()
+	rebuilt, err := reader.views(context.Background(), target, "endpoint", panes)
+	if err != nil || len(rebuilt) != 2 || rebuilt[0].Pane != "w1:p1" || rebuilt[1].Pane != "w2:p2" {
+		t.Fatalf("rebuilt views=%+v err=%v", rebuilt, err)
+	}
+	if want := "Herdr tab client mappings of s1 unreadable (unexpected end of JSON input); using the live clients\n" +
+		"Herdr tab client \"bogus\" of s1 skipped: not a pid\n" +
+		"Herdr tab client 13 of s1 skipped: read environ of 13: no such process\n"; warnings.String() != want {
+		t.Fatalf("unreadable mapping named %q, want %q", warnings.String(), want)
 	}
 	generation = `{"session_id":"s2","seq":2}`
 	if valid, err := got[0].Validate(context.Background()); err != nil || valid {
@@ -239,6 +263,16 @@ func TestHerdrTabViewReaderUsesActualClientsAndGeneration(t *testing.T) {
 	if err != nil || len(got) != 0 {
 		t.Fatalf("replacement retained old chat=%+v err=%v", got, err)
 	}
+	// An agent_session of a kind pfm does not know vetoes nothing: the terminal that proved the tab keeps it.
+	panes[1].Session = []byte(`{"kind":"future","value":"s1"}`)
+	warnings.Reset()
+	got, err = reader.views(context.Background(), target, "endpoint", panes)
+	if err != nil || len(got) != 1 || got[0].Pane != "w2:p2" || !got[0].Retained {
+		t.Fatalf("unknown claim retained views=%+v err=%v", got, err)
+	}
+	if want := "Herdr tab w2:t2 of s1: unusable tab agent_session: unsupported kind \"future\"; the pane's terminal proves it\n"; warnings.String() != want {
+		t.Fatalf("unknown claim named %q, want %q", warnings.String(), want)
+	}
 }
 
 func TestHerdrTabSessionProducerForms(t *testing.T) {
@@ -260,6 +294,11 @@ func TestHerdrTabSessionProducerForms(t *testing.T) {
 				t.Fatalf("session=%s matches=%t err=%v", body, matches, err)
 			}
 		})
+	}
+	// Source and agent are labels: a session naming the chat matches without them.
+	body := `{"kind":"id","value":"s1"}`
+	if matches, err := tabPaneSession(herdr.TabPane{Session: []byte(body)}, target); !matches || err != nil {
+		t.Fatalf("unlabelled session=%s matches=%t err=%v, want a match", body, matches, err)
 	}
 }
 
@@ -313,6 +352,9 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 		{"proved supervisor death", false, true, nil, nil, 1, "dead"},
 		{"proved owner, foreground unavailable", true, false, errors.New("foreground evidence unavailable"), nil, 1, "unknown"},
 		{"ownership unproved", false, true, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
+		// The engine gone from its pane never outranks an unproved supervisor
+		// (forecast C02): nothing is painted, never dead.
+		{"ownership unproved, engine gone", false, false, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			warnings := &bytes.Buffer{}
@@ -406,7 +448,12 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 		name, seatTerminal string
 		session            string
 		claimedTerminal    string
-		views              int
+		// replaced: the claimed chat's seat was replaced by a revive into a new
+		// tab, its old row retired (spawn.RetireHerdrSeat), so the claim is
+		// judged by the replacement seat that now carries the chat.
+		replaced bool
+		views    int
+		warning  string
 	}{
 		{name: "the seat's terminal proves the pane", seatTerminal: "term1", views: 1},
 		{name: "a seat with no recorded terminal", seatTerminal: "", views: 0},
@@ -421,8 +468,22 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 			session: other, claimedTerminal: "term0",
 		},
 		{
+			name: "a stale agent_session naming a chat replaced into another terminal", seatTerminal: "term1", views: 1,
+			session: other, claimedTerminal: "term2", replaced: true,
+		},
+		{
 			name: "an agent_session naming this chat born in another terminal", seatTerminal: "term0", views: 0,
 			session: `{"source":"herdr:claude","agent":"claude","kind":"id","value":"s1"}`,
+		},
+		{
+			name: "an agent_session of an unknown kind, the seat's terminal proves the pane", seatTerminal: "term1",
+			views: 1, session: `{"source":"herdr:claude","agent":"claude","kind":"future","value":"s1"}`,
+			warning: "Herdr tab w1:t1 of s1: unusable tab agent_session: unsupported kind \"future\"; the pane's terminal proves it\n",
+		},
+		{
+			name: "an agent_session with no value, the seat's terminal proves the pane", seatTerminal: "term1",
+			views: 1, session: `{"kind":"id"}`,
+			warning: "Herdr tab w1:t1 of s1: unusable tab agent_session: incomplete: {\"kind\":\"id\"}; the pane's terminal proves it\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -448,10 +509,14 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 			putSeat(tc.seatTerminal)
 			if tc.claimedTerminal != "" {
 				db := fleetdb.OpenSharedState(ctx, values)
-				if err := db.PutSeat(ctx, fleetdb.Seat{
+				claimed := fleetdb.Seat{
 					SeatID: "seat2", SessionID: "s2", Engine: "cc", Backend: "herdr", HerdrSocket: "endpoint",
 					HerdrPane: "w1:p1", HerdrWorkspace: "w1", HerdrTerminalID: tc.claimedTerminal, State: "lost",
-				}); err != nil {
+				}
+				if tc.replaced {
+					claimed.SeatID, claimed.HerdrPane, claimed.HerdrWorkspace, claimed.State = "seat3", "w2:p1", "w2", "live"
+				}
+				if err := db.PutSeat(ctx, claimed); err != nil {
 					t.Fatal(err)
 				}
 				if err := db.Close(); err != nil {
@@ -480,8 +545,8 @@ func TestHerdrTabNativePaneWithoutAgentSession(t *testing.T) {
 				engine: func(context.Context, fleetdb.Seat) (bool, error) { return true, nil },
 			}
 			got, err := reader.views(ctx, target, "endpoint", []herdr.TabPane{pane})
-			if err != nil || len(got) != tc.views {
-				t.Fatalf("views=%+v err=%v warnings=%q", got, err, warnings)
+			if err != nil || len(got) != tc.views || warnings.String() != tc.warning {
+				t.Fatalf("views=%+v err=%v warnings=%q, want warnings %q", got, err, warnings, tc.warning)
 			}
 			if tc.views == 0 {
 				return
@@ -585,7 +650,8 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 		mode: func() (string, error) { return "emoji", nil }, warn: warnings,
 	}
 	got, err := provider.tabs(context.Background(), "endpoint")
-	if err != nil || len(got) != 1 || got[0].Identity != "s2" || !strings.Contains(warnings.String(), "server gone") {
+	if err != nil || len(got) != 1 || got[0].Identity != "s2" ||
+		warnings.String() != "Herdr tab status of s1: list tab tmux clients: server gone\n" {
 		t.Fatalf("tabs=%+v err=%v warnings=%s", got, err, warnings)
 	}
 	// A chat failing tick after tick is named once while it lasts, and afresh
@@ -611,7 +677,7 @@ func TestHerdrTabProviderOneChatFailureKeepsOthers(t *testing.T) {
 	}
 	listErr = fmt.Errorf("%w: socket refused", errTabPaneList)
 	_, err = provider.tabs(context.Background(), "endpoint")
-	if err == nil || !strings.Contains(err.Error(), "socket refused") {
+	if err == nil || err.Error() != "locate tab views of s1: list Herdr tab panes: socket refused" {
 		t.Fatalf("pane listing failure=%v", err)
 	}
 }
@@ -654,6 +720,20 @@ func TestHerdrTabProviderCarriesTheThemeGlyphs(t *testing.T) {
 	}
 	if !strings.Contains(warn.String(), "Herdr tab glyphs of the theme: parse state.json") {
 		t.Fatalf("an unreadable theme was not named: %q", warn.String())
+	}
+	// An unreadable configuration paints the default mode, named.
+	readErr = nil
+	warn.Reset()
+	provider.mode = func() (string, error) {
+		return "", errors.New("load Herdr tab status configuration: parse config.json: unexpected end")
+	}
+	got, err = provider.tabs(context.Background(), "endpoint")
+	if err != nil || len(got) != 2 || !reflect.DeepEqual(got[0].Glyphs, themeGlyphs) {
+		t.Fatalf("an unreadable configuration: tabs=%+v err=%v, want the tabs in the default emoji mode", got, err)
+	}
+	if want := "Herdr tab status configuration: load Herdr tab status configuration: parse config.json: unexpected end" +
+		" (painting the default emoji mode)\n"; warn.String() != want {
+		t.Fatalf("an unreadable configuration was named %q, want %q", warn.String(), want)
 	}
 }
 

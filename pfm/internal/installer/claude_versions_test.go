@@ -67,18 +67,18 @@ func (noImageProcFS) Environ(int) (map[string]string, error) { return nil, nil }
 func (noImageProcFS) FDLinks(int) ([]gather.FDLink, error)   { return nil, nil }
 func (noImageProcFS) Stat(int) (gather.ProcStat, error)      { return gather.ProcStat{}, nil }
 
-// alwaysAliveSignal answers every kill(pid, 0) probe as "still running" —
+// alwaysAliveProbe answers every kill(pid, 0) probe as "still running" —
 // the shape a candidate's genuine Image failure takes, as opposed to the
 // pid simply having exited mid-scan.
-func alwaysAliveSignal(int, syscall.Signal) error { return nil }
+func alwaysAliveProbe(int) error { return nil }
 
-// goneSignal answers every kill(pid, 0) probe as ESRCH — the pid exited
+// goneProbe answers every kill(pid, 0) probe as ESRCH — the pid exited
 // mid-scan, which ProbeLiveClaudeVersions must skip rather than refuse.
-func goneSignal(int, syscall.Signal) error { return syscall.ESRCH }
+func goneProbe(int) error { return syscall.ESRCH }
 
 func writeExecutable(t *testing.T, path string) {
 	t.Helper()
-	if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -117,7 +117,7 @@ func TestInspectClaudeVersionsMarksLiveNewestConfiguredAndUnparsed(t *testing.T)
 	if report.Live != nil {
 		t.Fatalf("InspectClaudeVersions alone populated Live: %v", report.Live)
 	}
-	report = ProbeLiveClaudeVersions(report, procs, alwaysAliveSignal)
+	report = ProbeLiveClaudeVersions(report, procs, alwaysAliveProbe)
 	if report.LiveProbeErr != nil {
 		t.Fatalf("unexpected live probe error: %v", report.LiveProbeErr)
 	}
@@ -162,7 +162,7 @@ func TestPlanClaudeVersionPruneRefusesEverythingWhenTheImageProbeFails(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	report = ProbeLiveClaudeVersions(report, noImageProcFS{}, alwaysAliveSignal)
+	report = ProbeLiveClaudeVersions(report, noImageProcFS{}, alwaysAliveProbe)
 	if report.LiveProbeErr == nil {
 		t.Fatal("expected a live-probe error from a process table with no image identity")
 	}
@@ -219,7 +219,7 @@ func TestProbeLiveClaudeVersionsSkipsNonCandidatePidsEvenWhenTheirImageErrors(t 
 		},
 	}
 
-	report = ProbeLiveClaudeVersions(report, procs, alwaysAliveSignal)
+	report = ProbeLiveClaudeVersions(report, procs, alwaysAliveProbe)
 	if report.LiveProbeErr != nil {
 		t.Fatalf("a non-candidate pid's Image error poisoned the whole probe: %v", report.LiveProbeErr)
 	}
@@ -252,7 +252,7 @@ func TestProbeLiveClaudeVersionsRefusesWhenACandidatePidsImageErrorsAndItIsStill
 		imageErrs: map[int]error{4242: fmt.Errorf("image read failed")},
 	}
 
-	report = ProbeLiveClaudeVersions(report, procs, alwaysAliveSignal)
+	report = ProbeLiveClaudeVersions(report, procs, alwaysAliveProbe)
 	if report.LiveProbeErr == nil {
 		t.Fatal("a live candidate's Image error did not refuse the prune")
 	}
@@ -287,7 +287,7 @@ func TestProbeLiveClaudeVersionsSkipsACandidateWhoseImageFailsBecauseThePidIsGon
 		imageErrs: map[int]error{4242: fmt.Errorf("image read failed")},
 	}
 
-	report = ProbeLiveClaudeVersions(report, procs, goneSignal)
+	report = ProbeLiveClaudeVersions(report, procs, goneProbe)
 	if report.LiveProbeErr != nil {
 		t.Fatalf("a candidate pid that already exited refused the prune: %v", report.LiveProbeErr)
 	}

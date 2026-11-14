@@ -11,6 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func composeLaunches(t *testing.T, launches ...fleetdb.Launch) *fleetdb.Launches {
@@ -33,13 +34,17 @@ func composeLaunches(t *testing.T, launches ...fleetdb.Launch) *fleetdb.Launches
 	return reader
 }
 
-const fixtureClaudeTranscriptPath = "/fixture/one/.claude/projects/S.jsonl"
+func fixtureClaudeTranscriptPath() string {
+	return testjail.Place("/fixture/one/.claude/projects/S.jsonl")
+}
 
 func TestComposeNonLiveAccountUsesLaunchRecord(t *testing.T) {
 	input := Input{
-		Transcripts: []store.Transcript{transcript("S", fixtureClaudeTranscriptPath, "/work", "S", 1, 1, 1)},
-		Launches:    composeLaunches(t, fleetdb.Launch{SessionID: "S", Engine: pfmengine.Claude, Account: 3}),
-		Options:     Options{View: AllView},
+		Transcripts: []store.Transcript{
+			transcript("S", fixtureClaudeTranscriptPath(), testjail.Place("/work"), "S", 1, 1, 1),
+		},
+		Launches: composeLaunches(t, fleetdb.Launch{SessionID: "S", Engine: pfmengine.Claude, Account: 3}),
+		Options:  Options{View: AllView},
 	}
 	row, found := rowByID(Compose(input).Rows, "S")
 	if !found || row.Account != 3 || row.LaunchUnread {
@@ -56,7 +61,7 @@ func TestLiveClaudeAccountUsesConfiguredSeat(t *testing.T) {
 		want      int
 	}{
 		{name: "empty process config", want: 0},
-		{name: "configured process config", processes: []gather.ClaudeProcess{{Socket: "cc-S", PaneID: "%1", ConfigDir: "/fixture/account/1"}}, want: 1},
+		{name: "configured process config", processes: []gather.ClaudeProcess{{Socket: "cc-S", PaneID: "%1", ConfigDir: testjail.Place("/fixture/account/1")}}, want: 1},
 		{
 			// A failed environ read is no evidence against the launch record.
 			name:      "unreadable live process config keeps its launch record",
@@ -67,27 +72,27 @@ func TestLiveClaudeAccountUsesConfiguredSeat(t *testing.T) {
 		{
 			name: "two Claude processes in one pane keep the launch record",
 			processes: []gather.ClaudeProcess{
-				{Socket: "cc-S", PaneID: "%1", ConfigDir: "/fixture/account/1"},
-				{Socket: "cc-S", PaneID: "%1", ConfigDir: "/unknown"},
+				{Socket: "cc-S", PaneID: "%1", ConfigDir: testjail.Place("/fixture/account/1")},
+				{Socket: "cc-S", PaneID: "%1", ConfigDir: testjail.Place("/unknown")},
 			},
 			launch: []fleetdb.Launch{{SessionID: "S", Engine: pfmengine.Claude, Account: 2}},
 			want:   2,
 		},
-		{name: "unknown explicit config", agents: []gather.Agent{{SessionID: "S", ConfigDir: "/unknown"}}, want: 0},
-		{name: "unknown live process config", processes: []gather.ClaudeProcess{{Socket: "cc-S", PaneID: "%1", ConfigDir: "/unknown"}}, want: 0},
+		{name: "unknown explicit config", agents: []gather.Agent{{SessionID: "S", ConfigDir: testjail.Place("/unknown")}}, want: 0},
+		{name: "unknown live process config", processes: []gather.ClaudeProcess{{Socket: "cc-S", PaneID: "%1", ConfigDir: testjail.Place("/unknown")}}, want: 0},
 		{name: "unreadable live process config", processes: []gather.ClaudeProcess{{Socket: "cc-S", PaneID: "%1", ConfigUnreadable: true}}, want: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			const transcriptPath = "/store/S.jsonl"
 			input := Input{
-				Transcripts: []store.Transcript{transcript("S", transcriptPath, "/work", "S", 1, 1, 1)},
+				Transcripts: []store.Transcript{transcript("S", transcriptPath, testjail.Place("/work"), "S", 1, 1, 1)},
 				Snapshot: gather.Snapshot{
 					Panes:           []gather.ProbePane{{Socket: "cc-S", PaneID: "%1"}},
 					Crumbs:          []gather.Crumb{{Socket: "cc-S", PaneID: "%1", TranscriptPath: transcriptPath}},
 					Agents:          test.agents,
 					ClaudeProcesses: test.processes,
 				},
-				ClaudeSeats: []ClaudeSeat{{Account: 1, ConfigDir: "/fixture/account/1"}},
+				ClaudeSeats: []ClaudeSeat{{Account: 1, ConfigDir: testjail.Place("/fixture/account/1")}},
 				Launches:    composeLaunches(t, test.launch...),
 				Options:     Options{View: AllView},
 			}
@@ -101,8 +106,11 @@ func TestLiveClaudeAccountUsesConfiguredSeat(t *testing.T) {
 
 func TestComposeNeverLaunchedHasNoAccountOrMedal(t *testing.T) {
 	input := Input{
-		Transcripts: []store.Transcript{transcript("S", fixtureClaudeTranscriptPath, "/work", "S", 1, 1, 1)},
-		Launches:    composeLaunches(t), Options: Options{View: AllView},
+		Transcripts: []store.Transcript{
+			transcript("S", fixtureClaudeTranscriptPath(), testjail.Place("/work"), "S", 1, 1, 1),
+		},
+		Launches: composeLaunches(t),
+		Options:  Options{View: AllView},
 	}
 	row, found := rowByID(Compose(input).Rows, "S")
 	if !found || row.Account != 0 || row.LaunchUnread {
@@ -112,8 +120,11 @@ func TestComposeNeverLaunchedHasNoAccountOrMedal(t *testing.T) {
 
 func TestComposeLaunchReadFailureMarksRow(t *testing.T) {
 	input := Input{
-		Transcripts: []store.Transcript{transcript("S", fixtureClaudeTranscriptPath, "/work", "S", 1, 1, 1)},
-		LaunchError: errors.New("unreadable pfm.db"), Options: Options{View: AllView},
+		Transcripts: []store.Transcript{
+			transcript("S", fixtureClaudeTranscriptPath(), testjail.Place("/work"), "S", 1, 1, 1),
+		},
+		LaunchError: errors.New("unreadable pfm.db"),
+		Options:     Options{View: AllView},
 	}
 	row, found := rowByID(Compose(input).Rows, "S")
 	if !found || !row.LaunchUnread || row.C1H {
@@ -138,7 +149,7 @@ func TestComposeLiveBadgeUsesLaunchRecord(t *testing.T) {
 			}
 			path := "/home/.claude/projects/S.jsonl"
 			input := Input{
-				Transcripts: []store.Transcript{transcript("S", path, "/work", "S", 1, 1, 1)},
+				Transcripts: []store.Transcript{transcript("S", path, testjail.Place("/work"), "S", 1, 1, 1)},
 				Launches:    composeLaunches(t, records...), Options: Options{View: AllView},
 				Snapshot: gather.Snapshot{
 					Panes:           []gather.ProbePane{{Socket: "cc-S", PaneID: "%1"}},

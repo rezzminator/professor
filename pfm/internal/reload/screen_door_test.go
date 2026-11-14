@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strings"
 	"testing"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
@@ -84,11 +83,11 @@ func TestRunRefusesWhenTheCopyModeReadFails(t *testing.T) {
 	}
 	options := Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}
 	_, err := Run(context.Background(), request, options, tmux, nil, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "server not responding") {
+	if err == nil || err.Error() != "server not responding" {
 		t.Fatalf("Run error = %v, want the failed copy-mode read", err)
 	}
 	for _, verb := range tmux.verbs {
-		if strings.HasPrefix(verb, "type ") || strings.HasPrefix(verb, "key ") {
+		if verb != "leave copy mode" {
 			t.Fatalf("door calls %v: typed into a pane whose mode was unread", tmux.verbs)
 		}
 	}

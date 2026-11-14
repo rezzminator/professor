@@ -3,6 +3,7 @@ package tokens
 import (
 	"errors"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -57,6 +58,23 @@ func (scan *scanState) json() *object {
 	return out
 }
 
+// undatedAt places a record that carries no usable timestamp: at the previous
+// record's time, else the transcript's modification time. The record is
+// counted in noTimestamp, a call kept and not dropped. NaN, counted as a read
+// error beside the count, when the file's modification time cannot be read.
+func (a *auditor) undatedAt(file string, previous float64) float64 {
+	a.scan.noTimestamp++
+	if !math.IsNaN(previous) {
+		return previous
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		a.scan.readErrors = append(a.scan.readErrors, "place undated record in "+file+": "+describe(err))
+		return math.NaN()
+	}
+	return mtimeMs(info.ModTime())
+}
+
 // noteOnce adds a note the scan does not already carry.
 func (scan *scanState) noteOnce(note string) {
 	for _, existing := range scan.notes {
@@ -80,6 +98,13 @@ const backgroundGap = "transcript totals exclude background API calls (auto_mode
 func (a *auditor) gapsLine() string {
 	scan, book := a.scan, a.prices
 	var loud []string
+	if book.tableFailure != "" {
+		loud = append(loud, "price table unusable ("+book.tableFailure+`) — tokens counted, every dollar "n/a"`)
+	}
+	if book.overrideFailure != "" {
+		loud = append(loud, "price override unusable ("+book.overrideFailure+
+			") — dollars use the published table without it")
+	}
 	if book.refresh != nil && book.refresh.Status == "failed" {
 		cause := book.refresh.Error
 		if cause == "" {
@@ -96,7 +121,7 @@ func (a *auditor) gapsLine() string {
 		}
 	}
 	add(scan.badLines, " malformed lines")
-	add(scan.noTimestamp, " calls without a timestamp (dropped)")
+	add(scan.noTimestamp, " records without a timestamp (placed at the previous record's time, else the file's)")
 	add(scan.syntheticCalls, " synthetic/zero-usage calls (dropped: the harness billed nothing for them)")
 	if scan.unpricedCalls != 0 {
 		loud = append(loud, num(float64(scan.unpricedCalls))+" UNPRICED calls "+stringify(scan.unpricedModels, 0)+
@@ -154,6 +179,9 @@ func (a *auditor) gapsLine() string {
 		"; not historical billing"
 	if book.billing != nil {
 		pricingLine += "; Claude " + book.billing.Route + "/" + book.billing.Region
+	}
+	if book.tableFailure != "" {
+		pricingLine = "pricing: none, no price table loaded; not historical billing"
 	}
 	pricingLine += "\n"
 	if len(loud) == 0 {

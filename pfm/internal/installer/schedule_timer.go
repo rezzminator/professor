@@ -8,9 +8,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The schedule scheduler: `pfm internal schedule-fire` every 5 minutes, a
@@ -26,30 +26,27 @@ const (
 	retiredScheduleLaunchdLabel = "com.professor.pfm.reminder"
 )
 
-// ScheduleTimerDrift compares installed scheduler files with the install assets.
+// ScheduleTimerDrift compares this host's installed scheduler files with the
+// install assets.
 func ScheduleTimerDrift(home string, required ...bool) (path string, drifted bool, err error) {
+	return scheduleFilesDrift(nativeScheduler(), home, len(required) > 0 && required[0])
+}
+
+// scheduleFilesDrift compares sched's installed schedule-tick files under home
+// with what install writes. Once any of them exists (or installed says the
+// scheduler must be there), a missing one is drift.
+func scheduleFilesDrift(sched scheduler, home string, installed bool) (path string, drifted bool, err error) {
 	if home == "" {
 		return "", false, fmt.Errorf("schedule timer drift: no home directory")
 	}
-	assets := []string{"systemd/" + scheduleTimerUnit, "systemd/" + scheduleServiceUnit}
-	if schedulerIsLaunchd {
-		assets = []string{scheduleLaunchdAsset}
-	}
-	installed := len(required) > 0 && required[0]
-	for _, name := range assets {
-		path := filepath.Join(home, ".config", "systemd", "user", filepath.Base(name))
-		if schedulerIsLaunchd {
-			path = scheduleLaunchAgentFile(home)
-		}
-		if _, statErr := os.Lstat(path); !errors.Is(statErr, fs.ErrNotExist) {
+	files := sched.scheduleFiles(home)
+	for _, file := range files {
+		if _, statErr := os.Lstat(file.path); !errors.Is(statErr, fs.ErrNotExist) {
 			installed = true
 		}
 	}
-	for _, name := range assets {
-		path := filepath.Join(home, ".config", "systemd", "user", filepath.Base(name))
-		if schedulerIsLaunchd {
-			path = scheduleLaunchAgentFile(home)
-		}
+	for _, file := range files {
+		path := file.path
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 			if installed {
 				return path, true, nil
@@ -66,18 +63,9 @@ func ScheduleTimerDrift(home string, required ...bool) (path string, drifted boo
 		if err != nil {
 			return "", false, fmt.Errorf("read %s: %w", path, err)
 		}
-		var wanted []byte
-		if schedulerIsLaunchd {
-			wanted, err = renderScheduleLaunchAgent(home)
-		} else {
-			wanted, err = readAsset(name)
-			if err != nil {
-				return "", false, fmt.Errorf("read embedded asset %s: %w", name, err)
-			}
-			wanted, err = renderServicePath(wanted, home)
-		}
+		wanted, err := file.render()
 		if err != nil {
-			return "", false, fmt.Errorf("render embedded asset %s: %w", name, err)
+			return "", false, err
 		}
 		if !bytes.Equal(actual, wanted) {
 			return path, true, nil
@@ -92,7 +80,7 @@ func (installer *engine) scheduleLaunchAgentPath() string {
 }
 
 func scheduleLaunchAgentFile(home string) string {
-	return filepath.Join(home, "Library", "LaunchAgents", scheduleLaunchdLabel+".plist")
+	return filepath.Join(paths.LaunchAgentsDir(home), scheduleLaunchdLabel+".plist")
 }
 
 func renderScheduleLaunchAgent(home string) ([]byte, error) {
@@ -102,7 +90,7 @@ func renderScheduleLaunchAgent(home string) ([]byte, error) {
 	}
 	wanted, err := renderLaunchAgentTemplate(template, home)
 	if err == nil {
-		wanted, err = renderServicePath(wanted, home)
+		wanted, err = renderServiceEnv(wanted, home)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("render schedule launch agent: %w", err)
@@ -162,17 +150,13 @@ func (installer *engine) unwireScheduleLaunchAgent(ctx context.Context) error {
 
 // unwireScheduleLaunchAgentLabel unloads and removes one schedule agent plist.
 func (installer *engine) unwireScheduleLaunchAgentLabel(ctx context.Context, label string) error {
-	path := filepath.Join(installer.options.Home, "Library", "LaunchAgents", label+".plist")
+	path := filepath.Join(paths.LaunchAgentsDir(installer.options.Home), label+".plist")
 	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("stat schedule launch agent %s: %w", path, err)
 	}
-	if installer.apply {
-		domain := "gui/" + strconv.Itoa(os.Getuid())
-		_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+label)
-	}
-	if err := installer.change("remove "+path, func() error { return os.Remove(path) }); err != nil {
+	if err := installer.retireLaunchAgent(ctx, path, label, "remove "+path); err != nil {
 		return fmt.Errorf("remove schedule launch agent %s: %w", path, err)
 	}
 	return nil

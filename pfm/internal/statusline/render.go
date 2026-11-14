@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -50,8 +51,6 @@ type input struct {
 		UsedPercentage    float64 `json:"used_percentage"`
 		ContextWindowSize int64   `json:"context_window_size"`
 		PercentageKnown   bool    `json:"-"`
-		TotalInputTokens  int64   `json:"total_input_tokens"`
-		TotalOutputTokens int64   `json:"total_output_tokens"`
 		CurrentUsage      struct {
 			Known                    bool  `json:"-"`
 			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
@@ -102,6 +101,11 @@ type rateWindow struct {
 type rateLimits struct {
 	Windows map[string]rateWindow
 	Scoped  []usagehook.ScopedLimit
+	// scopedFailed marks a scoped array that could not be read (undecodable, or
+	// a percent out of range): the Fable row reads ERR, never hidden as off-plan.
+	scopedFailed bool
+	// faults are the decode and range notes Render prints to its Warn writer.
+	faults []string
 }
 
 func (limits *rateLimits) UnmarshalJSON(content []byte) error {
@@ -113,7 +117,8 @@ func (limits *rateLimits) UnmarshalJSON(content []byte) error {
 	// gateway's spend_limit, the undocumented per-model weeklies) so the quota
 	// snapshot can carry them all. Any window may be absent or null, and a key
 	// that is no window at all (model_scoped is an array) is skipped: only a
-	// malformed five_hour or seven_day, the two the render reads, fails it.
+	// malformed five_hour or seven_day, the two the render reads, reads ERR
+	// there while every other window still draws.
 	decoded := rateLimits{Windows: make(map[string]rateWindow, len(raw))}
 	for key, value := range raw {
 		if key == "limits" || string(value) == "null" {
@@ -121,8 +126,9 @@ func (limits *rateLimits) UnmarshalJSON(content []byte) error {
 		}
 		var window rateWindow
 		if err := json.Unmarshal(value, &window); err != nil {
-			if key == "five_hour" || key == "seven_day" {
-				return fmt.Errorf("decode %s rate limit: %w", key, err)
+			if key == fiveHourCacheKey || key == sevenDayCacheKey {
+				decoded.Windows[key] = rateWindow{Failure: true}
+				decoded.faults = append(decoded.faults, fmt.Sprintf("decode %s rate limit: %v", key, err))
 			}
 			continue
 		}
@@ -130,7 +136,9 @@ func (limits *rateLimits) UnmarshalJSON(content []byte) error {
 	}
 	if value, ok := raw["limits"]; ok {
 		if err := json.Unmarshal(value, &decoded.Scoped); err != nil {
-			return fmt.Errorf("decode scoped rate limits: %w", err)
+			decoded.Scoped = nil
+			decoded.scopedFailed = true
+			decoded.faults = append(decoded.faults, fmt.Sprintf("decode scoped rate limits: %v", err))
 		}
 	}
 	*limits = decoded
@@ -144,23 +152,21 @@ func (limits rateLimits) windowsAt(
 	now time.Time,
 	runtime Runtime,
 	account int,
-) (map[string]rateWindow, map[string]rateWindow, error) {
+) (map[string]rateWindow, map[string]rateWindow) {
 	windows := make(map[string]rateWindow, len(limits.Windows)+1)
 	for key, window := range limits.Windows {
 		windows[key] = window
 	}
+	if limits.scopedFailed {
+		windows[fableCacheKey] = rateWindow{Failure: true}
+	}
+	// FableWindowAt keeps a reset that is empty or unreadable (resetUnix warns
+	// of the latter), where NamedWindowsAt would hide the window as off-plan.
 	usage := usagehook.Usage{Limits: limits.Scoped}
-	for _, named := range usage.NamedWindowsAt(now) {
-		if named.Key != "seven_day_fable" || named.Window.Utilization == nil {
-			continue
-		}
-		resetAt, err := time.Parse(time.RFC3339, named.Window.ResetsAt)
-		if err != nil {
-			return nil, nil, fmt.Errorf("decode %s reset: %w", named.Key, err)
-		}
-		windows[named.Key] = rateWindow{
-			UsedPercentage: *named.Window.Utilization,
-			ResetsAt:       resetAt.Unix(),
+	if window, ok, _ := usage.FableWindowAt(now); ok && window.Utilization != nil {
+		windows[fableCacheKey] = rateWindow{
+			UsedPercentage: *window.Utilization,
+			ResetsAt:       resetUnix(runtime.Warn, "payload", fableCacheKey, window.ResetsAt),
 		}
 	}
 	reported := maps.Clone(windows)
@@ -189,7 +195,7 @@ func (limits rateLimits) windowsAt(
 		adoptSiblingReadings(now, runtime, account, windows)
 		fillCachedRateWindows(now, runtime, account, windows, missing)
 	}
-	return windows, reported, nil
+	return windows, reported
 }
 
 // Render is the native high-frequency path. It performs no network work and
@@ -201,8 +207,8 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return "", fmt.Errorf("decode statusline input: %w", err)
 	}
-	if err := validateInput(data); err != nil {
-		return "", fmt.Errorf("invalid statusline input: %w", err)
+	for _, fault := range append(data.RateLimits.faults, sanitizeInput(&data)...) {
+		fmt.Fprintf(runtime.Warn, "statusline: input: %s\n", fault)
 	}
 	if data.Model.ID == "" {
 		data.Model.ID = runtime.getenv("ANTHROPIC_MODEL")
@@ -224,14 +230,11 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	// read; accountBadge is pure and side-effect-free, so calling it before
 	// its other use below duplicates no logic, only the (cheap) lookup.
 	badge, account := accountBadge(runtime)
-	resolvedLimits, reported, err := data.RateLimits.windowsAt(now, runtime, account)
-	if err != nil {
-		return "", fmt.Errorf("decode statusline rate limits: %w", err)
-	}
+	resolvedLimits, reported := data.RateLimits.windowsAt(now, runtime, account)
 	data.RateLimits.Windows = resolvedLimits
 	data.RateLimits.Scoped = nil
 	writeBreadcrumb(runtime, data.TranscriptPath)
-	convergeWindowName(ctx, runtime, data)
+	convergeChatName(ctx, runtime, data)
 
 	recordRateLimits(runtime, now, account, data.SessionID, reported)
 
@@ -286,9 +289,9 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	}
 
 	if l3 != "" {
-		return reset + l1 + "\n" + reset + l2 + "\n" + reset + l3 + "\n", nil
+		l2 += "\n" + reset + l3
 	}
-	return reset + l1 + "\n" + reset + l2 + "\n", nil
+	return reset + l1 + "\n" + reset + l2 + "\n" + agentRowLines(runtime, data, directory, now), nil
 }
 
 func formatDuration(milliseconds int64) string {
@@ -393,7 +396,7 @@ func rateWindowRow(now time.Time, descriptor usagehook.WindowDescriptor, data in
 	label := percentColor(used) + descriptor.Label + "-used:" + strconv.Itoa(used) + "%" + reset
 	remaining := window.ResetsAt - now.Unix()
 	if remaining > 0 {
-		if descriptor.Key == "five_hour" {
+		if descriptor.Key == fiveHourCacheKey {
 			label += fmt.Sprintf(" %s↻%dh%dm%s", dim, remaining/3600, remaining%3600/60, reset)
 		} else {
 			label += fmt.Sprintf(" %s↻%dd%dh%s", dim, remaining/86400, remaining%86400/3600, reset)
@@ -508,14 +511,11 @@ func fleetCountsWithError(runtime Runtime) (map[pfmengine.ID]int, error) {
 			counts[id]++
 		}
 	}
-	if body, err := os.ReadFile(filepath.Join(runtime.ProcRoot, "net", "unix")); err == nil {
+	// The kernel's socket table counts only bound, live servers; where it
+	// cannot be read (macOS publishes none) the socket directory answers.
+	if sockets, err := gather.UnixSockets(runtime.ProcRoot); err == nil {
 		seen := map[string]bool{}
-		for _, line := range strings.Split(string(body), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) < 8 {
-				continue
-			}
-			path := fields[len(fields)-1]
+		for _, path := range sockets {
 			if filepath.Clean(filepath.Dir(path)) != filepath.Clean(runtime.TmuxDir) {
 				continue
 			}
@@ -528,8 +528,9 @@ func fleetCountsWithError(runtime Runtime) (map[pfmengine.ID]int, error) {
 		}
 		return counts, nil
 	}
+	// No socket directory yet means no tmux server ever ran: an empty fleet.
 	entries, err := os.ReadDir(runtime.TmuxDir)
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("read fleet sockets %s: %w", runtime.TmuxDir, err)
 	}
 	for _, entry := range entries {
@@ -621,7 +622,7 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 		Socket: socket, WindowID: pane, CurrentName: current, TargetName: label,
 		ChatName: data.SessionName,
 	}
-	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
+	client := gather.TmuxProbe{TmuxDir: runtime.TmuxDir}
 	if err := client.RenameWindow(commandContext, rename); err != nil {
 		return
 	}
@@ -708,9 +709,9 @@ func recordRateLimits(
 	if !live {
 		return
 	}
-	fiveWindow := windows["five_hour"]
-	sevenWindow := windows["seven_day"]
-	fableWindow := windows["seven_day_fable"]
+	fiveWindow := windows[fiveHourCacheKey]
+	sevenWindow := windows[sevenDayCacheKey]
+	fableWindow := windows[fableCacheKey]
 	if err := os.MkdirAll(runtime.RateLimitDir, 0o700); err != nil {
 		return
 	}
@@ -886,9 +887,19 @@ func codexQuotaSegment(runtime Runtime, now time.Time) string {
 		if window == nil {
 			continue
 		}
-		if window.UsedPercent < 0 || window.UsedPercent > 100 || window.ResetsAt <= 0 ||
-			window.WindowDurationMins <= 0 {
-			return cBad + codexQuotaLabel + catalogError + reset
+		// The reset and the length only draw the countdown and the label
+		// (resetCountdown, windowLabel): an unknown one never costs the reading.
+		// A percent outside 0..100 costs its own window, drawn as an error so
+		// it never reads as a window that did not answer.
+		if window.UsedPercent < 0 || window.UsedPercent > 100 {
+			fmt.Fprintf(
+				runtime.Warn,
+				"statusline: Codex quota %s: window used percent %v outside 0..100\n",
+				path,
+				window.UsedPercent,
+			)
+			segment = appendSegment(segment, cBad+windowLabel(window.WindowDurationMins)+"-used:"+catalogError+reset)
+			continue
 		}
 		percent := gaugePercent(window.UsedPercent)
 		segment = appendSegment(
@@ -920,6 +931,8 @@ func codexQuotaSegment(runtime Runtime, now time.Time) string {
 
 func windowLabel(minutes int64) string {
 	switch {
+	case minutes <= 0:
+		return "?"
 	case minutes >= 1440:
 		return fmt.Sprintf("%dd", minutes/1440)
 	case minutes >= 60:

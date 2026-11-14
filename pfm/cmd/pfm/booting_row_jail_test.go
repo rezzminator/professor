@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -32,6 +34,7 @@ import (
 // appears; a cc-new-* socket rows Booting too and is untouched by the first
 // socket's crumb.
 func TestBootingRowJailedTSV(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -88,6 +91,7 @@ func TestBootingRowJailedTSV(t *testing.T) {
 // first prompt creates a transcript or statusline crumb. This is the exact
 // promptless `pfm chat new --name` window other chats must resolve.
 func TestPromptlessNamedChatResolvesByItsLaunchName(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -116,6 +120,7 @@ func TestPromptlessNamedChatResolvesByItsLaunchName(t *testing.T) {
 // row under its launch name, and that name resolves to its session id, so
 // `pfm chat open NAME` and resolve reach it.
 func TestPromptlessForkListsAndResolvesByItsLaunchName(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -235,6 +240,7 @@ func bootingRowsFromTSV(t *testing.T) map[string]string {
 // action.Dispatch's own terminal branch execs tmux directly — no zsh/eval
 // wrapper is needed for a TMUX= line).
 func TestBootingRowInteractivePickerJailed(t *testing.T) {
+	testjail.TmuxServer(t)
 	t.Parallel()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")

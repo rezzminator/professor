@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
@@ -40,7 +41,7 @@ var _ themesync.TmuxServers = Servers{}
 // tmuxDir/{socket}.
 func AtDir(tmuxDir string) Servers {
 	return Servers{
-		Probe:   gather.TmuxProbe{TmuxTmpDir: filepath.Dir(tmuxDir)},
+		Probe:   gather.TmuxProbe{TmuxDir: tmuxDir},
 		TmuxDir: tmuxDir,
 	}
 }
@@ -86,9 +87,17 @@ func (servers Servers) Sockets(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(names)
 
+	// Every server is asked at once: a stopped one answers only at the probe
+	// bound, so N of them cost one bound, never N in a row.
+	pidErrs := make([]error, len(names))
+	var waitGroup sync.WaitGroup
+	for index, name := range names {
+		waitGroup.Go(func() { _, pidErrs[index] = servers.Probe.ServerPID(ctx, name) })
+	}
+	waitGroup.Wait()
 	live := make([]string, 0, len(names))
-	for _, name := range names {
-		if _, err := servers.Probe.ServerPID(ctx, name); err != nil {
+	for index, name := range names {
+		if err := pidErrs[index]; err != nil {
 			if errors.Is(err, gather.ErrServerGone) {
 				continue
 			}

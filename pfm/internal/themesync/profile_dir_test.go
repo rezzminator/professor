@@ -3,6 +3,7 @@ package themesync
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -40,23 +41,11 @@ func copyShippedTheme(t *testing.T, name string) string {
 }
 
 func TestProfileFilesIsTheFixedSet(t *testing.T) {
-	files := ProfileFiles()
-	if want := 7 + len(workbenchGroups) + len(syntaxFamilyNames()); len(files) != want {
-		t.Fatalf("ProfileFiles has %d files, want %d: 7, one per workbench group and one per syntax family: %v",
-			len(files), want, files)
-	}
-	listed := "\n" + strings.Join(files, "\n") + "\n"
-	for _, want := range []string{
-		"theme.json", "claude.json", "terminal.json", "tmux.json", "herdr.json", "vscode/chrome.json",
-		"vscode/semantic.json", "vscode/syntax/comment.json", "vscode/syntax/meta.json", "vscode/syntax/other.json",
-		"vscode/workbench/editor.json", "vscode/workbench/tabs.json",
-	} {
-		if !strings.Contains(listed, "\n"+want+"\n") {
-			t.Errorf("ProfileFiles lacks %s: %v", want, files)
-		}
-	}
-	if strings.Contains(listed, "\nvscode/syntax.json\n") {
-		t.Errorf("ProfileFiles still holds the single vscode/syntax.json: %v", files)
+	if got, want := strings.Join(
+		ProfileFiles(),
+		"\n",
+	), "claude.json\nherdr.json\nterminal.json\ntheme.json\ntmux.json\nvscode/chrome.json\nvscode/semantic.json\nvscode/syntax/comment.json\nvscode/syntax/constant.json\nvscode/syntax/diagnostic.json\nvscode/syntax/entity.json\nvscode/syntax/keyword.json\nvscode/syntax/markup.json\nvscode/syntax/meta.json\nvscode/syntax/other.json\nvscode/syntax/punctuation.json\nvscode/syntax/source.json\nvscode/syntax/string.json\nvscode/syntax/support.json\nvscode/syntax/variable.json\nvscode/workbench/activitybar.json\nvscode/workbench/base.json\nvscode/workbench/chat.json\nvscode/workbench/controls.json\nvscode/workbench/debug-testing.json\nvscode/workbench/diff-merge.json\nvscode/workbench/editor-guides.json\nvscode/workbench/editor-gutter.json\nvscode/workbench/editor-widgets.json\nvscode/workbench/editor.json\nvscode/workbench/notebook.json\nvscode/workbench/notifications.json\nvscode/workbench/panel.json\nvscode/workbench/quick-input.json\nvscode/workbench/sidebar-explorer.json\nvscode/workbench/statusbar.json\nvscode/workbench/symbols.json\nvscode/workbench/tabs.json\nvscode/workbench/terminal.json\nvscode/workbench/titlebar-menus.json"; got != want {
+		t.Errorf("ProfileFiles = %q, want %q", got, want)
 	}
 }
 
@@ -156,6 +145,9 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 		}
 		return string(content)
 	}
+	canonical := func(file, content string) func(t *testing.T, dir string) {
+		return func(t *testing.T, dir string) { write(t, dir, file, canonicalOrFail(t, content)) }
+	}
 	cases := []struct {
 		name   string
 		damage func(t *testing.T, dir string)
@@ -168,22 +160,22 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			want: "missing [vscode/workbench/tabs.json], extra []",
+			want: "theme {dir}: the file set differs from every theme's (ProfileFiles): missing [vscode/workbench/tabs.json], extra []",
 		},
 		{
 			name:   "extra file",
 			damage: func(t *testing.T, dir string) { write(t, dir, "notes.json", "{}\n") },
-			want:   "missing [], extra [notes.json]",
+			want:   "theme {dir}: the file set differs from every theme's (ProfileFiles): missing [], extra [notes.json]",
 		},
 		{
 			name:   "extra workbench file",
 			damage: func(t *testing.T, dir string) { write(t, dir, "vscode/workbench/misc.json", "{}\n") },
-			want:   "missing [], extra [vscode/workbench/misc.json]",
+			want:   "theme {dir}: the file set differs from every theme's (ProfileFiles): missing [], extra [vscode/workbench/misc.json]",
 		},
 		{
 			name:   "extra directory",
 			damage: func(t *testing.T, dir string) { write(t, dir, "vscode/extra/editor.json", "{}\n") },
-			want:   "missing [], extra [vscode/extra/]",
+			want:   "theme {dir}: the file set differs from every theme's (ProfileFiles): missing [], extra [vscode/extra/]",
 		},
 		{
 			name: "symlinked file",
@@ -196,7 +188,7 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			want: "missing [tmux.json], extra [tmux.json]",
+			want: "theme {dir}: the file set differs from every theme's (ProfileFiles): missing [tmux.json], extra [tmux.json]",
 		},
 		{
 			name: "colour in the wrong group's file",
@@ -217,7 +209,7 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 				write(t, dir, "vscode/workbench/editor.json", canonicalOrFail(t,
 					strings.Replace(editor, "{\n", "{\n  "+line+",\n", 1)))
 			},
-			want: `vscode/workbench/editor.json: colour "tab.activeBackground" belongs in vscode/workbench/tabs.json`,
+			want: "theme {dir}: vscode/workbench/editor.json: colour \"tab.activeBackground\" belongs in vscode/workbench/tabs.json",
 		},
 		{
 			name: "missing syntax family file",
@@ -226,12 +218,12 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			want: "missing [vscode/syntax/meta.json], extra []",
+			want: "theme {dir}: the file set differs from every theme's (ProfileFiles): missing [vscode/syntax/meta.json], extra []",
 		},
 		{
 			name:   "the single syntax file beside the family files",
 			damage: func(t *testing.T, dir string) { write(t, dir, "vscode/syntax.json", "[]\n") },
-			want:   "missing [], extra [vscode/syntax.json]",
+			want:   "theme {dir}: the file set differs from every theme's (ProfileFiles): missing [], extra [vscode/syntax.json]",
 		},
 		{
 			name: "syntax rule in the wrong family's file",
@@ -243,7 +235,7 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 				write(t, dir, "vscode/syntax/comment.json", syntaxFileOrFail(t, comments))
 				write(t, dir, "vscode/syntax/meta.json", syntaxFileOrFail(t, metas))
 			},
-			want: `vscode/syntax/meta.json: rule "0000" (first scope "comment") belongs in vscode/syntax/comment.json`,
+			want: "theme {dir}: vscode/syntax/meta.json: rule \"0000\" (first scope \"comment\") belongs in vscode/syntax/comment.json",
 		},
 		{
 			name: "syntax ordinal used twice",
@@ -253,7 +245,7 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 				delete(comments, "0002")
 				write(t, dir, "vscode/syntax/comment.json", syntaxFileOrFail(t, comments))
 			},
-			want: `vscode/syntax/keyword.json: rule "0001" holds an ordinal vscode/syntax/comment.json already holds`,
+			want: "theme {dir}: vscode/syntax/keyword.json: rule \"0001\" holds an ordinal vscode/syntax/comment.json already holds",
 		},
 		{
 			name: "syntax ordinal gap",
@@ -263,7 +255,7 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 				delete(comments, "0002")
 				write(t, dir, "vscode/syntax/comment.json", syntaxFileOrFail(t, comments))
 			},
-			want: `vscode/syntax: no rule holds ordinal "0002"`,
+			want: "theme {dir}: vscode/syntax: no rule holds ordinal \"0002\": the ordinals run from 0000 without a gap",
 		},
 		{
 			name: "syntax ordinal not four digits",
@@ -273,14 +265,14 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 				delete(comments, "0002")
 				write(t, dir, "vscode/syntax/comment.json", syntaxFileOrFail(t, comments))
 			},
-			want: `vscode/syntax/comment.json: rule "2": an ordinal is four digits`,
+			want: "theme {dir}: vscode/syntax/comment.json: rule \"2\": an ordinal is four digits, the rule's index in tokenColors",
 		},
 		{
 			name: "file not in canonical form",
 			damage: func(t *testing.T, dir string) {
 				write(t, dir, "theme.json", `{"name":"Tokyo Night · neon pink","base":"dark"}`)
 			},
-			want: "theme.json: not in canonical form",
+			want: "theme {dir}: theme.json: not in canonical form, keys sorted, two-space indent, one trailing newline (jq -S --indent 2 . writes it): line 1 should read \"{\"",
 		},
 		{
 			name: "unknown key",
@@ -292,14 +284,67 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 					"{\n  \"base\": \"dark\",\n  \"colour\": \"#000000\",\n  \"name\": \"N\"\n}\n",
 				)
 			},
-			want: `theme.json: json: unknown field "colour"`,
+			want: "theme {dir}: theme.json: json: unknown field \"colour\"",
 		},
 		{
 			name: "unknown colour id",
 			damage: func(t *testing.T, dir string) {
 				write(t, dir, "vscode/workbench/editor.json", "{\n  \"editors.x\": \"#000000\"\n}\n")
 			},
-			want: `vscode/workbench/editor.json: VS Code colour "editors.x": no vscode/workbench group claims "editors"`,
+			want: "theme {dir}: vscode/workbench/editor.json: VS Code colour \"editors.x\": no vscode/workbench group claims \"editors\" (profile_groups.go)",
+		},
+		{
+			name:   "invalid base",
+			damage: canonical("theme.json", `{"name":"Broken","base":"no-such-base"}`),
+			want:   "theme {dir}: theme.json: base \"no-such-base\": not a Claude Code built-in theme (dark, dark-ansi, dark-daltonized, light, light-ansi, light-daltonized)",
+		},
+		{
+			name:   "unknown Claude token",
+			damage: canonical("claude.json", `{"noSuchToken":"#123456"}`),
+			want:   "theme {dir}: claude.json: overrides \"noSuchToken\": not a Claude Code theme token (claude_token_ids.txt)",
+		},
+		{
+			name:   "invalid Claude colour",
+			damage: canonical("claude.json", `{"claude":"not-a-colour"}`),
+			want:   "theme {dir}: claude.json: overrides \"claude\": themesync: colour \"not-a-colour\" is not rgb(), #rgb, #rrggbb, ansi256() or ansi:name",
+		},
+		{
+			name:   "unknown tmux pin",
+			damage: canonical("tmux.json", `{"no-such-option":"#123456"}`),
+			want:   "theme {dir}: tmux.json: tmux pin \"no-such-option\": tmux renders no such key",
+		},
+		{
+			name:   "unknown Herdr pin",
+			damage: canonical("herdr.json", `{"noSuchToken":"#123456"}`),
+			want:   "theme {dir}: herdr.json: herdr pin \"noSuchToken\": herdr renders no such key",
+		},
+		{
+			name:   "unknown terminal pin",
+			damage: canonical("terminal.json", `{"noSuchToken":"#123456"}`),
+			want:   "theme {dir}: terminal.json: vscode colors pin \"noSuchToken\": vscode colors renders no such key",
+		},
+		{
+			name:   "unknown chrome pin",
+			damage: canonical("vscode/chrome.json", `{"noSuchToken":"#123456"}`),
+			want:   "theme {dir}: vscode/chrome.json: vscode chrome pin \"noSuchToken\": vscode chrome renders no such key",
+		},
+		{
+			name:   "invalid semantic colour",
+			damage: canonical("vscode/semantic.json", `{"class":"not-a-colour"}`),
+			want:   "theme {dir}: vscode/semantic.json: vscode theme semanticTokenColors \"class\": foreground \"not-a-colour\" is not a hex colour",
+		},
+		{
+			name:   "invalid workbench colour",
+			damage: canonical("vscode/workbench/editor.json", `{"editor.background":"not-a-colour"}`),
+			want:   "theme {dir}: vscode/workbench/editor.json: vscode theme colors \"editor.background\": \"not-a-colour\" is not #rgb, #rgba, #rrggbb or #rrggbbaa",
+		},
+		{
+			name: "invalid syntax colour",
+			damage: canonical(
+				"vscode/syntax/comment.json",
+				`{"0000":{"scope":["comment"],"settings":{"foreground":"not-a-colour"}}}`,
+			),
+			want: "theme {dir}: vscode/syntax/comment.json: rule \"0000\": vscode theme tokenColors[0]: foreground \"not-a-colour\" is not a hex colour",
 		},
 	}
 	for _, tc := range cases {
@@ -310,57 +355,57 @@ func TestReadProfileDirRefusesABrokenTheme(t *testing.T) {
 			}
 			tc.damage(t, dir)
 			_, err := ReadProfileDir(dir)
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), dir) {
-				t.Fatalf("ReadProfileDir = %v, want an error naming %s and %q", err, dir, tc.want)
+			if got := strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"); got != tc.want {
+				t.Fatalf("ReadProfileDir = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// Semantic validation must retain the source file, not just the assembled
-// profile name: an author needs to know which of the forty files to fix.
-func TestReadProfileDirNamesInvalidPart(t *testing.T) {
-	t.Parallel() // read-only over the shipped themes; no process state
-	cases := []struct {
-		name, file, content string
-	}{
-		{"missing name", "theme.json", `{"base":"dark"}`},
-		{"invalid base", "theme.json", `{"name":"Broken","base":"no-such-base"}`},
-		{"unknown Claude token", "claude.json", `{"noSuchToken":"#123456"}`},
-		{"invalid Claude colour", "claude.json", `{"claude":"not-a-colour"}`},
-		{"unknown tmux pin", "tmux.json", `{"no-such-option":"#123456"}`},
-		{"unknown Herdr pin", "herdr.json", `{"noSuchToken":"#123456"}`},
-		{"unknown terminal pin", "terminal.json", `{"noSuchToken":"#123456"}`},
-		{"unknown chrome pin", "vscode/chrome.json", `{"noSuchToken":"#123456"}`},
-		{"invalid semantic colour", "vscode/semantic.json", `{"class":"not-a-colour"}`},
-		{"invalid workbench colour", "vscode/workbench/editor.json", `{"editor.background":"not-a-colour"}`},
-		{
-			"invalid syntax colour", "vscode/syntax/comment.json",
-			`{"0000":{"scope":["comment"],"settings":{"foreground":"not-a-colour"}}}`,
-		},
+// The name is a title only: a theme.json without one reads, and the profile it
+// assembles is unnamed (its stem titles it), where it once was refused whole.
+func TestReadProfileDirAcceptsAThemeWithoutAName(t *testing.T) {
+	dir := copyShippedTheme(t, "tokyo-night")
+	themeFile := filepath.Join(dir, "theme.json")
+	original, err := os.ReadFile(themeFile)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := copyShippedTheme(t, "tokyo-night")
-			file := filepath.Join(dir, filepath.FromSlash(tc.file))
-			if err := os.WriteFile(file, []byte(canonicalOrFail(t, tc.content)), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			_, err := ReadProfileDir(dir)
-			if err == nil || !strings.Contains(err.Error(), tc.file+":") {
-				t.Fatalf("ReadProfileDir = %v, want an error naming %s", err, tc.file)
-			}
-		})
+	var meta map[string]any
+	if err := json.Unmarshal(original, &meta); err != nil {
+		t.Fatal(err)
+	}
+	delete(meta, "name")
+	body, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(themeFile, []byte(canonicalOrFail(t, string(body))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	document, err := ReadProfileDir(dir)
+	if err != nil {
+		t.Fatalf("ReadProfileDir of an unnamed theme = %v, want it read", err)
+	}
+	profile, err := ParseProfile(document)
+	if err != nil || profile.Name != "" || profile.Base != "dark" {
+		t.Fatalf("unnamed theme = %+v, %v; want no name and base dark", profile, err)
 	}
 }
 
 func TestReadProfileDirRefusesASingleFileProfile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "tokyo-night.json")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tokyo-night.json")
 	if err := os.WriteFile(path, []byte(`{"name":"N","base":"dark","overrides":{}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadProfileDir(path); err == nil || !strings.Contains(err.Error(), "not a directory") {
-		t.Fatalf("ReadProfileDir(file) = %v, want not a directory", err)
+	_, err := ReadProfileDir(path)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		dir,
+		"{dir}",
+	), "theme {dir}/tokyo-night.json: not a directory: a theme is a directory of theme.json"; got != want {
+		t.Fatalf("ReadProfileDir(file) = %q, want %q", got, want)
 	}
 }
 

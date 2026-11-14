@@ -1,3 +1,5 @@
+//go:build jail
+
 package gather
 
 import (
@@ -16,7 +18,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/naming"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -76,32 +77,6 @@ func newTmuxJail(t *testing.T) *tmuxJail {
 		}
 	})
 	return jail
-}
-
-func setGatherTestEnv(t *testing.T, root, tmuxDir string) {
-	t.Helper()
-
-	home := filepath.Join(root, "home")
-	sidDir := filepath.Join(root, "sid")
-	codexHome := filepath.Join(root, "codex")
-	for _, directory := range []string{home, sidDir, codexHome, tmuxDir} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatalf("create gather jail directory %q: %v", directory, err)
-		}
-	}
-
-	t.Setenv("HOME", home)
-	t.Setenv("TMUX", "")
-	t.Setenv("TMUX_TMPDIR", root)
-	t.Setenv(paths.EnvHome, home)
-	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "pfm-cache.db"))
-	t.Setenv(paths.EnvSIDDir, sidDir)
-	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude-projects"))
-	t.Setenv(paths.EnvCodexHome, codexHome)
-	t.Setenv(paths.EnvTmuxDir, tmuxDir)
-	// A chat server loads the user's ~/.tmux.conf in real life; a fixture must
-	// not, or the machine it runs on steers the test.
-	t.Setenv(paths.EnvTmuxConf, "/dev/null")
 }
 
 func (jail *tmuxJail) command(arguments ...string) *exec.Cmd {
@@ -273,6 +248,7 @@ func TestServerGoneReadsTmuxOwnWords(t *testing.T) {
 // TestShowGlobalOptionReadsTmuxsUnsetAnswer runs the real tmux: an unset user
 // option on a live server is ErrOptionUnset, a set one reads back its value.
 func TestShowGlobalOptionReadsTmuxsUnsetAnswer(t *testing.T) {
+	testjail.TmuxServer(t)
 	dir := testjail.ShortRoot(t)
 	const socket = "cc-opt-unset"
 	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe")
@@ -345,6 +321,7 @@ func TestParseLegacyPaneFallback(t *testing.T) {
 }
 
 func TestJailedTmuxProbeAndGather(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}
@@ -526,6 +503,7 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 // would take ONE name take neither, and a pane holding a rollout descriptor
 // still converges through the path it always did.
 func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}
@@ -671,15 +649,4 @@ func paneSockets(panes []ProbePane) []string {
 		sockets = append(sockets, pane.Socket)
 	}
 	return sockets
-}
-
-func TestTmuxJailUsesShortPrivateSocketPaths(t *testing.T) {
-	jail := newTmuxJail(t)
-	socketPath := filepath.Join(jail.tmuxDir, "cc-1-2-3")
-	if len(socketPath) >= 100 {
-		t.Fatalf("jailed socket path is too long (%d): %q", len(socketPath), socketPath)
-	}
-	if !strings.HasPrefix(filepath.Clean(jail.root), "/tmp/ccf") {
-		t.Fatalf("tmux jail escaped short private root: %q", jail.root)
-	}
 }

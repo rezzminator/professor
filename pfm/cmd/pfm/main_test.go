@@ -5,25 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"go/ast"
 	"go/parser"
-	"go/printer"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -116,7 +112,7 @@ func TestSettledRootInterface(t *testing.T) {
 	help := stdout.String()
 	for _, want := range []string{
 		"operator commands:", "  chat", "  install", "  update", "  init", "wiring commands:",
-		"  statusline", "  usage-hook", "tokens    audit transcripts: where did the tokens go (--codex, --opencode, --tree DIR)",
+		"  statusline", "  usage-hook", "tokens    audit transcripts: where did the tokens go (--codex, --opencode, --tree SESSION|AGENT)",
 	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("root help missing %q:\n%s", want, help)
@@ -341,81 +337,6 @@ func TestKilledPruneOrphansCLI(t *testing.T) {
 	}
 }
 
-func TestWiredIndexListOpenAndDoctor(t *testing.T) {
-	root := jailTest(t)
-	t.Setenv(spawn.TestFreshSocketEnv, "cc-1700000000-1-1")
-	project := filepath.Join(root, "work", "project")
-	transcriptDir := filepath.Join(root, "claude", "project")
-	if err := os.MkdirAll(project, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(transcriptDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	const id = "11111111-1111-4111-8111-111111111111"
-	content := `{"type":"user","cwd":` +
-		strconv.Quote(project) +
-		`,"message":{"content":"Wired prompt"}}` + "\n"
-	if err := os.WriteFile(
-		filepath.Join(transcriptDir, id+".jsonl"),
-		[]byte(content),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"index", "--full"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("index code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "files=1") ||
-		!strings.Contains(stdout.String(), "full=1") ||
-		!strings.Contains(stdout.String(), "touched=2") {
-		t.Fatalf("index stdout=%q", stdout.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run([]string{"ls", "--tsv"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("ls code=%d stderr=%q", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "\t"+id+"\t") ||
-		!strings.Contains(stdout.String(), "resume-claude") {
-		t.Fatalf("ls stdout=%q", stdout.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	readServer := holdClaudeOpen(t, root, "cc-1700000000-1-1")
-	if code := run([]string{"chat", "open", id}, &stdout, &stderr); code != 0 {
-		t.Fatalf("open code=%d stderr=%q", code, stderr.String())
-	}
-	if lines := strings.Count(stdout.String(), "\n"); lines != 1 {
-		t.Fatalf("open emitted %d lines: %q", lines, stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "attach -t 'cc-1700000000-1-1'") {
-		t.Fatalf("open stdout=%q", stdout.String())
-	}
-	// The resume is born through the one chat-server creator: its window
-	// carries the engine's name, never one its pane command chose.
-	if run := readServer("#{pane_start_command}"); !strings.Contains(run, "--resume") || !strings.Contains(run, id) {
-		t.Fatalf("opened server runs %q, want the resume of %s", run, id)
-	}
-	if window := readServer("#{window_name}"); window != "Claude" {
-		t.Fatalf("opened window = %q, want Claude", window)
-	}
-	stdout.Reset()
-	stderr.Reset()
-	testjail.PinClaudeAsk(t, filepath.Join(root, "home"))
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	links := fmt.Sprintf("account-links: ok (1 accounts × %d entries)", len(installer.StoreEntries))
-	if !strings.Contains(stdout.String(), "doctor: clean") ||
-		!strings.Contains(stdout.String(), "transcripts=1") ||
-		!strings.Contains(stdout.String(), fmt.Sprintf("host-check: ok (%d checks)", len(hostcheck.Detectors()))) ||
-		!strings.Contains(stdout.String(), links) {
-		t.Fatalf("doctor stdout=%q", stdout.String())
-	}
-}
-
 func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
 	jailTest(t)
 	dbPath := os.Getenv(paths.EnvCacheDB)
@@ -429,92 +350,6 @@ func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
 	if !strings.Contains(stdout.String(), "doctor: config path=") ||
 		!strings.Contains(stdout.String(), "doctor: unhealthy database:") {
 		t.Fatalf("doctor stdout=%q", stdout.String())
-	}
-}
-
-// An existing pre-push hook is inactive until Git is configured to use it.
-func TestDoctorNamesAnExistingButUnwiredPrePushGate(t *testing.T) {
-	savedProbe := doctor.PrePushGateProbeOverride
-	doctor.PrePushGateProbeOverride = nil
-	t.Cleanup(func() { doctor.PrePushGateProbeOverride = savedProbe })
-	root := jailTest(t)
-	testjail.PinClaudeAsk(t, filepath.Join(root, "home"))
-	home := jailPaths(t).Home
-	account := pfmconfig.DefaultAccountDir(home, 42)
-	if err := os.MkdirAll(account, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	testjail.StageGlobalAgents(t, home)
-	dirs, files := storeLayout()
-	testjail.StageAccountLinks(t, home, account, dirs, files)
-	t.Setenv(paths.EnvClaudeRoots, filepath.Join(account, "projects"))
-	repository := filepath.Join(root, "repository")
-	if err := os.MkdirAll(filepath.Join(repository, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repository, ".githooks"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(repository, ".git", "config"),
-		[]byte("[core]\n\trepositoryformatversion = 0\n\tbare = false\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(repository, ".git", "HEAD"),
-		[]byte("ref: refs/heads/main\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	for _, directory := range []string{"objects", filepath.Join("refs", "heads")} {
-		if err := os.MkdirAll(filepath.Join(repository, ".git", directory), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := testjail.WriteExecutable(
-		filepath.Join(repository, ".githooks", "pre-push"),
-		[]byte("#!/bin/sh\nexit 0\n"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(repository)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("doctor code=%d, want warning exit\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
-	}
-	want := "doctor: pre-push gate=UNWIRED expected=.githooks actual=(unset)"
-	if !strings.Contains(stdout.String(), want) {
-		t.Fatalf("doctor omitted %q:\n%s", want, stdout.String())
-	}
-	if err := os.WriteFile(
-		filepath.Join(repository, ".git", "config"),
-		[]byte("[core]\n\trepositoryformatversion = 0\n\tbare = false\n\thooksPath = .githooks\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("armed doctor code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if want := "doctor: pre-push gate=armed core.hooksPath=.githooks"; !strings.Contains(stdout.String(), want) {
-		t.Fatalf("armed doctor omitted %q:\n%s", want, stdout.String())
-	}
-	if err := os.Chmod(filepath.Join(repository, ".githooks", "pre-push"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("broken-hook doctor code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if want := "doctor: pre-push gate=BROKEN core.hooksPath=.githooks"; !strings.Contains(stdout.String(), want) {
-		t.Fatalf("broken-hook doctor omitted %q:\n%s", want, stdout.String())
 	}
 }
 
@@ -543,6 +378,14 @@ func jailTest(t *testing.T) string {
 	dirs, files := storeLayout()
 	testjail.StageAccountLinks(t, filepath.Join(root, "home"), filepath.Join(root, "home", ".cc", "1"), dirs, files)
 	stageStorePlugins(t, filepath.Join(root, "home"))
+	testjail.StageHerdrClaudeHook(t, filepath.Join(root, "home", ".cc", "1"))
+	// The jailed home reaches no user service manager: macOS always has
+	// launchctl, whose real gui domain holds no plist in this home.
+	previous := doctor.ScheduleTimerProbeOverride
+	doctor.ScheduleTimerProbeOverride = func(context.Context, deps.Runner) doctor.ServiceManagerReport {
+		return doctor.ServiceManagerReport{}
+	}
+	t.Cleanup(func() { doctor.ScheduleTimerProbeOverride = previous })
 	return root
 }
 
@@ -553,42 +396,6 @@ func jailPaths(t *testing.T) paths.Values {
 		t.Fatalf("resolve jail paths: %v", err)
 	}
 	return resolved
-}
-
-func writeJailedCodexAuth(t *testing.T, root string) {
-	t.Helper()
-	if err := os.WriteFile(
-		filepath.Join(root, "codex", "auth.json"),
-		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Keep a fixture Claude pane (a screen under Claude's name) alive until cleanup.
-func holdClaudeOpen(t *testing.T, root, socket string) func(format string) string {
-	t.Helper()
-	managed := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", "claude")
-	fixture := []byte("#!/bin/bash\nprintf 'fixture claude\\n'\nexec -a claude sleep 120\n")
-	if err := testjail.WriteExecutable(managed, fixture, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	socketPath := filepath.Join(root, "tmux", socket)
-	t.Cleanup(func() {
-		kill := exec.Command("tmux", "-S", socketPath, "kill-server")
-		kill.Env = append(os.Environ(), "TMUX=")
-		_ = kill.Run()
-	})
-	return func(format string) string {
-		read := exec.Command("tmux", "-S", socketPath, "display-message", "-p", "-t", socket, format)
-		read.Env = append(os.Environ(), "TMUX=")
-		output, err := read.Output()
-		if err != nil {
-			t.Fatalf("read the opened server %s: %v", socket, err)
-		}
-		return strings.TrimSpace(string(output))
-	}
 }
 
 // Read args[0] comparisons from the dispatcher, including its != kill-exit case.
@@ -628,14 +435,8 @@ func argsZeroStringLiterals(body *ast.BlockStmt) map[string]bool {
 
 // switchCaseStringLiterals collects every string literal a top-level
 // "switch args[0]" case clause names.
-// switchCaseStringLiterals collects every case's plain string literal AND
-// the printed source text of every non-literal case expression — run's own
-// "codex" case matches on pfmengine.MustLookup(pfmengine.Codex).LongName,
-// not a bare "codex" literal, so a caller that needs that one name checks
-// the printed-text set with pfmengine's own known selector text instead.
-func switchCaseStringLiterals(fset *token.FileSet, body *ast.BlockStmt) (literals, printedExprs map[string]bool) {
-	literals = map[string]bool{}
-	printedExprs = map[string]bool{}
+func switchCaseStringLiterals(body *ast.BlockStmt) map[string]bool {
+	literals := map[string]bool{}
 	ast.Inspect(body, func(n ast.Node) bool {
 		clause, ok := n.(*ast.CaseClause)
 		if !ok {
@@ -646,22 +447,17 @@ func switchCaseStringLiterals(fset *token.FileSet, body *ast.BlockStmt) (literal
 				if value, err := strconv.Unquote(literal.Value); err == nil {
 					literals[value] = true
 				}
-				continue
-			}
-			var buf bytes.Buffer
-			if err := printer.Fprint(&buf, fset, expr); err == nil {
-				printedExprs[buf.String()] = true
 			}
 		}
 		return true
 	})
-	return literals, printedExprs
+	return literals
 }
 
 // findFuncDecl parses main.go once and returns the *ast.FuncDecl body for
 // name — "run" or "runInternal", the two functions topLevelSubcommands and
 // internalSubcommands must stay in lockstep with.
-func findFuncDecl(t *testing.T, name string) (*ast.BlockStmt, *token.FileSet) {
+func findFuncDecl(t *testing.T, name string) *ast.BlockStmt {
 	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "main.go", nil, 0)
@@ -671,28 +467,19 @@ func findFuncDecl(t *testing.T, name string) (*ast.BlockStmt, *token.FileSet) {
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if ok && fn.Name.Name == name {
-			return fn.Body, fset
+			return fn.Body
 		}
 	}
 	t.Fatalf("main.go declares no func %s", name)
-	return nil, nil
+	return nil
 }
 
 // Every advertised top-level subcommand must reach its dispatcher handler.
 func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
-	body, fset := findFuncDecl(t, "run")
-	literals, printedExprs := switchCaseStringLiterals(fset, body)
-	// Engine cases match on registry LongName expressions, not bare literals;
-	// topLevelSubcommands carries those same runtime values.
-	selectors := map[string]string{
-		pfmengine.MustLookup(pfmengine.Codex).LongName:    "pfmengine.MustLookup(pfmengine.Codex).LongName",
-		pfmengine.MustLookup(pfmengine.OpenCode).LongName: "pfmengine.MustLookup(pfmengine.OpenCode).LongName",
-	}
+	body := findFuncDecl(t, "run")
+	literals := switchCaseStringLiterals(body)
 	for _, name := range topLevelSubcommands {
 		if literals[name] {
-			continue
-		}
-		if selector, ok := selectors[name]; ok && printedExprs[selector] {
 			continue
 		}
 		t.Fatalf(
@@ -704,7 +491,7 @@ func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
 
 // Advertised internal subcommands must reach their dispatcher handlers.
 func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
-	body, _ := findFuncDecl(t, "runInternal")
+	body := findFuncDecl(t, "runInternal")
 	comparisons := argsZeroStringLiterals(body)
 	for _, name := range internalSubcommands {
 		if !comparisons[name] {
@@ -716,73 +503,29 @@ func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
 	}
 }
 
-// legacyConfigJail is a jailed installed home whose default config load finds
-// no clone config while a legacy ~/.config/pfm/pfm.config.json waits.
-func legacyConfigJail(t *testing.T) string {
+// brokenConfigJail is a jailed installed home whose default config does not
+// parse; it returns the config's path.
+func brokenConfigJail(t *testing.T) string {
 	t.Helper()
 	root := jailTest(t)
 	t.Setenv(paths.EnvConfig, "")
-	home := jailPaths(t).Home
-	clone := filepath.Join(root, "clone") // a jailed clone with no pfm.config.json
+	clone := filepath.Join(root, "clone")
 	if err := os.MkdirAll(clone, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+	if err := paths.WriteSourceRepoMarker(jailPaths(t).Home, clone); err != nil {
 		t.Fatal(err)
 	}
-	legacy := filepath.Join(pfmconfig.LegacyConfigDir(paths.OSEnv{}, home), pfmconfig.FileName)
-	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+	path := filepath.Join(clone, pfmconfig.FileName)
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	content, err := pfmconfig.MarshalDefault(home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(legacy, content, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return legacy
+	return path
 }
 
-func TestInstallRefusesWhileLegacyConfigWaits(t *testing.T) {
-	legacy := legacyConfigJail(t)
-	previous := runInstaller
-	t.Cleanup(func() { runInstaller = previous })
-	var modes []installer.Mode
-	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		modes = append(modes, options.Mode)
-		return installer.Report{}, nil
-	}
-	for _, args := range [][]string{{"install", "--offline"}, {"install", "--yes", "--offline"}} {
-		var stdout, stderr bytes.Buffer
-		if code := run(args, &stdout, &stderr); code != 4 {
-			t.Fatalf("run(%q) code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
-		}
-		want := "pfm install: BLOCK legacy-config " + legacy + " — legacy pfm config outside the clone\n"
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr=%q, want %q", stderr.String(), want)
-		}
-	}
-	if len(modes) != 0 {
-		t.Fatalf("installer modes=%v, want no installer run", modes)
-	}
-}
-
-func TestDoctorReportsConfigNotMigrated(t *testing.T) {
-	legacy := legacyConfigJail(t)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 3 {
-		t.Fatalf("doctor code=%d stdout=%q stderr=%q, want failure", code, stdout.String(), stderr.String())
-	}
-	want := "doctor: config error=config not migrated: run pfm doctor for the fix"
-	if !strings.Contains(stdout.String(), want) || !strings.Contains(stdout.String(), legacy) {
-		t.Fatalf("doctor stdout=%q stderr=%q, want %q naming %s", stdout.String(), stderr.String(), want, legacy)
-	}
-}
-
-// Version answers while a legacy config waits for the operator to apply doctor's fix.
-func TestVersionAnswersWhileLegacyConfigWaits(t *testing.T) {
-	legacyConfigJail(t)
+// Version answers on a default config that does not parse.
+func TestVersionAnswersOnABrokenConfig(t *testing.T) {
+	brokenConfigJail(t)
 	for _, arg := range []string{"--version", versionCommand} {
 		var stdout, stderr bytes.Buffer
 		if code := run([]string{arg}, &stdout, &stderr); code != 0 {
@@ -794,14 +537,14 @@ func TestVersionAnswersWhileLegacyConfigWaits(t *testing.T) {
 	}
 }
 
-// Stale needs no config during binary replacement while the legacy config waits.
-func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
-	legacyConfigJail(t)
+// Stale needs no config during binary replacement, a broken one included.
+func TestInternalStaleAnswersOnABrokenConfig(t *testing.T) {
+	brokenConfigJail(t)
 	bin := filepath.Join(jailPaths(t).Home, ".local", "bin", "pfm")
 	if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(bin, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(bin, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	args := []string{"stale", "--binary", bin}
@@ -818,52 +561,44 @@ func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
 	}
 }
 
-// Every other internal command still refuses while the legacy config waits.
-func TestInternalCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
-	legacyConfigJail(t)
+// A hook or launcher runs on defaults over a broken config: a refusal there
+// would keep Claude from starting and fail every guard open.
+func TestInternalCommandsRunOnDefaultsOnABrokenConfig(t *testing.T) {
+	path := brokenConfigJail(t)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{internalCommand, "git-guard"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("internal git-guard code=%d stdout=%q stderr=%q, want 1", code, stdout.String(), stderr.String())
+	if code := run([]string{internalCommand, "primary-get"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("internal primary-get code=%d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
 	}
-	if want := "pfm: config: config not migrated: run pfm doctor for the fix"; !strings.HasPrefix(
-		stderr.String(),
-		want,
-	) {
-		t.Fatalf("internal git-guard stderr=%q, want %q", stderr.String(), want)
+	if stdout.String() != "1\n" {
+		t.Fatalf("internal primary-get stdout=%q, want the default account %q", stdout.String(), "1\n")
+	}
+	want := "pfm: config: parse config " + path +
+		" at byte 1: unexpected EOF; running on defaults until it is fixed (pfm doctor)\n"
+	if stderr.String() != want {
+		t.Fatalf("internal primary-get stderr=%q, want %q", stderr.String(), want)
 	}
 }
 
-// pfm config show keeps naming the pending legacy config; its exit stays 0.
-func TestConfigShowNamesNotMigrated(t *testing.T) {
-	legacyConfigJail(t)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{configCommand, "show"}, &stdout, &stderr); code != 0 {
-		t.Fatalf("config show code=%d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
-	}
-	if want := "pfm config show: configuration error: config not migrated"; !strings.Contains(stderr.String(), want) {
-		t.Fatalf("config show stderr=%q, want %q", stderr.String(), want)
-	}
-}
-
-func TestCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
-	legacy := legacyConfigJail(t)
+func TestCommandsRefuseOnABrokenConfig(t *testing.T) {
+	path := brokenConfigJail(t)
 	for _, args := range [][]string{{"ls"}, {"chat", "ls"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 1 {
 			t.Fatalf("ls code=%d stdout=%q stderr=%q, want 1", code, stdout.String(), stderr.String())
 		}
-		want := "pfm: config: config not migrated: run pfm doctor for the fix"
-		if !strings.HasPrefix(stderr.String(), want) || !strings.Contains(stderr.String(), legacy) {
-			t.Fatalf("ls stderr=%q, want %q naming %s", stderr.String(), want, legacy)
+		want := "pfm: config: parse config " + path + " at byte 1: unexpected EOF"
+		if !strings.HasPrefix(stderr.String(), want) {
+			t.Fatalf("ls stderr=%q, want it to begin %q", stderr.String(), want)
 		}
 	}
 }
 
-func TestInstallWithMissingNamedLegacyConfig(t *testing.T) {
-	legacy := legacyConfigJail(t)
-	if err := os.Remove(legacy); err != nil {
+func TestInstallWithMissingNamedConfig(t *testing.T) {
+	broken := brokenConfigJail(t)
+	if err := os.Remove(broken); err != nil {
 		t.Fatal(err)
 	}
+	missing := filepath.Join(filepath.Dir(broken), "missing", pfmconfig.FileName)
 	account := pfmconfig.DefaultAccountDir(jailPaths(t).Home, 42)
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
@@ -882,14 +617,14 @@ func TestInstallWithMissingNamedLegacyConfig(t *testing.T) {
 		{[]string{"install", "--check", "--offline"}, 1, "pfm install: "},
 	} {
 		var stdout, stderr bytes.Buffer
-		args := append([]string{"--config", legacy}, scenario.args...)
+		args := append([]string{"--config", missing}, scenario.args...)
 		code := run(args, &stdout, &stderr)
-		want := scenario.prefix + "--config " + legacy + " does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)\n"
+		want := scenario.prefix + "--config " + missing + " does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)\n"
 		output := stderr.String()
 		if scenario.code == 0 {
-			output = stdout.String()
+			output = strings.SplitAfterN(stdout.String(), "\n", 2)[0]
 		}
-		if code != scenario.code || !strings.Contains(output, want) {
+		if code != scenario.code || output != want {
 			t.Fatalf("code=%d want=%d output=%q expected=%q", code, scenario.code, output, want)
 		}
 	}
@@ -931,4 +666,29 @@ func stageStorePlugins(t *testing.T, home string) {
 		t.Fatal(err)
 	}
 	testjail.StageClaudePlugins(t, storeDir, ids)
+	testjail.StageTracetreeKit(t, storeDir, ids)
+}
+
+// rooted writes the run-unique temp root as {root}, so output naming it compares exactly.
+func rooted(s, root string) string { return strings.ReplaceAll(s, root, "{root}") }
+
+// scrub normalises what varies per run: the temp root, session ids, socket names and clock stamps.
+func scrub(s, root string) string {
+	// The host goes first: a macOS host name can hold a UUID the {uuid} rule would rewrite.
+	if host, err := os.Hostname(); err == nil {
+		s = strings.ReplaceAll(s, "host "+host+" ", "host {host} ")
+	}
+	for _, r := range []struct{ pattern, token string }{
+		{`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`, "{uuid}"},
+		{`\b(cc|cx|oc)-\d+-\d+-\d+\b`, "{socket}"},
+		{`\d{4}-\d\d-\d\d[T ]\d\d:\d\d(:\d\d(\.\d+)?)?Z?`, "{time}"},
+		{`\d{4}-\d\d-\d\dT\d\dh\b`, "{hour}"},
+		{`\b[0-9a-f]{32}\b`, "{hash}"},
+	} {
+		s = regexp.MustCompile(r.pattern).ReplaceAllString(s, r.token)
+	}
+	if root == "" {
+		return s
+	}
+	return rooted(s, root)
 }

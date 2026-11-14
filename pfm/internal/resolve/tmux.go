@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -43,12 +44,10 @@ func (tmux TmuxResolver) ListPanes(
 		// Either spelling of the control separator: see internal/tmux/format.go.
 		fields := pfmtmux.FormatSplit(line, 4)
 		if len(fields) != 4 {
-			return nil, fmt.Errorf(
-				"tmux socket %q returned %d fields in %q",
-				socketPath,
-				len(fields),
-				line,
-			)
+			// One line tmux wrote in another shape costs that pane, never the server.
+			obs.Logger(ctx).Warn("resolve.pane.skipped", obs.FieldSock, socketPath,
+				obs.FieldErr, fmt.Sprintf("tmux returned %d fields in %q", len(fields), line))
+			continue
 		}
 		panes = append(panes, ResolvedPane{
 			SocketPath:     socketPath,

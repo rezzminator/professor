@@ -3,7 +3,6 @@ package reload
 import (
 	"context"
 	"io"
-	"strings"
 	"testing"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
@@ -45,7 +44,8 @@ func TestDeliverThenRefusesTheClaudeFolderTrustDialogWithoutAKey(t *testing.T) {
 		fakeReloadProc{},
 		io.Discard,
 	)
-	if err == nil || !strings.Contains(err.Error(), "folder-trust dialog") {
+	if err == nil ||
+		err.Error() != "reload --then: pane %7 is held at Claude Code's folder-trust dialog; pfm pressed nothing (Enter there selects \"No, exit\"); attach it and choose \"Yes, I trust this folder\"" {
 		t.Fatalf("deliverThen error = %v, want it to name the folder-trust dialog", err)
 	}
 	if len(tmux.keys) != 0 {

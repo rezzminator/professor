@@ -116,7 +116,8 @@ type indicatorPainter struct {
 	call      func(ctx context.Context, socket string, lines ...[]byte) ([]json.RawMessage, error)
 	clock     clock.Clock
 	// seq numbers the request ids; reported holds the unexpected agent_status
-	// strings already named on stderr, so a blinking pane names one once.
+	// strings and id-less list entries already named on stderr, so a blinking
+	// pane names one once.
 	seq      uint64
 	reported map[string]bool
 	// hasDone keeps the blinker reconciling unseen completions: marking an
@@ -200,7 +201,7 @@ func (painter *indicatorPainter) nextSeq() uint64 {
 // or done agent appeared meanwhile. With a tab provider it takes the lock
 // first and keeps ticking while any tab is decorated, so an animated frame
 // advances on every tick, and stops once no tab is decorated and nothing is
-// blocked or done.
+// blocked or done (runTabs).
 func (painter *indicatorPainter) run(ctx context.Context) error {
 	if painter.socket == "" {
 		err := fmt.Errorf("herdr indicators: no Herdr socket: %s is not set", EnvSocket)
@@ -221,41 +222,13 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 		return err
 	}
 	if painter.tabs != nil {
-		release, held, err := painter.takeBlinkerLock()
-		if err != nil {
-			painter.logf("%v", err)
-			return err
-		}
-		if !held {
-			painter.nudge() // the blinker re-reads the tabs at its next tick
-			return nil
-		}
-		defer release()
-		blocked, _, err := painter.paint(ctx)
-		if err != nil {
-			painter.logf("%v", err)
-			return err
-		}
-		if !blocked && !painter.hasDone && !painter.hasTabs {
-			return nil
-		}
-		_, err = painter.blink(ctx)
-		if ctx.Err() != nil {
-			restoreCtx, cancel := painter.restoreContext(ctx)
-			defer cancel()
-			if restoreErr := painter.restoreTabs(restoreCtx); restoreErr != nil {
-				painter.logf("%v", restoreErr)
-				return errors.Join(err, restoreErr)
-			}
-		}
-		return err
+		return painter.runTabs(ctx)
 	}
 	settles := 0
 	for {
 		blocked, wrote, err := painter.paint(ctx)
 		if err != nil {
-			painter.logf("%v", err)
-			return err
+			return painter.failed(err)
 		}
 		if !blocked && !painter.hasDone && !painter.hasTabs {
 			if !wrote || settles >= maxSettleRounds {
@@ -431,9 +404,16 @@ func (painter *indicatorPainter) list(ctx context.Context) ([]indicatorTarget, e
 			len(results),
 		)
 	}
-	targets, err := decodeIndicatorTargets(results[0], results[1])
+	targets, skipped, err := decodeIndicatorTargets(results[0], results[1])
 	if err != nil {
 		return nil, fmt.Errorf("herdr indicators: socket %s: %w", painter.socket, err)
+	}
+	for _, entry := range skipped {
+		// Named once per painter, as an unrecognised status is: a blinker lists every tick.
+		if !painter.reported[entry] {
+			painter.reported[entry] = true
+			painter.logf("herdr indicators: socket %s: %s, left unpainted", painter.socket, entry)
+		}
 	}
 	return targets, nil
 }
@@ -696,8 +676,7 @@ func clearRecordedIndicators(
 		if err := painter.writeStop(ctx); err != nil {
 			failures = append(failures, err)
 		}
-		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) ||
-			!errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED)) {
+		if err := painter.clear(ctx); err != nil && (errors.Is(err, errIndicatorOwnership) || !SocketGone(err)) {
 			failures = append(failures, fmt.Errorf("herdr indicators: clear socket %s: %w", socket, err))
 			continue
 		}

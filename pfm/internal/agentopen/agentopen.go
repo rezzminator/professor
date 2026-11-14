@@ -47,6 +47,9 @@ type Agent struct {
 	PID       int    `json:"pid"`
 	Status    string `json:"status"`
 	State     string `json:"state"`
+	// PIDText is the registry's pid word when it is not an integer: PID is then
+	// 0, which is unknown, never "no process".
+	PIDText string `json:"-"`
 }
 
 // Claude has emitted pid as both a JSON number and a quoted number across
@@ -64,12 +67,12 @@ func (agent *Agent) UnmarshalJSON(content []byte) error {
 	if err := json.Unmarshal(content, &wire); err != nil {
 		return err
 	}
-	pid := 0
+	pid, pidText := 0, ""
 	if len(wire.PID) != 0 && string(wire.PID) != "null" {
 		value := strings.Trim(string(wire.PID), "\"")
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
-			return fmt.Errorf("parse agent pid %q: %w", value, err)
+			pidText = value // the row stays; one odd pid never empties the registry
 		}
 		pid = parsed
 	}
@@ -80,6 +83,7 @@ func (agent *Agent) UnmarshalJSON(content []byte) error {
 		PID:       pid,
 		Status:    wire.Status,
 		State:     wire.State,
+		PIDText:   pidText,
 	}
 	return nil
 }
@@ -140,8 +144,6 @@ type Commands interface {
 type Processes interface {
 	Processes(context.Context) ([]Process, error)
 	Alive(int) bool
-	Terminate(int) error
-	Kill(int) error
 }
 
 type Tmux interface {
@@ -158,35 +160,24 @@ type Dependencies struct {
 	Processes    Processes
 	Tmux         Tmux
 	Stderr       io.Writer
-	GracePeriod  time.Duration
-	PollInterval time.Duration
 	// ContinuationTail follows a Claude session to the newest segment of its
 	// continued-in chain; nil follows none.
 	ContinuationTail func(context.Context, string) (string, error)
 }
 
 type Opener struct {
-	sidDir, home              string
-	accounts                  []Account
-	claudeBinary              string
-	commands                  Commands
-	processes                 Processes
-	tmux                      Tmux
-	stderr                    io.Writer
-	gracePeriod, pollInterval time.Duration
-	configurationError        error
-	continuationTail          func(context.Context, string) (string, error)
+	sidDir, home       string
+	accounts           []Account
+	claudeBinary       string
+	commands           Commands
+	processes          Processes
+	tmux               Tmux
+	stderr             io.Writer
+	configurationError error
+	continuationTail   func(context.Context, string) (string, error)
 }
 
 func New(dependencies Dependencies) *Opener {
-	grace := dependencies.GracePeriod
-	if grace <= 0 {
-		grace = 15 * time.Second
-	}
-	poll := dependencies.PollInterval
-	if poll <= 0 {
-		poll = time.Second
-	}
 	stderr := dependencies.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -206,7 +197,6 @@ func New(dependencies Dependencies) *Opener {
 		claudeBinary: claudeBinary,
 		commands:     dependencies.Commands, processes: dependencies.Processes,
 		tmux: dependencies.Tmux, stderr: stderr,
-		gracePeriod: grace, pollInterval: poll,
 		configurationError: configurationError,
 		continuationTail:   dependencies.ContinuationTail,
 	}
@@ -291,6 +281,27 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 	}
 
 	account := opener.accountForConfig(hitConfig)
+	if hit.PIDText != "" {
+		// The row's pid is unknown, so "no live process" is unproven: prove it from
+		// the process table before any take-over, as for a missing row.
+		fmt.Fprintf(
+			opener.stderr,
+			"pfm internal agent-open: registry row for %s has an unreadable pid %q — proving no live claude holds it\n",
+			request.ID,
+			hit.PIDText,
+		)
+		held, err := opener.holdsSession(ctx, request.ID)
+		if err != nil {
+			return fmt.Errorf("prove no live claude holds %s: %w", request.ID, err)
+		}
+		if held {
+			return fmt.Errorf(
+				"registry row for %s has an unreadable pid %q, and a live claude holds it — refusing the double-resume",
+				request.ID,
+				hit.PIDText,
+			)
+		}
+	}
 	if hit.PID > 0 && opener.processes.Alive(hit.PID) {
 		socket, err := opener.tmux.SocketForPID(ctx, hit.PID)
 		if err != nil {
@@ -340,33 +351,9 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 		hit.activity(),
 		effectiveAgentAccount(request.PrimaryAccount),
 	)
-	if hit.PID > 0 && opener.processes.Alive(hit.PID) {
-		if err := opener.processes.Terminate(hit.PID); err != nil {
-			return fmt.Errorf("stop agent %d: %w", hit.PID, err)
-		}
-		deadline := time.NewTimer(opener.gracePeriod)
-		ticker := time.NewTicker(opener.pollInterval)
-		for opener.processes.Alive(hit.PID) {
-			select {
-			case <-ctx.Done():
-				ticker.Stop()
-				deadline.Stop()
-				return ctx.Err()
-			case <-deadline.C:
-				ticker.Stop()
-				if opener.processes.Alive(hit.PID) {
-					if err := opener.processes.Kill(hit.PID); err != nil {
-						return fmt.Errorf("kill agent %d: %w", hit.PID, err)
-					}
-				}
-				goto stopped
-			case <-ticker.C:
-			}
-		}
-		ticker.Stop()
-		deadline.Stop()
-	}
-stopped:
+	// The take-over signals nothing: a registry row whose pid still ran
+	// returned above (attached, or refused as outside pfm), so its pid can
+	// only be alive now as another process that took the freed number.
 	return opener.resumeFresh(ctx, request, primary, hitConfig)
 }
 

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -84,14 +83,6 @@ func (server herdrServer) stopped(ctx context.Context, socket string) (bool, err
 	return false, err
 }
 
-// herdrTree is what one Herdr server runs: the server process and every
-// process under it, read from the process table when the plan was built. Err
-// says why the tree could not be read.
-type herdrTree struct {
-	processes []process
-	err       error
-}
-
 func (server herdrServer) stop(
 	ctx context.Context, socket string, tree herdrTree, stopper processStopper,
 ) (string, error) {
@@ -116,78 +107,6 @@ func (server herdrServer) stop(
 		return "", fmt.Errorf("%s, but the processes it ran are unverified: %w", detail, tree.err)
 	}
 	return stopOutlivers(ctx, detail, tree.processes, stopper)
-}
-
-// stopOutlivers proves every process the server ran gone once the server
-// reads stopped: one that outlived it is stopped like any other process, and
-// one that cannot be stopped or read fails the step, named.
-func stopOutlivers(ctx context.Context, detail string, tree []process, stopper processStopper) (string, error) {
-	var outlived []string
-	var failures []error
-	for _, proc := range tree {
-		same, err := stopper.same(proc)
-		if err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		if !same {
-			continue
-		}
-		how, err := stopper.stop(ctx, proc)
-		if err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		outlived = append(outlived, fmt.Sprintf("pid %d %s", proc.PID, how))
-	}
-	if len(failures) > 0 {
-		return "", fmt.Errorf("%s, but %d of the %d process(es) it ran may still run: %w",
-			detail, len(failures), len(tree), errors.Join(failures...))
-	}
-	if len(outlived) == 0 {
-		return fmt.Sprintf("%s; all %d process(es) it ran are gone", detail, len(tree)), nil
-	}
-	return fmt.Sprintf("%s; %d of its %d process(es) outlived it, each stopped: %s",
-		detail, len(outlived), len(tree), strings.Join(outlived, ", ")), nil
-}
-
-// herdrProcesses reads the server's tree from the process table: every
-// `herdr server` process of binary and everything under it, except the pids
-// the restart spares (the front that launched it).
-func (finder *discoverer) herdrProcesses(binary string, table processTable, tableErr error) herdrTree {
-	if tableErr != nil {
-		return herdrTree{err: tableErr}
-	}
-	if err := table.unreadableErr(); err != nil {
-		return herdrTree{err: err}
-	}
-	inTree := map[int]bool{}
-	for _, proc := range table.Processes {
-		base := filepath.Base(proc.Argv[0])
-		if len(proc.Argv) == 2 && proc.Argv[1] == herdrServerVerb &&
-			(base == filepath.Base(binary) || base == "herdr") {
-			inTree[proc.PID] = true
-		}
-	}
-	if len(inTree) == 0 {
-		return herdrTree{err: fmt.Errorf("no %s server process in the process table (%d listed)",
-			filepath.Base(binary), table.Listed)}
-	}
-	for grew := true; grew; {
-		grew = false
-		for _, proc := range table.Processes {
-			if !inTree[proc.PID] && inTree[proc.Parent] && !slices.Contains(finder.deps.Spare, proc.PID) {
-				inTree[proc.PID], grew = true, true
-			}
-		}
-	}
-	var tree herdrTree
-	for _, proc := range table.Processes {
-		if inTree[proc.PID] {
-			tree.processes = append(tree.processes, proc)
-		}
-	}
-	return tree
 }
 
 func (server herdrServer) start(ctx context.Context) (string, error) {
@@ -262,12 +181,9 @@ func (finder *discoverer) findHerdr(ctx context.Context, table processTable, tab
 	if tree.err != nil {
 		foundBy = binary + " status --json; the processes it runs are unknown: " + tree.err.Error()
 	}
-	stopper := processStopper{
-		procs:  finder.deps.Procs,
-		signal: finder.deps.Signal,
-		clock:  finder.deps.Clock,
-		uid:    finder.deps.EffectiveUID,
-	}
+	// What a Herdr server ran (chats, shells, tools) is not this install's
+	// launch, so an outliver is stopped by its identity alone.
+	stopper := finder.deps.stopper(nil)
 	finder.plan.Units = append(finder.plan.Units, Unit{
 		Family:  FamilyHerdr,
 		Name:    "herdr server " + status.Socket,

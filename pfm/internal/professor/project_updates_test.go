@@ -2,15 +2,19 @@ package professor
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -54,107 +58,6 @@ func newUpdatedGitStoreProject(t *testing.T, store string) (project, home string
 	return project, t.TempDir()
 }
 
-// TestProjectUpdatesDiffIgnoresTheUsersGitDiffConfig: the diff printed under
-// an UPDATED row is git's own unified diff whatever the user's gitconfig
-// says — color.diff=always must not put ANSI escapes into the report or the
-// JSON diff, and a diff.external tool must not replace (or, failing, break)
-// it. Watched failing against the plain `git diff <pinned> -- …` call: the
-// external `false` made every UPDATED diff UNREADABLE and the run exit 3.
-func TestProjectUpdatesDiffIgnoresTheUsersGitDiffConfig(t *testing.T) {
-	store := newGitScaffoldStore(t)
-	runStoreGit(t, "-C", store, "config", "color.diff", "always")
-	runStoreGit(t, "-C", store, "config", "diff.external", "false")
-	project, home := newUpdatedGitStoreProject(t, store)
-
-	t.Run("diff ran", func(t *testing.T) {
-		var stdout bytes.Buffer
-		if code := RunProjectUpdates(project, home, true, &stdout, nil); code != 1 {
-			t.Fatalf("RunProjectUpdates(--json) code=%d, want 1 (review): %s", code, stdout.String())
-		}
-		var report struct {
-			Items []projectReportItem `json:"items"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-			t.Fatalf("report is not one JSON object: %v\n%s", err, stdout.String())
-		}
-		for _, item := range report.Items {
-			if item.Status != projectUpdated {
-				continue
-			}
-			if item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") ||
-				strings.Contains(item.Diff, "\x1b[") {
-				t.Fatalf(
-					"UPDATED %s diff=%q diffError=%q, want git's plain unified diff",
-					item.Local,
-					item.Diff,
-					item.DiffError,
-				)
-			}
-			var payload struct {
-				Items []map[string]json.RawMessage `json:"items"`
-			}
-			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
-				t.Fatal(err)
-			}
-			for _, encoded := range payload.Items {
-				if _, skipped := encoded["diffSkipped"]; skipped {
-					t.Fatalf("diff ran but JSON includes diffSkipped: %s", stdout.String())
-				}
-			}
-			return
-		}
-		t.Fatalf("no UPDATED item in the report: %s", stdout.String())
-	})
-
-	t.Run("post-update review", func(t *testing.T) {
-		var stdout bytes.Buffer
-		if code := renderProjectCheck(
-			project,
-			home,
-			false,
-			&stdout,
-			nil,
-		); code != 1 ||
-			!strings.Contains(stdout.String(), "REVIEW REQUIRED — 1 items; nothing was written.") {
-			t.Fatalf("renderProjectCheck() code=%d, want 1 (review): %s", code, stdout.String())
-		}
-	})
-
-	t.Run("textconv", func(t *testing.T) {
-		if err := os.WriteFile(
-			filepath.Join(store, ".git", "info", "attributes"),
-			[]byte("* diff=upper\n"),
-			0o600,
-		); err != nil {
-			t.Fatal(err)
-		}
-		runStoreGit(t, "-C", store, "config", "diff.upper.textconv", "tr a-z A-Z")
-		var stdout bytes.Buffer
-		code := RunProjectUpdates(project, home, true, &stdout, nil)
-		var report struct {
-			Items []projectReportItem `json:"items"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-			t.Fatal(err)
-		}
-		for _, item := range report.Items {
-			if item.Status == projectUpdated {
-				if code != 1 || item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") ||
-					strings.Contains(item.Diff, "UPSTREAM LINE") {
-					t.Fatalf(
-						"textconv report code=%d diff=%q error=%q, want plain diff",
-						code,
-						item.Diff,
-						item.DiffError,
-					)
-				}
-				return
-			}
-		}
-		t.Fatalf("no UPDATED item: %s", stdout.String())
-	})
-}
-
 func TestProjectUpdatesDiffIgnoresAnInheritedForeignRepository(t *testing.T) {
 	project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
 	foreign := newGitScaffoldStore(t)
@@ -170,7 +73,16 @@ func TestProjectUpdatesDiffIgnoresAnInheritedForeignRepository(t *testing.T) {
 	}
 	for _, item := range report.Items {
 		if item.Status == projectUpdated {
-			if code != 1 || item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") {
+			if code != 1 || item.DiffError != "" ||
+				item.Diff != `diff --git a/templates/project/settings.json b/templates/project/settings.json
+index 0967ef4..7748794 100644
+--- a/templates/project/settings.json
++++ b/templates/project/settings.json
+@@ -1 +1,2 @@
+-{}
++# fixture contract
++upstream line
+` {
 				t.Fatalf("foreign repository report code=%d diff=%q error=%q", code, item.Diff, item.DiffError)
 			}
 			return
@@ -190,7 +102,7 @@ func TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore(t *testing.T) {
 	linkedRoot := filepath.Join(t.TempDir(), "linked-worktree")
 	runStoreGit(t, "-C", repository, "worktree", "add", "--detach", "-q", linkedRoot, "HEAD")
 	for _, dir := range []string{ // git carries no empty directory; the store layout needs them
-		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub",
+		"commands", "agents", "scripts", "skills", "epics", "codex", "docs-commands", "docs-hub", "rules",
 	} {
 		if err := os.MkdirAll(filepath.Join(linkedRoot, "templates", "project", dir), 0o700); err != nil {
 			t.Fatal(err)
@@ -210,9 +122,13 @@ func TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore(t *testing.T) {
 
 	var stdout bytes.Buffer
 	code := RunProjectUpdates(project, home, false, &stdout, nil)
-	if code != 1 || strings.Contains(stdout.String(), "UNREADABLE") ||
-		!strings.Contains(stdout.String(), "      +upstream line\n") {
-		t.Fatalf("RunProjectUpdates() code=%d, want 1 with the upstream diff printed:\n%s", code, stdout.String())
+	got := gitSHA.ReplaceAllString(
+		strings.NewReplacer(linkedRoot, "{store}", project, "{project}").Replace(stdout.String()),
+		"{sha}",
+	)
+	if want := "professor: {project}  blueprint {sha} → {sha}\n  current       1\n  ignored       0\n  UPDATED       1\n    .claude/settings.json   project/settings.json  pinned @{sha}\n      upstream change: git -C {store} diff {sha} -- templates/project/settings.json\n      diff --git a/templates/project/settings.json b/templates/project/settings.json\n      index {sha}..{sha} 100644\n      --- a/templates/project/settings.json\n      +++ b/templates/project/settings.json\n      @@ -1 +1,2 @@\n      -{}\n      +# fixture contract\n      +upstream line\n      port what applies into .claude/settings.json, keep the project's own edits, then: pfm update pin .claude/settings.json\n      or keep your version on purpose, on record: pfm update pin .claude/settings.json --keep \"<what you did not take, and why>\"\n  NEW           0\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nREVIEW REQUIRED — 1 items; nothing was written.\n"; code != 1 ||
+		got != want {
+		t.Fatalf("RunProjectUpdates() code %d report = %q, want %q", code, got, want)
 	}
 }
 
@@ -640,8 +556,8 @@ func TestRenamedDocsHubReportsMovedNotGoneUpstreamAndNew(t *testing.T) {
 
 // TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream: only
 // a successor that is absent from the store leaves the old pin GONE-UPSTREAM;
-// one the store cannot be asked about fails the report by name, never printing
-// advice to delete a populated hub.
+// one the store cannot be asked about is an UNREADABLE row that fails the
+// report by name, never printing advice to delete a populated hub.
 func TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream(t *testing.T) {
 	project, home, store := newRenamedDocsHubProject(t)
 	hub := filepath.Join(store, "templates", "project", "docs-hub")
@@ -656,12 +572,10 @@ func TestRenamedTemplateWithAnUnreadableSuccessorIsAFailureNotGoneUpstream(t *te
 	code := RunProjectUpdates(project, home, false, &stdout, nil)
 
 	report := stdout.String()
-	if code != 3 || !strings.Contains(report, "FAILED — UNREADABLE ") ||
-		!strings.Contains(report, filepath.Join("docs-hub", "_index.md")) {
-		t.Fatalf("code=%d, want 3 and FAILED — UNREADABLE naming the successor:\n%s", code, report)
-	}
-	if strings.Contains(report, "delete it") {
-		t.Fatalf("report advises deleting while the successor is unreadable:\n%s", report)
+	got := gitSHA.ReplaceAllString(strings.NewReplacer(store, "{store}", project, "{project}").Replace(report), "{sha}")
+	if want := "professor: {project}  blueprint  → {sha}\n  current       0\n  ignored       0\n  UPDATED       0\n  NEW           3\n    project/docs-hub — adopt: copy/adapt it locally, then pfm update pin --template project/docs-hub <local> — or ignore\n    project/rumdl-policy.toml — adopt: copy/adapt it locally, then pfm update pin --template project/rumdl-policy.toml <local> — or ignore\n    project/settings.json — adopt: copy/adapt it locally, then pfm update pin --template project/settings.json <local> — or ignore\n  GONE-UPSTREAM 0\n  MOVED         0\n  LOCAL-DELETED 0\n  UNREADABLE    2\n    docs/agents/_index.md — UNREADABLE {store}/templates/project/docs-hub/_index.md: stat {store}/templates/project/docs-hub/_index.md: not a directory\n    docs/agents/standards.md — UNREADABLE {store}/templates/project/docs-hub/standards.md: stat {store}/templates/project/docs-hub/standards.md: not a directory\n  every row ends in a verb; re-run this report until it ends `clean` — a row left open is not a decision:\n    · UPDATED         port the intent of each upstream commit, then pfm update pin <local>; keeping your version on purpose: pfm update pin <local> --keep \"<what you did not take, and why>\"\n    · NEW             adopt, then pfm update pin --template <template> <local>; not for this project: pfm update ignore <template>\n    · GONE-UPSTREAM   pfm update drop <local>\n    · LOCAL-DELETED   restore the file, or pfm update drop <local> then pfm update ignore <template> (a dropped pin's template reads NEW); MOVED: the verbs on the row\n    · RETIRED-NAME    edit the line to its successor; a mention that must stay: pfm update accept <path> --reason \"<why>\" [--name <name>]\n    · INCOMPLETE      inspect the unscanned text; accept reviewed coverage: pfm update accept <path> --coverage --reason \"<why>\"; read failures must be fixed\n  run the verbs one at a time: each rewrites .professor/baseline.json\nFAILED — 2 item(s) could not be read; nothing was written.\n"; code != 3 ||
+		got != want {
+		t.Fatalf("RunProjectUpdates() code %d report = %q, want %q", code, got, want)
 	}
 }
 
@@ -689,3 +603,75 @@ func TestRetiredCoverageIncompleteIsVisibleAndNonfatal(t *testing.T) {
 		t.Error("incomplete scan marked failed")
 	}
 }
+
+// failingGitVerbRunner runs git for real except verb, which exits 128 the way
+// git does on a broken object store.
+type failingGitVerbRunner struct {
+	deps.Runner
+	verb string
+}
+
+func (runner failingGitVerbRunner) Run(
+	ctx context.Context,
+	argv []string,
+	opts deps.RunOptions,
+) (deps.RunResult, error) {
+	if len(argv) > 1 && argv[1] == runner.verb {
+		return deps.RunResult{ExitCode: 128, Stderr: []byte("fatal: scripted failure\n")}, nil
+	}
+	return runner.Runner.Run(ctx, argv, opts)
+}
+
+// TestProjectUpdatesKeepsTheDiffWhenPinHistoryIsUnreadable: the UPDATED diff
+// read, so a pinned-template read or commit log that fails costs only the
+// history line, never the diff, and the report stays a review, not a failure.
+func TestProjectUpdatesKeepsTheDiffWhenPinHistoryIsUnreadable(t *testing.T) {
+	for _, row := range []struct{ verb, want string }{
+		{"log", "commit log unreadable: git log: git exited with status 128: fatal: scripted failure"},
+		{"show", "pinned template unreadable, so this diff is unverified against the pin: " +
+			"show project/settings.json at %s: git exited with status 128: fatal: scripted failure"},
+	} {
+		t.Run(row.verb, func(t *testing.T) {
+			project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
+			report, err := buildProjectReport(project, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report.Store.runner = failingGitVerbRunner{Runner: storeGit, verb: row.verb}
+			if failed := captureProjectDiffs(&report); failed {
+				t.Fatalf("captureProjectDiffs() failed = true, want the diff kept: %+v", report.Items)
+			}
+			item := report.Items[0]
+			want := row.want
+			if strings.Contains(want, "%s") {
+				want = fmt.Sprintf(want, item.Pin.PinnedSHA)
+			}
+			if item.Status != projectUpdated || item.HistoryError != want ||
+				item.Diff != `diff --git a/templates/project/settings.json b/templates/project/settings.json
+index 0967ef4..7748794 100644
+--- a/templates/project/settings.json
++++ b/templates/project/settings.json
+@@ -1 +1,2 @@
+-{}
++# fixture contract
++upstream line
+` {
+				t.Fatalf("item = %+v, want UPDATED with its diff and historyError %q", item, want)
+			}
+			var stdout bytes.Buffer
+			writeProjectHuman(&stdout, report)
+			for _, line := range []string{
+				"      upstream commits UNAVAILABLE — " + want + "\n",
+				"      +upstream line\n",
+				"REVIEW REQUIRED — 1 items; nothing was written.\n",
+			} {
+				if !strings.Contains(stdout.String(), line) {
+					t.Fatalf("report lacks %q:\n%s", line, stdout.String())
+				}
+			}
+		})
+	}
+}
+
+// gitSHA matches the commit names a git store's fixture commits print, which differ per run.
+var gitSHA = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)

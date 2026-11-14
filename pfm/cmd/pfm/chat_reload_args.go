@@ -96,46 +96,6 @@ func reloadRequestedAccount(args []string) int {
 	return 0
 }
 
-// normalizeReloadArgs maps every cache spelling a person reaches for onto the
-// one canonical --cache 1h|5m before validation: `--1h` and `--5m`, each with
-// an optional trailing `on`, and `--cache on|off`, since the launch knob is
-// the cache1h boolean. A flag's value is copied untouched, so `--then --1h`
-// keeps its prompt. The worker's argv is normalized again, idempotently.
-func normalizeReloadArgs(args []string) []string {
-	normalized := make([]string, 0, len(args))
-	for index := 0; index < len(args); index++ {
-		switch word := args[index]; word {
-		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadModelFlag, reloadEffortFlag, reloadAccountFlag:
-			normalized = append(normalized, word)
-			if index+1 < len(args) {
-				index++
-				normalized = append(normalized, args[index])
-			}
-		case "--1h", "--5m":
-			normalized = append(normalized, reloadCacheFlag, strings.TrimPrefix(word, "--"))
-			if index+1 < len(args) && strings.EqualFold(args[index+1], "on") {
-				index++
-			}
-		case reloadCacheFlag:
-			normalized = append(normalized, word)
-			if index+1 < len(args) {
-				index++
-				value := strings.ToLower(args[index])
-				switch value {
-				case "on":
-					value = "1h"
-				case "off":
-					value = "5m"
-				}
-				normalized = append(normalized, value)
-			}
-		default:
-			normalized = append(normalized, word)
-		}
-	}
-	return normalized
-}
-
 // reloadArgumentHint turns a rejected word into an error the CALLER can act on
 // without re-reading the usage line and guessing again.
 //

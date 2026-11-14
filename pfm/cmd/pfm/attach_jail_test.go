@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -14,8 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-const attachHelperEnv = "PFM_ATTACH_HELPER"
-
 // TestPFMAttachHelper turns the package test binary into the real CLI for
 // subprocess integration tests. Keeping the CLI inside the test process is
 // load-bearing for process-table fixtures: TestMain installs the jail's
@@ -24,6 +24,8 @@ func TestPFMAttachHelper(t *testing.T) {
 	if os.Getenv(attachHelperEnv) != "1" {
 		t.Skip("pfm attach fixture runs only as a helper process")
 	}
+	// The helper is the CLI of a jail fixture over a real tmux server.
+	testjail.TmuxServer(t)
 	separator := -1
 	for index, argument := range os.Args {
 		if argument == "--" {
@@ -49,6 +51,7 @@ type attachJail struct {
 }
 
 func TestJailedEvalAttachFromPlainAndNestedTmux(t *testing.T) {
+	testjail.TmuxServer(t)
 	t.Parallel()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -274,7 +277,10 @@ func (jail *attachJail) proveAttach(
 	var output synchronizedBuffer
 	driverSocket := ""
 	if mode == "plain" {
-		command = testjail.PTYCommand(scriptPath)
+		command, err = testjail.PTYCommand(scriptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
 		command.Env = jail.env
 		input, err = command.StdinPipe()
 		if err != nil {

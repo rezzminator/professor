@@ -36,6 +36,7 @@ type fakeOpenTmux struct {
 	alive     map[string]bool
 	created   []action.ChatServer
 	createErr error
+	read      map[string]bool // sockets whose launch pane was read once
 }
 
 func (fake *fakeOpenTmux) ListPanes(context.Context, string) ([]action.ActionPane, error) {
@@ -62,9 +63,18 @@ func (fake *fakeOpenTmux) CreateChatServer(_ context.Context, server action.Chat
 	return fake.createErr
 }
 
-// LaunchPane shows every created pane as a settled chat: these tests are about
-// which chat opens where, the launch watch's own cases live in action's tests.
-func (fake *fakeOpenTmux) LaunchPane(context.Context, string) (action.LaunchPaneState, error) {
+// LaunchPane shows every created pane as a chat that settles: blank under its
+// engine at the first read, as a pane just created is, then its screen. These
+// tests are about which chat opens where; the launch watch's own cases live in
+// action's tests.
+func (fake *fakeOpenTmux) LaunchPane(_ context.Context, socket string) (action.LaunchPaneState, error) {
+	if !fake.read[socket] {
+		if fake.read == nil {
+			fake.read = map[string]bool{}
+		}
+		fake.read[socket] = true
+		return action.LaunchPaneState{Command: "claude"}, nil
+	}
 	return action.LaunchPaneState{Screen: "fake chat ready", Command: "claude"}, nil
 }
 
@@ -76,7 +86,9 @@ type emptyProcesses struct{}
 
 func (emptyProcesses) Processes(context.Context) ([]action.Process, error) { return nil, nil }
 
-func (emptyProcesses) Terminate(int) error { return nil }
+func (emptyProcesses) Terminate(gather.Target) (gather.Outcome, error) {
+	return gather.OutcomeGone, nil
+}
 
 // openStub is what stubOpenExecutor observed: the Heal the preparation wired
 // (nil means a wedged Codex thread would resume amnesiac) and every thread id
@@ -311,9 +323,9 @@ func (processes *openAgentProcesses) Processes(context.Context) ([]action.Proces
 	return []action.Process{{PID: 4242, Argv: []string{"claude", "--session-id", processes.id}}}, nil
 }
 
-func (processes *openAgentProcesses) Terminate(pid int) error {
-	processes.killed = append(processes.killed, pid)
-	return nil
+func (processes *openAgentProcesses) Terminate(target gather.Target) (gather.Outcome, error) {
+	processes.killed = append(processes.killed, target.PID)
+	return gather.OutcomeSent, nil
 }
 
 func TestOpenDetachedTargetKeepsAgentRouterSemantics(t *testing.T) {
@@ -787,41 +799,5 @@ func TestOpenDetachedIDSeesAnArchivedChatGoneThenRestored(t *testing.T) {
 	if err != nil || result.State != "opened" || len(tmux.created) != 1 {
 		t.Fatalf("OpenDetachedID(restored chat) = %#v, %v created = %d, want it resumed once",
 			result, err, len(tmux.created))
-	}
-}
-
-func TestPrepareOpenPreservesCodexCallerReadFailure(t *testing.T) {
-	root := testjail.Fleet(t)
-	t.Setenv("TMUX", "")
-	t.Setenv("HERDR_SOCKET_PATH", "")
-	t.Setenv("HERDR_PANE_ID", "")
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	t.Setenv("CODEX_THREAD_ID", "caller-thread")
-	runtime, err := config.RuntimeOrDefault(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	blocker := filepath.Join(root, "blocked-db")
-	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "cache.db"))
-	fake := &fakeOpenTmux{}
-	stubOpenExecutor(t, fake)
-	executor, request, _, err := prepareOpen(
-		context.Background(),
-		compose.Row{Kind: compose.NewClaude, CWD: root},
-		1,
-		false,
-		"",
-		io.Discard,
-		runtime,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = executor.Open(context.Background(), request)
-	if err == nil || !strings.Contains(err.Error(), "Codex") || len(fake.created) != 0 {
-		t.Fatalf("caller read failure birthed chat: err=%v created=%v", err, fake.created)
 	}
 }

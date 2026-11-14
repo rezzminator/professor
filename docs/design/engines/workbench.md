@@ -6,6 +6,7 @@
 - [Discovery and ownership](#discovery-and-ownership)
 - [Persona precedence](#persona-precedence)
 - [Launch doors](#launch-doors)
+- [pfm.settings.json](#pfmsettingsjson)
 - [Mirrors](#mirrors)
 - [Picker rows](#picker-rows)
 - [Cache](#cache)
@@ -20,7 +21,7 @@ A workbench is a nested sub-project marked by `{dir}/.professor/workbench.json`,
 | --- | --- | --- |
 | `prompt` | required | Relative regular non-empty file inside `.professor/`, including after physical-path resolution. |
 | `engines` | `["claude"]` | Non-empty ordered array of distinct `claude`, `codex`, `opencode` words. |
-| `title` | `filepath.Base(dir)` | Non-empty string when present. |
+| `title` | `filepath.Base(dir)` | String; empty reads as absent. |
 | `name` | `naming.WorkbenchPrefix(title)` | Non-empty string without whitespace or `:`. |
 | `effort` | none | String; `action.WorkbenchPersona` validates through `ClaudeEffort`, `CodexEffort` or `OpenCodeEffort` and lower-cases it; unknown values refuse the launch naming the bench. |
 | `model` | none | String passed verbatim; OpenCode requires non-empty `provider/model` parts. |
@@ -70,6 +71,16 @@ An omitted engine in `chat new` / MCP `new` keeps the current engine when enable
 
 Attaching to an already live seat does not relaunch it. Bare non-session administrative commands pass through. `pfm headless exec`, `PurposeQuery` probes (`reap/busy.go`, agent-open queries, `chat_call_resume.go`) and `internal/ask` one-shot runs are outside this rule. OpenCode `chat new` and registered MCP `new` support native Herdr seats only; `--agent-role`, reload and branch remain refused.
 
+## pfm.settings.json
+
+A `pfm.settings.json` at a project's managed root (the directory holding `.professor/baseline.json`; a linked git worktree reads its own copy) applies to every Claude, Codex and OpenCode chat pfm opens in the project (`pfm/internal/workbench/persona.go`: `ForLaunch`, `settingsPersona`, `readRootSettings`).
+
+- **`harnessPrompt`:** optional. `{"harnessPrompt": {"extend": "path"}}` sends the fleet prompt, a blank line, then the project's file; `{"harnessPrompt": {"replace": "path"}}` sends the file alone.
+- **`envs`:** `{NAME: value}` set on each such chat. A file holding only `envs` is valid.
+- **Precedence:** a nested workbench's prompt wins over the root file's `harnessPrompt`; the `envs` still apply. A restored chat (`pfm chat open`, `pfm/internal/chat/restored_recipe.go`) and a reload carry the `envs`.
+- **Refused names:** `PFM_*`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` (`settingsEnvReserved`).
+- **Faults:** a faulty file never blocks a launch; the chat opens without the whole file and a warning names the fault.
+
 ## Mirrors
 
 A workbench owns its own CLAUDE.md: engine-sync codex build {dir} compiles it into {dir}/AGENTS.md, and without it every Codex launch in the workbench is refused.
@@ -92,7 +103,7 @@ Claude ✦ launches choose a numbered name from the live/killed roster. Codex/Op
 
 ## Cache
 
-`paths.WorkbenchCache` names `workbenches.json` beside `CacheDB`. The version-1 cache stores bench directories/roots and discovery failures, not prompt content. `ReadCache` reloads manifests, skips deleted entries, recalculates duplicate-title keys, distinguishes missing from corrupt files, and returns saved walk failures. `WriteCache` publishes atomically. Source: `pfm/internal/workbench/cache.go`.
+`paths.WorkbenchCache` names `workbenches.json` beside `CacheDB`. The version-1 cache stores bench directories/roots and discovery failures, not prompt content. `ReadCache` reloads manifests, skips deleted entries, recalculates duplicate-title keys, distinguishes missing from corrupt files, and returns saved walk failures; an entry with an invalid or unstattable directory is one walk failure and every other bench still loads. `WriteCache` publishes atomically. Source: `pfm/internal/workbench/cache.go`.
 
 Picker first paint uses this cache without walking; refresh discovers benches and publishes both rows and cache. A corrupt cache produces a first frame with an error row naming the cache, and refresh repairs it. Fleet scans opt in through `Request.Workbenches`; plain scans keep their existing rows. Sources: `pfm/internal/picker/pipeline.go` (`refreshWorkbenches`), `pfm/internal/fleet/scan.go`.
 
@@ -106,9 +117,9 @@ Picker first paint uses this cache without walking; refresh discovers benches an
 | `doctor: workbench none under {root}` | none | No workbench was found under this managed root. |
 | `doctor: workbench {dir} ok · engines {engines} · prompt {prompt}` | none | Manifest valid; printed after mirror checks only when none failed. |
 | `doctor: workbench {dir} FAILED: {fault}` | failure | Repair the named manifest/prompt; no mirror check runs for it. |
-| `doctor: workbench {dir} {engine} mirror STALE: {problems} — the next launch there rebuilds it` | warning | Stale, missing, wrong-mode and orphaned outputs are cleared by a build. The next launch rebuilds them, or run `pfm {engine} build {dir}`. |
-| `doctor: workbench {dir} {engine} mirror FAILED: {problem} — the next launch there fails; fix it, then run pfm {engine} build {dir}` | failure per problem | Repair every named failure, build the mirror, then rerun doctor. |
-| `doctor: workbench {dir} {engine} mirror STALE: {problems} — rebuilt by pfm {engine} build {dir} once the failures are fixed` | warning | Rebuildable outputs accompany failures; fix those failures before building. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — the next launch there rebuilds it` | warning | Stale, missing, wrong-mode and orphaned outputs are cleared by a build. The next launch rebuilds them, or run `engine-sync {engine} build {dir}`. |
+| `doctor: workbench {dir} {engine} mirror FAILED: {problem} — the next launch there fails; fix it, then run engine-sync {engine} build {dir}` | failure per problem | Repair every named failure, build the mirror, then rerun doctor. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — rebuilt by engine-sync {engine} build {dir} once the failures are fixed` | warning | Rebuildable outputs accompany failures; fix those failures before building. |
 | `doctor: workbench {dir} {engine} mirror BROKEN: {err}` | failure | Repair the named compiler input and rebuild. |
 | `doctor: workbench discovery FAILED: {WalkError text} — whether more workbenches exist there is UNKNOWN` | failure | Restore access to the path and rerun discovery. |
 | `doctor: workbench UNREADABLE {err}` | failure | Repair the managed-root lookup path and rerun doctor. |

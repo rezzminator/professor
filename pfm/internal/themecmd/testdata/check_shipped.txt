@@ -1,0 +1,12 @@
+exit 0
+ok  Professor · Aurora         vs-dark  920 colours · 72 token rules · 46 semantic   {dir0}/templates/themes/aurora
+ok  Professor · Cobalt Dazzle  vs-dark  391 colours · 41 token rules · 28 semantic   {dir0}/templates/themes/cobalt-dazzle
+ok  Professor · Glowstick      vs-dark  391 colours · 41 token rules · 28 semantic   {dir0}/templates/themes/glowstick
+ok  Professor · Lacquer        vs-dark  391 colours · 41 token rules · 28 semantic   {dir0}/templates/themes/lacquer
+ok  Professor · Lagoon         vs-dark  991 colours · 80 token rules · 57 semantic   {dir0}/templates/themes/lagoon
+ok  Professor · Paper Lantern  vs       897 colours · 83 token rules · 53 semantic   {dir0}/templates/themes/paper-lantern
+ok  Professor · Prism          vs-dark  391 colours · 41 token rules · 28 semantic   {dir0}/templates/themes/prism
+ok  Professor · Tokyo Night    vs-dark  991 colours · 160 token rules · 49 semantic  {dir0}/templates/themes/tokyo-night
+ok  Professor · Ultrafunk      vs-dark  894 colours · 73 token rules · 53 semantic   {dir0}/templates/themes/ultrafunk
+9 of 9 profiles pass
+--- stderr

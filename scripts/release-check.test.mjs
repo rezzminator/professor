@@ -731,24 +731,24 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
       plugins: [{ name: "p", source: { source: "git-subdir", url: url ?? plugin, path: "./plugins/p", ref: "main" } }],
     };
     const base = await commit(r0, {
-      "README.md": "Run `/quality:prompt check`, `/handy` or `/reload --account 2`; see `/dev/null`.\n",
+      "README.md": "Run `/prompt:use check`, `/handy` or `/reload --account 2`; see `/dev/null`.\n",
       ".claude-plugin/marketplace.json": JSON.stringify(market, null, 2),
-      "templates/global/commands/quality/prompt.md": "q\n",
+      "templates/global/commands/prompt/use.md": "q\n",
       "templates/global/skills/handy/SKILL.md": "h\n",
       "pfm/internal/installer/assets/reload.command.md": "r\n",
       "templates/global/agents/old-agent.md": "a\n",
       "scripts/old.sh": "echo old\n",
     });
     // The removal, and every place a removed name may stand: history and the
-    // retired-name registry; plus a longer word that only starts with one.
+    // retired lists; plus a longer word that only starts with one.
     await commit(r0, {
       "scripts/old.sh": null,
       "templates/global/agents/old-agent.md": null,
       "releases/v0.1.0.md": "scripts/old.sh and old-agent are gone\n",
       "CHANGELOG.md": "- dropped scripts/old.sh\n",
       ".professor/RR/notes.md": "old-agent\n",
-      "pfm/internal/update/retired_names.go": "// old-agent retired\n",
-      "docs/live.md": "the old-agentx tool, the old-agent-sonnet role, scripts/old.sh.bak and scripts/old.shell\n",
+      "templates/global/retired.json": '{"names": [{"name": "old-agent"}, {"name": "scripts/old.sh"}]}\n',
+      "docs/live.md": "the old-agentx tool, the old-agent-sonnet role, the old-agent:use command, scripts/old.sh.bak and scripts/old.shell\n",
     }, "remove old.sh and old-agent");
     const check = async (files) => {
       if (files) await commit(r0, files, "more");
@@ -767,10 +767,39 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
     ])
       assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
   });
-  test("S1 a live file still names a removed path", async () => {
-    const r = await (await fixture()).check({ "docs/run.md": "intro\nrun scripts/old.sh first\n" });
+  test("S1 a live file still names a removed path or role", async () => {
+    const r = await (await fixture()).check({ "docs/run.md": "intro\nrun scripts/old.sh first\nold-agent: the old role\n" });
     assertFail(r, "S1");
     assert.match(r.out, /^FAIL S1: docs\/run\.md:2 — names the removed path scripts\/old\.sh$/m, r.out);
+    assert.match(r.out, /^FAIL S1: docs\/run\.md:3 — names the removed agent old-agent$/m, r.out);
+  });
+  test("S1 and D1 a role moved into a listed plugin keeps its names live", async () => {
+    const f = await fixture();
+    const before = await commit(f.r0, {
+      "templates/global/agents/p-mover.md": "m\n",
+      "templates/global/agents/scout.md": "s\n",
+      "templates/global/commands/p/doc.md": "d\n",
+      "templates/global/skills/kit/SKILL.md": "k\n",
+    }, "the roles before the move");
+    await commit(f.plugin, {
+      "plugins/p/agents/mover.md": "m\n",
+      "plugins/p/agents/scout.md": "s\n",
+      "plugins/p/commands/doc.md": "d\n",
+      "plugins/p/skills/kit/SKILL.md": "k\n",
+    }, "the roles move in");
+    await git(f.plugin, "tag", "-a", "v1.1.0", "-m", "v1.1.0");
+    await commit(f.r0, {
+      "templates/global/agents/p-mover.md": null,
+      "templates/global/agents/scout.md": null,
+      "templates/global/commands/p/doc.md": null,
+      "templates/global/skills/kit/SKILL.md": null,
+      "README.md": "Run `/prompt:use check`, `/handy`, `/reload --account 2` or `/p:doc`.\n",
+      "docs/moved.md": "Codex runs p-mover; Claude runs `/p:doc`, the kit skill and p:scout, the scout.\n",
+    }, "move the roles into plugin p");
+    const r = await run(f.r0, "preflight", "--base", before, "--head", "HEAD");
+    assertClean(r, "preflight");
+    for (const line of ["SEAMS 4 removed paths, 0 removed roles swept", "README 4 commands checked"])
+      assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
   });
   test("S1 a design doc's history section is no exemption", async () => {
     const r = await (await fixture()).check({ "docs/design/x/x.md": "## History\n\nold-agent was retired\n" });
@@ -778,9 +807,9 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
     assert.match(r.out, /^FAIL S1: docs\/design\/x\/x\.md:3 — names the removed agent old-agent$/m, r.out);
   });
   test("D1 the README names a command no tree ships", async () => {
-    const r = await (await fixture()).check({ "README.md": "Run `/quality:prompt`.\n\nThen `/quality:gone fix`.\n" });
+    const r = await (await fixture()).check({ "README.md": "Run `/prompt:use`.\n\nThen `/gone:use fix`.\n" });
     assertFail(r, "D1");
-    assert.match(r.out, /^FAIL D1: README\.md:3 — `\/quality:gone` names no command or skill this tree ships$/m, r.out);
+    assert.match(r.out, /^FAIL D1: README\.md:3 — `\/gone:use` names no command or skill this tree ships$/m, r.out);
   });
   test("T1 a listed plugin's gitlink is no published tag", async () => {
     const r = await (await fixture({ tagged: false })).check();

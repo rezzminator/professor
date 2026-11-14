@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -149,7 +148,8 @@ func TestConcurrentCallersSpendOneRequest(t *testing.T) {
 }
 
 // T3: a fresh statusline snapshot for this seat answers without a request,
-// and its windows are the ones the caller sees.
+// and its windows are the ones the caller sees; a corrupt sibling snapshot
+// costs only itself, named in the hook's log.
 func TestFreshStatuslineSnapshotAnswersWithoutARequest(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	root, configDir, cacheDir, env := doorSeat(t, 7, now)
@@ -168,11 +168,15 @@ func TestFreshStatuslineSnapshotAnswersWithoutARequest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(snapshotDir, "acct-7.session-a.json"), snapshot, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(snapshotDir, "acct-7.session-b.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	server, hits, _ := countingUsageServer(t, now, 0)
+	var log bytes.Buffer
 	message, err := Evaluate(context.Background(), Options{
 		Now: func() time.Time { return now }, Env: env, Home: root, ConfigDir: configDir,
 		AccountDirs: map[string]int{configDir: 7}, CacheDir: cacheDir, Warn: 80, Critical: 95, TTL: 3 * time.Minute,
-		Client: server.Client(), Endpoint: server.URL, Log: io.Discard,
+		Client: server.Client(), Endpoint: server.URL, Log: &log,
 	})
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -182,6 +186,11 @@ func TestFreshStatuslineSnapshotAnswersWithoutARequest(t *testing.T) {
 	}
 	if !strings.Contains(message, "5h 85%") || !strings.Contains(message, "7d 30%") {
 		t.Fatalf("hook did not answer from the snapshot's windows: %q", message)
+	}
+	wantLog := "pfm usage-hook: statusline snapshot: skipped statusline quota acct-7.session-b.json: decode: " +
+		"unexpected end of JSON input\n"
+	if log.String() != wantLog {
+		t.Fatalf("log=%q, want %q", log.String(), wantLog)
 	}
 }
 
@@ -258,6 +267,43 @@ func TestUsageRequestCarriesThePfmUserAgent(t *testing.T) {
 	}
 }
 
+// The usage offline switch stops the request at the door: with it set the
+// endpoint is never asked and the expired cache answers beside
+// ErrUsageOffline; unset, the same seat asks the endpoint once.
+func TestUsageOfflineSwitchSendsNoRequest(t *testing.T) {
+	for _, testcase := range []struct {
+		name         string
+		offline      bool
+		wantHits     int64
+		wantErr      error
+		wantFiveHour float64
+	}{
+		{name: "offline", offline: true, wantHits: 0, wantErr: ErrUsageOffline, wantFiveHour: 20},
+		{name: "online", offline: false, wantHits: 1, wantErr: nil, wantFiveHour: 10},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			now := time.Now()
+			root, configDir, cacheDir, _ := doorSeat(t, 5, now)
+			env := &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}}
+			server, hits, _ := countingUsageServer(t, now, 0)
+			usage, _, err := Fetch(context.Background(), Options{
+				Env: env, Home: root, ConfigDir: configDir,
+				AccountDirs: map[string]int{configDir: 5}, CacheDir: cacheDir, TTL: 3 * time.Minute,
+				Client: server.Client(), Endpoint: server.URL, Log: io.Discard, Offline: testcase.offline,
+			}, 5)
+			if !errors.Is(err, testcase.wantErr) || (testcase.wantErr == nil && err != nil) {
+				t.Fatalf("fetch error = %v, want %v", err, testcase.wantErr)
+			}
+			if got := hits.Load(); got != testcase.wantHits {
+				t.Fatalf("requests = %d, want %d", got, testcase.wantHits)
+			}
+			if usage.FiveHour.Utilization == nil || *usage.FiveHour.Utilization != testcase.wantFiveHour {
+				t.Fatalf("five-hour utilization = %v, want %v", usage.FiveHour.Utilization, testcase.wantFiveHour)
+			}
+		})
+	}
+}
+
 // The door and the Limits tab share one "still worth showing" rule: a window
 // counts only with a reading and a reset not yet passed, an unknown reset
 // being no passed one.
@@ -281,42 +327,16 @@ func TestHasCurrentWindowNeedsAReadingAndAResetNotYetPassed(t *testing.T) {
 	}
 }
 
-// TestClaudeProbesNeverWriteTheRealClaudeHome: the dependency probe (version
-// and self-doctor, as pfm doctor and pfm install run it) and the usage hook's
-// version read each run a logged-out claude. Run with the ambient env, it
-// recreated ~/.claude/backups and $HOME/.claude.json and the host check then
-// blocked the machine; each run now gets a throwaway home that is gone after.
-func TestClaudeProbesNeverWriteTheRealClaudeHome(t *testing.T) {
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
-	sid := filepath.Join(t.TempDir(), "sid")
-	t.Setenv(paths.EnvSIDDir, sid)
-	scratch := t.TempDir()
-	record := filepath.Join(scratch, "config-dirs.log")
-	binary := filepath.Join(scratch, "claude")
-	if err := testjail.WriteLoggedOutClaude(binary, record, ""); err != nil {
-		t.Fatal(err)
-	}
-	var entries []deps.Entry
-	registry := deps.Registry(deps.Options{Home: home, ClaudeBinary: binary})
-	for index := range registry {
-		if registry[index].Engine == pfmengine.Claude {
-			entries = append(entries, registry[index])
-		}
-	}
-	results := deps.Probe(context.Background(), entries, deps.ProbeOptions{GOOS: runtime.GOOS})
-	if len(results) != 1 || results[0].State != deps.StateOK || results[0].SelfDoctor != "ok" {
-		t.Fatalf("dependency probe = %#v, want one healthy claude", results)
-	}
-	version, err := claudeCodeVersion(context.Background(), binary)
-	if err != nil || version != "2.1.238" {
-		t.Fatalf("usage hook version = %q, %v", version, err)
-	}
-	if runs := testjail.AssertClaudeRanInThrowawayHomes(t, home, sid, record); runs != 4 {
-		t.Errorf("the fake recorded %d runs, want 4 (--version, doctor --help, doctor, the usage --version)", runs)
+// TestClaudeCodeVersionNamesAMissingBinary: a Claude binary absent from PATH
+// fails at resolution with its name, never as a stat of the bare name.
+func TestClaudeCodeVersionNamesAMissingBinary(t *testing.T) {
+	previous := usageRunner
+	usageRunner = &deps.FakeRunner{}
+	t.Cleanup(func() { usageRunner = previous })
+	_, err := claudeCodeVersion(context.Background(), "claude")
+	want := `resolve Claude Code binary "claude": exec: "claude": executable file not found in $PATH`
+	if err == nil || err.Error() != want {
+		t.Fatalf("claudeCodeVersion() error = %v, want %q", err, want)
 	}
 }
 
@@ -329,25 +349,29 @@ func TestClaudeVersionProbeDropsTheHerdrPane(t *testing.T) {
 	t.Setenv("HERDR_SOCKET_PATH", "/tmp/h.sock")
 	t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
 	t.Setenv("PFM_PROBE_KEEP", "kept")
-	scratch := t.TempDir()
-	record := filepath.Join(scratch, "env.log")
-	binary := filepath.Join(scratch, "claude")
-	script := "#!/bin/sh\n/usr/bin/env > '" + record + "'\nprintf '2.1.238 (Claude Code)\\n'\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+	binary := filepath.Join(t.TempDir(), "claude")
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath(binary, binary, nil)
+	fake.Script([]string{binary, "--version"}, deps.RunResult{Stdout: []byte("2.1.238 (Claude Code)\n")}, nil)
+	previous := usageRunner
+	usageRunner = fake
+	t.Cleanup(func() { usageRunner = previous })
 	if version, err := claudeCodeVersion(context.Background(), binary); err != nil || version != "2.1.238" {
 		t.Fatalf("claudeCodeVersion = %q, %v, want 2.1.238", version, err)
 	}
-	raw, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatal(err)
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("version probes = %v, want exactly 1", calls)
 	}
-	if !strings.Contains(string(raw), "PFM_PROBE_KEEP=kept") {
+	raw := strings.Join(calls[0].Opts.Env, "\n")
+	if !strings.Contains(raw, "PFM_PROBE_KEEP=kept") {
 		t.Fatalf("the probe lost an unrelated variable: %s", raw)
 	}
 	for _, name := range []string{"HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_BIN_PATH"} {
-		if strings.Contains("\n"+string(raw), "\n"+name+"=") {
+		if strings.Contains("\n"+raw, "\n"+name+"=") {
 			t.Errorf("%s reached the version probe: %s", name, raw)
 		}
 	}
@@ -370,13 +394,15 @@ func fixedUsageServer(t *testing.T, body string) (*httptest.Server, *atomic.Int6
 // of the window's earlier reading carried over, and it answers inside the TTL
 // like any success. A response that reports no window at all (an account on
 // credits) is an answer too, and is not asked again inside the TTL. A body
-// naming no usage key at all is no answer: it still fails and backs off.
+// naming no usage key at all, or no JSON, is no answer: it still fails and
+// backs off, its message carrying the body it could not use.
 func TestAnOmittedWindowIsAnAnswerNotAFailure(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	week := now.Add(5 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	for _, testcase := range []struct {
 		name, body          string
-		wantErr, wantSeven  bool
+		wantBackoff         string
+		wantSeven           bool
 		wantFable           bool
 		wantHitsAfterSecond int64
 	}{
@@ -398,8 +424,19 @@ func TestAnOmittedWindowIsAnAnswerNotAFailure(t *testing.T) {
 				`"seven_day":{"utilization":null,"resets_at":"` + week + `"},"limits":[]}`,
 			wantHitsAfterSecond: 1,
 		},
-		{name: "error object", body: `{"error":{"type":"x","message":"y"}}`, wantErr: true, wantHitsAfterSecond: 1},
-		{name: "null body", body: `null`, wantErr: true, wantHitsAfterSecond: 1},
+		{
+			name: "error object", body: `{"error":{"type":"x","message":"y"}}`, wantHitsAfterSecond: 1,
+			wantBackoff: `decode usage response: no usage key in 36-byte body: {"error":{"type":"x","message":"y"}}`,
+		},
+		{
+			name: "null body", body: `null`, wantHitsAfterSecond: 1,
+			wantBackoff: "decode usage response: no usage key in 4-byte body: null",
+		},
+		{
+			name: "no JSON", body: "<html>\n  busy\n</html>", wantHitsAfterSecond: 1,
+			wantBackoff: "decode usage response: invalid character '<' looking for beginning of value; " +
+				"body: <html> busy </html>",
+		},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			root, configDir, cacheDir, env := doorSeat(t, 11, now)
@@ -413,9 +450,10 @@ func TestAnOmittedWindowIsAnAnswerNotAFailure(t *testing.T) {
 			if readErr != nil {
 				t.Fatalf("read cache: %v", readErr)
 			}
-			if testcase.wantErr {
-				if err == nil || record.Backoff == nil {
-					t.Fatalf("err=%v backoff=%+v, want a failure that backs off", err, record.Backoff)
+			if testcase.wantBackoff != "" {
+				if err == nil || record.Backoff == nil || record.Backoff.Message != testcase.wantBackoff {
+					t.Fatalf("err=%v backoff=%+v, want a failure that backs off with %q",
+						err, record.Backoff, testcase.wantBackoff)
 				}
 				return
 			}

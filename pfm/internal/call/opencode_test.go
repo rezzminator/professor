@@ -8,9 +8,9 @@ import (
 
 func TestPaneCommandEngineRecognizesOpenCode(t *testing.T) {
 	cases := []struct {
-		command  string
-		binaries map[pfmengine.ID]string
-		want     string
+		paneCommand string
+		binaries    map[pfmengine.ID]string
+		want        string
 	}{
 		{"opencode", nil, string(pfmengine.OpenCode)},
 		{"/home/me/.local/bin/opencode", nil, string(pfmengine.OpenCode)},
@@ -21,8 +21,8 @@ func TestPaneCommandEngineRecognizesOpenCode(t *testing.T) {
 		{"vim", nil, ""},
 	}
 	for _, c := range cases {
-		if got := paneCommandEngine(c.command, c.binaries); got != c.want {
-			t.Errorf("paneCommandEngine(%q) = %q, want %q", c.command, got, c.want)
+		if got := paneCommandEngine(c.paneCommand, c.binaries); got != c.want {
+			t.Errorf("paneCommandEngine(%q) = %q, want %q", c.paneCommand, got, c.want)
 		}
 	}
 }

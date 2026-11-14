@@ -20,10 +20,10 @@ func TestPFMPathWarningsCatchResolutionAndHashShadows(t *testing.T) {
 	}
 	canonical := filepath.Join(canonicalDir, "pfm")
 	shadow := filepath.Join(shadowDir, "pfm")
-	if err := testjail.WriteExecutable(canonical, []byte("production-candidate"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(canonical, []byte("production-candidate"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(shadow, []byte("stale-shadow"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(shadow, []byte("stale-shadow"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -35,11 +35,24 @@ func TestPFMPathWarningsCatchResolutionAndHashShadows(t *testing.T) {
 		t.Fatalf("warnings = %q, want resolution and hash mismatch for shadow", joined)
 	}
 
-	if err := testjail.WriteExecutable(shadow, []byte("production-candidate"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(shadow, []byte("production-candidate"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	warnings = pfmPathWarnings(home, canonicalDir+string(os.PathListSeparator)+shadowDir)
 	if len(warnings) != 0 {
 		t.Fatalf("matching canonical-first PATH warnings = %q, want none", warnings)
+	}
+
+	// A canonical binary that cannot be hashed still leaves the resolution order reported.
+	if err := os.Remove(canonical); err != nil {
+		t.Fatal(err)
+	}
+	warnings = pfmPathWarnings(home, shadowDir+string(os.PathListSeparator)+canonicalDir)
+	want := []string{
+		"pfm_canonical=" + canonical + " error=open " + canonical + ": no such file or directory",
+		"pfm_path_resolves=" + shadow + " canonical=" + canonical,
+	}
+	if strings.Join(warnings, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unhashable canonical warnings = %q, want %q", warnings, want)
 	}
 }

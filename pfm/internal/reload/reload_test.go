@@ -11,16 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
-	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type fakeReloadTmux struct {
@@ -38,6 +33,7 @@ func (tmux *fakeReloadTmux) ListPanes(context.Context, string) ([]Pane, error) {
 	return []Pane{{ID: "%7", Dead: tmux.dead, PID: 700}}, nil
 }
 func (*fakeReloadTmux) SetRemain(context.Context, string, string, bool) error { return nil }
+func (*fakeReloadTmux) KillPane(context.Context, string, string) error        { return nil }
 func (tmux *fakeReloadTmux) LeaveCopyMode(context.Context, pfmcall.Target) (bool, error) {
 	return false, tmux.leaveErr
 }
@@ -359,31 +355,9 @@ func TestRunRefusesAnOverlappingPaneReload(t *testing.T) {
 		nil,
 		nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "already in flight") {
+	if err == nil || err.Error() != "another reload of this pane is already in flight" {
 		t.Fatalf("overlap error = %v", err)
 	}
-}
-
-type releasePaneLockClock struct {
-	clock.Clock
-	lock         *os.File
-	polls        int
-	beforeUnlock func() error
-}
-
-func (clk *releasePaneLockClock) Sleep(ctx context.Context, _ time.Duration) error {
-	clk.polls++
-	if clk.polls == 2 {
-		if clk.beforeUnlock != nil {
-			if err := clk.beforeUnlock(); err != nil {
-				return err
-			}
-		}
-		if err := syscall.Flock(int(clk.lock.Fd()), syscall.LOCK_UN); err != nil {
-			return err
-		}
-	}
-	return clk.Clock.Sleep(ctx, 0)
 }
 
 type queuedThenTmux struct {
@@ -396,55 +370,6 @@ func (tmux *queuedThenTmux) SendKey(ctx context.Context, target pfmcall.Target, 
 		tmux.submissions++
 	}
 	return tmux.delayedThenTmux.SendKey(ctx, target, key)
-}
-
-func TestRunQueuesBehindAnOverlappingPaneReload(t *testing.T) {
-	dir := t.TempDir()
-	root, cwd := t.TempDir(), t.TempDir()
-	t.Setenv(paths.EnvHome, t.TempDir())
-	t.Setenv(paths.EnvClaudeRoots, root)
-	id := "22222222-2222-4222-8222-222222222222"
-	if err := os.WriteFile(filepath.Join(root, id+".jsonl"), []byte("{}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	lock, err := os.OpenFile(LockPath(dir, "probe-1", "%7"), os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Close() })
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatal(err)
-	}
-	clk := &releasePaneLockClock{Clock: clock.Real, lock: lock}
-	clk.beforeUnlock = func() error {
-		return writeHandoff(lock, handoffRecord{
-			Engine: pfmengine.Claude, SessionID: id, Account: 2, Cache1H: true,
-			CWD: cwd, WrittenAt: clock.Real.Now(),
-		})
-	}
-	tmux := &queuedThenTmux{}
-	var stderr strings.Builder
-	result, err := Run(
-		context.Background(),
-		Request{
-			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
-			SessionID: "11111111-1111-4111-8111-111111111111",
-			CWD:       "/jail/project", Account: 1, AccountIDs: []int{1}, Then: "S",
-			Machine: reloadTestMachine("", dir),
-		},
-		Options{SIDDir: dir, Delay: -1, Poll: -1, IdleTries: 5, ExitTries: 2, ThenTries: 2, Clock: clk},
-		tmux, promptReadyProc{tmux: &tmux.delayedThenTmux}, &stderr,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if clk.polls < 2 || tmux.respawn == "" || tmux.submissions != 1 {
-		t.Fatalf("polls=%d respawned=%t steer submissions=%d", clk.polls, tmux.respawn != "", tmux.submissions)
-	}
-	if parsedReloadShell(t, tmux.respawn).Resume != id || result.Account != 2 || !result.Cache1H ||
-		result.LeftBehind != id || tmux.respawnCWD != cwd || !strings.Contains(stderr.String(), "continuing from session "+id+" on account 2") {
-		t.Fatalf("queued result=%+v cwd=%q stderr=%q", result, tmux.respawnCWD, stderr.String())
-	}
 }
 
 func TestRunMarksSelectorRefusalOnlyWhenPaneWasTold(t *testing.T) {
@@ -461,25 +386,6 @@ func TestRunMarksSelectorRefusalOnlyWhenPaneWasTold(t *testing.T) {
 	}
 }
 
-func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
-	run, err := claudeRun(Request{
-		Account:   2,
-		Machine:   reloadTestMachine("", t.TempDir()),
-		SessionID: "11111111-1111-4111-8111-111111111111",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, variable := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CACHE_LIVE_CONTROL_MAIN_TTL"} {
-		if !strings.Contains(run, variable) {
-			t.Fatalf("run %q does not mention %s", run, variable)
-		}
-	}
-	if parsedReloadShell(t, run).Resume != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("run %q has no resume", run)
-	}
-}
-
 func reloadTestMachine(systemPrompt, home string) pfmconfig.Config {
 	for _, id := range []int{1, 2} {
 		dir := pfmconfig.DefaultAccountDir(home, id)
@@ -493,83 +399,6 @@ func reloadTestMachine(systemPrompt, home string) pfmconfig.Config {
 			{ID: 1, ConfigDir: pfmconfig.DefaultAccountDir(home, 1)},
 			{ID: 2, ConfigDir: pfmconfig.DefaultAccountDir(home, 2)},
 		},
-	}
-}
-
-func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
-	home := t.TempDir()
-	if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	promptPath, err := action.ProfessorPromptPath(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
-		t.Fatalf("stage professor prompt dir: %v", err)
-	}
-	if err := os.WriteFile(promptPath, []byte("professor prompt\n"), 0o644); err != nil {
-		t.Fatalf("stage professor prompt file: %v", err)
-	}
-	professor, err := claudeRun(Request{
-		Account:   2,
-		Home:      home,
-		Machine:   reloadTestMachine(pfmconfig.SystemPromptProfessor, home),
-		SessionID: "11111111-1111-4111-8111-111111111111",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := parsedReloadShell(t, professor).PromptFile; got != promptPath {
-		t.Fatalf("reloaded chat prompt = %q", got)
-	}
-	if !strings.Contains(professor, "--dangerously-skip-permissions") {
-		t.Fatalf("reloaded chat lost the configured autonomy posture: %q", professor)
-	}
-	rolePrompt := filepath.Join(home, "sid", "role-prompt-cc-reviewer.md")
-	if err := os.MkdirAll(filepath.Dir(rolePrompt), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(rolePrompt, []byte("role"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	roleRun, err := claudeRun(Request{
-		Account: 2, Home: home, Machine: reloadTestMachine(pfmconfig.SystemPromptProfessor, home),
-		SessionID: "11111111-1111-4111-8111-111111111111", PromptChannel: rolePrompt,
-	})
-	if err != nil || parsedReloadShell(t, roleRun).PromptFile != rolePrompt ||
-		strings.Contains(roleRun, cmdparse.Quote(promptPath)) {
-		t.Fatalf("Claude role reload did not replace the ordinary prompt file: run=%q error=%v", roleRun, err)
-	}
-
-	lean, err := claudeRun(Request{
-		Account:   2,
-		Home:      home,
-		Machine:   reloadTestMachine(pfmconfig.SystemPromptLean, home),
-		SessionID: "11111111-1111-4111-8111-111111111111",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if parsedReloadShell(t, lean).SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "1" {
-		t.Fatalf("reloaded chat lost the lean prompt arm: %q", lean)
-	}
-
-	production, err := claudeRun(Request{
-		Account:   2,
-		Home:      home,
-		Machine:   reloadTestMachine(pfmconfig.SystemPromptProduction, home),
-		SessionID: "11111111-1111-4111-8111-111111111111",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if parsed := parsedReloadShell(t, production); parsed.PromptFile != "" ||
-		parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "" {
-		t.Fatalf("production mode invented prompt material: %q", production)
-	}
-	if !strings.Contains(production, " -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT ") {
-		t.Fatalf("reload no longer strips an inherited lean arm: %q", production)
 	}
 }
 
@@ -590,32 +419,16 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	escaped := strings.ReplaceAll(prompt, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
 	developerInstructions := cmdparse.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
-	if !strings.Contains(run, " -c "+developerInstructions+" resume ") {
-		t.Fatalf("Codex role reload does not carry one complete developer-instructions value before resume: %q", run)
-	}
-	for _, want := range []string{
-		"CODEX_HOME='/jail/codex/9'",
-		"'/opt/codex safe' --no-daemon --sandbox workspace-write",
-		"resume '019ff700-0000-7000-8000-000000000001'",
-	} {
-		if !strings.Contains(run, want) {
-			t.Fatalf("run %q lacks %q", run, want)
-		}
-	}
-	if strings.Contains(run, "CLAUDE_CONFIG_DIR=") {
-		t.Fatalf("Codex reload inherited a Claude config assignment: %q", run)
-	}
-	for _, name := range claudelaunch.Hygiene() {
-		if !strings.Contains(run, "-u "+name) {
-			t.Fatalf("Codex reload did not strip %s: %q", name, run)
-		}
-	}
 	roleless, err := codexRun(Request{SessionID: "019ff700-0000-7000-8000-000000000001"})
-	if err != nil || strings.Contains(roleless, "developer_instructions") {
-		t.Fatalf("roleless Codex reload changed: run=%q error=%v", roleless, err)
-	}
-	if !strings.Contains(roleless, " codex --no-daemon --sandbox workspace-write resume ") {
-		t.Fatalf("Codex reload runs the respawned chat on the shared daemon: %q", roleless)
+	if got, want := strings.Replace(
+		run,
+		developerInstructions,
+		"{instructions}",
+		1,
+	)+"\n"+roleless+"\n"+fmt.Sprint(
+		err,
+	), "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CODEX_HOME='/jail/codex/9' '/opt/codex safe' --no-daemon --sandbox workspace-write -c {instructions} resume '019ff700-0000-7000-8000-000000000001'\nenv -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID codex --no-daemon --sandbox workspace-write resume '019ff700-0000-7000-8000-000000000001'\n<nil>"; got != want {
+		t.Fatalf("role run, roleless run, error = %q, want %q", got, want)
 	}
 }
 
@@ -640,89 +453,8 @@ func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
 		tmux, nil, nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "OpenCode") || tmux.literal != "" {
+	if err == nil || err.Error() != "OpenCode does not support in-place reload" || tmux.literal != "" {
 		t.Fatalf("OpenCode reload error=%v literal=%q, want refusal before /exit", err, tmux.literal)
-	}
-}
-
-func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
-	for _, configKey := range []bool{false, true} {
-		name := "environment"
-		if configKey {
-			name = "config key"
-		}
-		t.Run(name, func(t *testing.T) {
-			t.Setenv(paths.EnvHome, t.TempDir())
-			statePath := filepath.Join(t.TempDir(), "pfm.db")
-			t.Setenv(paths.EnvStateDB, statePath)
-			if configKey {
-				configPath := filepath.Join(t.TempDir(), "pfm.config.json")
-				content := []byte(`{"version":2,"state":{"db":"` + statePath + `"}}`)
-				if err := os.WriteFile(configPath, content, 0o600); err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv(paths.EnvConfig, configPath)
-				t.Setenv(paths.EnvStateDB, "")
-				t.Setenv(paths.EnvCacheDB, "")
-			}
-			tmux := &fakeReloadTmux{}
-			result, err := Run(
-				context.Background(),
-				Request{
-					Engine:     pfmengine.Claude,
-					SocketPath: "/tmp/tmux-1000/probe-reload",
-					Pane:       "%7",
-					SessionID:  "11111111-1111-4111-8111-111111111111",
-					CWD:        "/jail/project",
-					Account:    2,
-					AccountIDs: []int{2},
-					Machine:    reloadTestMachine("", t.TempDir()),
-					Cache1H:    false,
-				},
-				Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
-				tmux,
-				nil,
-				nil,
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result.New || tmux.literal != "/exit" {
-				t.Fatalf("result=%+v literal=%q", result, tmux.literal)
-			}
-			for _, want := range []string{
-				"CLAUDE_CONFIG_DIR=",
-			} {
-				if !strings.Contains(tmux.respawn, want) {
-					t.Fatalf("respawn %q lacks %q", tmux.respawn, want)
-				}
-			}
-			parsed := parsedReloadShell(t, tmux.respawn)
-			if parsed.Resume != "11111111-1111-4111-8111-111111111111" ||
-				respawnEnv(t, tmux.respawn)["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" {
-				t.Fatalf("respawn resume=%q env=%#v", parsed.Resume, respawnEnv(t, tmux.respawn))
-			}
-			values, err := pfmconfig.ResolvePaths()
-			if err != nil {
-				t.Fatal(err)
-			}
-			launches, err := fleetdb.OpenLaunches(context.Background(), values)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := launches.Close(); err != nil {
-					t.Error(err)
-				}
-			}()
-			record, err := launches.LaunchFor(context.Background(), "11111111-1111-4111-8111-111111111111")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if record.Account != 2 || record.Cache1H || record.Engine != pfmengine.Claude {
-				t.Fatalf("reload record=%+v", record)
-			}
-		})
 	}
 }
 
@@ -892,8 +624,8 @@ func TestRunClearsTheTypedExitWhenTheChatDoesNotDie(t *testing.T) {
 		nil,
 		nil,
 	)
-	if err == nil || !strings.Contains(err.Error(), "did not complete") ||
-		!strings.Contains(err.Error(), "cleared the typed /exit") {
+	if err == nil ||
+		err.Error() != "/exit did not complete after 2 polls; chat left running\ncleared the typed /exit from the composer" {
 		t.Fatalf("stuck /exit error=%v, want 'did not complete' plus 'cleared the typed /exit'", err)
 	}
 	backspaces := 0

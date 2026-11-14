@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -12,7 +11,7 @@ import (
 // extraction: the newest N entries, newest last, and truncated exactly when
 // entries were left out.
 func TestReadEntriesTailsNewestLastAndSaysWhenItCut(t *testing.T) {
-	root := testjail.Fleet(t)
+	root := memoryFleet(t)
 	const id = "d4444444-4444-4444-8444-444444444444"
 	seedClaudeChat(t, root, id, assistantSaid("tests are green"))
 	ctx := context.Background()

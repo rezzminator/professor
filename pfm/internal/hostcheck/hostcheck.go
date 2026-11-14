@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 type Severity string
@@ -21,7 +21,6 @@ const (
 	Block              Severity = "BLOCK"
 	Warn               Severity = "WARN"
 	Accepted           Severity = "ACCEPTED"
-	checkPFMMCP                 = "pfm-mcp"
 	checkThirdPartyMCP          = "third-party-mcp"
 	classUnclassified           = "unclassified"
 )
@@ -50,13 +49,10 @@ func (row Row) Render(prefix string) string {
 }
 
 type Env struct {
-	CloneConfigPath                                                         string
-	Home, Store, ConfigPath, LegacyConfigDir, StateDB, CacheDB, ManagedRoot string
-	ConfigExplicit                                                          bool
-	MCPPort                                                                 int
-	Accounts                                                                []config.Account
-	AcceptedMCP                                                             []config.AcceptedMCP
-	Now                                                                     time.Time
+	Home, Store, ConfigPath, StateDB, CacheDB string
+	Accounts                                  []config.Account
+	AcceptedMCP                               []config.AcceptedMCP
+	Now                                       time.Time
 	// Environ is pfm's own process environment, KEY=VALUE: the login shell's
 	// exports when pfm runs from a terminal, a chat's when it runs in one.
 	Environ []string
@@ -66,25 +62,40 @@ type Env struct {
 	Tmux TmuxServerClient
 	// ProcRoot is the proc root an account's live chats are read from; empty is the host's.
 	ProcRoot string
+	// Retired is the clone's retired lists; RetiredErr says they could not be
+	// read, and every check needing them then reports it.
+	Retired    retired.Lists
+	RetiredErr error
 }
 
 // EnvFor builds the read-only detector environment from the loaded runtime.
 func EnvFor(runtime config.Runtime, now time.Time) Env {
 	home := runtime.Paths.Home
-	var cloneConfigPath string
-	if repo, err := paths.ReadSourceRepoMarker(home); err == nil {
-		cloneConfigPath = filepath.Join(repo, config.FileName)
-	}
+	lists, listsErr := retired.LoadLists(home)
 	return Env{
 		Home: home, Store: installer.ClaudeStore(home), ConfigPath: runtime.Config.Path,
-		CloneConfigPath: cloneConfigPath,
-		LegacyConfigDir: config.LegacyConfigDir(paths.OSEnv{}, home),
-		StateDB:         runtime.Paths.StateDB, CacheDB: runtime.Paths.CacheDB,
-		ManagedRoot: installer.ManagedRoot(home), ConfigExplicit: runtime.ConfigExplicit,
-		MCPPort: runtime.Config.MCP.HTTP.Port, Accounts: runtime.Config.Accounts, Now: now,
+		StateDB: runtime.Paths.StateDB, CacheDB: runtime.Paths.CacheDB,
+		Accounts: runtime.Config.Accounts, Now: now,
 		Environ: os.Environ(), TmuxDir: runtime.Paths.TmuxDir, ProcRoot: runtime.Paths.ProcRoot,
 		AcceptedMCP: runtime.Config.Doctor.AcceptedMCP,
+		Retired:     lists, RetiredErr: listsErr,
 	}
+}
+
+// retiredUnread is the row of a check that needs the retired lists and could
+// not read or parse them; ok is false when they were read. An absent file is
+// no row: the install skips every retirement step naming it and doctor's
+// retired_lists row fails on it, so the gate never refuses what install skips.
+func retiredUnread(env Env, check string) (row Row, ok bool) {
+	if env.RetiredErr == nil || errors.Is(env.RetiredErr, fs.ErrNotExist) {
+		return Row{}, false
+	}
+	file, err := retired.ListsPath(env.Home)
+	if err != nil {
+		// The clone itself did not resolve: RetiredErr names why.
+		file = retired.FileRel
+	}
+	return unreadable(check, file, env.RetiredErr), true
 }
 
 type Detector struct {
@@ -94,16 +105,7 @@ type Detector struct {
 
 func Detectors() []Detector {
 	return []Detector{
-		{legacyConfigCheck, legacyConfig},
-		{"pre-split-config", preSplitConfig},
-		{"legacy-state-db", detectLegacyStateDB},
-		{"legacy-cache-db", detectLegacyCacheDB},
 		{"pfm-settings", pfmSettings},
-		{checkPFMMCP, pfmMCP},
-		{"staged-shim", stagedShim},
-		{"staged-prompts", stagedPrompts},
-		{"shared-db", sharedDB},
-		{checkRetiredHarvesterConfig, retiredHarvesterConfig},
 		{"stray-dir", strayDir},
 		{"account-is-store", accountIsStore},
 		{"store-identity", storeIdentity},
@@ -223,18 +225,6 @@ func uniquePaths(candidates []string) []string {
 		}
 	}
 	return result
-}
-
-func moveOrRemove(rows *[]Row, check, source, target string) (string, bool) {
-	before := len(*rows)
-	info := inspectPath(rows, check, target)
-	if len(*rows) != before {
-		return "", false
-	}
-	if info == nil {
-		return "mv " + source + " " + target, true
-	}
-	return removeKeeping(rows, check, target, "diff "+source+" "+target+" && rm "+source, source)
 }
 
 // removeKeeping is the one door for a printed fix that deletes each of removes

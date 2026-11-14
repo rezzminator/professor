@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -39,17 +38,11 @@ func writeArmedFixture(t *testing.T, path string, pid int, steer string, stamp t
 	}
 }
 
-// deadPID returns a pid no live process holds: a child that already ran to
-// completion and was reaped. (A made-up large number could collide with a
-// real process on a busy host; a reaped child's pid is provably free right
-// now.)
+// deadPID returns a pid no process holds: above every kernel's pid limit (Linux caps at 2^22, macOS at
+// 99999), so no child is needed to produce one.
 func deadPID(t *testing.T) int {
 	t.Helper()
-	command := exec.Command("true")
-	if err := command.Run(); err != nil {
-		t.Fatalf("run a short-lived child: %v", err)
-	}
-	return command.Process.Pid
+	return 1 << 30
 }
 
 // waitOn is the ThenWait CommandThenSpawner hands the waiter for the jail
@@ -162,12 +155,21 @@ func TestArmRecordLeavesALiveArmingAlone(t *testing.T) {
 	}
 
 	writeArmedFixture(t, path, deadPID(t), "/compact a dead arming", time.Now().Add(-time.Hour))
+	// A reader holding the old record (a hard link to its inode) keeps it whole:
+	// the new record replaces the file in one rename, never truncates it in place.
+	reader := path + ".reader"
+	if err := os.Link(path, reader); err != nil {
+		t.Fatal(err)
+	}
 	if err := armRecord(request, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	record, _, err = readArmedRecord(path)
 	if err != nil || record.PID != 0 || record.Steer != "resume" {
 		t.Fatalf("record after arming over a dead one = %+v (%v), want the new unclaimed arming", record, err)
+	}
+	if old, _, err := readArmedRecord(reader); err != nil || old.Steer != "/compact a dead arming" {
+		t.Fatalf("reader's record %s = %+v (%v), want the dead arming intact", reader, old, err)
 	}
 }
 
@@ -178,29 +180,24 @@ func TestClaimArmedLeavesAnotherLiveWaitersRecord(t *testing.T) {
 	var warnings bytes.Buffer
 	engine.warningWriter = &warnings
 	path := filepath.Join(t.TempDir(), "chat-then-y.armed")
-	// os.Getpid() stands in for "another live waiter": alive, and the code
-	// under test compares against its own pid — so a child that is provably
-	// alive and not us is needed. `sleep` is that child.
-	child := exec.Command("sleep", "30")
-	if err := child.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })
-	writeArmedFixture(t, path, child.Process.Pid, "/compact theirs", time.Now())
+	// The parent process stands in for "another live waiter": alive for the whole run, and not us — the
+	// code under test compares against its own pid.
+	other := os.Getppid()
+	writeArmedFixture(t, path, other, "/compact theirs", time.Now())
 
 	if err := engine.claimArmed(path, "resume"); err != nil {
 		t.Fatalf("claimArmed() over a readable record held by another live waiter = %v, want no error", err)
 	}
 
 	record, _, err := readArmedRecord(path)
-	if err != nil || record.PID != child.Process.Pid || record.Steer != "/compact theirs" {
+	if err != nil || record.PID != other || record.Steer != "/compact theirs" {
 		t.Fatalf(
 			"record after a foreign claim attempt = %+v (%v), want the other waiter's record untouched",
 			record,
 			err,
 		)
 	}
-	if !strings.Contains(warnings.String(), "held by pid "+strconv.Itoa(child.Process.Pid)) {
+	if !strings.Contains(warnings.String(), "held by pid "+strconv.Itoa(other)) {
 		t.Fatalf("the refused claim was not logged: %q", warnings.String())
 	}
 }

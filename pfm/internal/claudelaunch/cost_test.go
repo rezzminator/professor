@@ -69,27 +69,27 @@ func TestCostPreemptedReasonTable(t *testing.T) {
 		name     string
 		environ  []string
 		settings []string
-		want     string // substring of the reason; "" = the launch may arm
+		want     string // the reason; "" = the launch may arm
 	}{
 		{"clean", []string{"HOME=/h"}, nil, ""},
-		{"user enables telemetry in the process env", []string{"CLAUDE_CODE_ENABLE_TELEMETRY=1"}, nil, "CLAUDE_CODE_ENABLE_TELEMETRY"},
-		{"user sets one OTEL_ variable", []string{"OTEL_METRICS_EXPORTER=prometheus"}, nil, "OTEL_METRICS_EXPORTER"},
-		{"user names a variable with an empty value", []string{"OTEL_SERVICE_NAME="}, nil, "OTEL_SERVICE_NAME"},
-		{"settings.json env enables telemetry", nil, []string{"CLAUDE_CODE_ENABLE_TELEMETRY"}, "settings.json"},
-		{"settings.json env names an OTEL_ variable", nil, []string{"EDITOR", "OTEL_EXPORTER_OTLP_ENDPOINT"}, "OTEL_EXPORTER_OTLP_ENDPOINT"},
+		{"user enables telemetry in the process env", []string{"CLAUDE_CODE_ENABLE_TELEMETRY=1"}, nil, "the launch environment already sets CLAUDE_CODE_ENABLE_TELEMETRY"},
+		{"user sets one OTEL_ variable", []string{"OTEL_METRICS_EXPORTER=prometheus"}, nil, "the launch environment already sets OTEL_METRICS_EXPORTER"},
+		{"user names a variable with an empty value", []string{"OTEL_SERVICE_NAME="}, nil, "the launch environment already sets OTEL_SERVICE_NAME"},
+		{"settings.json env enables telemetry", nil, []string{"CLAUDE_CODE_ENABLE_TELEMETRY"}, "the account's settings.json env already sets CLAUDE_CODE_ENABLE_TELEMETRY"},
+		{"settings.json env names an OTEL_ variable", nil, []string{"EDITOR", "OTEL_EXPORTER_OTLP_ENDPOINT"}, "the account's settings.json env already sets OTEL_EXPORTER_OTLP_ENDPOINT"},
 		{"settings.json env without telemetry names", nil, []string{"EDITOR"}, ""},
 		// The nested-claude door: a chat started from inside a pfm chat inherits the parent's own
 		// exports and marker. They are pfm's, not the user's, so the launch is not pre-empted.
 		{"nested chat inheriting pfm's own exports", ownEnv, nil, ""},
-		{"inherited marker but a user variable on top", append(slices.Clone(ownEnv), "OTEL_SERVICE_NAME=mine"), nil, "OTEL_SERVICE_NAME"},
-		{"inherited marker but the user changed the endpoint", append(slices.Clone(ownEnv), "OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example.invalid"), nil, "OTEL_EXPORTER_OTLP_ENDPOINT"},
-		{"inherited exports without the marker are the user's", CostEnv(40111, 99)[:9], nil, "CLAUDE_CODE_ENABLE_TELEMETRY"},
-		{"inherited own exports but settings.json names OTEL_", ownEnv, []string{"OTEL_LOGS_EXPORTER"}, "settings.json"},
-		{"marker off does not vouch for exports", []string{"PFM_COST_LEDGER=off", "OTEL_LOGS_EXPORTER=otlp"}, nil, "OTEL_LOGS_EXPORTER"},
+		{"inherited marker but a user variable on top", append(slices.Clone(ownEnv), "OTEL_SERVICE_NAME=mine"), nil, "the launch environment already sets OTEL_SERVICE_NAME"},
+		{"inherited marker but the user changed the endpoint", append(slices.Clone(ownEnv), "OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example.invalid"), nil, "the launch environment already sets OTEL_EXPORTER_OTLP_ENDPOINT"},
+		{"inherited exports without the marker are the user's", CostEnv(40111, 99)[:9], nil, "the launch environment already sets CLAUDE_CODE_ENABLE_TELEMETRY, OTEL_LOGS_EXPORTER, OTEL_TRACES_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_LOGS_EXPORT_INTERVAL, OTEL_BSP_SCHEDULE_DELAY"},
+		{"inherited own exports but settings.json names OTEL_", ownEnv, []string{"OTEL_LOGS_EXPORTER"}, "the account's settings.json env already sets OTEL_LOGS_EXPORTER"},
+		{"marker off does not vouch for exports", []string{"PFM_COST_LEDGER=off", "OTEL_LOGS_EXPORTER=otlp"}, nil, "the launch environment already sets OTEL_LOGS_EXPORTER"},
 	} {
 		got := CostPreemptedReason(tc.environ, tc.settings)
-		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
-			t.Errorf("%s: reason = %q, want it to contain %q", tc.name, got, tc.want)
+		if got != tc.want {
+			t.Errorf("%s: reason = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
@@ -132,7 +132,7 @@ func installFakePFM(t *testing.T, home string) string {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path

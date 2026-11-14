@@ -148,7 +148,13 @@ func TestFunctionHookModulesDirectoryMarketplaceReadsItsFolderNotTheSnapshot(t *
 	writeFile(t, accountStateFile(env), `{}`)
 	installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "professor", true, true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
-	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@professor")
+	if got, want := strings.ReplaceAll(
+		row.Problem,
+		env.Home,
+		"{home}",
+	), "cachedGrowthBookFeatures.tengu_plugin_hooks_modules is unset while function-hook plugins buddy@professor are installed: Claude Code loads none of their modules until a GrowthBook fetch sets it, which never succeeds behind a gateway, and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag"; got != want {
+		t.Fatalf("problem = %q, want %q", got, want)
+	}
 }
 
 func TestFunctionHookModulesDirectoryMarketplaceFolderWithoutModulesIsClean(t *testing.T) {
@@ -169,7 +175,13 @@ func TestFunctionHookModulesGithubMarketplaceStillReadsInstallPath(t *testing.T)
 	writeFile(t, filepath.Join(dir, "plugins", "known_marketplaces.json"),
 		`{"professor":{"source":{"source":"github","repo":"owner/professor"}}}`)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
-	assertContains(t, "problem", row.Problem, hookModulesFlag+" is unset", "buddy@professor")
+	if got, want := strings.ReplaceAll(
+		row.Problem,
+		env.Home,
+		"{home}",
+	), "cachedGrowthBookFeatures.tengu_plugin_hooks_modules is unset while function-hook plugins buddy@professor are installed: Claude Code loads none of their modules until a GrowthBook fetch sets it, which never succeeds behind a gateway, and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag"; got != want {
+		t.Fatalf("problem = %q, want %q", got, want)
+	}
 }
 
 func TestFunctionHookModulesUnresolvableDirectoryFolderIsReportedNotClean(t *testing.T) {
@@ -212,4 +224,43 @@ func TestFunctionHookModulesUnparsableKnownMarketplacesIsReportedNotClean(t *tes
 		t.Fatalf("row=%+v, want WARN at %s", row, known)
 	}
 	assertContains(t, "problem", row.Problem, "cannot parse", "unknown")
+}
+
+// One plugin whose hooks.json cannot be parsed costs that plugin alone: its
+// row names it unknown, and the account's flag verdict still names the
+// sibling that declares modules.
+func TestFunctionHookModulesUnparsablePluginHooksKeepsItsSiblings(t *testing.T) {
+	env := fixtureEnv(t)
+	dir := env.Accounts[0].ConfigDir
+	writeFile(t, accountStateFile(env), `{}`)
+	good := filepath.Join(dir, "plugins", "cache", "buddy")
+	bad := filepath.Join(dir, "plugins", "cache", "broken")
+	writeFile(t, filepath.Join(good, "hooks", "hooks.json"), `{"modules":["./plugin.ts"]}`)
+	badHooks := filepath.Join(bad, "hooks", "hooks.json")
+	writeFile(t, badHooks, `{"modules":`)
+	writeFile(t, filepath.Join(dir, "plugins", "installed_plugins.json"),
+		`{"version":2,"plugins":{"buddy@professor":[{"installPath":"`+good+`"}],`+
+			`"broken@professor":[{"installPath":"`+bad+`"}]}}`)
+	rows := detect(t, "function-hook-modules", env)
+	want := []Row{
+		{
+			Warn, "function-hook-modules", badHooks,
+			"cannot parse " + badHooks + ": unexpected end of JSON input — " +
+				"whether plugin broken@professor carries hook modules is unknown",
+			"repair the JSON in " + badHooks + ", then rerun pfm doctor",
+		},
+		{
+			Warn, "function-hook-modules", accountStateFile(env),
+			"cachedGrowthBookFeatures." + hookModulesFlag + " is unset while function-hook plugins " +
+				"buddy@professor are installed: Claude Code loads none of their modules until a GrowthBook " +
+				"fetch sets it, which never succeeds behind a gateway, and " +
+				"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag",
+			"with no Claude chat running in this account (pfm chat ls), set cachedGrowthBookFeatures." +
+				hookModulesFlag + " to true in " + accountStateFile(env) + ", then start a new chat; " +
+				"a later GrowthBook fetch that serves false undoes it",
+		},
+	}
+	if len(rows) != len(want) || rows[0] != want[0] || rows[1] != want[1] {
+		t.Fatalf("rows=%+v\nwant %+v", rows, want)
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -20,24 +21,26 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
-// applyWorkbench prepares the persona before either executor door synthesizes a launch.
-func applyWorkbench(request *Request) error {
+// applyWorkbench prepares the persona before either executor door synthesizes
+// a launch, and returns what the launch dropped of it (LaunchPersona,
+// PersonaMirror): the chat opens anyway.
+func applyWorkbench(request *Request, engineSync deps.Runner) ([]string, error) {
 	// A booting row attaches to a seat already launched: nothing relaunches.
 	if request.Row.Kind.IsLiveSeat() || request.Row.Kind == compose.Booting {
-		return nil
+		return nil, nil
 	}
 	engine, err := compose.EngineForKindChecked(request.Row.Kind)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	mode := workbench.Resume
 	switch request.Row.Kind {
 	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode:
 		mode = workbench.New
 	}
-	persona, err := WorkbenchPersona(request.Row.CWD, engine, mode)
+	persona, warnings, err := LaunchPersona(request.Row.CWD, request.Home, engine, mode)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	request.Persona = persona
 	request.OpenCodePlugin = ""
@@ -60,27 +63,65 @@ func applyWorkbench(request *Request) error {
 		}
 	}
 	if !persona.Applies() {
-		return nil
+		return warnings, nil
 	}
+	// A new Codex chat runs the user's own cx, whose launcher builds the mirror.
 	if request.Row.Kind == compose.ResumeCodex || engine == pfmengine.OpenCode {
-		if err := workbench.EnsureMirror(persona.Bench, engine, request.Home); err != nil {
-			return err
-		}
+		warnings = append(warnings, PersonaMirror(persona, engine, request.Home, engineSync)...)
 	}
 	if engine == pfmengine.OpenCode {
 		if err := attachOpenCodeSeatPlugin(request); err != nil {
-			return err
+			return nil, err
 		}
 		fleet, err := paths.GeneratedHarnessPrompt(request.Home, pfmengine.OpenCode)
 		if err != nil {
 			if !errors.Is(err, paths.ErrNoSourceRepoMarker) && !errors.Is(err, paths.ErrSourceRepoUnusable) {
 				wrapped := fmt.Errorf("resolve the fleet prompt an OpenCode workbench launch replaces: %w", err)
 				obs.Logger(context.Background()).Error("OpenCode workbench fleet prompt", obs.FieldErr, wrapped)
-				return wrapped
+				return nil, wrapped
 			}
 		} else {
 			request.OpenCodeFleetPrompt = fleet
 		}
+	}
+	return warnings, nil
+}
+
+// LaunchPersona is every launch door's workbench persona read. A persona that
+// cannot resolve never refuses the launch: an unknown effort word launches the
+// persona on the engine's default effort, any other fault launches without the
+// persona, each named in the returned warnings after the settings file's own
+// (workbench.Persona.Warnings); the settings envs ride every outcome. A
+// workbench that does not enable the engine stays the refusal of a new
+// launch, naming its fix.
+func LaunchPersona(cwd, home string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, []string, error) {
+	raw, err := workbench.ForLaunch(cwd, home, engine, mode)
+	if err == nil {
+		persona, effortErr := personaEffort(raw, engine)
+		if effortErr == nil {
+			return persona, persona.Warnings, nil
+		}
+		raw.Effort = ""
+		return raw, append(raw.Warnings, effortErr.Error()+"; launching the persona on the default effort"), nil
+	}
+	if bench, found, benchErr := workbench.Nearest(cwd); benchErr == nil && found && bench.Err == nil &&
+		!bench.Enables(engine) {
+		return workbench.Persona{}, nil, err
+	}
+	return workbench.Persona{Envs: raw.Envs}, append(raw.Warnings,
+		"workbench persona not applied ("+err.Error()+"); launching without it",
+	), nil
+}
+
+// PersonaMirror builds the persona's engine mirror before a launch. A build
+// that fails launches on the mirror as it stands, named in the returned warning.
+// engineSync runs the engine-sync child; nil is the real process table.
+func PersonaMirror(persona workbench.Persona, engine pfmengine.ID, home string, engineSync deps.Runner) []string {
+	if !persona.Applies() {
+		return nil
+	}
+	if err := workbench.EnsureMirror(persona.Bench, engine, home, engineSync); err != nil {
+		return []string{err.Error() + "; launching on the mirror as it stands"}
 	}
 	return nil
 }
@@ -88,11 +129,18 @@ func applyWorkbench(request *Request) error {
 // WorkbenchPersona is workbench.ForLaunch with the persona's effort validated
 // through engine's one effort roster and carried lower-cased, so every launch
 // door accepts what chat new and reload accept.
-func WorkbenchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, error) {
-	persona, err := workbench.ForLaunch(cwd, engine, mode)
+func WorkbenchPersona(cwd, home string, engine pfmengine.ID, mode workbench.Mode) (workbench.Persona, error) {
+	persona, err := workbench.ForLaunch(cwd, home, engine, mode)
 	if err != nil {
 		return workbench.Persona{}, err
 	}
+	return personaEffort(persona, engine)
+}
+
+// personaEffort is persona with its effort word validated through engine's
+// one effort roster and carried lower-cased.
+func personaEffort(persona workbench.Persona, engine pfmengine.ID) (workbench.Persona, error) {
+	var err error
 	switch engine {
 	case pfmengine.Claude:
 		persona.Effort, err = ClaudeEffort(persona.Effort)
@@ -107,17 +155,6 @@ func WorkbenchPersona(cwd string, engine pfmengine.ID, mode workbench.Mode) (wor
 		return workbench.Persona{}, wrapped
 	}
 	return persona, nil
-}
-
-func claudePersonaSpawn(
-	purpose Purpose, home string, account int, cache1H bool,
-	machine pfmconfig.Config, persona workbench.Persona, name string, args ...string,
-) ClaudeSpawn {
-	return ClaudeSpawn{
-		Purpose: purpose, Home: home, Account: account, Cache1H: &cache1H,
-		Machine: machine, Name: name, Args: args,
-		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
-	}
 }
 
 // openCodePersonaEnv is the environment an OpenCode launch adds: the plugin
@@ -143,6 +180,8 @@ func attachOpenCodeSeatPlugin(request *Request) error {
 	return nil
 }
 
+// openCodePersonaAssignments is openCodePersonaEnv's assignments behind the
+// adopter settings' envs (claudelaunch.WithEnvs).
 func openCodePersonaAssignments(request Request) ([]string, error) {
 	hasPersona := request.Persona.Prompt != ""
 	var plugins []string
@@ -164,7 +203,7 @@ func openCodePersonaAssignments(request Request) ([]string, error) {
 		}
 	}
 	if len(plugins) == 0 && model == "" && effort == "" && request.OpenCodePromptChannel == "" {
-		return nil, nil
+		return claudelaunch.WithEnvs(request.Persona.Envs, nil), nil
 	}
 	if (model != "" || effort != "" || request.OpenCodePromptChannel != "") && request.OpenCodePlugin == "" {
 		return nil, errors.New("OpenCode model, effort and prompt channel require the native seat plugin")
@@ -189,12 +228,13 @@ func openCodePersonaAssignments(request Request) ([]string, error) {
 		}
 	}
 	if !hasPersona {
-		return env, nil
+		return claudelaunch.WithEnvs(request.Persona.Envs, env), nil
 	}
 	if request.OpenCodeFleetPrompt != "" {
 		env = append(env, "PFM_OPENCODE_FLEET_FILE="+request.OpenCodeFleetPrompt)
 	}
-	return append(env, "PFM_OPENCODE_SYSTEM_FILE="+request.Persona.Prompt), nil
+	env = append(env, "PFM_OPENCODE_SYSTEM_FILE="+request.Persona.Prompt)
+	return claudelaunch.WithEnvs(request.Persona.Envs, env), nil
 }
 
 func openCodeSeatRun(request Request, machine pfmconfig.Config, resume bool) (*fleetdb.SeatRun, error) {
@@ -214,10 +254,7 @@ func openCodeSeatRun(request Request, machine pfmconfig.Config, resume bool) (*f
 	return &fleetdb.SeatRun{
 		Binary: binaryWord(machine.OpenCode.Binary, pfmengine.MustLookup(pfmengine.OpenCode).Binary, false),
 		Args:   args,
-		Env: machine.ExtensionEnvironment(
-			pfmengine.MustLookup(pfmengine.OpenCode).LongName,
-			launchEnvironment(os.Environ(), launch),
-		),
-		CWD: request.Row.CWD,
+		Env:    claudelaunch.RunEnvironment(os.Environ(), launch),
+		CWD:    request.Row.CWD,
 	}, nil
 }

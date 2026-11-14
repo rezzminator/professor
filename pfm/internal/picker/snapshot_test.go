@@ -190,8 +190,7 @@ func TestBuildSnapshotReportsScheduleReadFailure(t *testing.T) {
 		scanRequest{Schedules: fakeScheduleReader{err: errors.New("database unavailable")}},
 		output,
 	)
-	if !strings.Contains(snapshot.ScheduleError, "read schedule flags") ||
-		!strings.Contains(snapshot.ScheduleError, "database unavailable") {
+	if snapshot.ScheduleError != "read schedule flags: database unavailable" {
 		t.Fatalf("ScheduleError = %q, want the wrapped read failure", snapshot.ScheduleError)
 	}
 	if len(snapshot.Rows) != 2 || snapshot.Rows[0].ScheduleFired || snapshot.Rows[1].ScheduleFired {
@@ -276,7 +275,7 @@ func TestRereadFactsRefreshesWorkingStateWithoutAStoreRead(t *testing.T) {
 		)
 	}
 
-	if again := rereadFacts(environment, request, last); rowFactsMoved(last.snapshot, again) {
+	if again := rereadFacts(context.Background(), environment, request, last); rowFactsMoved(last.snapshot, again) {
 		t.Fatalf("an unchanged re-read must not look like a change: %+v", again.Rows[0])
 	}
 
@@ -292,7 +291,7 @@ func TestRereadFactsRefreshesWorkingStateWithoutAStoreRead(t *testing.T) {
 		t.Fatalf("close transcript: %v", err)
 	}
 	environment.NowNS = statNowNS(t, transcript)
-	idle := rereadFacts(environment, request, last)
+	idle := rereadFacts(context.Background(), environment, request, last)
 	if idle.Rows[0].Working || !rowFactsMoved(last.snapshot, idle) {
 		t.Fatalf("a chat that finished its turn must re-read idle and count as a change: %+v", idle.Rows[0])
 	}
@@ -314,6 +313,7 @@ func TestSendRefreshIncludesNativeSeats(t *testing.T) {
 	environment := fleet.Env{
 		Paths:  paths.Values{Home: home, StateDB: filepath.Join(home, "state.db")},
 		Config: config.Defaults(home, nil),
+		Faults: []string{"primary account unreadable: permission denied; account 1 stands in"},
 	}
 	state := fleetdb.OpenSharedState(ctx, environment.Paths)
 	t.Cleanup(func() {
@@ -364,6 +364,9 @@ func TestSendRefreshIncludesNativeSeats(t *testing.T) {
 		if snapshot.Refreshing != refreshing || len(last.output.Rows) != len(snapshot.Rows) {
 			t.Fatalf("refresh state lost: %+v", snapshot)
 		}
+		if want := "primary account unreadable: permission denied; account 1 stands in"; snapshot.ScanError != want {
+			t.Fatalf("ScanError = %q, want the account fault %q", snapshot.ScanError, want)
+		}
 	}
 }
 
@@ -391,8 +394,15 @@ func TestSendRefreshReportsNativeReadFailure(t *testing.T) {
 		t.Fatal("failed native pass must remain retryable without becoming last good state")
 	}
 	snapshot := <-updates
-	if snapshot.RefreshFailure == nil || !strings.Contains(snapshot.RefreshFailure.Err, "durable seats") {
+	if snapshot.RefreshFailure == nil {
 		t.Fatalf("native read failure rendered successful: %+v", snapshot)
+	}
+	if got, want := strings.ReplaceAll(
+		snapshot.RefreshFailure.Err,
+		blocker,
+		"{blocker}",
+	), "read durable seats: stat durable seat database: stat {blocker}/state.db: not a directory"; got != want {
+		t.Fatalf("refresh failure = %q, want %q", got, want)
 	}
 }
 
@@ -714,7 +724,7 @@ func TestPickerThemeRefreshAndOff(t *testing.T) {
 		t.Fatal("disabled theme state changed the exact original picker")
 	}
 	path := writePickerTheme(t, home, themesync.Applied{Primary: v}, themesync.Light, true)
-	refresh := rereadFacts(env, request, sentRefresh{snapshot: initial})
+	refresh := rereadFacts(context.Background(), env, request, sentRefresh{snapshot: initial})
 	if !rowFactsMoved(initial, refresh) {
 		t.Fatal("parked refresh did not notice the theme change")
 	}
@@ -725,7 +735,7 @@ func TestPickerThemeRefreshAndOff(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	off := rereadFacts(env, request, sentRefresh{snapshot: refresh})
+	off := rereadFacts(context.Background(), env, request, sentRefresh{snapshot: refresh})
 	updated, _ = updated.Update(ui.RefreshMsg{Snapshot: off})
 	if !reflect.DeepEqual(updated.View(), baseline) {
 		t.Fatal("theme off did not restore the exact original picker")
@@ -764,7 +774,7 @@ func TestPickerThemeUnreadableReportsAndFallsBack(t *testing.T) {
 			if !reflect.DeepEqual(ui.NewModel(snapshot).View(), baseline) {
 				t.Fatal("unreadable state changed the legacy palette")
 			}
-			broken := rereadFacts(env, request, sentRefresh{snapshot: snapshot})
+			broken := rereadFacts(context.Background(), env, request, sentRefresh{snapshot: snapshot})
 			if !rowFactsMoved(snapshot, broken) || broken.ThemeError == "" {
 				t.Fatal("parked refresh did not publish the theme error")
 			}
@@ -776,7 +786,7 @@ func TestPickerThemeUnreadableReportsAndFallsBack(t *testing.T) {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
-			recovered := rereadFacts(env, request, sentRefresh{snapshot: broken})
+			recovered := rereadFacts(context.Background(), env, request, sentRefresh{snapshot: broken})
 			updated, _ = updated.Update(ui.RefreshMsg{Snapshot: recovered})
 			if !rowFactsMoved(broken, recovered) || !reflect.DeepEqual(updated.View(), baseline) {
 				t.Fatal("theme recovery did not clear the visible error")

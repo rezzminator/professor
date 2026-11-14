@@ -2,6 +2,7 @@ package spawn
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // renameProof reports whether Codex itself recorded a rename of a thread to
@@ -55,13 +57,16 @@ func codexIndexProof(codexHomes []string) renameProof {
 		if len(homes) == 0 {
 			return false, errors.New("no Codex home is configured to read the rename from")
 		}
+		// A home that cannot be read never hides a rename another home recorded.
+		var unread error
 		for _, home := range homes {
 			landed, err := sessionIndexHasRename(filepath.Join(home, codexmeta.SessionIndexFile), name, since)
-			if err != nil || landed {
-				return landed, err
+			if landed {
+				return true, nil
 			}
+			unread = errors.Join(unread, err)
 		}
-		return false, nil
+		return false, unread
 	}
 }
 
@@ -81,11 +86,16 @@ func sessionIndexHasRename(path, name string, since time.Time) (renamed bool, re
 	}()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	undecoded := 0
 	for scanner.Scan() {
 		// A line that does not decode is skipped, not fatal: Codex appends
 		// while this reads, so the last line can be torn mid-write.
 		entry, err := codexmeta.DecodeSessionIndexLine(scanner.Bytes())
-		if err != nil || entry.ThreadName != name {
+		if err != nil {
+			undecoded++
+			continue
+		}
+		if entry.ThreadName != name {
 			continue
 		}
 		if renamed, ok := entry.RenamedAt(); ok && !renamed.Before(since) {
@@ -95,5 +105,30 @@ func sessionIndexHasRename(path, name string, since time.Time) (renamed bool, re
 	if err := scanner.Err(); err != nil {
 		return false, fmt.Errorf("read Codex session index %s: %w", path, err)
 	}
+	if undecoded > 0 {
+		// Counted, never fatal: a torn last line is routine, and an error here
+		// would stop the rename retry for every chat on this home.
+		obs.Logger(context.Background()).Warn("Codex session index lines skipped",
+			"path", path, "undecoded", undecoded)
+	}
 	return false, nil
+}
+
+// unverifiedRename is the verdict when neither witness can speak: Codex shows
+// nothing on screen and its ledger could not be read. That is "could not
+// verify", never "unnamed" — the rename may well have landed.
+func unverifiedRename(err error) string {
+	return fmt.Sprintf(
+		"could not verify the Codex rename — nothing on screen confirms it and its session index could not be read (%v); the chat may be named, check it with pfm ls",
+		err,
+	)
+}
+
+// screenUnread is what a rename warning adds when the screen that would show
+// Codex's reason could not be read: "could not look", never "showed nothing".
+func screenUnread(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (its screen could not be read: %v)", err)
 }

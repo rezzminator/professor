@@ -53,7 +53,9 @@ func TestChatSummaryIncludesResolvedTabStatus(t *testing.T) {
 		}
 	}
 	got := Defaults(t.TempDir(), nil)
-	if !strings.Contains(got.ChatSummary(), "config chat.herdrTabStatus=emoji (default)\n") {
+	if got.ChatSummary() != `config chat.backend=auto (default)
+config chat.herdrTabStatus=emoji (default)
+` {
 		t.Fatalf("default tab status/source missing: %q", got.ChatSummary())
 	}
 }
@@ -102,56 +104,6 @@ func TestChatBackendConfiguration(t *testing.T) {
 			}
 			if roundtrip.Chat.Backend != tc.want || roundtrip.Source("chat.backend") != got.Source("chat.backend") {
 				t.Fatalf("roundtrip chat.backend = %q, want %q", roundtrip.Chat.Backend, tc.want)
-			}
-		})
-	}
-}
-
-func TestRetiredHerdrTabPriorityLoadsAndDrops(t *testing.T) {
-	path := filepath.Join(t.TempDir(), FileName)
-	if err := os.WriteFile(path, []byte(`{"version":2,"chat":{"herdrTabPriority":true}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Load(path, t.TempDir(), nil)
-	if err != nil {
-		t.Fatalf("a config carrying the retired chat.herdrTabPriority must still load: %v", err)
-	}
-	body, err := Marshal(got, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(body), "herdrTabPriority") {
-		t.Fatalf("retired key written back:\n%s", body)
-	}
-}
-
-func TestHerdrTabStatusConfiguration(t *testing.T) {
-	for _, mode := range []string{"emoji", "text", "off", "invalid"} {
-		t.Run(mode, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), FileName)
-			if err := os.WriteFile(
-				path,
-				[]byte(`{"version":2,"chat":{"herdrTabStatus":"`+mode+`"}}`),
-				0o600,
-			); err != nil {
-				t.Fatal(err)
-			}
-			got, err := Load(path, t.TempDir(), nil)
-			if mode == "invalid" {
-				if err == nil || !strings.Contains(err.Error(), "herdrTabStatus") {
-					t.Fatalf("invalid mode error=%v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			data, err := Marshal(got, false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(data), `"herdrTabStatus": "`+mode+`"`) {
-				t.Fatalf("roundtrip lost mode: %s", data)
 			}
 		})
 	}

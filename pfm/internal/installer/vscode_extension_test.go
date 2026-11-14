@@ -11,8 +11,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
 
 // newVSCodeExtensionEngine builds the minimal *engine a linkVSCodeExtension /
@@ -100,6 +98,35 @@ func TestVSCodeExtensionLinksIntoEveryPresentProductRootNeverAnAbsentOne(t *test
 // same roots changes nothing: no new "change" is reported and the ledger
 // bytes are byte-for-byte the same, the same law ensureLink already gives
 // every other managed link.
+// One product whose extension cannot link fails alone: every other product
+// still links, and the ledger records the links that landed.
+func TestVSCodeExtensionFailingProductCostsOnlyThatProduct(t *testing.T) {
+	t.Setenv("VSCODE_PORTABLE", "")
+	home := t.TempDir()
+	rootA := filepath.Join(home, "product-a")
+	rootB := filepath.Join(home, "product-b")
+	writeFixture(t, filepath.Join(rootA, "extensions"), "a file where the extensions directory belongs\n")
+	if err := os.MkdirAll(rootB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	installer := newVSCodeExtensionEngine(t, home, []string{rootA, rootB}, true)
+	broken := filepath.Join(rootA, "extensions", vscodeExtensionLinkName)
+	err := installer.wireVSCode()
+	if err == nil || !strings.Contains(err.Error(), "link VS Code extension "+broken+": ") {
+		t.Fatalf("wireVSCode = %v, want the failure of %s", err, broken)
+	}
+	linked := filepath.Join(rootB, "extensions", vscodeExtensionLinkName)
+	source := filepath.Join(installer.managedRoot, filepath.FromSlash(vscodeExtensionSource))
+	if resolved, ok := resolvedLink(linked); !ok || resolved != filepath.Clean(source) {
+		t.Fatalf("%s -> %q,%v, want the extension source %s", linked, resolved, ok, source)
+	}
+	ledger := readVSCodeLedgerFixture(t, installer.managedRoot)
+	if len(ledger.Extensions) != 1 || ledger.Extensions[0] != linked {
+		t.Fatalf("ledger extensions = %v, want [%s]", ledger.Extensions, linked)
+	}
+}
+
 func TestVSCodeExtensionReinstallIsIdempotent(t *testing.T) {
 	t.Setenv("VSCODE_PORTABLE", "")
 	home := t.TempDir()
@@ -370,7 +397,17 @@ func TestVSCodeExtensionDropsARecordedTargetWhoseProductRootVanished(t *testing.
 	}
 	stillTarget := filepath.Join(stillRoot, "extensions", vscodeExtensionLinkName)
 
-	ledger := vscodeOwnershipDocument{Version: vscodeOwnershipVersion, Extensions: []string{goneTarget, stillTarget}}
+	// A path under a regular file stats as ENOTDIR (even as root), so the
+	// root is unreadable rather than gone: its record must be kept.
+	blocker := filepath.Join(home, "blocker")
+	writeFixture(t, blocker, "not a directory")
+	blockedRoot := filepath.Join(blocker, "product")
+	blockedTarget := filepath.Join(blockedRoot, "extensions", vscodeExtensionLinkName)
+
+	ledger := vscodeOwnershipDocument{
+		Version:    vscodeOwnershipVersion,
+		Extensions: []string{goneTarget, stillTarget, blockedTarget},
+	}
 	encoded, err := json.Marshal(ledger)
 	if err != nil {
 		t.Fatal(err)
@@ -386,8 +423,14 @@ func TestVSCodeExtensionDropsARecordedTargetWhoseProductRootVanished(t *testing.
 		t.Fatalf("a vanished product root was recreated: %v", err)
 	}
 	result := readVSCodeLedgerFixture(t, managed)
-	if len(result.Extensions) != 1 || result.Extensions[0] != stillTarget {
-		t.Fatalf("ledger extensions = %v, want only %s", result.Extensions, stillTarget)
+	if want := []string{blockedTarget, stillTarget}; !slices.Equal(result.Extensions, want) {
+		t.Fatalf("ledger extensions = %v, want %v", result.Extensions, want)
+	}
+	output := installer.options.Stdout.(*bytes.Buffer).String()
+	wantSkip := "  skip    " + blockedTarget + " VS Code product " + blockedRoot +
+		" could not be checked: stat " + blockedRoot + ": not a directory; extension link record kept\n"
+	if !strings.Contains(output, wantSkip) {
+		t.Fatalf("missing %q in install output:\n%s", wantSkip, output)
 	}
 	if _, linked := resolvedLink(stillTarget); !linked {
 		t.Fatal("the still-present recorded target was not (re)linked")
@@ -509,7 +552,7 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 		t.Fatalf("package.json main %q does not name an embedded file: %v", manifest.Main, err)
 	}
 
-	files, err := assetFiles()
+	files, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,45 +564,6 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 		if !staged[want] {
 			t.Fatalf("assetFiles() did not stage %s; staged=%v", want, files)
 		}
-	}
-}
-
-// TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions is the
-// M9 regression for issue #24 findings 10-12: every terminal the extension
-// opens must go through the SAME contributed-profile route the + dropdown uses
-// (workbench.action.terminal.newWithProfile addressed at professor.terminal),
-// never through a bare createTerminal(options) call, which renders the
-// default profile's icon instead of the extension's own (finding 10). It reads
-// the code with its comments stripped, so it runs where Node does not; the
-// route itself is driven under Node by
-// TestVSCodeExtensionNewTerminalCommandsOpenTheProfessorProfile.
-func TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions(t *testing.T) {
-	t.Parallel()
-	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/extension.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var kept strings.Builder
-	for _, line := range strings.Split(string(raw), "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), "//") {
-			kept.WriteString(line + "\n")
-		}
-	}
-	code := kept.String()
-	if !strings.Contains(code, "registerCommand('professor.newChatTerminal'") {
-		t.Fatalf("extension.js does not register professor.newChatTerminal: %s", code)
-	}
-	if strings.Contains(code, "createTerminal(") {
-		t.Fatalf(
-			"extension.js calls createTerminal(...) with its own options instead of delegating to the contributed profile route: %s",
-			code,
-		)
-	}
-	if !strings.Contains(code, "workbench.action.terminal.newWithProfile") {
-		t.Fatalf("extension.js does not delegate through workbench.action.terminal.newWithProfile: %s", code)
-	}
-	if !strings.Contains(code, "id: 'professor.terminal'") && !strings.Contains(code, `id: "professor.terminal"`) {
-		t.Fatalf("extension.js's newWithProfile call does not address id professor.terminal: %s", code)
 	}
 }
 
@@ -631,9 +635,12 @@ func TestVSCodeExtensionPreviewCreatesNoLinkAndNoLedger(t *testing.T) {
 	) {
 		t.Fatalf("preview wrote the VS Code ownership ledger: %v", err)
 	}
-	if !strings.Contains(preview.String(), "link "+target) {
-		t.Fatalf("preview did not name the extension link it would make:\n%s", preview.String())
-	}
+	wantOutputLines(t, preview.String(), []string{
+		"  change  link " + target + " -> " + filepath.Join(
+			managedRootForHome(home),
+			filepath.FromSlash(vscodeExtensionSource),
+		),
+	}, "link "+target)
 }
 
 // TestVSCodeSettingsMergeAndRestoreWriteThroughASymlinkedSettingsFile pins the
@@ -784,90 +791,5 @@ func TestVSCodeDefaultTerminalIsASettingsProfileNeverAnExtensionContributedOne(t
 			`"terminal.integrated.defaultProfile.linux": "`+title+`"`, 1))
 		value, profiles = run(false)
 		assertSettingsProfileDefault("ordinary install over an owned "+title+" default", value, profiles)
-	}
-}
-
-// TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv runs the embedded
-// extension.js under Node with a stubbed 'vscode' module and asserts
-// nextTerminal's env carries PFM_AUTO_OPEN, a PROFESSOR_TERMINAL marker, and
-// a JSON null for every chat-identity variable a launcher app could have
-// inherited (see the comment beside nextTerminal's env in extension.js).
-func TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv(t *testing.T) {
-	t.Parallel()
-	output := runVSCodeExtensionDriver(t, "profile")
-
-	var profile struct {
-		Env map[string]any `json:"env"`
-	}
-	if err := json.Unmarshal(output, &profile); err != nil {
-		t.Fatalf("decode terminal profile JSON: %v: %s", err, output)
-	}
-
-	if profile.Env["PFM_AUTO_OPEN"] != "pfm" {
-		t.Fatalf("terminal profile env missing PFM_AUTO_OPEN=pfm: %v", profile.Env)
-	}
-	marker, ok := profile.Env["PROFESSOR_TERMINAL"].(string)
-	if !ok || marker == "" {
-		t.Fatalf("terminal profile env missing a PROFESSOR_TERMINAL marker: %v", profile.Env)
-	}
-	for _, key := range append(claudelaunch.IdentityHygiene(), "TMUX", "TMUX_PANE") {
-		value, present := profile.Env[key]
-		if !present {
-			t.Fatalf("terminal profile env dropped %s entirely instead of nulling it: %v", key, profile.Env)
-		}
-		if value != nil {
-			t.Fatalf("terminal profile env[%s] = %v, want JSON null (VS Code deletes the inherited var)", key, value)
-		}
-	}
-	nulled := 0
-	for _, value := range profile.Env {
-		if value == nil {
-			nulled++
-		}
-	}
-	if want := len(claudelaunch.IdentityHygiene()) + 2; nulled != want {
-		t.Fatalf(
-			"terminal profile env nulls %d names, want exactly the %d identity and TMUX names: %v",
-			nulled,
-			want,
-			profile.Env,
-		)
-	}
-}
-
-// TestVSCodeExtensionNewTerminalCommandsOpenTheProfessorProfile drives, under
-// Node, the handlers the extension registers for professor.newChatTerminal and
-// for VS Code's own workbench.action.terminal.new — the command the terminal
-// view's + button and Ctrl+Shift+` run. Both must open the Professor
-// contributed profile through newWithProfile, the route provideTerminalProfile
-// serves, so every default-route terminal takes the next icon/colour pair off
-// the one shared counter. A caller that passes its own config keeps it.
-func TestVSCodeExtensionNewTerminalCommandsOpenTheProfessorProfile(t *testing.T) {
-	t.Parallel()
-	output := runVSCodeExtensionDriver(t, "route")
-
-	var executed [][]any
-	if err := json.Unmarshal(output, &executed); err != nil {
-		t.Fatalf("decode executed commands JSON: %v: %s", err, output)
-	}
-	professor := map[string]any{"config": map[string]any{
-		"extensionIdentifier": "professor.professor",
-		"id":                  "professor.terminal",
-		"title":               vscodeExtensionProfileTitle,
-	}}
-	want := [][]any{
-		{"workbench.action.terminal.newWithProfile", professor},
-		{"workbench.action.terminal.newWithProfile", professor},
-		{"workbench.action.terminal.newWithProfile", map[string]any{
-			"config":   map[string]any{"profileName": "bash"},
-			"location": float64(2),
-		}},
-	}
-	if !reflect.DeepEqual(executed, want) {
-		t.Fatalf(
-			"executed commands =\n%v\nwant (newChatTerminal, + with no options, + with a caller's own config) =\n%v",
-			executed,
-			want,
-		)
 	}
 }

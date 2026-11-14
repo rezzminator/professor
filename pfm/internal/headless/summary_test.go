@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestSummarizeDeliversLastExchangeToRunner(t *testing.T) {
@@ -27,19 +27,18 @@ func TestSummarizeDeliversLastExchangeToRunner(t *testing.T) {
 				`{"type":"user","message":{"role":"user","content":"which checks ran?"}}`,
 				`{"type":"assistant","message":{"role":"assistant","content":"the capture regression passed"}}`,
 			)
-			capture := filepath.Join(root, "stdin")
 			bin := filepath.Join(root, "bin")
-			output := `{"result":"capture regression passed"}`
+			output := `{"result":"capture regression passed"}` + "\n"
 			if engineName == "codex" {
-				output = `{"type":"item.completed","item":{"type":"agent_message","text":"capture regression passed"}}' '{"type":"turn.completed"}`
+				output = `{"type":"item.completed","item":{"type":"agent_message","text":"capture regression passed"}}` + "\n" +
+					`{"type":"turn.completed"}` + "\n"
 			}
-			writeSummaryStub(t, bin, engineName,
-				`/bin/cat > "$ASK_CAPTURE"`+"\nprintf '%s\\n' '"+output+"'",
-			)
+			writeEngine(t, bin, engineName)
+			runner := fakeEngine(deps.StartOutput{Stdout: output})
 			t.Setenv("PATH", bin)
-			t.Setenv("ASK_CAPTURE", capture)
 			options := SummaryOptions{
 				Config: summaryMachine(t, engineName), Database: database, TempDir: filepath.Join(root, "prepared"),
+				Runner: runner,
 			}
 			result := Summarize(
 				context.Background(),
@@ -49,16 +48,13 @@ func TestSummarizeDeliversLastExchangeToRunner(t *testing.T) {
 			if result.Text != "capture regression passed" || result.Warning != nil {
 				t.Fatalf("summary=%+v", result)
 			}
-			raw, err := os.ReadFile(capture)
-			if err != nil {
-				t.Fatal(err)
-			}
+			raw := startedStdin(t, runner, 0)
 			for _, want := range []string{"which checks ran?", "the capture regression passed", "STATE: COMPLETE"} {
-				if !strings.Contains(string(raw), want) {
+				if !strings.Contains(raw, want) {
 					t.Errorf("runner input missing last exchange %q: %s", want, raw)
 				}
 			}
-			if strings.Contains(string(raw), "obsolete") {
+			if strings.Contains(raw, "obsolete") {
 				t.Errorf("runner received an older exchange: %s", raw)
 			}
 			assertNoLeakedTempFiles(t, options.TempDir)
@@ -73,16 +69,21 @@ func TestSummarizeCachesCompleteExchangeAndBoundsAnswer(t *testing.T) {
 		`{"type":"user","message":{"role":"user","content":"what changed?"}}`,
 		`{"type":"assistant","message":{"role":"assistant","content":"the cache changed"}}`,
 	)
-	counter := filepath.Join(root, "calls")
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "codex", `
-printf x >> "$ASK_COUNTER"
-printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"item.completed","item":{"type":"agent_message","text":"one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two thirty-three thirty-four thirty-five thirty-six thirty-seven thirty-eight thirty-nine forty forty-one forty-two"}}' '{"type":"turn.completed"}'`)
+	writeEngine(t, bin, "codex")
+	words := "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen " +
+		"seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six " +
+		"twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two thirty-three thirty-four thirty-five " +
+		"thirty-six thirty-seven thirty-eight thirty-nine forty forty-one forty-two"
+	runner := fakeEngine(deps.StartOutput{
+		Stdout: `{"type":"thread.started"}` + "\n" + `{"type":"turn.started"}` + "\n" +
+			`{"type":"item.completed","item":{"type":"agent_message","text":"` + words + `"}}` + "\n" +
+			`{"type":"turn.completed"}` + "\n",
+	})
 	t.Setenv("PATH", bin)
-	t.Setenv("ASK_COUNTER", counter)
 	options := SummaryOptions{
 		Config: summaryMachine(t, "codex"), Database: database,
-		TempDir: filepath.Join(root, "tmp", "chat-status"),
+		TempDir: filepath.Join(root, "tmp", "chat-status"), Runner: runner,
 	}
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath}
 	first := Summarize(context.Background(), chat, options)
@@ -93,11 +94,47 @@ printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"it
 	if !second.Cached || second.Warning != nil || second.Text != first.Text {
 		t.Fatalf("second summary=%+v, first=%+v", second, first)
 	}
-	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "x" {
-		t.Fatalf("runner calls=%q err=%v", calls, err)
+	if calls := len(runner.Starts()); calls != 1 {
+		t.Fatalf("runner calls=%d, want 1", calls)
 	}
 	if entries, err := os.ReadDir(options.TempDir); err != nil || len(entries) != 0 {
 		t.Fatalf("prepared temp entries=%v err=%v", entries, err)
+	}
+}
+
+// A cache that cannot be read or written costs only the cache: the summary
+// is run and handed back, and both cache failures come back as its Warning.
+func TestSummarizeKeepsTheSummaryPastAnUnusableCache(t *testing.T) {
+	root, database := summaryTestStore(t)
+	transcriptPath := filepath.Join(root, "complete.jsonl")
+	writeSummaryTranscript(t, transcriptPath,
+		`{"type":"user","message":{"role":"user","content":"what changed?"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"the cache changed"}}`,
+	)
+	bin := filepath.Join(root, "bin")
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{Stdout: `{"result":"the cache changed"}` + "\n"})
+	t.Setenv("PATH", bin)
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result := Summarize(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, SummaryOptions{
+		Config: summaryMachine(t, "claude"), Database: database, TempDir: filepath.Join(root, "prepared"),
+		Runner: runner,
+	})
+	if result.Text != "the cache changed" || result.Cached {
+		t.Fatalf("summary=%+v, want the fresh summary text", result)
+	}
+	if calls := len(runner.Starts()); calls != 1 {
+		t.Fatalf("runner calls=%d, want one run", calls)
+	}
+	if result.Warning == nil {
+		t.Fatal("Warning = nil, want both cache failures")
+	}
+	lines := strings.Split(result.Warning.Error(), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "read summary cache: ") ||
+		!strings.HasPrefix(lines[1], "write summary cache: ") {
+		t.Fatalf("Warning = %q, want a read then a write cache failure", result.Warning)
 	}
 }
 
@@ -110,20 +147,15 @@ func TestSummarizeMarksPartialAndNeverCachesIt(t *testing.T) {
 		`{"type":"user","message":{"role":"user","content":"run the checks"}}`,
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]}}`,
 	)
-	counter := filepath.Join(root, "calls")
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(
-		t,
-		bin,
-		"claude",
-		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"checks are running\"}'",
-	)
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{Stdout: `{"result":"checks are running"}` + "\n"})
 	t.Setenv("PATH", bin)
-	t.Setenv("ASK_COUNTER", counter)
 	options := SummaryOptions{
 		Config:   summaryMachine(t, "claude"),
 		Database: database,
 		TempDir:  filepath.Join(root, "tmp"),
+		Runner:   runner,
 	}
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath}
 	for iteration := 0; iteration < 2; iteration++ {
@@ -132,8 +164,8 @@ func TestSummarizeMarksPartialAndNeverCachesIt(t *testing.T) {
 			t.Fatalf("iteration %d summary=%+v", iteration, result)
 		}
 	}
-	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "xx" {
-		t.Fatalf("runner calls=%q err=%v", calls, err)
+	if calls := len(runner.Starts()); calls != 2 {
+		t.Fatalf("runner calls=%d, want 2", calls)
 	}
 }
 
@@ -151,20 +183,15 @@ func TestSummarizeNeverCachesAMidTurnCodexExchange(t *testing.T) {
 		codexToolLine,
 		codexSaid("checking the next file"),
 	)
-	counter := filepath.Join(root, "calls")
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(
-		t,
-		bin,
-		"claude",
-		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"still checking files\"}'",
-	)
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{Stdout: `{"result":"still checking files"}` + "\n"})
 	t.Setenv("PATH", bin)
-	t.Setenv("ASK_COUNTER", counter)
 	options := SummaryOptions{
 		Config:   summaryMachine(t, "claude"),
 		Database: database,
 		TempDir:  filepath.Join(root, "tmp"),
+		Runner:   runner,
 	}
 	chat := Chat{Name: "seat", Engine: pfmengine.Codex, Path: transcriptPath}
 	for iteration := 0; iteration < 2; iteration++ {
@@ -173,8 +200,8 @@ func TestSummarizeNeverCachesAMidTurnCodexExchange(t *testing.T) {
 			t.Fatalf("iteration %d summary=%+v, want an uncached PARTIAL", iteration, result)
 		}
 	}
-	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "xx" {
-		t.Fatalf("runner calls=%q err=%v", calls, err)
+	if calls := len(runner.Starts()); calls != 2 {
+		t.Fatalf("runner calls=%d, want 2", calls)
 	}
 	info, err := os.Stat(transcriptPath)
 	if err != nil {
@@ -194,18 +221,17 @@ func TestSummarizePreservesAnswerWhenPreparedExchangeCleanupFails(t *testing.T) 
 	)
 	tempDir := filepath.Join(root, "tmp", "chat-status")
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "codex", `
-set -eu
-set -- "$HEADLESS_TEMP_DIR"/exchange-*.md
-[ "$#" -eq 1 ]
-[ -f "$1" ]
-rm "$1"
-printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"item.completed","item":{"type":"agent_message","text":"cleanup-resistant summary"}}' '{"type":"turn.completed"}'`)
+	writeEngine(t, bin, "codex")
+	runner := fakeEngine(deps.StartOutput{
+		AtStart: removePreparedExchange(t, tempDir),
+		Stdout: `{"type":"thread.started"}` + "\n" + `{"type":"turn.started"}` + "\n" +
+			`{"type":"item.completed","item":{"type":"agent_message","text":"cleanup-resistant summary"}}` + "\n" +
+			`{"type":"turn.completed"}` + "\n",
+	})
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
 
 	result := Summarize(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, SummaryOptions{
-		Config: summaryMachine(t, "codex"), Database: database, TempDir: tempDir,
+		Config: summaryMachine(t, "codex"), Database: database, TempDir: tempDir, Runner: runner,
 	})
 	if result.Text != "cleanup-resistant summary" || strings.HasPrefix(result.Text, "failed (") {
 		t.Fatalf("summary lost its computed answer after cleanup failure: %+v", result)
@@ -215,7 +241,7 @@ printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"it
 	}
 
 	cached := Summarize(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, SummaryOptions{
-		Config: summaryMachine(t, "codex"), Database: database, TempDir: tempDir,
+		Config: summaryMachine(t, "codex"), Database: database, TempDir: tempDir, Runner: runner,
 	})
 	if cached.Text != result.Text || !cached.Cached || cached.Warning != nil {
 		t.Fatalf("summary was not cached after cleanup warning: first=%+v cached=%+v", result, cached)
@@ -243,9 +269,10 @@ func TestSummarizeDistinguishesMissingEngineFromRunnerFailure(t *testing.T) {
 		t.Fatalf("missing summary=%+v", missing)
 	}
 
-	writeSummaryStub(t, bin, "codex", "printf 'provider crashed\\n' >&2\nexit 9")
+	writeEngine(t, bin, "codex")
 	failed := Summarize(context.Background(), Chat{Engine: "cc", Path: transcriptPath}, SummaryOptions{
 		Config: summaryMachine(t, "codex"), Database: database, TempDir: filepath.Join(root, "tmp"),
+		Runner: fakeEngine(deps.StartOutput{Stderr: "provider crashed\n", ExitCode: 9}),
 	})
 	if !strings.HasPrefix(failed.Text, "failed (") || !strings.Contains(failed.Text, "provider crashed") {
 		t.Fatalf("failed summary=%+v", failed)
@@ -282,11 +309,14 @@ func summaryMachine(t *testing.T, engineName string) pfmconfig.Config {
 	if err != nil {
 		panic(err)
 	}
+	binaries := t.TempDir()
+	writeEngine(t, binaries, "claude")
+	writeEngine(t, binaries, "codex")
 	return pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: t.TempDir()}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
-		Claude:        pfmconfig.Claude{Binary: "claude"},
-		Codex:         pfmconfig.Codex{Binary: "codex"},
+		Claude:        pfmconfig.Claude{Binary: filepath.Join(binaries, "claude")},
+		Codex:         pfmconfig.Codex{Binary: filepath.Join(binaries, "codex")},
 		Ask: pfmconfig.AskConfig{Engine: id, Prefs: map[pfmengine.ID]pfmconfig.EnginePrefs{
 			pfmengine.Codex: {Model: "cx-test", Effort: "low"}, pfmengine.Claude: {Model: "cc-test", Effort: "low"},
 		}},
@@ -296,20 +326,6 @@ func summaryMachine(t *testing.T, engineName string) pfmconfig.Config {
 func writeSummaryTranscript(t *testing.T, path string, lines ...string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeSummaryStub(t *testing.T, directory, name, body string) {
-	t.Helper()
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := testjail.WriteExecutable(
-		filepath.Join(directory, name),
-		[]byte("#!/bin/sh\n"+body+"\n"),
-		0o700,
-	); err != nil {
 		t.Fatal(err)
 	}
 }

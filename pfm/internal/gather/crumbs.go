@@ -78,15 +78,18 @@ func allDigits(value string) bool {
 
 // ReadCrumbs reads valid crumbs and removes pane crumbs whose pane vanished.
 func ReadCrumbs(sidDir string, panes []ProbePane) (CrumbProbe, error) {
-	return scanCrumbs(sidDir, panes, true)
+	return scanCrumbs(sidDir, panes, true, nil)
 }
 
 // ReadCrumbsReadOnly reads live crumbs but leaves stale pane crumbs in place.
 func ReadCrumbsReadOnly(sidDir string, panes []ProbePane) (CrumbProbe, error) {
-	return scanCrumbs(sidDir, panes, false)
+	return scanCrumbs(sidDir, panes, false, nil)
 }
 
-func scanCrumbs(sidDir string, panes []ProbePane, sweep bool) (CrumbProbe, error) {
+// scanCrumbs reads sidDir's crumbs against panes. A pane crumb on a socket in
+// unreadable is never swept: its pane may live on, unread. A crumb that cannot
+// be read or swept costs that crumb only, named in Warnings.
+func scanCrumbs(sidDir string, panes []ProbePane, sweep bool, unreadable map[string]string) (CrumbProbe, error) {
 	var result CrumbProbe
 	entries, err := os.ReadDir(sidDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -117,9 +120,11 @@ func scanCrumbs(sidDir string, panes []ProbePane, sweep bool) (CrumbProbe, error
 		path := filepath.Join(sidDir, entry.Name())
 		if paneID != "" {
 			if _, live := livePanes[socket+"\x00"+paneID]; !live {
-				if sweep {
+				if _, unread := unreadable[socket]; sweep && !unread {
 					if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-						return result, fmt.Errorf("remove stale pane crumb %q: %w", entry.Name(), err)
+						result.Warnings = append(result.Warnings,
+							fmt.Sprintf("stale pane crumb %s could not be removed; it stays: %v", path, err))
+						continue
 					}
 					result.StaleSwept = append(result.StaleSwept, entry.Name())
 				}
@@ -132,7 +137,11 @@ func scanCrumbs(sidDir string, panes []ProbePane, sweep bool) (CrumbProbe, error
 			continue
 		}
 		if err != nil {
-			return result, fmt.Errorf("read crumb %q: %w", entry.Name(), err)
+			result.Ignored++
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("crumb %s unreadable; its chat may lack its transcript this scan: %v", path, err))
+			result.Unread = append(result.Unread, Crumb{Filename: entry.Name(), Socket: socket, PaneID: paneID})
+			continue
 		}
 		transcriptPath := strings.TrimRight(string(content), "\r\n")
 		if transcriptPath == "" {

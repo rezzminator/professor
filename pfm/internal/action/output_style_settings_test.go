@@ -3,19 +3,21 @@ package action
 import (
 	"bytes"
 	"context"
-	"os/exec"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func TestClaudeSpawnCommandUsesRunnerStartBoundary(t *testing.T) {
 	fake := &deps.FakeRunner{}
-	binary := deps.Executable("sh")
+	binary := "/scripted/claude"
+	fake.ScriptLookPath(binary, binary, nil)
 	fake.ScriptStart([]string{binary}, 42, nil, nil)
 	spawn := ClaudeSpawn{
 		Purpose: PurposeQuery,
@@ -100,14 +102,12 @@ func TestClaudeSpawnCarriesDefaultOutputStyle(t *testing.T) {
 	}
 }
 
-// TestClaudeSpawnKeepsACallerSuppliedSettingsFlag is the regression for the
-// silently-discarded --settings bug: ShellCommand and argv used to append the
-// fleet's own --settings {"outputStyle":"default"} AFTER spawn.Args, and
-// --settings is single-value, so a caller who typed their own --settings
-// through pfm's launcher had it overridden by the fleet's pair with no
-// warning. Both renderers must now keep the caller's file and carry exactly
-// ONE --settings word, not the fleet's default payload.
-func TestClaudeSpawnCarriesRegistrySettingsAfterCallerFlag(t *testing.T) {
+// TestClaudeSpawnFoldsTheCallerSettingsIntoItsOwn is the regression for the
+// silently-discarded --settings bug: Claude reads one --settings, the last, so
+// the fleet's own pair appended behind a caller's --settings discarded the
+// caller's. Both renderers carry exactly ONE --settings word: the fleet's
+// settings with the caller's keys folded in, the caller's winning.
+func TestClaudeSpawnFoldsTheCallerSettingsIntoItsOwn(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
 	spawn := ClaudeSpawn{
@@ -119,28 +119,30 @@ func TestClaudeSpawnCarriesRegistrySettingsAfterCallerFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shell spawn: %v", err)
 	}
-	if !strings.Contains(shell, "'--settings' '{\"outputStyle\":\"mine\"}'") {
-		t.Fatalf("shell spawn %q lacks the caller's --settings value", shell)
-	}
-	if got := parsedShell(t, shell).Settings["outputStyle"]; got != "default" {
-		t.Fatalf("registry output style = %#v", got)
-	}
-
 	command, err := spawn.Command(context.Background())
 	if err != nil {
 		t.Fatalf("command spawn: %v", err)
 	}
-	if !containsFlagPair(command.Args, "--settings", `{"outputStyle":"mine"}`) {
-		t.Fatalf("command argv %#v lacks the caller's --settings value", command.Args)
-	}
-	settingsCount := 0
-	for _, argument := range command.Args {
-		if argument == "--settings" {
-			settingsCount++
+	for renderer, words := range map[string][]string{"shell": shellWords(t, shell), "argv": command.Args} {
+		var payloads []string
+		for index, word := range words {
+			if word == "--settings" && index+1 < len(words) {
+				payloads = append(payloads, words[index+1])
+			}
 		}
-	}
-	if settingsCount != 2 {
-		t.Fatalf("command argv %#v carries %d --settings words, want 2", command.Args, settingsCount)
+		if len(payloads) != 1 {
+			t.Fatalf("%s spawn %q carries %d --settings words, want 1", renderer, words, len(payloads))
+		}
+		var settings map[string]any
+		if err := json.Unmarshal([]byte(payloads[0]), &settings); err != nil {
+			t.Fatalf("%s spawn --settings %q: %v", renderer, payloads[0], err)
+		}
+		if got := settings["outputStyle"]; got != "mine" {
+			t.Fatalf("%s spawn outputStyle = %#v, want the caller's \"mine\"", renderer, got)
+		}
+		if _, held := settings["hooks"]; !held {
+			t.Fatalf("%s spawn --settings %q lost the fleet's hooks", renderer, payloads[0])
+		}
 	}
 }
 
@@ -198,22 +200,13 @@ func TestLauncherRunSessionRouting(t *testing.T) {
 	}
 }
 
-func containsFlagPair(args []string, key, value string) bool {
-	for index := 0; index+1 < len(args); index++ {
-		if args[index] == key && args[index+1] == value {
-			return true
-		}
-	}
-	return false
-}
-
 func shellWords(t *testing.T, run string) []string {
 	t.Helper()
-	output, err := exec.Command("sh", "-c", "set -- "+launchHead(run)+"; printf '%s\\000' \"$@\"").Output()
+	words, err := cmdparse.SplitShellWords(launchHead(run))
 	if err != nil {
-		t.Fatalf("parse shell launch: %v", err)
+		t.Fatalf("parse shell launch %q: %v", run, err)
 	}
-	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+	return words
 }
 
 // launchHead is a launch line up to its fallback tail, the first " || " outside

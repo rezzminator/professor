@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
@@ -177,6 +178,18 @@ func ResolveCodex(machine pfmconfig.Config) (Engine, error) {
 type processEngine struct {
 	machine pfmconfig.Config
 	engine  pfmengine.ID
+	runner  deps.Runner
+}
+
+// WithRunner hands a process-backed Engine the Runner its child starts
+// through (headless/run's Request.Runner; nil keeps the real one). An Engine
+// that is not process-backed is returned unchanged.
+func WithRunner(engine Engine, runner deps.Runner) Engine {
+	if process, ok := engine.(processEngine); ok {
+		process.runner = runner
+		return process
+	}
+	return engine
 }
 
 func (engine processEngine) Run(parent context.Context, input AskInput) (AskResult, error) {
@@ -208,6 +221,7 @@ func (engine processEngine) Run(parent context.Context, input AskInput) (AskResu
 	request := headlessrun.Request{
 		Config: engine.machine, Engine: engine.engine, Model: input.Model, Effort: input.Effort,
 		Prompt: prompt, Timeout: timeout, NoSessionPersistence: engine.engine == pfmengine.Codex,
+		Runner: engine.runner,
 	}
 	result, runErr := headlessrun.Run(parent, request)
 	if runErr != nil {

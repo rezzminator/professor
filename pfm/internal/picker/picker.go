@@ -1,6 +1,9 @@
 // Package picker is the pfm ls loop: cached first frame, streamed refreshes
 // with idle backoff, the cosmos sampler, and key to action over fleet.Scan,
 // with every row action delegated to chat.
+//
+// reread.go: the parked picker's row-facts re-read (working state, Herdr's
+// blocked marks) over the last pass, without a full pass.
 package picker
 
 import (
@@ -19,6 +22,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -158,6 +162,7 @@ func Run(
 		// The Reader caches each file by size and modification time: a refresh
 		// re-stats each row's files and reads again only a file that changed.
 		request.Facts = rowfacts.NewReader(runtime.Paths.SIDDir)
+		request.HerdrBlocked = gather.HerdrBlockedPanes
 		scan, err = scanFleetCached(ctx, database, request)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
@@ -179,6 +184,7 @@ func Run(
 		scan.Snapshot.ApplyKill = applier
 		scan.Snapshot.ApplyDeactivate = deactivateApplier(ctx, scan.Paths)
 		scan.Snapshot.MergeNewChat = true
+		scan.Snapshot.HerdrSpace = herdrSpace(ctx, runtime.Paths.Home, stderr)
 		scan.Snapshot.LastLaunch = lastLaunch
 		if memoryErr != nil {
 			scan.Snapshot.LaunchMemoryError = memoryErr.Error()
@@ -190,6 +196,7 @@ func Run(
 		statsSampler.Limits = pfmstats.NewLimitsSampler(limitAccounts(runtime))
 		statsSampler.Limits.TTL = pfmstats.LiveLimitsTTL
 		statsSampler.Limits.Version = runtime.Version
+		statsSampler.Limits.Offline = paths.UsageOffline()
 		// Codex's own fetch execs `codex app-server` (unlike Claude's cheap
 		// disk-cache-backed HTTP path) — see CodexLiveLimitsTTL.
 		statsSampler.Limits.CodexTTL = pfmstats.CodexLiveLimitsTTL
@@ -217,11 +224,9 @@ func Run(
 			updates,
 			activity,
 		)
-		outcome, err = (ui.BubblePicker{Updates: updates}).Pick(
-			ctx,
-			scan.Snapshot,
-		)
-		refreshCancel()
+		outcome, err = pickThenDrain(func() (ui.Outcome, error) {
+			return (ui.BubblePicker{Updates: updates}).Pick(ctx, scan.Snapshot)
+		}, refreshCancel, updates)
 		warnings.flush(stderr)
 	}
 	if err != nil {
@@ -288,11 +293,14 @@ func Run(
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
 		}
+		var primary int
+		selectedRow, primary, cache1H = resumeUnder(selectedRow, outcome, cache1H)
+		ctx = pfmchat.WithResumeChoice(ctx, outcome.Resume != nil)
 		return openAndRemember(ctx, sharedState, outcome, stderr, func() int {
 			return pfmchat.OpenRow(
 				ctx,
 				selectedRow,
-				outcome.PrimaryAccount,
+				primary,
 				cache1H,
 				"",
 				stdout,
@@ -388,7 +396,9 @@ func resolveSelectedRow(
 	runtime *pfmconfig.Runtime,
 	stderr io.Writer,
 ) (compose.Row, error) {
-	if row.ID == "" || !isResumeRowKind(row.Kind) {
+	// The resumable kinds are the ones scanFleetCached's empty gather can
+	// paint for a chat that is actually live right now.
+	if row.ID == "" || !row.Kind.IsResumable() {
 		return row, nil
 	}
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
@@ -421,16 +431,16 @@ func resolveSelectedRow(
 	)
 }
 
-// isResumeRowKind reports whether kind is one of the resumable-only kinds
-// resolveSelectedRow re-resolves: the kinds scanFleetCached's empty gather
-// can paint for a chat that is actually live right now.
-func isResumeRowKind(kind compose.Kind) bool {
-	switch kind {
-	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
-		return true
-	default:
-		return false
+// resumeUnder applies a resume walk's choice to the chat it opens: the row's
+// account, which a Claude resume launches under, the primary account a Codex
+// or OpenCode resume launches under, and the prompt cache. A row no longer
+// resumable (resumed elsewhere since the Enter) opens as it is.
+func resumeUnder(row compose.Row, outcome ui.Outcome, cache1H bool) (compose.Row, int, bool) {
+	if outcome.Resume == nil || !row.Kind.IsResumable() {
+		return row, outcome.PrimaryAccount, cache1H
 	}
+	row.Account = outcome.Resume.Account
+	return row, outcome.Resume.Account, outcome.Resume.Cache1H
 }
 
 func limitAccounts(runtime pfmconfig.Runtime) []pfmstats.LimitAccount {
@@ -599,8 +609,24 @@ func deactivateApplier(
 		if row.Socket == "" {
 			return errors.New("selected chat has no live server")
 		}
-		return pfmchat.KillServer(ctx, resolved, row.Socket)
+		return endSoleChatServer(ctx, resolved, row)
 	}
+}
+
+// endSoleChatServer ends row's tmux server through pfmchat.KillServer, which
+// ends it only while row's pane is its sole pane. A picker row is a scan's
+// view: a Codex or OpenCode row is one per process with no split check, and a
+// Claude row counts only crumbed panes, so a row with no pane is refused.
+func endSoleChatServer(ctx context.Context, resolved paths.Values, row compose.Row) error {
+	if row.PaneID == "" {
+		return fmt.Errorf(
+			"chat %s has no pane on server %s to prove the server is its own: %w",
+			row.Name,
+			row.Socket,
+			pfmchat.ErrEndRefused,
+		)
+	}
+	return pfmchat.KillServer(ctx, resolved, row.Socket, row.PaneID)
 }
 
 func rebootRow(
@@ -622,7 +648,11 @@ func rebootRow(
 	if row.Kind == compose.LiveSplit || row.ID == "" {
 		return compose.Row{}, errors.New("a split live row cannot be rebooted as one chat")
 	}
-	if err := pfmchat.KillServer(ctx, resolved, row.Socket); err != nil {
+	// A refused end leaves the chat running, so reopening it would start a
+	// second copy beside it; a cleanup failure after the server died is a warning.
+	if err := endSoleChatServer(ctx, resolved, row); errors.Is(err, pfmchat.ErrEndRefused) {
+		return compose.Row{}, fmt.Errorf("reboot %s: %w", row.ID, err)
+	} else if err != nil {
 		fmt.Fprintf(stderr, "pfm: reboot kill-server %s: %v\n", row.Socket, err)
 	}
 	row.Kind = compose.ResumeKindFor(row.Kind)

@@ -7,14 +7,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/retired"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -37,7 +40,7 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	live := filepath.Join(versions, "2.1.260")
 	prunable := filepath.Join(versions, "2.1.250")
 	for _, path := range []string{newest, second, live, prunable} {
-		if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutableNeverRun(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -63,19 +66,15 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	previewOutput := preview.String()
-	if !strings.Contains(previewOutput, "remove "+prunable) {
-		t.Fatalf("preview did not list the prunable version:\n%s", previewOutput)
+	// Only the actual newest build is labelled "newest"; the second-newest kept
+	// build carries a distinct, honest label.
+	pruneLines := []string{
+		"  change  remove " + prunable + " (2.1.250, 17B)",
+		"  ok      keep " + live + " (live (pids 4242))",
+		"  ok      keep " + second + " (within keep window)",
+		"  ok      keep " + newest + " (newest)",
 	}
-	if !strings.Contains(previewOutput, "keep "+live+" (live (pids 4242))") {
-		t.Fatalf("preview did not name the live version kept, with its pids:\n%s", previewOutput)
-	}
-	// issue #24 F7: only the actual newest build is labelled "newest" — the
-	// second-newest kept build carries a distinct, honest label.
-	if !strings.Contains(previewOutput, "keep "+newest+" (newest)") ||
-		!strings.Contains(previewOutput, "keep "+second+" (within keep window)") {
-		t.Fatalf("preview did not name the two newest versions kept, one honestly labelled second:\n%s", previewOutput)
-	}
+	wantOutputLines(t, preview.String(), pruneLines, versions+"/")
 	for _, path := range []string{newest, second, live, prunable} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("preview removed %s: %v", path, err)
@@ -89,13 +88,7 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	applyOutput := apply.String()
-	if !strings.Contains(applyOutput, "remove "+prunable) {
-		t.Fatalf("apply did not report the removal:\n%s", applyOutput)
-	}
-	if !strings.Contains(applyOutput, "keep "+live+" (live (pids 4242))") {
-		t.Fatalf("apply did not name the live version kept:\n%s", applyOutput)
-	}
+	wantOutputLines(t, apply.String(), pruneLines, versions+"/")
 	if _, err := os.Stat(prunable); !os.IsNotExist(err) {
 		t.Fatalf("apply left the prunable version in place: err=%v", err)
 	}
@@ -173,60 +166,56 @@ func TestChangeDescriptionNamesCreateVsBackedUpRewrite(t *testing.T) {
 	}
 }
 
-// TestZshrcWiredOnFirstInstallBeforeAnyMarker is a fresh machine's first
-// `pfm install --yes` from the clone: the marker is recorded by this very run,
-// so the shell line must come from the clone being installed, not from a
-// marker a prior install would have left.
-func TestZshrcWiredOnFirstInstallBeforeAnyMarker(t *testing.T) {
-	home := t.TempDir()
-	clone := t.TempDir()
-	var applied bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t), SourceRepo: clone,
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &applied,
-	}); err != nil {
-		t.Fatalf("first install: %v\n%s", err, applied.String())
-	}
-	want := sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh"))
-	if content := readFixture(t, filepath.Join(home, ".zshrc")); !strings.Contains(content, want) {
-		t.Fatalf("first install left .zshrc without %q:\n%s\n%s", want, content, applied.String())
+// TestZshrcCreateOnFreshHomeNamesItselfHonestly: a first install on a home with no .zshrc creates it
+// with the shim's source line, says "create" (never a backed-up rewrite) and writes no backup, whether the
+// clone comes from the SourceRepo option or the recorded marker.
+func TestZshrcCreateOnFreshHomeNamesItselfHonestly(t *testing.T) {
+	t.Parallel()
+	for _, recorded := range []bool{false, true} {
+		home, clone := t.TempDir(), t.TempDir()
+		options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
+		if recorded {
+			recordFixtureSourceRepo(t, home, clone)
+		} else {
+			options.SourceRepo = clone
+		}
+		var applied bytes.Buffer
+		options.Stdout = &applied
+		if _, err := Run(context.Background(), options); err != nil {
+			t.Fatalf("apply on a fresh home (recorded marker %v): %v\n%s", recorded, err, applied.String())
+		}
+		zshrc := filepath.Join(home, ".zshrc")
+		wantOutputLines(t, applied.String(), []string{"  change  create " + zshrc}, zshrc)
+		if matches, _ := filepath.Glob(zshrc + ".pre-professor-*"); len(matches) != 0 {
+			t.Fatalf("backup written for a file that did not exist: %v", matches)
+		}
+		if got, want := readFixture(t, zshrc), shimBlock(clone); got != want {
+			t.Fatalf("zshrc = %q\nwant %q", got, want)
+		}
 	}
 }
 
-func TestZshrcCreateOnFreshHomeNamesItselfHonestly(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	recordFixtureSourceRepo(t, home, t.TempDir())
-	var applied bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &applied,
-	}); err != nil {
-		t.Fatalf("apply on a fresh home: %v\n%s", err, applied.String())
-	}
-	out := applied.String()
-	zshrc := filepath.Join(home, ".zshrc")
-	if !strings.Contains(out, "create "+zshrc) {
-		t.Fatalf("apply output never says it created %s:\n%s", zshrc, out)
-	}
-	if strings.Contains(out, "rewrite "+zshrc+" (backup preserved)") {
-		t.Fatalf("claimed a backed-up rewrite for an absent zshrc:\n%s", out)
-	}
-	if matches, _ := filepath.Glob(zshrc + ".pre-professor-*"); len(matches) != 0 {
-		t.Fatalf("backup written for a file that did not exist: %v", matches)
-	}
-	if content := readFixture(t, zshrc); !strings.Contains(content, "pfm.zsh") {
-		t.Fatalf("zshrc was not created with the source line:\n%s", content)
-	}
+// fixtureConvergeRetired are the retired lists the converge test seeds a
+// leftover of each; the shipped lists are empty.
+var fixtureConvergeRetired = retired.Lists{
+	HookCommands:  fixtureRetiredHooks.HookCommands,
+	HookBinaries:  fixtureRetiredHooks.HookBinaries,
+	HookShimHints: fixtureRetiredHooks.HookShimHints,
+	Units:         []string{"cc-name-sync.path", "cc-name-sync.timer", "pfm-reminder.service", "pfm-reminder.timer"},
+	ConfigFiles:   []retired.ConfigFile{{Path: "bin/cc-kill.sh", Reason: "native pfm command"}},
 }
 
 func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	clone := t.TempDir()
-	recordFixtureSourceRepo(t, home, clone)
-	config := filepath.Join(home, ".claude")
-	writeFixture(t, filepath.Join(home, ".codex", "hooks.json"), `{
+	for _, kind := range schedulerKinds {
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+			launchd := kind == servicemanager.KindLaunchd
+			home := t.TempDir()
+			clone := t.TempDir()
+			recordFixtureSourceRepo(t, home, clone)
+			config := filepath.Join(home, ".claude")
+			writeFixture(t, filepath.Join(home, ".codex", "hooks.json"), `{
   "hooks": {
     "SubagentStart": [{"matcher":"","hooks":[
       {"type":"command","command":"`+home+`/.local/bin/cc-fleet dream hook codex-subagent-inject"},
@@ -234,7 +223,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
     ]}]
   }
 }`)
-	writeFixture(t, filepath.Join(config, "settings.json"), `{
+			writeFixture(t, filepath.Join(config, "settings.json"), `{
   "statusLine":{"type":"command","command":"bash ~/.claude/statusline-command.sh"},
   "hooks":{
     "PreToolUse":[{"matcher":"Agent","hooks":[{"type":"command","command":"`+home+`/.local/bin/cc-fleet dream hook agent-inject"}]}],
@@ -244,305 +233,274 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
     ]
   }
 }`)
-	secondarySettings := filepath.Join(home, ".cc", "2", "settings.json")
-	writeFixture(
-		t,
-		secondarySettings,
-		`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"pfm chat bb"},{"type":"command","command":"secondary-keep"}]}]}}`,
-	)
-	writeFixture(t, filepath.Join(config, ".cc-ls-hidden"), "killed-b\nkilled-a\n")
-	writeFixture(t, filepath.Join(config, "bin", "cc-kill.sh"), "retired\n")
-	writeFixture(t, filepath.Join(home, ".zshrc"), "alias keep=yes\nsource /old/cc-fleet.zsh\n")
-	unitDir := filepath.Join(home, ".config", "systemd", "user")
-	legacyPathWant := filepath.Join(unitDir, "default.target.wants", "cc-name-sync.path")
-	legacyTimerWant := filepath.Join(unitDir, "timers.target.wants", "cc-name-sync.timer")
-	renamedTimerWant := filepath.Join(unitDir, "timers.target.wants", "pfm-reminder.timer")
-	renamedUnits := []string{
-		filepath.Join(unitDir, "pfm-reminder.service"),
-		filepath.Join(unitDir, "pfm-reminder.timer"),
-	}
-	for _, unit := range renamedUnits {
-		writeFixture(t, unit, "[Unit]\nDescription=renamed\n")
-	}
-	for _, target := range []string{legacyPathWant, legacyTimerWant, renamedTimerWant} {
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(filepath.Join("..", filepath.Base(target)), target); err != nil {
-			t.Fatal(err)
-		}
-	}
-	seed := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
-	})
-	if err := seed.Kill(context.Background(), "killed-a", 99); err != nil {
-		t.Fatal(err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	runner := &fakeRunner{}
-	now := func() time.Time { return time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC) }
-	var preview bytes.Buffer
-	previewReport, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeDryRun, Home: home, Now: now, Stdout: &preview, Runner: runner,
-	})
-	if err != nil || previewReport.Changed == 0 {
-		t.Fatalf("dry run report=%#v err=%v", previewReport, err)
-	}
-	stagedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", "claude")
-	if _, err := os.Lstat(stagedClaude); !os.IsNotExist(err) {
-		t.Fatalf("dry run staged assets: %v", err)
-	}
-
-	var applied bytes.Buffer
-	report, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Now: now, Stdout: &applied, Runner: runner,
-	})
-	if err != nil || report.Changed == 0 {
-		t.Fatalf("apply report=%#v err=%v\n%s", report, err, applied.String())
-	}
-	managed := filepath.Join(home, ".local", "share", "pfm", "install")
-	assertLink(t, filepath.Join(config, "commands", "reload.md"), filepath.Join(managed, "reload.command.md"))
-	// T3: the staged /reload command's frontmatter description opens with
-	// the USER-ONLY law and then carries reload.Usage itself, folded to one
-	// line — never the unrendered {{RELOAD_USAGE}} token — so the picker
-	// shows the human exactly the flags reload.Run accepts.
-	reloadMD := readFixture(t, filepath.Join(config, "commands", "reload.md"))
-	if strings.Contains(reloadMD, "{{RELOAD_USAGE}}") {
-		t.Fatalf("reload command asset kept its unrendered token:\n%s", reloadMD)
-	}
-	descriptionLine := ""
-	for _, line := range strings.Split(reloadMD, "\n") {
-		if strings.HasPrefix(line, "description: '") {
-			descriptionLine = line
-			break
-		}
-	}
-	if descriptionLine == "" {
-		t.Fatalf("reload command asset has no frontmatter description line:\n%s", reloadMD)
-	}
-	gotDescription := strings.ReplaceAll(
-		strings.TrimSuffix(strings.TrimPrefix(descriptionLine, "description: '"), "'"),
-		"''", "'",
-	)
-	wantDescription := "USER-ONLY — the user types /reload; never run this without the user's permission. " +
-		foldReloadUsage(reload.Usage)
-	if gotDescription != wantDescription {
-		t.Fatalf(
-			"reload description = %q, want the USER-ONLY law plus the folded usage line %q",
-			gotDescription,
-			wantDescription,
-		)
-	}
-	// T4: /handoff is a global skill, linked the same way /reload is a
-	// global command.
-	assertLink(t, filepath.Join(config, "skills", "handoff", "SKILL.md"), filepath.Join(managed, "handoff.skill.md"))
-	// One job, two schedulers: assert the one this platform actually installs,
-	// and that it did NOT leave the other platform's files behind.
-	if schedulerIsLaunchd {
-		agent := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
-		info, err := os.Lstat(agent)
-		if err != nil {
-			t.Fatalf("launch agent was not installed: %v", err)
-		}
-		// launchd silently ignores a symlinked agent, so this must be a real file.
-		if info.Mode()&os.ModeSymlink != 0 {
-			t.Fatalf("launch agent is a symlink; launchd will never load it")
-		}
-		plist := readFixture(t, agent)
-		if strings.Contains(plist, "__PFM_HOME__") {
-			t.Fatalf("launch agent kept its placeholder:\n%s", plist)
-		}
-		if !strings.Contains(plist, home+"/.local/bin/pfm") ||
-			!strings.Contains(plist, home+"/.codex/session_index.jsonl") {
-			t.Fatalf("launch agent does not point at this home:\n%s", plist)
-		}
-		if _, err := os.Lstat(filepath.Join(managed, "systemd")); !os.IsNotExist(err) {
-			t.Fatalf("systemd units were staged on a launchd host: %v", err)
-		}
-	} else {
-		assertLink(
-			t,
-			filepath.Join(home, ".config", "systemd", "user", "pfm-name-sync.service"),
-			filepath.Join(managed, "systemd", "pfm-name-sync.service"),
-		)
-		assertLink(
-			t,
-			filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
-			filepath.Join(unitDir, "pfm-name-sync.path"),
-		)
-		assertLink(
-			t,
-			filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
-			filepath.Join(unitDir, nameSyncTimerUnit),
-		)
-		for _, unit := range []string{scheduleServiceUnit, scheduleTimerUnit} {
-			assertLink(t, filepath.Join(unitDir, unit), filepath.Join(managed, "systemd", unit))
-		}
-		assertLink(
-			t,
-			filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit),
-			filepath.Join(unitDir, scheduleTimerUnit),
-		)
-	}
-	// The predecessor's enablement links are a systemd concept; a launchd host
-	// never wires systemd at all, so it has none to retire.
-	if !schedulerIsLaunchd {
-		for _, retired := range append([]string{legacyPathWant, legacyTimerWant, renamedTimerWant}, renamedUnits...) {
-			if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-				t.Fatalf("retired unit or enablement link remains at %s: %v", retired, err)
+			secondarySettings := filepath.Join(home, ".cc", "2", "settings.json")
+			writeFixture(
+				t,
+				secondarySettings,
+				`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"pfm chat bb"},{"type":"command","command":"secondary-keep"}]}]}}`,
+			)
+			writeFixture(t, filepath.Join(config, "bin", "cc-kill.sh"), "retired\n")
+			writeFixture(t, filepath.Join(home, ".zshrc"), "alias keep=yes\n")
+			unitDir := filepath.Join(home, ".config", "systemd", "user")
+			legacyPathWant := filepath.Join(unitDir, "default.target.wants", "cc-name-sync.path")
+			legacyTimerWant := filepath.Join(unitDir, "timers.target.wants", "cc-name-sync.timer")
+			renamedTimerWant := filepath.Join(unitDir, "timers.target.wants", "pfm-reminder.timer")
+			renamedUnits := []string{
+				filepath.Join(unitDir, "pfm-reminder.service"),
+				filepath.Join(unitDir, "pfm-reminder.timer"),
 			}
-		}
-	}
-	for _, retired := range []string{
-		filepath.Join(config, ".cc-ls-hidden"),
-		filepath.Join(config, "bin", "cc-kill.sh"),
-	} {
-		if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-			t.Fatalf("retired file remains at %s: %v", retired, err)
-		}
-	}
-	// F1: host overlays are materialized under the managed root and symlinked
-	// at their contracted ~/.local/bin names, including the Claude launcher.
-	managedClaude := filepath.Join(managed, "bin", "claude")
-	assertLink(t, filepath.Join(home, ".local", "bin", "claude"), managedClaude)
-	// The shim's own behaviour (the login-default CLAUDE_CONFIG_DIR, then the
-	// native exec) is pinned in launcher_test.go; install materializes it verbatim.
-	wantClaude, err := readAsset("bin/claude")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := readFixture(t, managedClaude); got != string(wantClaude) {
-		t.Fatalf("managed claude=%q, want the shipped shim %q", got, wantClaude)
-	}
-	for name, command := range map[string]string{"pfm-statusline": "statusline", "tmux-title-renudge": "tmux-title-renudge"} {
-		managedShim := filepath.Join(managed, "bin", name)
-		assertLink(t, filepath.Join(home, ".local", "bin", name), managedShim)
-		if info, err := os.Stat(managedShim); err != nil || info.Mode().Perm() != 0o755 {
-			t.Fatalf("managed %s mode=%v err=%v, want 0o755", name, info, err)
-		}
-		shim := readFixture(t, managedShim)
-		want := "#!/usr/bin/env bash\n" + `exec "$HOME/.local/bin/pfm" internal ` + command + ` "$@"` + "\n"
-		if shim != want {
-			t.Fatalf("managed %s=%q, want native exec shim %q", name, shim, want)
-		}
-	}
-	if settings := readFixture(t, filepath.Join(config, "settings.json")); !strings.Contains(settings, "bb-hook.sh") {
-		t.Fatalf("install changed account settings: %s", settings)
-	}
-	codexHooks := readFixture(t, filepath.Join(home, ".codex", "hooks.json"))
-	for _, wanted := range []string{"fixture-codex-keep"} {
-		if !strings.Contains(codexHooks, wanted) {
-			t.Fatalf("Codex hooks missing %q:\n%s", wanted, codexHooks)
-		}
-	}
-	if strings.Contains(codexHooks, "/cc-fleet ") {
-		t.Fatalf("Codex hooks retained predecessor command:\n%s", codexHooks)
-	}
-	if strings.Contains(codexHooks, "dream hook codex-subagent-inject") {
-		t.Fatalf("Codex hooks retained paused Dream injection:\n%s", codexHooks)
-	}
-	// The Codex SessionStart clear-kill hook is retired: SessionStart(source=
-	// clear) fires on the new session's first turn, by which point every
-	// Codex chat on the host shares one app-server daemon pid, so it could
-	// never say which pane cleared. Install strips a leftover one and never
-	// writes it back.
-	if strings.Contains(codexHooks, "internal clear-kill") {
-		t.Fatalf("install wrote the retired Codex SessionStart clear-kill hook:\n%s", codexHooks)
-	}
-	if secondary := readFixture(t, secondarySettings); !strings.Contains(secondary, "secondary-keep") {
-		t.Fatalf("install changed secondary settings: %s", secondary)
-	}
-	if zshrc := readFixture(
-		t,
-		filepath.Join(home, ".zshrc"),
-	); !strings.Contains(
-		zshrc,
-		sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")),
-	) ||
-		strings.Contains(zshrc, "cc-fleet.zsh") {
-		t.Fatalf("zshrc was not converged:\n%s", zshrc)
-	}
+			for _, unit := range renamedUnits {
+				writeFixture(t, unit, "[Unit]\nDescription=renamed\n")
+			}
+			for _, target := range []string{legacyPathWant, legacyTimerWant, renamedTimerWant} {
+				if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join("..", filepath.Base(target)), target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runner := &fakeRunner{}
+			now := func() time.Time { return time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC) }
+			var preview bytes.Buffer
+			previewReport, err := Run(context.Background(), Options{
+				scheduler:     schedulerFor(kind),
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeDryRun, Home: home, Now: now, Stdout: &preview, Runner: runner,
+				retired: &fixtureConvergeRetired,
+			})
+			if err != nil || previewReport.Changed == 0 {
+				t.Fatalf("dry run report=%#v err=%v", previewReport, err)
+			}
+			stagedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", "claude")
+			if _, err := os.Lstat(stagedClaude); !os.IsNotExist(err) {
+				t.Fatalf("dry run staged assets: %v", err)
+			}
 
-	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
-	})
-	killed, err := state.KilledAt(context.Background())
-	closeErr := state.Close()
-	if err != nil || closeErr != nil || len(killed) != 2 || killed["killed-a"] != 99 || killed["killed-b"] != 0 {
-		t.Fatalf("migrated killed=%v err=%v close=%v", killed, err, closeErr)
-	}
+			var applied bytes.Buffer
+			report, err := Run(context.Background(), Options{
+				scheduler:     schedulerFor(kind),
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeApply, Home: home, Now: now, Stdout: &applied, Runner: runner,
+				retired: &fixtureConvergeRetired,
+			})
+			if err != nil || report.Changed == 0 {
+				t.Fatalf("apply report=%#v err=%v\n%s", report, err, applied.String())
+			}
+			managed := filepath.Join(home, ".local", "share", "pfm", "install")
+			assertLink(t, filepath.Join(config, "commands", "reload.md"), filepath.Join(managed, "reload.command.md"))
+			// T3: the staged /reload command's frontmatter description opens with
+			// the USER-ONLY law and then carries reload.Usage itself, folded to one
+			// line — never the unrendered {{RELOAD_USAGE}} token — so the picker
+			// shows the human exactly the flags reload.Run accepts.
+			reloadMD := readFixture(t, filepath.Join(config, "commands", "reload.md"))
+			if strings.Contains(reloadMD, "{{RELOAD_USAGE}}") {
+				t.Fatalf("reload command asset kept its unrendered token:\n%s", reloadMD)
+			}
+			descriptionLine := ""
+			for _, line := range strings.Split(reloadMD, "\n") {
+				if strings.HasPrefix(line, "description: '") {
+					descriptionLine = line
+					break
+				}
+			}
+			if descriptionLine == "" {
+				t.Fatalf("reload command asset has no frontmatter description line:\n%s", reloadMD)
+			}
+			gotDescription := strings.ReplaceAll(
+				strings.TrimSuffix(strings.TrimPrefix(descriptionLine, "description: '"), "'"),
+				"''", "'",
+			)
+			wantDescription := "USER-ONLY — the user types /reload; never run this without the user's permission. " +
+				foldReloadUsage(reload.Usage)
+			if gotDescription != wantDescription {
+				t.Fatalf(
+					"reload description = %q, want the USER-ONLY law plus the folded usage line %q",
+					gotDescription,
+					wantDescription,
+				)
+			}
+			// One job, two schedulers: assert the one this platform actually installs,
+			// and that it did NOT leave the other platform's files behind.
+			if launchd {
+				agent := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
+				info, err := os.Lstat(agent)
+				if err != nil {
+					t.Fatalf("launch agent was not installed: %v", err)
+				}
+				// launchd silently ignores a symlinked agent, so this must be a real file.
+				if info.Mode()&os.ModeSymlink != 0 {
+					t.Fatalf("launch agent is a symlink; launchd will never load it")
+				}
+				plist := readFixture(t, agent)
+				if strings.Contains(plist, "__PFM_HOME__") {
+					t.Fatalf("launch agent kept its placeholder:\n%s", plist)
+				}
+				if !strings.Contains(plist, "<string>"+paths.AgentLauncher(home)+"</string>") ||
+					!strings.Contains(plist, home+"/.codex/session_index.jsonl") {
+					t.Fatalf("launch agent does not point at this home:\n%s", plist)
+				}
+				if _, err := os.Lstat(filepath.Join(managed, "systemd")); !os.IsNotExist(err) {
+					t.Fatalf("systemd units were staged on a launchd host: %v", err)
+				}
+			} else {
+				assertLink(
+					t,
+					filepath.Join(home, ".config", "systemd", "user", "pfm-name-sync.service"),
+					filepath.Join(managed, "systemd", "pfm-name-sync.service"),
+				)
+				assertLink(
+					t,
+					filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
+					filepath.Join(unitDir, "pfm-name-sync.path"),
+				)
+				assertLink(
+					t,
+					filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
+					filepath.Join(unitDir, nameSyncTimerUnit),
+				)
+				for _, unit := range []string{scheduleServiceUnit, scheduleTimerUnit} {
+					assertLink(t, filepath.Join(unitDir, unit), filepath.Join(managed, "systemd", unit))
+				}
+				assertLink(
+					t,
+					filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit),
+					filepath.Join(unitDir, scheduleTimerUnit),
+				)
+			}
+			// The predecessor's enablement links are a systemd concept; a launchd host
+			// never wires systemd at all, so it has none to retire.
+			if !launchd {
+				for _, unit := range append([]string{legacyPathWant, legacyTimerWant, renamedTimerWant}, renamedUnits...) {
+					if _, err := os.Lstat(unit); !os.IsNotExist(err) {
+						t.Fatalf("retired unit or enablement link remains at %s: %v", unit, err)
+					}
+				}
+			}
+			if _, err := os.Lstat(filepath.Join(config, "bin", "cc-kill.sh")); !os.IsNotExist(err) {
+				t.Fatalf("retired file remains at %s: %v", filepath.Join(config, "bin", "cc-kill.sh"), err)
+			}
+			// F1: host overlays are materialized under the managed root and symlinked
+			// at their contracted ~/.local/bin names, including the Claude launcher.
+			managedClaude := filepath.Join(managed, "bin", "claude")
+			assertLink(t, filepath.Join(home, ".local", "bin", "claude"), managedClaude)
+			// The shim's own behaviour (the login-default CLAUDE_CONFIG_DIR, then the
+			// native exec) is pinned in launcher_test.go; install materializes it verbatim.
+			wantClaude, err := readAsset("bin/claude")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := readFixture(t, managedClaude); got != string(wantClaude) {
+				t.Fatalf("managed claude=%q, want the shipped shim %q", got, wantClaude)
+			}
+			for name, command := range map[string]string{"pfm-statusline": "statusline", "tmux-title-renudge": "tmux-title-renudge"} {
+				managedShim := filepath.Join(managed, "bin", name)
+				assertLink(t, filepath.Join(home, ".local", "bin", name), managedShim)
+				if info, err := os.Stat(managedShim); err != nil || info.Mode().Perm() != 0o755 {
+					t.Fatalf("managed %s mode=%v err=%v, want 0o755", name, info, err)
+				}
+				shim := readFixture(t, managedShim)
+				want := "#!/usr/bin/env bash\n" + `exec "$HOME/.local/bin/pfm" internal ` + command + ` "$@"` + "\n"
+				if shim != want {
+					t.Fatalf("managed %s=%q, want native exec shim %q", name, shim, want)
+				}
+			}
+			if settings := readFixture(
+				t,
+				filepath.Join(config, "settings.json"),
+			); !strings.Contains(
+				settings,
+				"bb-hook.sh",
+			) {
+				t.Fatalf("install changed account settings: %s", settings)
+			}
+			codexHooks := readFixture(t, filepath.Join(home, ".codex", "hooks.json"))
+			for _, wanted := range []string{"fixture-codex-keep"} {
+				if !strings.Contains(codexHooks, wanted) {
+					t.Fatalf("Codex hooks missing %q:\n%s", wanted, codexHooks)
+				}
+			}
+			if strings.Contains(codexHooks, "/cc-fleet ") {
+				t.Fatalf("Codex hooks retained predecessor command:\n%s", codexHooks)
+			}
+			if strings.Contains(codexHooks, "dream hook codex-subagent-inject") {
+				t.Fatalf("Codex hooks retained paused Dream injection:\n%s", codexHooks)
+			}
+			if secondary := readFixture(t, secondarySettings); !strings.Contains(secondary, "secondary-keep") {
+				t.Fatalf("install changed secondary settings: %s", secondary)
+			}
+			if zshrc := readFixture(
+				t,
+				filepath.Join(home, ".zshrc"),
+			); !strings.Contains(
+				zshrc,
+				sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")),
+			) {
+				t.Fatalf("zshrc was not converged:\n%s", zshrc)
+			}
 
-	var second bytes.Buffer
-	secondReport, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Now: now, Stdout: &second, Runner: runner,
-	})
-	if err != nil || secondReport.Changed != 0 {
-		t.Fatalf("second apply report=%#v err=%v\n%s", secondReport, err, second.String())
-	}
+			var second bytes.Buffer
+			secondReport, err := Run(context.Background(), Options{
+				scheduler:     schedulerFor(kind),
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeApply, Home: home, Now: now, Stdout: &second, Runner: runner,
+				retired: &fixtureConvergeRetired,
+			})
+			if err != nil || secondReport.Changed != 0 {
+				t.Fatalf("second apply report=%#v err=%v\n%s", secondReport, err, second.String())
+			}
 
-	var removed bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeUninstall, Home: home, Now: now, Stdout: &removed, Runner: runner,
-	}); err != nil {
-		t.Fatalf("uninstall: %v\n%s", err, removed.String())
-	}
-	if settings := readFixture(
-		t,
-		filepath.Join(config, "settings.json"),
-	); strings.Contains(
-		settings,
-		"internal clear-kill",
-	) {
-		t.Fatalf("uninstall retained clear-kill hook:\n%s", settings)
-	}
-	if codexHooks := readFixture(
-		t,
-		filepath.Join(home, ".codex", "hooks.json"),
-	); strings.Contains(
-		codexHooks,
-		"internal clear-kill",
-	) ||
-		!strings.Contains(codexHooks, "fixture-codex-keep") ||
-		strings.Contains(codexHooks, "dream hook codex-subagent-inject") {
-		t.Fatalf("uninstall did not remove only the owned Codex clear hook:\n%s", codexHooks)
-	}
-	if _, err := os.Lstat(managed); !os.IsNotExist(err) {
-		t.Fatalf("uninstall left managed asset root: %v", err)
-	}
-	for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
-		if _, err := os.Lstat(filepath.Join(home, ".local", "bin", overlay)); !os.IsNotExist(err) {
-			t.Fatalf("uninstall left the %s host overlay link: %v", overlay, err)
-		}
-	}
-	if _, err := os.Lstat(filepath.Join(config, "skills", "handoff", "SKILL.md")); !os.IsNotExist(err) {
-		t.Fatalf("uninstall left the /handoff skill link: %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(config, "skills", "handoff")); !os.IsNotExist(err) {
-		t.Fatalf("uninstall left the empty handoff skill directory behind: %v", err)
-	}
-	if schedulerIsLaunchd {
-		agent := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
-		if _, err := os.Lstat(agent); !os.IsNotExist(err) {
-			t.Fatalf("uninstall left the launch agent at %s: %v", agent, err)
-		}
-	}
-	for _, removed := range []string{
-		filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
-		filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
-		filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit),
-		filepath.Join(unitDir, scheduleServiceUnit),
-		filepath.Join(unitDir, scheduleTimerUnit),
-	} {
-		if _, err := os.Lstat(removed); !os.IsNotExist(err) {
-			t.Fatalf("uninstall left enablement link at %s: %v", removed, err)
-		}
+			var removed bytes.Buffer
+			if _, err := Run(context.Background(), Options{
+				scheduler:     schedulerFor(kind),
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeUninstall, Home: home, Now: now, Stdout: &removed, Runner: runner,
+				retired: &fixtureConvergeRetired,
+			}); err != nil {
+				t.Fatalf("uninstall: %v\n%s", err, removed.String())
+			}
+			if settings := readFixture(
+				t,
+				filepath.Join(config, "settings.json"),
+			); strings.Contains(
+				settings,
+				"internal clear-kill",
+			) {
+				t.Fatalf("uninstall retained clear-kill hook:\n%s", settings)
+			}
+			if codexHooks := readFixture(
+				t,
+				filepath.Join(home, ".codex", "hooks.json"),
+			); !strings.Contains(codexHooks, "fixture-codex-keep") ||
+				strings.Contains(codexHooks, "dream hook codex-subagent-inject") {
+				t.Fatalf("uninstall did not keep only the operator's Codex hook:\n%s", codexHooks)
+			}
+			if _, err := os.Lstat(managed); !os.IsNotExist(err) {
+				t.Fatalf("uninstall left managed asset root: %v", err)
+			}
+			for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
+				if _, err := os.Lstat(filepath.Join(home, ".local", "bin", overlay)); !os.IsNotExist(err) {
+					t.Fatalf("uninstall left the %s host overlay link: %v", overlay, err)
+				}
+			}
+			if launchd {
+				agent := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
+				if _, err := os.Lstat(agent); !os.IsNotExist(err) {
+					t.Fatalf("uninstall left the launch agent at %s: %v", agent, err)
+				}
+			}
+			for _, removed := range []string{
+				filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
+				filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
+				filepath.Join(unitDir, "timers.target.wants", scheduleTimerUnit),
+				filepath.Join(unitDir, scheduleServiceUnit),
+				filepath.Join(unitDir, scheduleTimerUnit),
+			} {
+				if _, err := os.Lstat(removed); !os.IsNotExist(err) {
+					t.Fatalf("uninstall left enablement link at %s: %v", removed, err)
+				}
+			}
+		})
 	}
 }
 
@@ -552,36 +510,33 @@ func TestEmptyCodexRosterSkipsCommandAndAgentMirrors(t *testing.T) {
 		"no Codex accounts configured — command mirror has nothing to write",
 		"no Codex accounts configured — agent mirror has nothing to write",
 	}
-	record := testjail.FakeEngineSync(t, `{"ok":true,"events":[{"verb":"skip","message":"`+skips[0]+`"},`+
-		`{"verb":"skip","message":"`+skips[1]+`"}],"error":""}`, 0)
+	record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[{"verb":"skip","message":"`+
+		skips[0]+`"},{"verb":"skip","message":"`+skips[1]+`"}],"error":""}`, 0)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t), EngineSyncRunner: engineSync,
+		Mode: ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{}, CodexHomes: []string{},
 	})
 	if err != nil {
 		t.Fatalf("zero-Codex preview: %v\n%s", err, output.String())
 	}
-	for _, wanted := range skips {
-		if !strings.Contains(output.String(), "  skip    "+wanted+"\n") {
-			t.Errorf("zero-account mirror skip omitted %q:\n%s", wanted, output.String())
-		}
-	}
-	for _, call := range testjail.EngineSyncCalls(t, record) {
-		if !strings.Contains(call, " --no-codex-home") || strings.Contains(call, " --codex-home ") {
-			t.Errorf("engine-sync call %q does not carry the empty roster", call)
-		}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    " + skips[0], "  skip    " + skips[1],
+		"  skip    no Codex accounts configured — hooks.json wiring has nothing to wire",
+	}, "no Codex accounts")
+	wantCalls := []string{"global --home " + home + " --source-repo " + home + "/.professor --claude-config-dir " +
+		home + "/.claude --no-codex-home --plan --json"}
+	if calls := testjail.EngineSyncCalls(t, record); !slices.Equal(calls, wantCalls) {
+		t.Errorf("engine-sync calls = %q\nwant %q", calls, wantCalls)
 	}
 }
 
 func TestMCPEnablementSurvivesAnUnavailableSystemdUserManagerAndDisableRemovesIt(t *testing.T) {
 	t.Parallel()
-	if schedulerIsLaunchd {
-		t.Skip("systemd enablement is not installed on launchd hosts")
-	}
 	home := t.TempDir()
 	wants := filepath.Join(home, ".config", "systemd", "user", "default.target.wants", mcpUnitName)
 	options := Options{
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		MCPEnabled: map[string]bool{"chat": true},
@@ -617,7 +572,7 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 		apply:       true,
 		managedRoot: managed,
 	}
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,7 +590,9 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 // exits non-zero naming it.
 func TestUninstallCodexConflictFailsTheRunAfterEveryUnwireStep(t *testing.T) {
 	home := t.TempDir()
+	_, install := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
+	options.EngineSyncRunner = install
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
@@ -644,13 +601,14 @@ func TestUninstallCodexConflictFailsTheRunAfterEveryUnwireStep(t *testing.T) {
 		t.Fatalf("install did not wire command fixture: %v", err)
 	}
 	conflict := "CONFLICT " + filepath.Join(home, ".codex", "prompts", "audit-fixture.md")
-	record := testjail.FakeEngineSync(
+	record, engineSync := testjail.FakeEngineSyncRunner(
 		t,
 		`{"ok":false,"events":[{"verb":"conflict","message":"`+conflict+`"}],"error":""}`,
 		1,
 	)
 
 	options.Mode = ModeUninstall
+	options.EngineSyncRunner = engineSync
 	_, err := Run(context.Background(), options)
 	if err == nil || !strings.Contains(err.Error(), conflict) || strings.Contains(err.Error(), "preflight") {
 		t.Fatalf("uninstall error=%v, want the engine-sync conflict and no preflight refusal", err)
@@ -822,9 +780,9 @@ func TestWireGlobalSkillsReportsATemplateSkillWithoutSKILLMd(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "SKILL-SOURCE-MISSING half-built") {
-		t.Fatalf("apply output omitted the missing-skill-source report:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    SKILL-SOURCE-MISSING half-built (" + source + "/half-built/SKILL.md absent)",
+	}, "half-built")
 	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "half-built")); !os.IsNotExist(err) {
 		t.Fatalf("a skill source without SKILL.md still produced a link: %v", err)
 	}
@@ -854,7 +812,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		}
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -869,7 +830,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		writeFixture(t, frr, "---\nname: frr\ndescription: pre-rename research agent\n---\nbody\n")
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -888,7 +852,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		)
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -903,7 +870,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		writeFixture(t, frr, "just prose, no frontmatter\n")
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -916,7 +886,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		home := t.TempDir()
 		if _, err := Run(
 			context.Background(),
-			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				retired: &retired.Lists{GlobalAgents: []string{"frr"}},
+			},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -985,7 +958,7 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 	home := t.TempDir()
 	conflict := "CONFLICT " + filepath.Join(home, ".codex", "prompts", "reload.md")
-	record := testjail.FakeEngineSync(
+	record, engineSync := testjail.FakeEngineSyncRunner(
 		t,
 		`{"ok":false,"events":[{"verb":"conflict","message":"`+conflict+`"}],"error":""}`,
 		1,
@@ -993,23 +966,20 @@ func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t), EngineSyncRunner: engineSync,
+		Mode: ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
-	if err == nil || !strings.Contains(err.Error(), conflict) {
+	if err == nil || err.Error() != "engine-sync global: "+conflict {
 		t.Fatalf("dry-run error=%v, want the engine-sync conflict; output:\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "  conflict "+conflict+"\n") {
-		t.Fatalf("dry-run transcript lacks the conflict:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{"  conflict " + conflict}, "CONFLICT")
 
 	output.Reset()
 	_, err = Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t), EngineSyncRunner: engineSync,
+		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
-	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
-		!strings.Contains(err.Error(), conflict) {
+	if err == nil || err.Error() != "preflight apply plan: engine-sync global: "+conflict {
 		t.Fatalf("apply error=%v, want the pre-mutation conflict refusal; output:\n%s", err, output.String())
 	}
 	for _, path := range []string{
@@ -1021,47 +991,16 @@ func TestEngineSyncGlobalConflictRefusesTheApplyBeforeAnyWrite(t *testing.T) {
 			t.Errorf("apply preflight wrote %s before refusing the conflict: %v", path, statErr)
 		}
 	}
+	// Both runs only planned: the plan's scratch source home is a fresh temp directory each run.
+	plan := regexp.MustCompile(` --source-home \S+`)
+	var calls []string
 	for _, call := range testjail.EngineSyncCalls(t, record) {
-		if !strings.Contains(call, " --plan") {
-			t.Fatalf("engine-sync ran %q past a planned conflict", call)
-		}
+		calls = append(calls, plan.ReplaceAllString(call, " --source-home PLAN"))
 	}
-}
-
-func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	runner := &fakeRunner{manager: true}
-	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, Runner: runner,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	joined := strings.Join(runner.calls, "\n")
-	wantCalls := []string{
-		nameSyncStateProbe,
-		"systemctl --user daemon-reload",
-		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit + " " + scheduleTimerUnit,
-	}
-	if schedulerIsLaunchd {
-		// launchd has no manager probe to fail: the agent is bootstrapped into
-		// the caller's own gui domain, and bootout first so an edited plist
-		// replaces the loaded job instead of being rejected as a duplicate.
-		wantCalls = []string{
-			"launchctl bootout gui/",
-			"launchctl bootstrap gui/",
-		}
-		for _, unwanted := range []string{"daemon-reload", "enable --now"} {
-			if strings.Contains(joined, unwanted) {
-				t.Fatalf("systemd was driven on a launchd host:\n%s", joined)
-			}
-		}
-	}
-	for _, wanted := range wantCalls {
-		if !strings.Contains(joined, wanted) {
-			t.Fatalf("systemctl calls missing %q:\n%s", wanted, joined)
-		}
+	planCall := "global --home " + home + " --source-repo " + home + "/.professor --claude-config-dir " + home +
+		"/.claude --codex-home " + home + "/.codex --source-home PLAN --plan --json"
+	if want := []string{planCall, planCall}; !slices.Equal(calls, want) {
+		t.Fatalf("engine-sync calls = %q\nwant %q", calls, want)
 	}
 }
 
@@ -1150,9 +1089,9 @@ func TestShimSourceUsesRecordedCloneAndKeepsLegacyPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh"))
-	if !strings.Contains(string(raw), "before\n# The shell launchers delegate to the pfm engine.\n"+want+"\nafter") {
-		t.Fatalf("zshrc=%q", raw)
+	want := "before\n" + shimBlock(clone) + "after\n"
+	if string(raw) != want {
+		t.Fatalf("zshrc=%q\nwant %q", raw, want)
 	}
 }
 
@@ -1224,9 +1163,10 @@ func TestShimUnwireRemovesLegacyAndCloneLinesWithoutMarker(t *testing.T) {
 func TestEarlyCallScanStopsWhereTheRewriterFindsTheSourceLine(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	recordFixtureSourceRepo(t, home, t.TempDir())
+	clone := t.TempDir()
+	recordFixtureSourceRepo(t, home, clone)
 	zshrc := filepath.Join(home, ".zshrc")
-	writeFixture(t, zshrc, "cc\nsource /old/cc-fleet.zsh\ncc-ls\n")
+	writeFixture(t, zshrc, "cc\nsource /old/pfm.zsh\ncc-ls\n")
 
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
@@ -1235,18 +1175,14 @@ func TestEarlyCallScanStopsWhereTheRewriterFindsTheSourceLine(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
-	report := output.String()
 	// Line 1 runs before the launchers exist; line 3 does not.
-	if !strings.Contains(report, "a fleet command runs ABOVE the source line") ||
-		!strings.Contains(report, "line 1: cc\n") {
-		t.Fatalf("installer did not report the early call:\n%s", report)
-	}
-	if strings.Contains(report, "line 3: cc-ls") {
-		t.Fatalf("installer reported a call below the source line:\n%s", report)
-	}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    a fleet command runs ABOVE the source line, where it does not exist yet:",
+		"          line 1: cc",
+	}, "ABOVE the source line", "line 1:", "line 3:")
 	// It reports; it never rewrites a line of the operator's shell that is not ours.
-	if zshrcContent := readFixture(t, zshrc); !strings.HasPrefix(zshrcContent, "cc\n") {
-		t.Fatalf("installer rewrote the operator's own line:\n%s", zshrcContent)
+	if got, want := readFixture(t, zshrc), "cc\n"+shimBlock(clone)+"cc-ls\n"; got != want {
+		t.Fatalf("zshrc = %q\nwant %q", got, want)
 	}
 }
 
@@ -1276,9 +1212,6 @@ func (runner *outputRunner) Output(ctx context.Context, name string, args ...str
 // rewrite the agent and its binary while that agent is running.
 func TestLaunchAgentGateRefusesOnlyMidExecution(t *testing.T) {
 	t.Parallel()
-	if !schedulerIsLaunchd {
-		t.Skip("launch-agent gate is macOS-only")
-	}
 	cases := []struct {
 		name       string
 		output     string
@@ -1295,6 +1228,7 @@ func TestLaunchAgentGateRefusesOnlyMidExecution(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			runner := &outputRunner{printOutput: testCase.output, printErr: testCase.outputErr}
 			_, err := Run(context.Background(), Options{
+				scheduler:     schedulerFor(servicemanager.KindLaunchd),
 				MCPConfigPath: testConfigPath(t),
 				Mode:          ModeApply, Home: t.TempDir(), Stdout: io.Discard, Runner: runner,
 			})
@@ -1315,19 +1249,16 @@ func TestLaunchAgentGateRefusesOnlyMidExecution(t *testing.T) {
 // the gate did not run rather than implying it passed.
 func TestLaunchAgentGateAnnouncesWhenItCannotProbe(t *testing.T) {
 	t.Parallel()
-	if !schedulerIsLaunchd {
-		t.Skip("launch-agent gate is macOS-only")
-	}
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
+		scheduler:     schedulerFor(servicemanager.KindLaunchd),
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: t.TempDir(), Stdout: &output, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "launch-agent gate NOT probed") {
-		t.Fatalf("an unprobed gate was silent:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{"  skip    launch-agent gate NOT probed (launchctl print could not " +
+		"run or its output could not be read); an apply during a name-sync or schedule run is not refused"}, "launch-agent gate")
 }
 
 func recordFixtureSourceRepo(t *testing.T, home, repo string) {
@@ -1347,6 +1278,34 @@ func writeFixture(t *testing.T, path, content string) {
 	}
 }
 
+// shimBlock is the block an install writes into .zshrc to source the clone's shim.
+func shimBlock(clone string) string {
+	return "# The shell launchers delegate to the pfm engine.\n" +
+		sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")) + "\n"
+}
+
+// outputLines returns the lines of out that hold any of marks, in order: the slice a test compares whole.
+func outputLines(out string, marks ...string) []string {
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		for _, mark := range marks {
+			if strings.Contains(line, mark) {
+				lines = append(lines, line)
+				break
+			}
+		}
+	}
+	return lines
+}
+
+// wantOutputLines fails unless the lines of out holding any of marks are exactly want, in order.
+func wantOutputLines(t *testing.T, out string, want []string, marks ...string) {
+	t.Helper()
+	if got := outputLines(out, marks...); !slices.Equal(got, want) {
+		t.Fatalf("output lines holding %q:\n got %q\nwant %q\nwhole output:\n%s", marks, got, want, out)
+	}
+}
+
 func readFixture(t *testing.T, path string) string {
 	t.Helper()
 	content, err := os.ReadFile(path)
@@ -1361,31 +1320,6 @@ func assertLink(t *testing.T, target, wanted string) {
 	got, linked := resolvedLink(target)
 	if !linked || got != wanted {
 		t.Fatalf("link %s -> %q,%v, want %q,true", target, got, linked, wanted)
-	}
-}
-
-func TestMigrateLegacyCarrierUsesConfiguredStateDB(t *testing.T) {
-	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".claude", ".cc-ls-hidden"), "retired-chat\n")
-	statePath := filepath.Join(home, "operator-state", "pfm.db")
-	installer := &engine{
-		options: Options{
-			MCPConfigPath: testConfigPath(t),
-			Mode:          ModeApply,
-			Home:          home,
-			StateDB:       statePath,
-			Stdout:        io.Discard,
-		},
-		apply: true,
-	}
-	if err := installer.migrateLegacyCarrier(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	state := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: statePath})
-	killed, err := state.KilledAt(context.Background())
-	closeErr := state.Close()
-	if err != nil || closeErr != nil || killed["retired-chat"] != 0 || len(killed) != 1 {
-		t.Fatalf("configured state killed=%v err=%v close=%v", killed, err, closeErr)
 	}
 }
 
@@ -1485,15 +1419,11 @@ func TestCopyCommandPlanTreeSkipsAnInterruptedLinkStage(t *testing.T) {
 	}
 }
 
-// A host that never ran an install of the build that renamed the reminder
-// still holds pfm-reminder.service and .timer: uninstall disables and unlinks
-// both, as the install that retires them does.
+// A host still holding units the retired lists name: uninstall disables and
+// unlinks each, as the install that retires them does.
 func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
-	if schedulerIsLaunchd {
-		t.Skip("the systemd units are Linux-only")
-	}
 	home := t.TempDir()
-	testjail.FakeEngineSync(t, `{"ok":true,"events":[],"error":""}`, 0)
+	_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	units := []string{
 		filepath.Join(unitDir, "pfm-reminder.service"),
@@ -1505,7 +1435,9 @@ func TestLinuxUninstallRetiresTheRenamedReminderUnits(t *testing.T) {
 	runner := &fakeRunner{manager: true, nameSyncIdle: true}
 	var removed bytes.Buffer
 	if _, err := Run(context.Background(), Options{
+		scheduler: schedulerFor(servicemanager.KindSystemd), EngineSyncRunner: engineSync,
 		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Stdout: &removed, Runner: runner,
+		retired: &retired.Lists{Units: []string{"pfm-reminder.service", "pfm-reminder.timer"}},
 	}); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, removed.String())
 	}

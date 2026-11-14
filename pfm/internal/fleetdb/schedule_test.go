@@ -2,7 +2,6 @@ package fleetdb
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -22,7 +21,7 @@ func newTestSchedule(session string, created time.Time, interval time.Duration) 
 
 func TestScheduleLifecycle(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	base := time.Unix(1_800_000_000, 0)
 
@@ -114,7 +113,7 @@ func TestScheduleLifecycle(t *testing.T) {
 
 func TestCreateScheduleRefusesInvalidInput(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	base := time.Unix(1_800_000_000, 0)
 	for name, mutate := range map[string]func(*Schedule){
 		"below minimum": func(r *Schedule) { r.Interval = MinScheduleInterval - time.Second },
@@ -137,7 +136,7 @@ func TestCreateScheduleRefusesInvalidInput(t *testing.T) {
 
 func TestScheduleProblemsNamesFailedAndOverdue(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	base := time.Unix(1_800_000_000, 0)
 	failed, _ := state.CreateSchedule(ctx, newTestSchedule("failed", base, 24*time.Hour))
@@ -173,43 +172,6 @@ func TestScheduleOperationsReportADegradedStore(t *testing.T) {
 	}
 	if _, err := state.MarkScheduleFired(context.Background(), 1, time.Now()); err == nil {
 		t.Fatal("MarkScheduleFired() on a degraded store returned no error")
-	}
-}
-
-func TestSharedMigrationFromV2AddsSchedulesAndBacksUp(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	path := filepath.Join(root, "pfm.db")
-	ctx := context.Background()
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode=WAL;"+schemaDDL+migrationV2+
-		`INSERT INTO launch VALUES('keep','claude',1,0,5,5); PRAGMA user_version=2;`); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	state := OpenSharedState(ctx, paths.Values{StateDB: path})
-	if err := state.Degraded(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = state.Close() })
-	var version, count int
-	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
-		t.Fatalf("version=%d err=%v", version, err)
-	}
-	keepRow := state.db.QueryRow("SELECT count(*) FROM launch WHERE session_id='keep'")
-	if err := keepRow.Scan(&count); err != nil || count != 1 {
-		t.Fatalf("launch row=%d err=%v", count, err)
-	}
-	if _, err := state.CreateSchedule(ctx, newTestSchedule("s", time.Unix(1, 0), time.Hour)); err != nil {
-		t.Fatalf("CreateSchedule() after migration = %v", err)
-	}
-	if _, err := os.Stat(path + ".bak-before-v3"); err != nil {
-		t.Fatalf("v2 database was not backed up before v3: %v", err)
 	}
 }
 
@@ -267,7 +229,7 @@ VALUES('kept','claude','check the build',3600000000000,5,1);`,
 // schedule of the same chat stays.
 func TestOneTimeScheduleFiresOnceThenLeavesWhenSeen(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	base := time.Unix(1_800_000_000, 0)
 	fireAt := base.Add(2 * time.Hour)

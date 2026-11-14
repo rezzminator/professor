@@ -12,12 +12,9 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	"github.com/rezzminator/professor/pfm/internal/themecmd"
 )
 
 // runNameSync converges every live chat's tmux WINDOW name — the fleet's DNS
@@ -25,10 +22,11 @@ import (
 // a person picking a pane reads it.
 //
 // A codex window follows its thread's indexed name; a claude window follows
-// the 🔖 label its own statusline renders. Both halves are computed and
+// the 🔖 label its own statusline renders. Both engines' names are computed and
 // applied by the same gather pass the picker runs, so there is exactly ONE
 // writer of a window name however this command is reached — a systemd path
-// unit on a codex rename, a timer, or a picker refresh.
+// unit on a codex rename, a timer, or a picker refresh. On --apply every live
+// native Herdr seat is named first (nameSyncHalves).
 func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	flags := cli.NewFlagSet("name-sync", "usage: pfm name-sync [--apply] [--dry-run]", stderr)
 	apply, dryRun := flags.Bool("apply", false, "perform renames"), flags.Bool("dry-run", false, "preview alias")
@@ -53,77 +51,22 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	// A delta index first: a codex rename lands in session_index.jsonl or the
 	// thread store, and the name a window converges on is read from the index.
 	// Without this pass the sync would converge yesterday's names.
+	// A failed pass leaves the last index: names may be one pass stale, never all lost.
 	indexer, err := fleetindex.NewWithRoots(database, runtime.Paths, runtime.Paths.Roots)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
-		return 1
+	if err == nil {
+		_, err = indexer.Run(ctx, fleetindex.Options{})
 	}
-	if _, err := indexer.Run(ctx, fleetindex.Options{}); err != nil {
-		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
-		return 1
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm name-sync: index pass: %v; converging on the last index\n", err)
 	}
 
-	environment, err := fleet.ResolveEnv(fleet.Request{Runtime: &runtime})
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
-		return 1
-	}
-	data, err := fleet.LoadData(ctx, database)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
-		return 1
-	}
-	// Only an explicit --apply lets the gather pass perform its planned renames.
-	live, err := fleet.Gather(ctx, database, environment, data, !*apply, fleet.PrintWarn(stderr), stderr)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
-		return 1
-	}
-	if *apply {
-		fleet.ReconcileCodexPanes(ctx, database, live, runtime, fleet.PrintWarn(stderr))
-	}
-	verb := "renamed"
-	if !*apply {
-		verb = "would rename"
-	}
-	for _, rename := range live.Renames {
-		fmt.Fprintf(
-			stdout,
-			"%s %s %s: %s -> %s\n",
-			verb,
-			rename.Socket,
-			rename.WindowID,
-			rename.CurrentName,
-			rename.TargetName,
-		)
-	}
-	if !*apply {
-		// A preview reports its plan; it has no applied outcome to verify.
-		fmt.Fprintf(stdout, "windows planned: %d\n", len(live.Renames))
-		return 0
-	}
-	titlesTmux := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
-	titlesUnverified := convergeChatServerOptions(
-		ctx, titlesTmux, liveSockets(live.Panes), environment.Config.Tmux.Titles,
-		filepath.Join(environment.Paths.Home, ".local", "bin", "pfm"), stdout, stderr,
+	// The native seats go first: a Codex /rename fires this run for them, and their
+	// name never waits behind the tmux pass, nor is lost when that pass fails.
+	return nameSyncHalves(
+		*apply,
+		func() bool { return pfmchat.ConvergeHerdrNames(ctx, database, runtime.Paths, stderr) },
+		func() int { return syncWindowNames(ctx, database, runtime, *apply, stdout, stderr) },
 	)
-	titlesUnverified += reannounceChatServers(
-		ctx, hookentry.HerdrReannounce, environment.Paths.TmuxDir, liveSockets(live.Panes), stdout, stderr,
-	)
-	titlesUnverified += themecmd.ConvergeTmux(ctx, environment.Paths, liveSockets(live.Panes), stdout, stderr)
-	if titlesUnverified != 0 {
-		fmt.Fprintf(stdout, "tmux options unverified: %d\n", titlesUnverified)
-	}
-	converged, unverified := verifyRenames(ctx, runtime, live.Renames, stderr)
-	fmt.Fprintf(stdout, "windows converged: %d\n", converged)
-	if unverified != 0 {
-		fmt.Fprintf(stdout, "windows unverified: %d\n", unverified)
-	}
-	nativeOK := pfmchat.ConvergeHerdrNames(ctx, database, runtime.Paths, stderr)
-	if !nativeOK || titlesUnverified != 0 || unverified != 0 {
-		return 1
-	}
-	return 0
 }
 
 // verifyRenames reads every renamed window's name BACK off its server and

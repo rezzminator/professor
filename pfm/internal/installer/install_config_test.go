@@ -18,7 +18,7 @@ import (
 )
 
 func TestInstallConfig(t *testing.T) {
-	for _, scenario := range []string{"existing", "empty target", "explicit missing", "no clone", "no example", "plan seed", "marker wins"} {
+	for _, scenario := range []string{"existing", "empty target", "empty target no clone", "explicit missing", "no clone", "no example", "plan seed", "marker wins"} {
 		t.Run(scenario, func(t *testing.T) {
 			home, clone := t.TempDir(), t.TempDir()
 			target := filepath.Join(home, "config", pfmconfig.FileName)
@@ -35,7 +35,7 @@ func TestInstallConfig(t *testing.T) {
 			if err := os.WriteFile(example, content, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			wantTheme, wantSeed := "original", ""
+			wantTheme, wantSeed, wantPath := "original", "", target
 			switch scenario {
 			case "existing":
 				if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
@@ -47,6 +47,9 @@ func TestInstallConfig(t *testing.T) {
 				wantTheme = "existing"
 			case "empty target":
 				runtime.Config.Path = ""
+				wantTheme, wantSeed, wantPath = "seeded", example, filepath.Join(clone, pfmconfig.FileName)
+			case "empty target no clone":
+				runtime.Config.Path, clone = "", ""
 			case "explicit missing":
 				runtime.ConfigExplicit = true
 			case "no clone":
@@ -76,8 +79,8 @@ func TestInstallConfig(t *testing.T) {
 				t.Fatal("fallback changed runtime config")
 			}
 			if wantTheme == "seeded" {
-				if got.Path != target {
-					t.Fatalf("path=%q", got.Path)
+				if got.Path != wantPath {
+					t.Fatalf("path=%q, want %q", got.Path, wantPath)
 				}
 				if len(got.Accounts) == 0 || got.Accounts[0].ConfigDir != pfmconfig.DefaultAccountDir(home, 1) {
 					t.Fatalf("accounts=%+v", got.Accounts)

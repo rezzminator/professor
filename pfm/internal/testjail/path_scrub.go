@@ -1,14 +1,36 @@
 package testjail
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // pfmInstallBinSuffix is the tail of pfm's managed install bin dir, whichever
 // home owns it.
 var pfmInstallBinSuffix = filepath.Join(".local", "share", "pfm", "install", "bin")
+
+// scrubPATH strips the operator's ~/.local/bin and pfm's managed install bin, which hold pfm's own
+// `claude` launcher shim, from PATH, so a jailed test resolving a binary through PATH never reaches
+// it. An armed unit binary holds no PATH to scrub: the unit net points it at an empty directory.
+func scrubPATH(armed bool) error {
+	if armed {
+		return nil
+	}
+	hostEnv := paths.OSEnv{}
+	operatorHome, homeErr := hostEnv.Home()
+	if homeErr != nil {
+		warnSetup("user home unknown, stripping only pfm install bin dirs from PATH: %v", homeErr)
+		operatorHome = ""
+	}
+	if err := os.Setenv("PATH", scrubOperatorPATH(hostEnv.Get("PATH"), operatorHome)); err != nil {
+		return fmt.Errorf("scrub PATH: %w", err)
+	}
+	return nil
+}
 
 // scrubOperatorPATH drops every PATH entry that is <home>/.local/bin or a pfm
 // install bin dir (a path ending .local/share/pfm/install/bin, any home),

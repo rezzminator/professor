@@ -1,5 +1,18 @@
 // Package testjail holds the platform setup the suite needs before any test
 // runs. It is imported only by _test.go files, so it never reaches the binary.
+//
+// database.go: DatabaseFiles, the allowance a test that needs SQLite's own file calls; Run turns the
+// SQLite door's memory mode on for every test.
+// executable.go: WriteExecutable, the one writer of a file a test runs; WriteExecutableNeverRun, of one
+// the code under test only resolves or reads; the fake logged-out engines.
+// enginesync.go, enginesync_runner.go: the engine-sync fakes, run and in process.
+// fence.go: runsHere, the guard Run asks first; ChildOutput, a re-exec's output; tier_unit.go and
+// tier_machine.go, the build-tag pair telling a unit binary from a jail (or e2e, journey) one.
+// unitnet.go: the unit net an armed unit binary runs inside, and its one switch.
+// jail_dir.go: RunInJail, Run starting a package's tests in the jail directory.
+// place.go: Place, an invented fixture path's root in the jail directory; TempPath, a path under Run's temp root.
+// profile.go: the step profiler of every package process; profile_place.go names the process and holds
+// ModuleRoot; profile_run.go, profile_run_summary.go: the run directory a plain go test records into.
 package testjail
 
 import (
@@ -10,7 +23,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -18,11 +30,11 @@ import (
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
-	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // KeepAmbientIdentity, set by a TestMain before Run, leaves the ambient
@@ -42,14 +54,23 @@ const jailMarkerEnv = "PFM_TESTJAIL"
 // include t.TempDir's test name, so macOS's long TMPDIR can exceed its 104-byte
 // limit. Resolving /tmp once also collapses macOS's /private alias.
 func Run(m *testing.M) int {
-	if !inFence() && !onHostedRunner() {
-		return runInFence() // fence.go: no test ever runs on the machine that started it
+	if !runsHere(unitBinary, unitNetArmed, paths.OSEnv{}, fenceMarker) {
+		return runInFence() // fence.go: no machine-tier test ever runs on the machine that started it
 	}
-	// A chat exports its live state store's paths; a jailed test must open the jail's own.
+	armed := UnitNetArmed()
+	if err := armUnitProcess(armed); err != nil { // unitnet.go: umask, environment, zone, exec door
+		warnSetup("%v", err)
+		return 1
+	}
+	// A chat exports its live state store's paths and its install's mark; a jailed
+	// test must open the jail's own store, and a process it starts must never carry
+	// the operator's mark, or a stop acting for the operator's install would own it.
 	// A test binary a jailed test re-execs as its own helper inherits jailMarkerEnv
-	// and keeps the store paths that test handed it.
+	// and keeps the store paths and the jail mark that test handed it. GOTMPDIR is the
+	// fence's disk for go's build scratch, and t.TempDir honours it since Go 1.25:
+	// test scratch stays on TMPDIR's tmpfs, where the timing budgets were set.
 	if _, child := (paths.OSEnv{}).Lookup(jailMarkerEnv); !child {
-		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB"} {
+		for _, name := range []string{"PFM_STATE_DB", "PFM_CACHE_DB", paths.EnvInstallMark, "GOTMPDIR"} {
 			if err := os.Unsetenv(name); err != nil {
 				warnSetup("clear %s: %v", name, err)
 				return 1
@@ -59,18 +80,13 @@ func Run(m *testing.M) int {
 			warnSetup("set %s: %v", jailMarkerEnv, err)
 			return 1
 		}
+		// Every SQLite path this process opens is served from memory, its file a
+		// marker (database.go); a re-exec'd helper opens files, as pfm itself does.
+		sqlitedb.ServeTestMemory()
 	}
-	// The operator's ~/.local/bin and pfm's managed install bin hold pfm's own
-	// `claude` launcher shim; a jailed test resolving a binary through PATH must
-	// never reach it. Scrub before anything below resolves a binary.
-	hostEnv := paths.OSEnv{}
-	operatorHome, homeErr := hostEnv.Home()
-	if homeErr != nil {
-		warnSetup("user home unknown, stripping only pfm install bin dirs from PATH: %v", homeErr)
-		operatorHome = ""
-	}
-	if err := os.Setenv("PATH", scrubOperatorPATH(hostEnv.Get("PATH"), operatorHome)); err != nil {
-		warnSetup("scrub PATH: %v", err)
+	// Scrub before anything below resolves a binary (path_scrub.go).
+	if err := scrubPATH(armed); err != nil {
+		warnSetup("%v", err)
 		return 1
 	}
 	if err := pinLaunchShell(deps.Resolve); err != nil {
@@ -83,24 +99,12 @@ func Run(m *testing.M) int {
 		warnSetup("clear CLAUDE_CONFIG_DIR and the login default's sentinel: %v", err)
 		return 1
 	}
-	// The fence has none of these — no tmux pane, no chat socket, no host
-	// Claude/Codex session — and a jail must not inherit a live seat from the
-	// executor's own shell. A test that needs one sets it with t.Setenv.
-	// Literal names: testjail cannot import internal/resolve (import cycle).
-	//
-	// Exception: KeepAmbientIdentity (see its declaration).
+	// No live seat of the executor's own shell reaches a test (unitnet.go's ambientIdentity), except
+	// under KeepAmbientIdentity (see its declaration).
 	if !KeepAmbientIdentity {
-		for _, name := range []string{
-			"TMUX",
-			"TMUX_PANE",
-			"CHAT_CALL_SOCKET",
-			"CLAUDE_CODE_SESSION_ID",
-			"CODEX_THREAD_ID",
-		} {
-			if err := os.Setenv(name, ""); err != nil {
-				warnSetup("clear %s: %v", name, err)
-				return 1
-			}
+		if err := clearAmbientIdentity(os.Setenv); err != nil {
+			warnSetup("%v", err)
+			return 1
 		}
 	}
 	// The gate's step profiler exports BASH_ENV with `set -E` and an ERR trap so
@@ -132,8 +136,12 @@ func Run(m *testing.M) int {
 	}
 	// No test fetches a source-fetched global skill from its public repo: an
 	// install run in the jail skips the fetch and doctor reports OFFLINE; no
-	// price refresh fetches a publisher's pricing page.
-	for _, name := range []string{paths.EnvSkillSourcesOffline, paths.EnvThemesOffline, paths.EnvPricesOffline} {
+	// price refresh fetches a publisher's pricing page; no update check asks
+	// GitHub and no usage fetch calls the provider.
+	for _, name := range []string{
+		paths.EnvSkillSourcesOffline, paths.EnvThemesOffline, paths.EnvPricesOffline,
+		paths.EnvUpdateCheckOffline, paths.EnvUsageOffline,
+	} {
 		if err := os.Setenv(name, "1"); err != nil {
 			warnSetup("set %s: %v", name, err)
 			return 1
@@ -147,37 +155,39 @@ func Run(m *testing.M) int {
 	// AndInternalCLI, 5/6 red under load). Pin the Go directories outside the
 	// jail here, before HOME/XDG_CONFIG_HOME move. A missing home or cache dir
 	// is reported, never silently left to the jail.
-	if code := pinGoDirs(); code != 0 {
+	if code := pinGoDirs(armed); code != 0 {
 		return code
 	}
-	base, err := filepath.EvalSymlinks(os.TempDir())
-	if short, shortErr := filepath.EvalSymlinks("/tmp"); shortErr == nil {
+	base, err := filepath.EvalSymlinks(paths.TempRoot())
+	if short, shortErr := filepath.EvalSymlinks(paths.SystemTempDir()); shortErr == nil {
 		base, err = short, nil
 	}
 	if err != nil {
 		// No canonical base to stand on. Run anyway rather than failing the
 		// whole package: on a platform where the default temp dir is already
 		// short and canonical, nothing here was needed in the first place.
-		cleanup, setupErr := jailHome(os.TempDir())
-		defer cleanup()
-		if setupErr != nil {
-			warnSetup("%v", setupErr)
-			return 1
-		}
-		return runProfiled(m)
-	}
-	// No wrapper directory of our own: t.TempDir() already makes a unique path
-	// per test and removes it. An extra layer would only spend a dozen of the
-	// 104 bytes a socket path is allowed, which is exactly the budget the
-	// longest test names need.
-	if err := os.Setenv("TMPDIR", base); err != nil {
+		base = paths.TempRoot()
+	} else if err := os.Setenv("TMPDIR", base); err != nil {
+		// No wrapper directory of our own: t.TempDir() already makes a unique path
+		// per test and removes it. An extra layer would only spend a dozen of the
+		// 104 bytes a socket path is allowed, which is exactly the budget the
+		// longest test names need.
 		warnSetup("set TMPDIR to %s: %v", base, err)
+		return 1
+	}
+	base, dropNet, err := unitNet(base) // unitnet.go: an armed unit binary's net, before any jail
+	defer dropNet()
+	if err != nil {
+		warnSetup("%v", err)
 		return 1
 	}
 	cleanup, setupErr := jailHome(base)
 	defer cleanup()
 	if setupErr != nil {
 		warnSetup("%v", setupErr)
+		return 1
+	}
+	if !enterJailDir() {
 		return 1
 	}
 	return runProfiled(m)
@@ -189,7 +199,7 @@ var activeProfiler atomic.Pointer[profiler]
 
 // runProfiled runs the package tests under the always-on profiler (profile.go).
 func runProfiled(m *testing.M) int {
-	p, off := startProfile()
+	p, off := startProfile(testCount(m))
 	activeProfiler.Store(p)
 	code := m.Run()
 	activeProfiler.Store(nil)
@@ -302,14 +312,15 @@ func ShortRoot(t *testing.T) string {
 			t.Errorf("remove short jail root %s: %v", directory, err)
 		}
 	})
+	releaseDatabases(t, directory)
 	return directory
 }
 
 // CreateShortRoot returns an unregistered short root for harnesses that do not
 // have a *testing.T. The caller owns cleanup.
 func CreateShortRoot() (string, error) {
-	base := os.TempDir()
-	if short, err := filepath.EvalSymlinks("/tmp"); err == nil {
+	base := paths.TempRoot()
+	if short, err := filepath.EvalSymlinks(paths.SystemTempDir()); err == nil {
 		base = short
 	}
 	return os.MkdirTemp(base, "j")
@@ -363,6 +374,9 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	setenv(paths.EnvCodexHome, filepath.Join(root, codexHome))
 	setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	setenv(paths.EnvHome, filepath.Join(root, "home"))
+	// Every process the jail starts carries the jail home's install mark, as a
+	// pfm run from that home marks its children: never the operator's.
+	setenv(paths.EnvInstallMark, paths.InstallMark(filepath.Join(root, "home")))
 	configPath := filepath.Join(root, "home", "pfm.config.json")
 	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -566,6 +580,7 @@ func StageHarnessPromptBaseline(t *testing.T, home, alias, stem, captured, name 
 func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runtime {
 	t.Helper()
 	home := t.TempDir()
+	releaseDatabases(t, home)
 	claudeBinary := pfmengine.MustLookup(pfmengine.Claude).Binary
 	canonicalDir := filepath.Join(home, ".local", "bin")
 	hostShimDir := filepath.Join(t.TempDir(), "bin")
@@ -595,7 +610,6 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	if err := WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stageTracetreeKit(t, home, hostShimDir)
 	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
@@ -621,6 +635,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	}
 	t.Setenv("HOME", home)
 	t.Setenv(paths.EnvHome, home)
+	t.Setenv(paths.EnvInstallMark, paths.InstallMark(home)) // as fleetSetenv: the jail home's mark
 	configPath := filepath.Join(home, "pfm.config.json")
 	if err := os.WriteFile(configPath, []byte("{\"version\":2,\"ask\":{\"engine\":\"claude\"}}\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -661,37 +676,15 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	return loadedRuntime
 }
 
-// PTYCommand builds a command that runs argv on a REAL pty via script(1), for
-// behaviour that only happens on a terminal.
-//
-// The two script(1) implementations disagree about their own argv. util-linux
-// takes the command through -c and the typescript file LAST; BSD (macOS) takes
-// the typescript file FIRST and then the command and its arguments directly,
-// with no -c and no -f. Handing Linux's form to the BSD binary prints a usage
-// message and exits — and a test that then writes to its stdin fails with
-// "broken pipe", which reads as the code under test closing the pipe rather
-// than as the harness being wrong about the platform.
-func PTYCommand(argv ...string) *exec.Cmd {
-	scriptBinary, err := deps.Resolve("script")
-	if err != nil {
-		scriptBinary = "script"
-	}
-	if runtime.GOOS == "linux" {
-		quoted := make([]string, len(argv))
-		for index, argument := range argv {
-			quoted[index] = cmdparse.Quote(argument)
-		}
-		return exec.Command(scriptBinary, "-qefc", strings.Join(quoted, " "), "/dev/null")
-	}
-	return exec.Command(scriptBinary, append([]string{"-qe", "/dev/null"}, argv...)...)
-}
-
 // pinGoDirs sets GOCACHE, GOPATH, GOMODCACHE and TEST_TELEMETRY_DIR — each only
 // when unset — outside the jail, so a `go` child spawned under a jailed
 // HOME/XDG_CONFIG_HOME never writes into the jail. Returns a non-zero exit code
 // when a required value cannot be chosen or set; a missing user cache/home dir
 // is reported and the variable left as it was.
-func pinGoDirs() int {
+func pinGoDirs(armed bool) int {
+	if armed { // an armed unit binary starts no `go` child and pins no directory derived from the real home
+		return 0
+	}
 	set := func(name, value string) int {
 		if err := os.Setenv(name, value); err != nil {
 			warnSetup("set %s: %v", name, err)
@@ -764,7 +757,7 @@ func StageClaudePlugins(t *testing.T, store string, ids []string) {
 	enabled := make(map[string]bool)
 	records := make(map[string]any)
 	for _, id := range ids {
-		installPath := filepath.Join(store, "plugins", "cache", id)
+		installPath := stagedPluginPath(store, id)
 		if err := os.MkdirAll(installPath, 0o700); err != nil {
 			t.Fatal(err)
 		}

@@ -10,9 +10,14 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
+// TestRunExitCloseLeavesTheTerminalWhileAReloadIsInFlight: the terminal stays
+// open only for the reload's own /exit (pane mutex held, exit mark written); the
+// owner's /exit while the reload still waits, and any exit once the reload let
+// go, close it.
 func TestRunExitCloseLeavesTheTerminalWhileAReloadIsInFlight(t *testing.T) {
 	original, originalEnv := exitCloseTerminals, exitCloseIdentify
 	t.Cleanup(func() { exitCloseTerminals, exitCloseIdentify = original, originalEnv })
@@ -47,8 +52,23 @@ func TestRunExitCloseLeavesTheTerminalWhileAReloadIsInFlight(t *testing.T) {
 	if code := ExitClose(strings.NewReader(payload), &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
-	if called || !strings.Contains(stderr.String(), "reload in flight") {
-		t.Fatalf("called=%v stderr=%q", called, stderr.String())
+	if !called {
+		t.Fatalf("lock held, no exit mark (the owner's /exit while the reload waits): closer did not run; stderr=%q",
+			stderr.String())
+	}
+	if err := os.WriteFile(reload.ExitMarkPath(sidDir, socket, pane), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	called = false
+	if code := ExitClose(strings.NewReader(payload), &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	want := "pfm internal exit-close: left open — reload in flight for " + socket + " " + pane +
+		": the pane is being rebooted, not closed\n"
+	if called || stderr.String() != want {
+		t.Fatalf("the reload's own /exit: called=%v stderr=%q, want the terminal left open with %q",
+			called, stderr.String(), want)
 	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
 		t.Fatal(err)

@@ -88,6 +88,8 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 		want  []string
 		// failAt is the path a scan error must name, in the scan and in install's retirement.
 		failAt func(h ownershipHome) string
+		// entry marks a failAt one entry costs: install names it and retires the rest.
+		entry bool
 	}{
 		{
 			name: "a dead owned link is DEAD in every registry, nested commands included",
@@ -95,7 +97,7 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				managed := managedRootForHome(h.home)
 				gone := filepath.Join(managed, "legacy", "group", "ls.command.md")
 				symlinkFixture(t, gone, filepath.Join(h.store, "commands", "legacy", "group", "old"))
-				symlinkFixture(t, filepath.Join(h.clone, "workflows", "deep-rr"), filepath.Join(h.store, "skills", "old"))
+				symlinkFixture(t, filepath.Join(managedRootForHome(h.home), "skills", "deep-rr"), filepath.Join(h.store, "skills", "old"))
 				symlinkFixture(t, gone, filepath.Join(h.home, ".agents", "skills", "old"))
 			},
 			want: []string{
@@ -117,21 +119,12 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 		{
 			name: "a target that cannot be inspected is an error",
 			setup: func(t *testing.T, h ownershipHome) {
-				target := filepath.Join(h.clone, "workflows", "deep-rr")
+				target := filepath.Join(managedRootForHome(h.home), "skills", "deep-rr")
 				writeFixture(t, filepath.Dir(target), "not a directory")
 				symlinkFixture(t, target, filepath.Join(h.store, "commands", "old"))
 			},
-			failAt: func(h ownershipHome) string { return filepath.Join(h.clone, "workflows", "deep-rr") },
-		},
-		{
-			name: "store links, present or gone",
-			setup: func(t *testing.T, h ownershipHome) {
-				stores := RetiredGeneratedStores(h.home)
-				symlinkFixture(t, filepath.Join(stores[0], "a.md"), filepath.Join(h.store, "agents", "a.md"))
-				writeFixture(t, filepath.Join(stores[1], "b.md"), "rendered")
-				symlinkFixture(t, filepath.Join(stores[1], "b.md"), filepath.Join(h.store, "agents", "b.md"))
-			},
-			want: []string{"STORE .claude/agents/a.md", "STORE .claude/agents/b.md"},
+			failAt: func(h ownershipHome) string { return filepath.Join(managedRootForHome(h.home), "skills", "deep-rr") },
+			entry:  true,
 		},
 		{
 			name: "an existing unplanned command is an orphan, a planned one is not",
@@ -172,7 +165,6 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 					`{"source_fetched":{"fetched":{"repo":"acme/fetched"}}}`)
 				writeFixture(t, filepath.Join(managed, "skills", "fetched", "SKILL.md"), "fetched")
 				writeFixture(t, filepath.Join(managed, "skills", "stale", "SKILL.md"), "no longer registered")
-				writeFixture(t, filepath.Join(managed, "handoff.skill.md"), "embedded")
 				symlinkFixture(t, filepath.Join(skills, "tpl"), filepath.Join(h.store, "skills", "tpl"))
 				symlinkFixture(t, filepath.Join(skills, "tpl"), filepath.Join(h.home, ".agents", "skills", "tpl"))
 				symlinkFixture(t, filepath.Join(skills, "nomd"), filepath.Join(h.store, "skills", "nomd"))
@@ -182,9 +174,6 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				)
 				symlinkFixture(
 					t, filepath.Join(managed, "skills", "stale"), filepath.Join(h.home, ".agents", "skills", "stale"),
-				)
-				symlinkFixture(
-					t, filepath.Join(managed, "handoff.skill.md"), filepath.Join(h.store, "skills", "handoff", "SKILL.md"),
 				)
 			},
 			want: []string{"ORPHAN .agents/skills/stale", "ORPHAN .claude/skills/nomd"},
@@ -254,7 +243,7 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 		{
 			name: "a registry root that is a dead link is DEAD, a live one is not an orphan",
 			setup: func(t *testing.T, h ownershipHome) {
-				symlinkFixture(t, filepath.Join(h.clone, "workflows", "retired-skills"), filepath.Join(h.home, ".agents", "skills"))
+				symlinkFixture(t, filepath.Join(managedRootForHome(h.home), "retired-skills"), filepath.Join(h.home, ".agents", "skills"))
 				writeFixture(t, filepath.Join(h.clone, "kept-commands", "x.md"), "x")
 				symlinkFixture(t, filepath.Join(h.clone, "kept-commands"), filepath.Join(h.store, "commands"))
 			},
@@ -284,10 +273,18 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), path) {
 					t.Fatalf("error=%v, want an error naming %s", err, path)
 				}
-				installer := &engine{options: Options{Home: h.home, ConfigDir: h.store}}
-				if stepErr := installer.retireDeadRegistryLinks(); stepErr == nil ||
-					!strings.Contains(stepErr.Error(), path) {
-					t.Fatalf("install retirement error=%v, want an error naming %s", stepErr, path)
+				var output bytes.Buffer
+				installer := &engine{options: Options{Home: h.home, ConfigDir: h.store, Stdout: &output}}
+				stepErr := installer.retireDeadRegistryLinks()
+				if !test.entry {
+					if stepErr == nil || !strings.Contains(stepErr.Error(), path) {
+						t.Fatalf("install retirement error=%v, want an error naming %s", stepErr, path)
+					}
+					return
+				}
+				want := "  skip    registry-ownership entry left alone: " + err.Error() + "\n"
+				if stepErr != nil || output.String() != want {
+					t.Fatalf("install error=%v transcript=%q, want nil, %q", stepErr, output.String(), want)
 				}
 				return
 			}
@@ -330,8 +327,6 @@ func TestInspectRegistryOwnershipCounts(t *testing.T) {
 func ownershipRowsFixture(t *testing.T) ownershipHome {
 	t.Helper()
 	h := newOwnershipHome(t)
-	symlinkFixture(t,
-		filepath.Join(RetiredGeneratedStores(h.home)[0], "astra.md"), filepath.Join(h.store, "agents", "astra.md"))
 	oldSkill := filepath.Join(h.clone, "templates", "global", "skills", "old-skill")
 	if err := os.MkdirAll(oldSkill, 0o755); err != nil {
 		t.Fatal(err)
@@ -369,7 +364,7 @@ func reportRegistries(h ownershipHome) (rows []string, warnings, failures int) {
 	warnings, failures = ReportGlobalRegistries(
 		&output, h.home, true,
 		&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
-		nil, nil, ownershipRetired, nil,
+		nil, nil, ownershipRetired, nil, nil,
 	)
 	return registryRows(output.String()), warnings, failures
 }
@@ -380,10 +375,7 @@ func TestRegistryOwnershipDoctorRows(t *testing.T) {
 		t.Parallel()
 		h := ownershipRowsFixture(t)
 		rows, warnings, failures := reportRegistries(h)
-		store := RetiredGeneratedStores(h.home)[0]
 		want := []string{
-			"doctor: registry STORE " + filepath.Join(h.store, "agents", "astra.md") + " -> " +
-				filepath.Join(store, "astra.md") + " — retired store; run pfm install --yes",
 			"doctor: registry DEAD " + filepath.Join(h.store, "commands", "gone.md") + " -> " +
 				filepath.Join(h.clone, "templates", "global", "commands", "gone.md") +
 				" — target gone; run pfm install --yes",
@@ -396,9 +388,9 @@ func TestRegistryOwnershipDoctorRows(t *testing.T) {
 		if !reflect.DeepEqual(rows, want) {
 			t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(rows, "\n"), strings.Join(want, "\n"))
 		}
-		if warnings != 2 || failures != 2 {
+		if warnings != 2 || failures != 1 {
 			t.Fatalf(
-				"warnings=%d failures=%d, want 2 and 2 (STORE and ORPHAN fail; DEAD and RETIRED warn)",
+				"warnings=%d failures=%d, want 2 and 1 (ORPHAN fails; DEAD and RETIRED warn)",
 				warnings,
 				failures,
 			)
@@ -461,8 +453,6 @@ func TestRetireRegistryOwnership(t *testing.T) {
 			retired := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
 			sort.Strings(retired)
 			want := []string{
-				"  change  retire " + filepath.Join(h.store, "agents", "astra.md") + " (retired store link -> " +
-					filepath.Join(RetiredGeneratedStores(h.home)[0], "astra.md") + ")",
 				"  change  retire " + filepath.Join(h.store, "commands", "gone.md") + " (dead pfm link -> " +
 					filepath.Join(h.clone, "templates", "global", "commands", "gone.md") + ")",
 				"  change  retire " + filepath.Join(h.store, "skills", "old-skill") + " (orphan pfm link -> " +
@@ -515,7 +505,7 @@ func TestRulesDoctorRows(t *testing.T) {
 		warnings, failures = ReportGlobalRegistries(
 			&output, h.home, true,
 			&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
-			nil, nil, ownershipRetired, nil,
+			nil, nil, ownershipRetired, nil, nil,
 		)
 		return rulesRows(output.String()), warnings, failures
 	}

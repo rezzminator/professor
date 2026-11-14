@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -19,6 +21,7 @@ import (
 )
 
 func TestNameSyncDefaultsToPreview(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -55,9 +58,34 @@ func TestNameSyncDefaultsToPreview(t *testing.T) {
 			resolved.FirstRoot(pfmengine.Codex),
 		),
 	}
+	// An OpenCode root under a regular file fails the index pass; the sync still plans on the last index.
+	blocker := filepath.Join(root, "opencode-blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Paths.Roots[pfmengine.OpenCode] = []string{filepath.Join(blocker, "opencode")}
+	// An unreadable primary account: the sync composes on the implicit one and says so.
+	mirror := filepath.Join(resolved.Home, ".claude-primary")
+	if err := os.WriteFile(mirror, []byte("garbage\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
 	if code := runNameSync(nil, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("runNameSync() code=%d stderr=%q", code, stderr.String())
+	}
+	store := filepath.Join(blocker, "opencode", "opencode.db")
+	prefix := "pfm name-sync: index pass: index engine ox: stat opencode store " + store + ": "
+	if got := stderr.String(); !strings.HasPrefix(got, prefix) ||
+		!strings.Contains(got, "; converging on the last index\n") {
+		t.Fatalf("runNameSync() stderr=%q, want the failed index pass named", got)
+	}
+	fault := "pfm name-sync: primary account unreadable (read primary account: parse primary account mirror: " +
+		`strconv.Atoi: parsing "garbage": invalid syntax); composing on account 1` + "\n"
+	if got := stderr.String(); !strings.Contains(got, fault) {
+		t.Fatalf("runNameSync() stderr=%q, want the account fault %q", got, fault)
+	}
+	if err := os.Remove(mirror); err != nil {
+		t.Fatal(err)
 	}
 	if got := readProbe(t, socketPath, "display-message", "-p", "#{window_name}"); got != original {
 		t.Fatalf("window name = %q, want unchanged %q in the default preview", got, original)
@@ -88,10 +116,11 @@ func TestNameSyncDefaultsToPreview(t *testing.T) {
 // one window in each state on a probe server: one whose name matches what was
 // asked for, one a second writer took back, and one whose server is gone.
 func TestNameSyncCountsOnlyVerifiedWindowsAsConverged(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	base := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +204,7 @@ const namesyncThemeState = `{"enabled":true,"appearance":"dark","generation":1,"
 // theme's own door: nothing is said or touched while `pfm theme` has never
 // been set, and with the sync on each live server is themed and counted.
 func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

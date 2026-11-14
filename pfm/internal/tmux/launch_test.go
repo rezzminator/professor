@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,10 +95,11 @@ func TestPrepareLaunchNamesAnUnwritableDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := PrepareLaunch(filepath.Join(file, "dir"), strings.Repeat("x", InlineRunBudget+1))
-	if err == nil || !strings.Contains(err.Error(), "prepare launch script") {
-		t.Fatalf("an unwritable directory = %v, want a named launch-script error", err)
-	}
-	if strings.Contains(err.Error(), "xxxx") {
-		t.Fatalf("the error carries the run: %.80q", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		file,
+		"{file}",
+	), "prepare launch script: create tmux socket directory {file}/dir: mkdir {file}: not a directory"; got != want {
+		t.Fatalf("an unwritable directory = %q, want %q", got, want)
 	}
 }

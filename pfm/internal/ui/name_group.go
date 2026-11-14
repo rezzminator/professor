@@ -41,6 +41,5 @@ func nameGroupPrefix(name string) (string, bool) {
 // Agent, Booting, and every resumable kind — a resumable SOLO:BUILD groups
 // with its live namesakes exactly like a live row would.
 func isNameGroupRow(kind compose.Kind) bool {
-	return kind.IsAddressable() ||
-		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpenCode
+	return kind.IsAddressable() || kind.IsResumable()
 }

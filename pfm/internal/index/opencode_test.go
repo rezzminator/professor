@@ -2,18 +2,17 @@ package index
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // seedOpenCodeStore builds the OpenCode v1.14.30 store shape from its published
@@ -24,7 +23,7 @@ func seedOpenCodeStore(t *testing.T, root string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir opencode root: %v", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatalf("open fixture store: %v", err)
 	}
@@ -238,7 +237,7 @@ func TestReadOpenCodeSessionsCompactsNativeModelID(t *testing.T) {
 	root := t.TempDir()
 	seedOpenCodeStore(t, root)
 
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,16 +285,40 @@ func TestReadOpenCodeSessionsMissingStoreIsQuietlyEmpty(t *testing.T) {
 	}
 }
 
-func TestReadOpenCodeSessionsRejectsMalformedNativeJSONAndShapes(t *testing.T) {
+// mutateOpenCodeStore runs statement against root's fixture store.
+func mutateOpenCodeStore(t *testing.T, root, statement string) {
+	t.Helper()
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(statement); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("mutate fixture: %v; close database: %v", err, closeErr)
+		}
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestReadOpenCodeSessionsKeepsSessionsPastMalformedRows: a malformed message
+// or part row costs that row only. Every session stays mirrored, the reader
+// warns naming the session and the kind (never the stored content), and the
+// doctor probe still reports the store unhealthy.
+func TestReadOpenCodeSessionsKeepsSessionsPastMalformedRows(t *testing.T) {
 	tests := []struct {
 		name      string
 		statement string
-		wantError string
+		wantIDs   []string
+		wantWarn  string
 	}{
 		{
 			name:      "message JSON",
 			statement: `UPDATE message SET data = 'not-json' WHERE id = 'm1'`,
-			wantError: "validate opencode message JSON",
+			wantIDs:   []string{"ses_child", "ses_gone", "ses_root"},
+			wantWarn:  "opencode session ses_root kept with malformed rows (message JSON 1)",
 		},
 		{
 			name: "message shape",
@@ -303,84 +326,71 @@ func TestReadOpenCodeSessionsRejectsMalformedNativeJSONAndShapes(t *testing.T) {
 			  'role','user', 'agent','build',
 			  'model',json_object('providerID',7,'modelID','m1')
 			) WHERE id = 'm1'`,
-			wantError: "validate opencode message shape",
+			wantIDs:  []string{"ses_child", "ses_gone", "ses_root"},
+			wantWarn: "opencode session ses_root kept with malformed rows (message shape 1)",
 		},
 		{
 			name:      "assistant shape",
 			statement: `UPDATE message SET data = json_remove(data, '$.agent') WHERE id = 'a1'`,
-			wantError: "validate opencode message shape",
+			wantIDs:   []string{"ses_child", "ses_gone", "ses_root"},
+			wantWarn:  "opencode session ses_root kept with malformed rows (message shape 1)",
 		},
 		{
 			name:      "part JSON",
-			statement: `UPDATE part SET data = 'not-json' WHERE id = 'i1'`,
-			wantError: "validate opencode part JSON",
+			statement: `UPDATE part SET data = 'not-json' WHERE id = 'i3'`,
+			wantIDs:   []string{"ses_child", "ses_gone", "ses_root"},
+			wantWarn:  "opencode session ses_child kept with malformed rows (part JSON 1)",
 		},
 		{
 			name:      "part shape",
 			statement: `UPDATE part SET data = json_object('type','text','text',7) WHERE id = 'i1'`,
-			wantError: "validate opencode part shape",
+			wantIDs:   []string{"ses_child", "ses_gone", "ses_root"},
+			wantWarn:  "opencode session ses_root kept with malformed rows (part shape 1)",
+		},
+		{
+			name: "rows of no session",
+			statement: `DELETE FROM session;
+UPDATE message SET data = 'not-json' WHERE id = 'm1';
+UPDATE part SET data = 'not-json' WHERE id = 'i1';`,
+			wantWarn: "opencode rows of no session hold malformed rows (message JSON 1, part JSON 1)",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			seedOpenCodeStore(t, root)
-			db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.Exec(test.statement); err != nil {
-				if closeErr := db.Close(); closeErr != nil {
-					t.Fatalf("mutate fixture: %v; close database: %v", err, closeErr)
-				}
-				t.Fatal(err)
-			}
-			if err := db.Close(); err != nil {
-				t.Fatal(err)
-			}
+			mutateOpenCodeStore(t, root, test.statement)
 
-			_, err = ReadOpenCodeSessions(context.Background(), root)
-			if err == nil || !strings.Contains(err.Error(), test.wantError) {
-				t.Fatalf("ReadOpenCodeSessions() error = %v, want %q", err, test.wantError)
+			ctx, recorder := obs.Test(t)
+			sessions, err := ReadOpenCodeSessions(ctx, root)
+			if err != nil {
+				t.Fatalf("ReadOpenCodeSessions() error = %v, want the sessions kept", err)
 			}
-			if strings.Contains(err.Error(), "not-json") {
-				t.Fatalf("validation error leaked stored content: %v", err)
+			ids := make([]string, 0, len(sessions))
+			for _, session := range sessions {
+				ids = append(ids, session.ID)
+			}
+			sort.Strings(ids)
+			if strings.Join(ids, " ") != strings.Join(test.wantIDs, " ") {
+				t.Fatalf("session ids = %v, want %v", ids, test.wantIDs)
+			}
+			storePath := OpenCodeStorePath(root)
+			want := "opencode rows|" + test.wantWarn
+			if got := unreadableWarnings(recorder, storePath); len(got) != 1 || got[0] != want {
+				t.Fatalf("warnings for %s = %q, want [%q]", storePath, got, want)
+			}
+			wantProbe := "validate opencode rows: " + test.wantWarn
+			if err := ProbeOpenCodeStore(context.Background(), root); err == nil || err.Error() != wantProbe {
+				t.Fatalf("ProbeOpenCodeStore() error = %v, want %q", err, wantProbe)
 			}
 		})
-	}
-}
-
-func TestReadOpenCodeSessionsRejectsMalformedOrphansWithoutSessions(t *testing.T) {
-	root := t.TempDir()
-	seedOpenCodeStore(t, root)
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`
-DELETE FROM session;
-UPDATE message SET data = 'not-json' WHERE id = 'm1';
-UPDATE part SET data = 'not-json' WHERE id = 'i1';
-`); err != nil {
-		if closeErr := db.Close(); closeErr != nil {
-			t.Fatalf("mutate orphan fixture: %v; close database: %v", err, closeErr)
-		}
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = ReadOpenCodeSessions(context.Background(), root)
-	if err == nil || !strings.Contains(err.Error(), "validate opencode message JSON") {
-		t.Fatalf("ReadOpenCodeSessions() error = %v, want orphan validation error", err)
 	}
 }
 
 func TestReadOpenCodeSessionsAcceptsACompletelyEmptyNativeStore(t *testing.T) {
 	root := t.TempDir()
 	seedOpenCodeStore(t, root)
-	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(root, "opencode.db"), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,82 +411,4 @@ func TestReadOpenCodeSessionsAcceptsACompletelyEmptyNativeStore(t *testing.T) {
 	if len(sessions) != 0 {
 		t.Fatalf("sessions = %#v, want empty", sessions)
 	}
-}
-
-func openMirrorStore(t *testing.T) *store.Store {
-	t.Helper()
-	root := t.TempDir()
-	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "pfm-cache.db"))
-	t.Setenv(paths.EnvStateDB, filepath.Join(root, "shared.db"))
-	database, err := store.Open()
-	if err != nil {
-		t.Fatalf("store.Open() error = %v", err)
-	}
-	return database
-}
-
-// TestSyncOpenCodeMirrorsChangedStoresOnly pins the mirror pass a fleet scan
-// runs on every refresh: a pass over an unchanged store neither reads it nor
-// replaces the mirror, and a commit a live OpenCode left in its WAL (the
-// database file untouched) is read, dropping the session it deleted.
-func TestSyncOpenCodeMirrorsChangedStoresOnly(t *testing.T) {
-	database := openMirrorStore(t)
-	ctx, recorder := obs.Test(t)
-	root := t.TempDir()
-	seedOpenCodeStore(t, root)
-	reads := func() int {
-		count := 0
-		for _, record := range recorder.Records() {
-			if kind, _ := record.Field("kind"); record.Message == "db.statement" && kind == "opencode" {
-				count++
-			}
-		}
-		return count
-	}
-	pass := func(step string, wantReads, wantMirrored int, wantIDs ...string) {
-		t.Helper()
-		var counters Counters
-		if err := SyncOpenCode(ctx, database, []string{root}, &counters); err != nil {
-			t.Fatalf("%s: sync: %v", step, err)
-		}
-		stored, err := database.OpenCodeSessions(ctx)
-		if err != nil {
-			t.Fatalf("%s: reread mirror: %v", step, err)
-		}
-		ids := make([]string, 0, len(stored))
-		for _, row := range stored {
-			ids = append(ids, row.ID)
-		}
-		sort.Strings(ids)
-		if got := reads(); got != wantReads || counters.OpenCodeSessions != wantMirrored ||
-			strings.Join(ids, ",") != strings.Join(wantIDs, ",") {
-			t.Fatalf("%s: store reads %d, mirrored %d, mirror %v; want %d, %d, %v",
-				step, got, counters.OpenCodeSessions, ids, wantReads, wantMirrored, wantIDs)
-		}
-	}
-	// A live OpenCode holds its store open in WAL mode, its WAL created by its
-	// first transaction, so its commits stay in the WAL until a checkpoint.
-	live, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
-	if err != nil {
-		t.Fatalf("open the live store: %v", err)
-	}
-	live.SetMaxOpenConns(1)
-	defer func() {
-		if err := live.Close(); err != nil {
-			t.Errorf("close the live store: %v", err)
-		}
-	}()
-	if _, err := live.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		t.Fatalf("enable WAL: %v", err)
-	}
-	if _, err := live.Exec("SELECT count(*) FROM session"); err != nil {
-		t.Fatalf("open the live WAL: %v", err)
-	}
-
-	pass("first pass", 1, 3, "ses_child", "ses_gone", "ses_root")
-	pass("unchanged store", 1, 0, "ses_child", "ses_gone", "ses_root")
-	if _, err := live.Exec("DELETE FROM session WHERE id = 'ses_child'"); err != nil {
-		t.Fatalf("delete child: %v", err)
-	}
-	pass("a commit only the WAL holds", 2, 2, "ses_gone", "ses_root")
 }

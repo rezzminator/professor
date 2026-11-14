@@ -9,16 +9,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // testPlugin is a row of the default list the install tests ensure: its Name,
@@ -32,6 +30,19 @@ var testPlugins = []testPlugin{
 	{Name: "auto-effort", Source: "rezzminator/professor", ID: "auto-effort@professor"},
 	{Name: "tool-visibility-controller", Source: "rezzminator/professor", ID: "tool-visibility-controller@professor"},
 	{Name: "engine-sync", Source: "rezzminator/professor", ID: "engine-sync@professor"},
+	{Name: "flights", Source: "rezzminator/professor", ID: "flights@professor"},
+}
+
+// testRetiredPlugins is the retired lists' claudePlugins these tests install
+// with: invented ids once ours, keyed by their successor's bare name.
+var testRetiredPlugins = map[string][]string{
+	"auto-effort": {
+		"old-effort@old-effort",
+		"old-effort@old-effort-dev",
+		"old-effort@professor",
+		"auto-effort@old-market",
+	},
+	"forward-compaction": {"old-compact@old-compact", "old-compact@old-compact-dev", "old-compact@professor"},
 }
 
 // pluginCall is one argv the fake runner saw, with the account it ran for.
@@ -53,6 +64,14 @@ type pluginRunner struct {
 }
 
 func (runner *pluginRunner) Run(_ context.Context, argv []string, options deps.RunOptions) (deps.RunResult, error) {
+	// A whole install also drives the engine-sync binary through this process
+	// runner; that is no claude command, so the ledger never sees it.
+	if filepath.Base(argv[0]) == "engine-sync" && len(argv) > 1 {
+		if argv[1] == "version" {
+			return deps.RunResult{Stdout: []byte("engine-sync 99.0.0\n")}, nil
+		}
+		return deps.RunResult{Stdout: []byte(`{"ok":true,"events":[],"error":""}`)}, nil
+	}
 	configDir := ""
 	for _, entry := range options.Env {
 		if value, ok := strings.CutPrefix(entry, claudeConfigDirEnv+"="); ok {
@@ -79,7 +98,8 @@ func (*pluginRunner) LookPath(name string) (string, error) {
 func pluginFixture(t *testing.T) (home, binary, first, second string) {
 	t.Helper()
 	home = t.TempDir()
-	binary = writeScript(t, t.TempDir(), "claude-real", "#!/bin/sh\nexit 0\n")
+	binary = filepath.Join(t.TempDir(), "claude-real")
+	writeExecutable(t, binary)
 	first = filepath.Join(home, ".cc", "1")
 	second = filepath.Join(home, ".cc", "2")
 	for _, dir := range []string{filepath.Join(home, ".claude"), first, second} {
@@ -100,6 +120,7 @@ func pluginEngine(home, binary, first, second string, runner deps.Runner, out *b
 		ClaudePlugins:    pfmconfig.DefaultClaudePlugins(),
 		ProcessRunner:    runner,
 		Stdout:           out,
+		retired:          &retired.Lists{ClaudePlugins: testRetiredPlugins},
 	}, apply: apply}
 }
 
@@ -163,14 +184,15 @@ func TestClaudePluginStepRefusesTheStoreOnARosterHost(t *testing.T) {
 	inst.options.PrimaryConfigDir = ""
 	store := inst.options.ConfigDir
 	err := inst.ensureClaudePlugins(context.Background())
-	if err == nil || !strings.Contains(err.Error(), store+" resolves to the Claude store") {
-		t.Fatalf("err=%v, want the store refusal\n%s", err, out.String())
+	refusal := "claude plugins in " + store + ": " + store + " resolves to the Claude store — run pfm doctor"
+	if err == nil || err.Error() != refusal {
+		t.Fatalf("err=%v, want %q\n%s", err, refusal, out.String())
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("ran %v with the store as config dir\n%s", runner.calls, out.String())
 	}
-	if !strings.Contains(out.String(), "  FAIL    claude plugins in "+store+": ") {
-		t.Fatalf("no FAIL line for the refusal:\n%s", out.String())
+	if want := "  FAIL    " + refusal + "\n"; out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
 	}
 }
 
@@ -225,10 +247,16 @@ func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
 		t.Fatalf("no plugin command ran\n%s", out.String())
 	}
 	for index, environment := range runner.envs {
+		values := map[string]string{}
 		for _, entry := range environment {
-			if strings.HasPrefix(entry, claudelaunch.ConfigDirDefaultEnv+"=") {
-				t.Fatalf("command %v carries %s", runner.calls[index], entry)
-			}
+			key, value, _ := strings.Cut(entry, "=")
+			values[key] = value
+		}
+		if got, carried := values[claudelaunch.ConfigDirDefaultEnv]; carried ||
+			values["CLAUDE_CONFIG_DIR"] != runner.calls[index].configDir {
+			t.Fatalf("command %v: %s carried=%v (%q), CLAUDE_CONFIG_DIR=%q, want no sentinel and %q",
+				runner.calls[index], claudelaunch.ConfigDirDefaultEnv, carried, got,
+				values["CLAUDE_CONFIG_DIR"], runner.calls[index].configDir)
 		}
 	}
 }
@@ -237,7 +265,7 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@professor":true,` +
 		`"forward-compaction@professor":true,"auto-effort@professor":true,"tool-visibility-controller@professor":true,` +
-		`"engine-sync@professor":true}}`
+		`"engine-sync@professor":true,"flights@professor":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeInstalledPlugins(
 		t,
@@ -247,6 +275,7 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 		testPlugins[2].ID,
 		testPlugins[3].ID,
 		testPlugins[4].ID,
+		testPlugins[5].ID,
 	)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
@@ -367,8 +396,7 @@ func TestEnsureClaudePluginsInstallsTheListedPlugins(t *testing.T) {
 
 // TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins: an unreadable
 // plugins/known_marketplaces.json fails each listed id that needs it, naming the record, and the
-// plugins that do not need it still install; a plugin of ours then fails its legacy check, which
-// reads the record for a legacy marketplace, naming it too.
+// plugins that do not need it still install.
 func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	known := filepath.Join(first, "plugins", "known_marketplaces.json")
@@ -379,9 +407,7 @@ func TestEnsureClaudePluginsUnreadableMarketplaceRecordFailsOnlyItsPlugins(t *te
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: "typesafe@typesafe-ai"}, {ID: "auto-effort"}}
 	err := inst.ensureClaudePlugins(context.Background())
 	want := "claude plugin typesafe@typesafe-ai in " + first + ": marketplace record unreadable, state unknown: parse " +
-		known + ": unexpected end of JSON input\n" +
-		"claude plugin auto-effort@professor in " + first +
-		": legacy ids of auto-effort@professor unchecked: parse " + known + ": unexpected end of JSON input"
+		known + ": unexpected end of JSON input"
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v\nwant %s\n%s", err, want, out.String())
 	}
@@ -429,9 +455,8 @@ func TestEnsureClaudePluginsReportsAPluginItCannotInstall(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched: only the listed plugins are installed,
-// enabled or moved off their legacy ids; every other enabledPlugins entry (the legacy ids of a
-// plugin pfm used to install included) and its pluginConfigs keep their value.
+// TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched: only the listed plugins are installed and
+// enabled; every other enabledPlugins entry and its pluginConfigs keep their value.
 func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 	root := t.TempDir()
 	inst, runner, out, home, first := alphaPluginEngine(t, root)
@@ -442,7 +467,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 	simulateClaude(t, runner)
 	writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{`+
 		`"cache-live-control@cache-live-control":true,"cache-live-control@cache-live-control-dev":true,`+
-		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false,"auto-effort@auto-effort":true},`+
+		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false},`+
 		`"pluginConfigs":{"cache-live-control@cache-live-control":{"options":{"keep":1}}}}`)
 	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
@@ -485,7 +510,7 @@ func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@professor":true,` +
 		`"forward-compaction@professor":true,"auto-effort@professor":true,"tool-visibility-controller@professor":true,` +
-		`"engine-sync@professor":true}}`
+		`"engine-sync@professor":true,"flights@professor":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
 	writeInstalledPlugins(
@@ -496,6 +521,7 @@ func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 		testPlugins[2].ID,
 		testPlugins[3].ID,
 		testPlugins[4].ID,
+		testPlugins[5].ID,
 	)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
@@ -526,7 +552,14 @@ func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 }
 
 func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
-	all := []string{testPlugins[0].ID, testPlugins[1].ID, testPlugins[2].ID, testPlugins[3].ID, testPlugins[4].ID}
+	all := []string{
+		testPlugins[0].ID,
+		testPlugins[1].ID,
+		testPlugins[2].ID,
+		testPlugins[3].ID,
+		testPlugins[4].ID,
+		testPlugins[5].ID,
+	}
 	for _, test := range []struct {
 		name    string
 		prepare func(t *testing.T, dir string)
@@ -625,11 +658,13 @@ func TestEnsureClaudePluginsDryRunSaysWhatWouldRun(t *testing.T) {
 	if len(runner.calls) != 0 {
 		t.Fatalf("dry run executed %v", runner.calls)
 	}
-	want := "change  run CLAUDE_CONFIG_DIR=" + first + " " + binary +
-		" plugin marketplace add rezzminator/professor && " + binary +
-		" plugin install forward-compaction@professor -y"
-	if !strings.Contains(out.String(), want) {
-		t.Fatalf("output missing %q:\n%s", want, out.String())
+	var want string
+	for _, plugin := range testPlugins {
+		want += "  change  run CLAUDE_CONFIG_DIR=" + first + " " + binary + " plugin marketplace add " + plugin.Source +
+			" && " + binary + " plugin install " + plugin.ID + " -y\n"
+	}
+	if out.String() != want {
+		t.Fatalf("output =\n%s\nwant\n%s", out.String(), want)
 	}
 }
 
@@ -646,10 +681,13 @@ func TestEnsureClaudePluginsUnresolvedBinaryIsAVisibleSkip(t *testing.T) {
 	if len(runner.calls) != 0 {
 		t.Fatalf("unresolved binary still ran %v", runner.calls)
 	}
-	want := "skip    claude plugin cache-live-control@professor in " + first +
-		": real claude binary not resolved:"
-	if !strings.Contains(out.String(), want) || !strings.Contains(out.String(), "no-such-claude") {
-		t.Fatalf("output missing %q naming the binary:\n%s", want, out.String())
+	var want string
+	for _, plugin := range testPlugins {
+		want += "  skip    claude plugin " + plugin.ID + " in " + first +
+			": real claude binary not resolved: configured Claude binary not found: no-such-claude\n"
+	}
+	if out.String() != want {
+		t.Fatalf("output =\n%s\nwant\n%s", out.String(), want)
 	}
 }
 
@@ -671,23 +709,15 @@ func TestInstallRunsTheClaudePluginStep(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Run: %v\n%s", err, out.String())
 	}
-	installs := map[string]int{}
-	for _, call := range runner.calls {
-		if strings.HasPrefix(call.argv, "plugin install ") {
-			installs[call.configDir]++
-		}
-	}
 	// A host with no roster has only the store as a config dir: the step runs
 	// no claude command there.
-	if len(installs) != 0 || len(runner.calls) != 0 ||
-		!strings.Contains(out.String(), "  skip    claude plugins: not run — no account roster") {
-		t.Fatalf(
-			"plugin installs per dir=%v calls=%v, want the named skip and no command\n%s",
-			installs,
-			runner.calls,
-			out.String(),
-		)
+	if len(runner.calls) != 0 {
+		t.Fatalf("claude calls = %v, want none\n%s", runner.calls, out.String())
 	}
+	wantOutputLines(t, out.String(), []string{
+		"  skip    claude plugins: not run — no account roster, so the only config dir is the Claude store " + store +
+			", where a claude process writes account identity; add an account to pfm.config.json and rerun pfm install --yes",
+	}, "claude plugin")
 }
 
 func TestClaudePluginDoorLeavesSettingsEnvAlone(t *testing.T) {
@@ -709,81 +739,6 @@ func TestClaudePluginDoorLeavesSettingsEnvAlone(t *testing.T) {
 				t.Fatalf("settings=%q err=%v, want %q", got, err, test.content)
 			}
 		})
-	}
-}
-
-// recordedPIDs reads every pid a fixture script appended to path.
-func recordedPIDs(t *testing.T, path string) []int {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var pids []int
-	for _, field := range strings.Fields(string(raw)) {
-		pid, convErr := strconv.Atoi(field)
-		if convErr != nil {
-			t.Fatalf("parse recorded pid %q: %v", field, convErr)
-		}
-		pids = append(pids, pid)
-	}
-	return pids
-}
-
-func TestClaudePluginCommandTimeoutKillsTheWholeProcessGroup(t *testing.T) {
-	home := t.TempDir()
-	account := filepath.Join(home, ".cc", "1") // not the store: the command then carries CLAUDE_CONFIG_DIR
-	if err := os.MkdirAll(account, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	// The fake claude records its own pid and a backgrounded sleep's pid under
-	// the account dir (the one path the command's environment carries), then
-	// hangs, the way a stuck plugin command does.
-	binary := writeScript(t, t.TempDir(), "claude-hang", "#!/bin/sh\n"+
-		"sleep 300 &\n"+
-		"echo $! >> \"$CLAUDE_CONFIG_DIR/child.pids\"\n"+
-		"echo $$ >> \"$CLAUDE_CONFIG_DIR/main.pids\"\n"+
-		"exec sleep 300\n")
-	t.Cleanup(func() {
-		for _, name := range []string{"child.pids", "main.pids"} {
-			for _, pid := range recordedPIDs(t, filepath.Join(account, name)) {
-				_ = syscall.Kill(pid, syscall.SIGKILL)
-			}
-		}
-	})
-	previous := claudePluginTimeout
-	claudePluginTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { claudePluginTimeout = previous })
-
-	var out bytes.Buffer
-	installer := &engine{options: Options{
-		Home: home, ConfigDir: account, ClaudeBinary: binary, Stdout: &out,
-		ClaudePlugins: pfmconfig.DefaultClaudePlugins(),
-	}, apply: true}
-	finished := make(chan error, 1)
-	go func() { finished <- installer.ensureClaudePlugins(context.Background()) }()
-	var err error
-	select {
-	case err = <-finished:
-	case <-time.After(15 * time.Second):
-		t.Fatal("ensureClaudePlugins did not return within 15s: the hung command was not stopped")
-	}
-	if err == nil || !strings.Contains(err.Error(), "timed out after 300ms") {
-		t.Fatalf("error=%v, want it to say the command timed out after 300ms", err)
-	}
-	pids := append(recordedPIDs(t, filepath.Join(account, "child.pids")),
-		recordedPIDs(t, filepath.Join(account, "main.pids"))...)
-	if len(pids) < 2 {
-		t.Fatalf("fixture recorded pids %v, want a shell and a backgrounded child", pids)
-	}
-	for _, pid := range pids {
-		deadline := time.Now().Add(5 * time.Second)
-		for syscall.Kill(pid, 0) == nil {
-			if time.Now().After(deadline) {
-				t.Fatalf("process %d survived the plugin command timeout", pid)
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
 	}
 }
 
@@ -857,22 +812,13 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 		warning   bool
 		successor string
 	}{
-		{"agent-effort@agent-effort", true, true, "auto-effort"},
-		{"agent-effort@agent-effort-dev", true, true, "auto-effort"},
-		{"agent-effort@agent-effort", false, false, "auto-effort"},
-		{"agent-effort@professor", true, true, "auto-effort"},
-		{"agent-effort@rezzminator", true, true, "auto-effort"},
-		{"auto-effort-control@rezzminator", true, true, "auto-effort"},
-		{"auto-effort@rezzminator", true, true, "auto-effort"},
-		{"effort-live-control@effort-live-control", true, true, "auto-effort"},
-		{"effort-live-control@effort-live-control-dev", true, true, "auto-effort"},
-		{"effort-live-control@professor", true, true, "auto-effort"},
-		{"effort-live-control@rezzminator", true, true, "auto-effort"},
+		{"old-effort@old-effort", true, true, "auto-effort"},
+		{"old-effort@old-effort", false, false, "auto-effort"},
+		{"old-effort@professor", true, true, "auto-effort"},
+		{"auto-effort@old-market", true, true, "auto-effort"},
 		{"auto-effort@professor", true, false, "auto-effort"},
-		{"sub-agent-compact@sub-agent-compact", true, true, "forward-compaction"},
-		{"sub-agent-compact@sub-agent-compact-dev", true, true, "forward-compaction"},
-		{"sub-agent-compact@sub-agent-compact-dev", false, false, "forward-compaction"},
-		{"sub-agent-compact@professor", true, true, "forward-compaction"},
+		{"old-compact@old-compact-dev", true, true, "forward-compaction"},
+		{"old-compact@old-compact-dev", false, false, "forward-compaction"},
 		{"forward-compaction@professor", true, false, "forward-compaction"},
 	} {
 		t.Run(fmt.Sprintf("%s enabled=%v", row.id, row.enabled), func(t *testing.T) {
@@ -884,7 +830,7 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 			if err := os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			gaps, err := ClaudePluginGaps(path, nil)
+			gaps, err := ClaudePluginGaps(path, nil, testRetiredPlugins)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -899,8 +845,32 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 				}
 			}
 			if !reflect.DeepEqual(gaps, want) {
-				t.Fatalf("legacy plugin gaps = %+v, want %+v", gaps, want)
+				t.Fatalf("retired plugin gaps = %+v, want %+v", gaps, want)
 			}
 		})
+	}
+}
+
+// TestConfigureClaudePluginsReadsTheMachineConfig pins the three Options the
+// plugin and env steps take from the machine config: the list, whether it is the
+// default, and claude.env with callmeter's cost ledger.
+func TestConfigureClaudePluginsReadsTheMachineConfig(t *testing.T) {
+	machine := pfmconfig.Defaults(t.TempDir(), nil)
+	machine.Claude.Plugins = []pfmconfig.ClaudePlugin{{ID: "callmeter"}}
+	machine.Claude.Env = map[string]string{"X": "1"}
+	machine.Sources[pfmconfig.KeyClaudePlugins] = pfmconfig.SourceFile
+	options := Options{Home: "/h", Env: &paths.MapEnv{Values: map[string]string{paths.EnvCostLedgerDir: "/ledger"}}}
+	ConfigureClaudePlugins(&options, machine)
+	if !reflect.DeepEqual(options.ClaudePlugins, machine.Claude.Plugins) || options.ClaudePluginsDefault {
+		t.Fatalf("plugins = %v default=%t", options.ClaudePlugins, options.ClaudePluginsDefault)
+	}
+	want := map[string]string{"X": "1", pfmconfig.CallmeterCostLedgerDirEnv: "/ledger"}
+	if !reflect.DeepEqual(options.ClaudeEnv, want) {
+		t.Fatalf("env = %v, want %v", options.ClaudeEnv, want)
+	}
+	defaults := Options{}
+	ConfigureClaudePlugins(&defaults, pfmconfig.Defaults(t.TempDir(), nil))
+	if !defaults.ClaudePluginsDefault {
+		t.Fatal("an unset claude.plugins is not reported as the default")
 	}
 }

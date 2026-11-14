@@ -141,7 +141,6 @@ func tabObservation(state string) TabDecoration {
 		Name:        "Chat",
 		State:       state,
 		Mode:        "emoji",
-		Revision:    7,
 		AgentStatus: "blocked",
 		Session:     json.RawMessage(`{"source":"pfm","agent":"claude","kind":"id","value":"s1"}`),
 	}
@@ -597,6 +596,39 @@ func TestTabStatusShutdownRestoresOnlyCurrentOwner(t *testing.T) {
 				t.Fatalf("shutdown label=%q want %q", f.label, want)
 			}
 		})
+	}
+}
+
+// A stale painter the install replaces (SIGTERM, then a new painter) restores
+// every tab under one restore budget. Once an earlier tab's call spends it, a
+// later tab's owner check opens the store with an expired context, and that
+// tab keeps its decorated label. The replacement's first paint rewrites it
+// from pfm's label record.
+func TestTabRestorePastItsBudgetIsRepaintedByTheReplacement(t *testing.T) {
+	f := newTabStatusFixture()
+	stale, _ := newTabPainter(t, f.call)
+	if _, err := stale.paintTabs(context.Background(), []TabDecoration{tabObservation("blocked")}, 0); err != nil {
+		t.Fatal(err)
+	}
+	expired, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	late := tabObservation("blocked")
+	late.Validate = func(ctx context.Context) (bool, error) { return false, ctx.Err() }
+	stale.tabObservations = []TabDecoration{late}
+	if err := stale.restoreTabs(expired); !errors.Is(err, context.DeadlineExceeded) || f.label != "🔴 Chat" {
+		t.Fatalf("restore past its budget: err=%v label=%q, want the decorated label left", err, f.label)
+	}
+	f.state = "idle"
+	f.revision++
+	idle := tabObservation("idle")
+	idle.AgentStatus = "idle"
+	replacement, stderr := newTabPainter(t, f.call)
+	replacement.lockDir = stale.lockDir
+	if _, err := replacement.paintTabs(context.Background(), []TabDecoration{idle}, 0); err != nil {
+		t.Fatalf("replacement paint: %v (%s)", err, stderr)
+	}
+	if f.label != "⚪ Chat" {
+		t.Fatalf("label after the replacement's paint = %q, want the idle label ⚪ Chat", f.label)
 	}
 }
 

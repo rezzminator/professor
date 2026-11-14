@@ -2,21 +2,18 @@
 # Fence housekeeping — sourced on the HOST before a fence image build, so stale
 # fence containers, images and caches never pile up. Callers:
 # .claude/scripts/dev.sh (the iso actions that build and test: install build
-# typecheck verify test e2e cover all — never status, run, shell, sim),
-# infra/fence/lanes/root.sh (before a root build, with its own hash).
-# dev.sh and infra/demo/up.sh also
-# call fence_volumes_ensure before every compose run.
+# typecheck verify test e2e cover all — never status, run, shell, sim).
+# dev.sh also calls fence_volumes_ensure before every compose run.
 #
-#   fence_housekeeping [lane-hash]   # the nine steps below, in order
-#   fence_volumes_ensure             # the five shared cache volumes exist
+#   fence_housekeeping               # the seven steps below, in order
+#   fence_volumes_ensure             # the three shared cache volumes exist
+#   fence_cache_budget_pending       # a container start removes the caches marked over budget
 #   fence_sim_volume <checkout>      # that checkout's `iso sim` harvester volume
 #
 # Only fence-owned objects are ever removed: containers and dangling images
 # labelled pfm.fence=1 (pfm-dev.Dockerfile, docker-compose.yml and every fence
-# `docker run` set it), lane images (label professor.lane-root, tag
-# pfm-lane-base:*), the three shared cache volumes, volumes named
-# ^(fence|infra)_pfm-dev-, the retired pfm-lane-{harvest,uv}-cache volumes,
-# and this clone's recorded pfm-sim-harvest- volumes,
+# `docker run` set it), the three shared cache volumes, volumes named
+# ^(fence|infra)_pfm-dev- and this clone's recorded pfm-sim-harvest- volumes,
 # build cache no build used for a week, and scratch under the roots this repo's
 # scripts derive. No other
 # container, image or volume on the host is ever named to docker.
@@ -27,38 +24,29 @@
 #
 #   containers      labelled, exited: removed; labelled, running and created
 #                   more than PFM_FENCE_CONTAINER_MAX_HOURS (default 6) ago: forced
-#                   out (a leaked lane or root build).
-#                   A running container also labelled pfm.fence.long-lived=1 — an
-#                   `iso shell`, the live demo —
+#                   out (a leaked run).
+#                   A running container also labelled pfm.fence.long-lived=1 — the
+#                   shared fence container (infra/fence/shared.sh), where every `iso`
+#                   call but `iso sim` runs —
 #                   is never age-reaped: someone is using it, and another
 #                   checkout's gate run must not end it.
 #   images          dangling images labelled pfm.fence=1 — each rebuild's previous
-#                   professor-pfm-{dev,sim} or lane root, ~3 GB each; docker skips
-#                   any a container uses. A running lane root build skips the
-#                   prune; an overlapping prune is a skip, not a WARN.
-#   lane-images     lane roots whose hash is not current in any checkout, and
-#                   pfm-lane-base:<hash> pins of such hashes no running
-#                   pfm-lane-build-<hash> holds; `docker rmi` without -f, so a
-#                   root a container still uses is kept. The current hashes are
-#                   the argument (root.sh passes its own) plus
-#                   lanes/root.sh --print-hash of every checkout
-#                   `git worktree list` names (a missing one is skipped). A
-#                   failing listing, an underivable checkout or an empty keep-set
-#                   removes no lane image and WARNs the cause.
+#                   professor-pfm-{dev,sim}, ~3 GB each; docker skips
+#                   any a container uses. An overlapping prune is a skip, not a
+#                   WARN.
 #   legacy-volumes  the compose-prefixed caches from before the volumes were
-#                   named (fence_pfm-dev-*), plus the retired exact names
-#                   pfm-lane-harvest-cache and pfm-lane-uv-cache; removed once
-#                   no container uses them.
+#                   named (fence_pfm-dev-*); removed once no container uses
+#                   them.
 #   checkouts       a checkout's own fence state lives as long as the checkout:
 #                   its `iso sim` volume pfm-sim-harvest-<key> (fence_sim_volume)
 #                   and its scratch root /tmp/<checkout name minus a leading dot>
-#                   (dev.sh, lanes/run.sh derive it from the checkout
-#                   they run in). Every checkout `git worktree list` names is
+#                   (dev.sh derives it from the checkout it runs in).
+#                   Every checkout `git worktree list` names is
 #                   recorded in the ledger {stamp dir}/checkouts as three
 #                   tab-separated fields: checkout path, scratch root, sim volume.
 #                   Once it is gone, only its recorded sim volume is removed
 #                   (docker refuses one a container mounts: kept for retry).
-#                   Only timing/, build/ and lanes/ in its recorded root
+#                   Only timing/ and build/ in its recorded root
 #                   are removed, each after 1 day without modification. Other
 #                   content stays; rmdir removes an empty root. The row stays
 #                   while its root is nonempty or its sim volume needs retry.
@@ -76,15 +64,20 @@
 #                   `docker system df -v` (bounded to 120 s where the host has
 #                   `timeout`) against its budget in MB — pfm-dev-gocache
 #                   PFM_FENCE_GOCACHE_MB (15000), pfm-dev-gomod PFM_FENCE_GOMOD_MB
-#                   (4000), pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB (2000); over
+#                   (4000) and pfm-dev-lintcache PFM_FENCE_LINTCACHE_MB (2000), a
+#                   volume not created yet skipped; over
 #                   budget the volume is removed — `docker volume rm`, which the
 #                   daemon refuses atomically while any container mounts it — and
-#                   the next fence run recreates it empty: one cold build.
+#                   the next fence run recreates it empty: one cold build. This pass
+#                   runs after a shared container starts and mounts the caches, so a
+#                   refusal marks the volume ({stamp dir}/{volume}.over-budget) and
+#                   the next container start removes it before its `docker run`
+#                   (fence_cache_budget_pending).
 #   scratch         age: under /tmp/{project}, each live checkout's scratch root
 #                   and each live checkout's repo-local tmp/, an entry with no
 #                   file modified in PFM_FENCE_SCRATCH_DAYS (default 7) days is
 #                   removed; a younger directory is walked one level down by the
-#                   same rule (timing/run.*, lanes/<run>). Kept always:
+#                   same rule (timing/run.*). Kept always:
 #                   /tmp/{project}/fence (the stamps and ledger) and tmp/tools
 #                   (infra/fence/tools.sh). The fence runs as root, so a tree the
 #                   host user cannot remove is removed through a local fence
@@ -99,7 +92,7 @@
 #   WARN fence housekeeping: {step} failed: {reason}
 # and the later steps still run. A daily step that failed, or an over-budget
 # cache that could not be removed or sized, writes no stamp, so the next build
-# retries; an underivable lane hash removes no lane image; a failed checkout
+# retries; a failed checkout
 # listing removes no sim volume and no scratch root.
 
 FENCE_HK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || FENCE_HK_DIR=""
@@ -170,16 +163,10 @@ _fence_hk_containers() {
   done <<<"$out"
 }
 
+_fence_hk_has_line() { [[ $'\n'"$1"$'\n' == *$'\n'"$2"$'\n'* ]]; }
+
 _fence_hk_images() {
-  local out builds
-  if ! builds="$(docker ps --filter name=pfm-lane-build- --format '{{.Names}}' 2>&1)"; then
-    _fence_hk_warn images "listing running lane builds, prune skipped: $(_fence_hk_line "$builds")"
-    return 0
-  fi
-  if [ -n "$builds" ]; then
-    _fence_hk_say "skipped the dangling fence image prune — lane root build(s) in flight: $(_fence_hk_line "$builds")"
-    return 0
-  fi
+  local out
   if out="$(docker image prune -f --filter label=pfm.fence=1 2>&1)"; then
     case "$out" in *Deleted*) _fence_hk_say "removed dangling fence images — $(grep -i 'reclaimed' <<<"$out")" ;; esac
     return 0
@@ -188,67 +175,6 @@ _fence_hk_images() {
   _fence_hk_warn images "docker image prune: $(_fence_hk_line "$out")"
 }
 
-_fence_hk_rmi() { # _fence_hk_rmi <ref> — untag/remove without -f; in use is a keep
-  local out
-  if out="$(docker rmi "$1" 2>&1)"; then _fence_hk_say "removed image $1"; return 0; fi
-  case "$out" in
-    *"No such image"*) _fence_hk_say "image $1 already removed"; return 0 ;;
-    *conflict* | *"is using"* | *"being used"*) _fence_hk_say "kept image $1 — a container still uses it"; return 0 ;;
-  esac
-  _fence_hk_warn lane-images "docker rmi $1: $(_fence_hk_line "$out")"
-}
-
-_fence_hk_has_line() { [[ $'\n'"$1"$'\n' == *$'\n'"$2"$'\n'* ]]; }
-
-_fence_hk_lane_images() {
-  local keep="${1:-}" repo out wt h bad all current ids pins builds id ref tag tag_hash
-  # The keep-set: the argument plus every registered checkout's current hash.
-  repo="$(cd -- "$FENCE_HK_DIR/../.." 2>/dev/null && pwd -P)" || repo="$FENCE_HK_DIR"
-  if ! out="$(git -C "$repo" worktree list --porcelain 2>&1)"; then
-    _fence_hk_warn lane-images "git worktree list in $repo failed, no lane image removed: $(_fence_hk_line "$out")"; return
-  fi
-  while IFS= read -r wt; do
-    case "$wt" in worktree\ *) wt="${wt#worktree }" ;; *) continue ;; esac
-    [ -f "$wt/infra/fence/lanes/root.sh" ] || continue
-    if ! h="$(bash "$wt/infra/fence/lanes/root.sh" --print-hash 2>&1)"; then
-      _fence_hk_warn lane-images "the lane-root hash of checkout $wt is underivable, no lane image removed: $(_fence_hk_line "$h")"; return
-    fi
-    keep="$keep"$'\n'"${h##*$'\n'}"
-  done <<<"$out"
-  keep="$(sort -u <<<"$keep")"
-  keep="${keep#$'\n'}"
-  [ -n "$keep" ] || { _fence_hk_warn lane-images "no checkout yields a lane-root hash, no lane image removed"; return; }
-  bad=""
-  while IFS= read -r h; do
-    case "$h" in *[!0123456789abcdef]*) bad="$h"; break ;; esac
-  done <<<"$keep"
-  [ -z "$bad" ] || { _fence_hk_warn lane-images "'$bad' is not a lane-root hash, no lane image removed"; return; }
-  all="$(docker image ls --filter label=professor.lane-root --format '{{.ID}} {{.Repository}}:{{.Tag}}' 2>&1)" ||
-    { _fence_hk_warn lane-images "listing lane roots: $(_fence_hk_line "$all")"; return; }
-  current=""
-  while read -r h; do
-    ids="$(docker image ls --filter "label=professor.lane-root=$h" --format '{{.ID}}' 2>&1)" ||
-      { _fence_hk_warn lane-images "listing the lane root of $h: $(_fence_hk_line "$ids")"; return; }
-    current="$current"$'\n'"$ids"
-  done <<<"$keep"
-  while read -r id ref; do
-    [ -n "$id" ] || continue
-    _fence_hk_has_line "$current" "$id" && continue
-    [ "$ref" = "<none>:<none>" ] && ref="$id"
-    _fence_hk_rmi "$ref"
-  done <<<"$all"
-  pins="$(docker image ls pfm-lane-base --format '{{.Tag}}' 2>&1)" ||
-    { _fence_hk_warn lane-images "listing pfm-lane-base pins: $(_fence_hk_line "$pins")"; return; }
-  builds="$(docker ps --filter name=pfm-lane-build- --format '{{.Names}}' 2>&1)" ||
-    { _fence_hk_warn lane-images "listing running lane builds: $(_fence_hk_line "$builds")"; return; }
-  while read -r tag; do
-    case "$tag" in '' | "<none>") continue ;; esac
-    tag_hash="${tag%%-*}"
-    _fence_hk_has_line "$keep" "$tag_hash" && continue
-    _fence_hk_has_line "$builds" "pfm-lane-build-$tag" && continue
-    _fence_hk_rmi "pfm-lane-base:$tag"
-  done <<<"$pins"
-}
 
 _fence_hk_legacy_volumes() {
   local names v out
@@ -259,7 +185,7 @@ _fence_hk_legacy_volumes() {
       case "$out" in *"in use"*) _fence_hk_say "kept legacy volume $v — a container still uses it" ;;
         *) _fence_hk_warn legacy-volumes "docker volume rm $v: $(_fence_hk_line "$out")" ;; esac
     fi
-  done < <(grep -E '^(fence|infra)_pfm-dev-|^pfm-lane-(harvest|uv)-cache$' <<<"$names")
+  done < <(grep -E '^(fence|infra)_pfm-dev-' <<<"$names")
 }
 
 _fence_hk_project_dir() { # /tmp/{project} — {project} from the main checkout, so every worktree shares it
@@ -324,13 +250,36 @@ _fence_hk_cache_budget() {
       fi
       [ "$used" -gt "$budget" ] || continue
       if out="$(docker volume rm "$v" 2>&1)"; then
+        rm -f "$dir/$v.over-budget"
         _fence_hk_say "removed $v, $used MB > $budget MB budget, freed $used MB — the next fence run recreates it empty"
       else
         _fence_hk_warn cache-budget "$v is $used MB > $budget MB and was kept — docker volume rm: $(_fence_hk_line "$out")"; all_ok=0
+        case "$out" in *"in use"*) : >"$dir/$v.over-budget" || _fence_hk_warn cache-budget "could not mark $v over budget in $dir" ;; esac
       fi
     done <<<"$FENCE_CACHE_BUDGETS"
   fi
   [ "$all_ok" = 1 ] && _fence_hk_stamp cache-budget "$stamp"
+}
+
+# fence_cache_budget_pending: the container start's half of cache-budget, run before `docker run`
+# mounts the caches: each volume the detached pass marked over budget is removed while no container
+# holds it; one another container still mounts stays marked for the next start. Never fails its caller.
+fence_cache_budget_pending() {
+  local dir m v out
+  dir="$(_fence_hk_stamp_dir)"
+  for m in "$dir"/*.over-budget; do
+    [ -e "$m" ] || continue
+    v="$(basename "$m" .over-budget)"
+    if out="$(docker volume rm "$v" 2>&1)"; then
+      rm -f "$m"; _fence_hk_say "removed $v, marked over budget — this fence run recreates it empty"
+    else
+      case "$out" in
+        *[Nn]"o such volume"*) rm -f "$m" ;;
+        *) _fence_hk_warn cache-budget "$v stays marked over budget — docker volume rm: $(_fence_hk_line "$out")" ;;
+      esac
+    fi
+  done
+  return 0
 }
 
 _fence_hk_build_cache() {
@@ -462,7 +411,7 @@ _fence_hk_checkouts() {
       if [ -L "$root" ] || [ ! -d "$root" ]; then
         _fence_hk_warn checkouts "kept $root — recorded scratch root is not a directory or is a symlink"; pending=1
       else
-        for purpose in timing build lanes; do
+        for purpose in timing build; do
           [ -d "$root/$purpose" ] && [ ! -L "$root/$purpose" ] || continue
           _fence_hk_stale "$root/$purpose" 1 && _fence_hk_rmtree checkouts "$root/$purpose"
         done
@@ -501,13 +450,12 @@ _fence_hk_scratch() {
 
 # Each public entry runs in a subshell with the caller's shell options reset, so
 # no failure, unset variable or ERR trap inside it can end or fail the caller.
-fence_housekeeping() { # fence_housekeeping [lane-hash]
+fence_housekeeping() {
   fence_config_values || return 1
   (
     set +eEu +o pipefail; trap - ERR; IFS=$' \t\n'
     _fence_hk_containers
     _fence_hk_images
-    _fence_hk_lane_images "${1:-}"
     _fence_hk_legacy_volumes
     _fence_hk_checkouts
     _fence_hk_build_cache
@@ -519,7 +467,7 @@ fence_housekeeping() { # fence_housekeeping [lane-hash]
 fence_volumes_ensure() { # compose declares the caches external: they must exist before it runs
   (
     set +eEu +o pipefail; trap - ERR; IFS=$' \t\n'
-    # shellcheck disable=SC2086 # five fixed names
+    # shellcheck disable=SC2086 # three fixed names
     docker volume inspect $FENCE_CACHE_VOLUMES >/dev/null 2>&1 && exit 0
     for v in $FENCE_CACHE_VOLUMES; do
       out="$(docker volume create "$v" 2>&1)" || _fence_hk_warn volumes "docker volume create $v: $(_fence_hk_line "$out")"

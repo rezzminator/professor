@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -98,11 +100,24 @@ func TestExecuteListsEveryEndedChatOnly(t *testing.T) {
 	var out bytes.Buffer
 	(Plan{Units: []Unit{ended, survivor}}).Execute(context.Background(), &out)
 	text := out.String()
-	if !strings.Contains(text, "restart: ended 1 chat(s)") || !strings.Contains(text, "ended  claude   a") ||
-		!strings.Contains(text, "sess-a") {
+	if text != `stop   chats          claude a  ok  stopped
+stop   chats          codex b  FAILED  socket still answers
+restart: ended 1 chat(s)
+  ended  claude   a                        sess-a
+last   pfm            
+restart: 1 step(s) FAILED
+restart: exit 1
+` {
 		t.Fatalf("the ended chat is not listed with engine, name and session id:\n%s", text)
 	}
-	if strings.Contains(text, "ended  codex") {
+	if text != `stop   chats          claude a  ok  stopped
+stop   chats          codex b  FAILED  socket still answers
+restart: ended 1 chat(s)
+  ended  claude   a                        sess-a
+last   pfm            
+restart: 1 step(s) FAILED
+restart: exit 1
+` {
 		t.Fatalf("a chat that failed to end is listed as ended:\n%s", text)
 	}
 }
@@ -147,7 +162,10 @@ func TestPrintShowsThePlanAndRunsNoStep(t *testing.T) {
 	}
 	out.Reset()
 	(Plan{}).Print(&out)
-	if !strings.Contains(out.String(), "nothing found to start again") {
+	if out.String() != `restart plan: stop downstream first, then start upstream first only what was running before; chats are not brought back
+start     nothing found to start again
+last      pfm            
+` {
 		t.Fatalf("an empty start phase is not named:\n%s", out.String())
 	}
 }
@@ -187,7 +205,14 @@ func TestPrintMarksEachStartAsARestartOfAUnitThatWasUp(t *testing.T) {
 	unit := recordedUnit(&order, FamilyServices, "service", true, nil, nil)
 	unit.Before = "ActiveState=active"
 	printed, _, _ := printAndRun(t, []Unit{unit})
-	if !strings.Contains(printed, "service  restart (was up: ActiveState=active)") {
+	if printed != `restart plan: stop downstream first, then start upstream first only what was running before; chats are not brought back
+stop   1  services       service
+          found: test service
+          stop:  stop service
+start  1  services       service  restart (was up: ActiveState=active)
+          start: start service
+last      pfm            the worker
+` {
 		t.Fatalf("the start line does not say the unit was up:\n%s", printed)
 	}
 }
@@ -208,5 +233,22 @@ func TestExecuteNeverStopsOrStartsAUnitThatWasDown(t *testing.T) {
 	assertStaysStopped(t, printed, executed, "systemd pfm-x.service", "ActiveState=inactive")
 	if strings.Contains(printed, "stop   1") || strings.Contains(printed, "start  1") {
 		t.Fatalf("the plan numbers a unit that stays stopped as a step:\n%s", printed)
+	}
+}
+
+// golden compares got with testdata/{file}; a mismatch prints the GOLDEN line the fill script writes from.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Errorf(
+			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN internal/restart/testdata/%s = %q",
+			file,
+			err,
+			want,
+			got,
+			file,
+			got,
+		)
 	}
 }

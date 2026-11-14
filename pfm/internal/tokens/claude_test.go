@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBashCategoryNamesRunsNotMentions(t *testing.T) {
@@ -97,18 +98,40 @@ func TestCollectCountsMalformedUndatedAndSyntheticLines(t *testing.T) {
 		assistant("m3", "claude-sonnet-5", "2026-09-21T05:00:00Z", 0, 0, 0, 0),
 		assistant("m4", "claude-sonnet-5", "2026-09-21T05:00:00Z", 10, 10, 0, 0),
 		assistant("m4", "claude-sonnet-5", "2026-09-21T05:00:01Z", 10, 12, 0, 0),
+		assistant("m5", "claude-sonnet-5", "", 10, 10, 0, 0),
 		`{"type":"custom-title","customTitle":"demo title"}`,
 		// a clock field that is no number: the total stands, the line counts as bad
 		`{"type":"cost-state","totalCostUSD":1.5,"startTime":"2026-09-21T05:00:00Z","totalDuration":1000}`,
 	)
+	fileTime := time.Date(2026, 9, 21, 6, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(file, fileTime, fileTime); err != nil {
+		t.Fatal(err)
+	}
 	a, _, _ := testAuditor(t)
 	c, err := a.collect(file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.scan.badLines != 2 || a.scan.noTimestamp != 1 || a.scan.syntheticCalls != 2 {
+	var kept []string
+	for key := range c.usage {
+		kept = append(kept, key)
+	}
+	for _, key := range []string{"message:m1", "message:m4", "message:m5"} {
+		if c.usage[key] == nil {
+			t.Fatalf("collect kept calls %v, want message:m1, message:m4 and message:m5; %s is missing", kept, key)
+		}
+	}
+	// An undated call is kept: placed at the previous record's time, else the file's.
+	if got, want := c.usage["message:m1"].ts, float64(fileTime.UnixMilli()); got != want {
+		t.Errorf("m1 (undated, first record) ts %v, want the file time %v", got, want)
+	}
+	m4Time := float64(time.Date(2026, 9, 21, 5, 0, 1, 0, time.UTC).UnixMilli())
+	if got, want := c.usage["message:m5"].ts, m4Time; got != want {
+		t.Errorf("m5 (undated after m4) ts %v, want m4's %v", got, want)
+	}
+	if a.scan.badLines != 2 || a.scan.noTimestamp != 2 || a.scan.syntheticCalls != 2 {
 		t.Errorf(
-			"bad %d, undated %d, synthetic %d; want 2, 1, 2",
+			"bad %d, undated %d, synthetic %d; want 2, 2, 2",
 			a.scan.badLines,
 			a.scan.noTimestamp,
 			a.scan.syntheticCalls,
@@ -117,8 +140,8 @@ func TestCollectCountsMalformedUndatedAndSyntheticLines(t *testing.T) {
 	if c.harnessUSD == nil || *c.harnessUSD != 1.5 || len(c.anchors.States()) != 1 {
 		t.Errorf("harnessUSD %v, cost-states %v; want 1.5 and one state", c.harnessUSD, c.anchors.States())
 	}
-	if c.order != 1 || c.usage["message:m4"].usage.Output != 12 || c.title != "demo title" || c.cwd != "/w/demo" {
-		t.Errorf("calls %d, m4 output %d, title %q, cwd %q; want one call whose last line counts",
+	if c.order != 3 || c.usage["message:m4"].usage.Output != 12 || c.title != "demo title" || c.cwd != "/w/demo" {
+		t.Errorf("calls %d, m4 output %d, title %q, cwd %q; want three calls, m4's last line counting",
 			c.order, c.usage["message:m4"].usage.Output, c.title, c.cwd)
 	}
 }
@@ -144,7 +167,8 @@ func TestMalformedClaudeUsageIsReportedAsGap(t *testing.T) {
 		t,
 		filepath.Join(t.TempDir(), "s1.jsonl"),
 		assistant("good", "claude-sonnet-5", "2026-09-21T05:00:00Z", 10, 20, 0, 0),
-		`{"type":"assistant","timestamp":"2026-09-21T05:01:00Z","message":{"id":"bad","model":"claude-sonnet-5","usage":{"input_tokens":"broken","output_tokens":20}}}`,
+		`{"type":"assistant","timestamp":"2026-09-21T05:01:00Z","message":{"id":"bad","model":"claude-sonnet-5","content":[{"type":"tool_use","id":"tu_bad","name":"Read","input":{"file_path":"/a"}}],"usage":{"input_tokens":"broken","output_tokens":20}}}`,
+		`{"type":"user","timestamp":"2026-09-21T05:01:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_bad","content":"abc"}]}}`,
 		`{"type":"assistant"}`,
 		`{"type":"assistant","message":{"usage":null}}`,
 		`{"type":"assistant","message":{}}`,
@@ -159,6 +183,17 @@ func TestMalformedClaudeUsageIsReportedAsGap(t *testing.T) {
 	}
 	if len(c.usage) != 1 || c.usage["message:good"] == nil {
 		t.Errorf("usage = %v; want only the valid call", c.usage)
+	}
+	// The malformed usage costs only the call's usage: the tool use it carried is still registered,
+	// so the result that answers it names its tool.
+	var tools []string
+	for _, e := range c.seq {
+		if e.tool != "" {
+			tools = append(tools, e.tool)
+		}
+	}
+	if len(tools) != 1 || tools[0] != "Read" {
+		t.Errorf("tool results = %v; want one, naming Read through the malformed call's tool_use", tools)
 	}
 }
 

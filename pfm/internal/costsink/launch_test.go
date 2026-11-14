@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func fakeArm(port int, err error, calls *int) func(ArmOptions) (Armed, error) {
@@ -259,5 +261,19 @@ func TestPrepareNeverArmsWhenTheSettingsFileCannotBeRead(t *testing.T) {
 				t.Fatalf("sink log = %q, want the unreadable settings named", got)
 			}
 		})
+	}
+}
+
+// A wrapped command that cannot be found ends the launch with exec's own
+// not-found text and 127, before any ledger is decided.
+func TestRunLaunchNamesACommandItCannotFind(t *testing.T) {
+	previous := launchRunner
+	launchRunner = &deps.FakeRunner{}
+	t.Cleanup(func() { launchRunner = previous })
+	var stderr strings.Builder
+	code := RunLaunch([]string{"--", "nosuchbin"}, &stderr, &paths.MapEnv{})
+	const want = "pfm internal cost-launch: find nosuchbin: exec: \"nosuchbin\": executable file not found in $PATH\n"
+	if code != 127 || stderr.String() != want {
+		t.Fatalf("RunLaunch = %d, stderr %q; want 127, %q", code, stderr.String(), want)
 	}
 }

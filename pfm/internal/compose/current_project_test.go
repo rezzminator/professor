@@ -1,6 +1,10 @@
 package compose
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+)
 
 // The picker is opened FROM a project, and that project must lead the list.
 // Ordering by activity alone meant opening the list in projc led with proja —
@@ -13,7 +17,7 @@ func projectRow(project, name string, activityNS int64) Row {
 		ID:         project + "-" + name,
 		Name:       name,
 		Project:    project,
-		CWD:        "/work/" + project,
+		CWD:        testjail.Place("/work/") + project,
 		ActivityNS: activityNS,
 	}
 }
@@ -34,8 +38,8 @@ func TestTheProjectYouOpenedInLeadsTheList(t *testing.T) {
 	output := leadWithCurrentProject(Output{
 		Rows:         sorted,
 		ProjectOrder: order,
-		ProjectDirs:  map[string]string{"projc": "/work/projc"},
-	}, "/work/projc")
+		ProjectDirs:  map[string]string{"projc": testjail.Place("/work/projc")},
+	}, testjail.Place("/work/projc"))
 
 	if got := orderOf(output); got[0] != "projc" {
 		t.Fatalf("opened in projc, list leads with %q", got)
@@ -61,7 +65,7 @@ func TestTheProjectYouOpenedInLeadsTheList(t *testing.T) {
 	})
 	if withNew.Rows[0].Kind != NewClaude ||
 		withNew.Rows[0].Project != "projc" ||
-		withNew.Rows[0].CWD != "/work/projc" {
+		withNew.Rows[0].CWD != testjail.Place("/work/projc") {
 		t.Fatalf("New chat targets the wrong project: %#v", withNew.Rows[0])
 	}
 }
@@ -81,7 +85,7 @@ func TestAProjectWithNoChatsStillLeadsAndLosesNothing(t *testing.T) {
 		Rows:         sorted,
 		ProjectOrder: order,
 		ProjectDirs:  map[string]string{},
-	}, "/work/fresh-thing")
+	}, testjail.Place("/work/fresh-thing"))
 
 	if got := orderOf(output); got[0] != "fresh-thing" {
 		t.Fatalf("a chatless current project did not lead: %q", got)
@@ -89,7 +93,7 @@ func TestAProjectWithNoChatsStillLeadsAndLosesNothing(t *testing.T) {
 	if len(output.Rows) != len(rows) {
 		t.Fatalf("reordering dropped rows: %d of %d", len(output.Rows), len(rows))
 	}
-	if output.ProjectDirs["fresh-thing"] != "/work/fresh-thing" {
+	if output.ProjectDirs["fresh-thing"] != testjail.Place("/work/fresh-thing") {
 		t.Fatalf("current project has no directory to launch in: %#v", output.ProjectDirs)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,10 +12,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
@@ -27,7 +32,6 @@ func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
 		"pane":       "%7",
 		"engine":     "claude",
 		"id":         "session-id",
-		"source":     "tmux",
 	}
 	want := ProxyIdentity{
 		Version:    ProxyWireVersion,
@@ -37,7 +41,6 @@ func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
 		Pane:       "%7",
 		Engine:     "claude",
 		ID:         "session-id",
-		Source:     "tmux",
 	}
 	got, detail, err := parseProxyIdentity(raw)
 	if err != nil || detail != "" || !reflect.DeepEqual(got, want) {
@@ -55,35 +58,43 @@ func TestParseProxyIdentityNamesMalformedPayloads(t *testing.T) {
 		raw    any
 		detail string
 	}{
-		{name: "not object", raw: []any{"cc-seat"}, detail: "must be an object"},
+		{name: "not object", raw: []any{"cc-seat"}, detail: "<nil> MCP _meta.pfmProxy must be an object"},
 		{
 			name:   "session not string",
 			raw:    map[string]any{"v": ProxyWireVersion, "session": 7},
-			detail: "session must be a string",
+			detail: "<nil> MCP _meta.pfmProxy session must be a string",
 		},
-		{name: "session absent", raw: map[string]any{"v": ProxyWireVersion}, detail: "non-empty session"},
-		{name: "session empty", raw: map[string]any{"v": ProxyWireVersion, "session": ""}, detail: "non-empty session"},
+		{
+			name:   "session absent",
+			raw:    map[string]any{"v": ProxyWireVersion},
+			detail: "<nil> MCP _meta.pfmProxy must carry a non-empty session without whitespace or control characters",
+		},
+		{
+			name:   "session empty",
+			raw:    map[string]any{"v": ProxyWireVersion, "session": ""},
+			detail: "<nil> MCP _meta.pfmProxy must carry a non-empty session without whitespace or control characters",
+		},
 		{
 			name:   "session whitespace",
 			raw:    map[string]any{"v": ProxyWireVersion, "session": " cc-seat "},
-			detail: "without whitespace",
+			detail: "<nil> MCP _meta.pfmProxy must carry a non-empty session without whitespace or control characters",
 		},
 		{
 			name:   "session control",
 			raw:    map[string]any{"v": ProxyWireVersion, "session": "cc-seat\n"},
-			detail: "control characters",
+			detail: "<nil> MCP _meta.pfmProxy must carry a non-empty session without whitespace or control characters",
 		},
 		{name: "seat field not string", raw: func() map[string]any {
 			payload := valid()
 			payload["pane"] = 7
 			return payload
-		}(), detail: "pane must be a string"},
+		}(), detail: "<nil> MCP _meta.pfmProxy pane must be a string"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, detail, err := parseProxyIdentity(test.raw)
-			if err != nil || !strings.Contains(detail, test.detail) {
-				t.Fatalf("detail=%q err=%v, want nil error and detail containing %q", detail, err, test.detail)
+			if got := fmt.Sprint(err, " ", detail); got != test.detail {
+				t.Errorf("error and detail = %q, want %q", got, test.detail)
 			}
 		})
 	}
@@ -97,11 +108,34 @@ func TestParseProxyIdentityRejectsUnsupportedWireVersions(t *testing.T) {
 		received string
 		include  bool
 	}{
-		{name: "missing", received: "missing"},
-		{name: "zero integer", version: 0, received: "0", include: true},
-		{name: "zero JSON number", version: float64(0), received: "0", include: true},
-		{name: "next", version: float64(ProxyWireVersion + 1), received: "2", include: true},
-		{name: "not numeric", version: "one", received: "one", include: true},
+		{
+			name:     "missing",
+			received: "\"\" proxy wire version missing is unsupported; daemon requires version 1; restart the chat so its engine launches the new proxy",
+		},
+		{
+			name:     "zero integer",
+			version:  0,
+			received: "\"\" proxy wire version 0 is unsupported; daemon requires version 1; restart the chat so its engine launches the new proxy",
+			include:  true,
+		},
+		{
+			name:     "zero JSON number",
+			version:  float64(0),
+			received: "\"\" proxy wire version 0 is unsupported; daemon requires version 1; restart the chat so its engine launches the new proxy",
+			include:  true,
+		},
+		{
+			name:     "next",
+			version:  float64(ProxyWireVersion + 1),
+			received: "\"\" proxy wire version 2 is unsupported; daemon requires version 1; restart the chat so its engine launches the new proxy",
+			include:  true,
+		},
+		{
+			name:     "not numeric",
+			version:  "one",
+			received: "\"\" proxy wire version one is unsupported; daemon requires version 1; restart the chat so its engine launches the new proxy",
+			include:  true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -110,35 +144,40 @@ func TestParseProxyIdentityRejectsUnsupportedWireVersions(t *testing.T) {
 				payload["v"] = test.version
 			}
 			_, detail, err := parseProxyIdentity(payload)
-			if err == nil || detail != "" {
-				t.Fatalf("detail=%q err=%v, want a version error", detail, err)
-			}
-			message := err.Error()
-			for _, part := range []string{
-				test.received,
-				"requires version 1",
-				"restart the chat",
-			} {
-				if !strings.Contains(message, part) {
-					t.Errorf("error %q does not name %q", message, part)
-				}
+			if got := fmt.Sprintf("%q %v", detail, err); got != test.received {
+				t.Errorf("detail and error = %q, want %q", got, test.received)
 			}
 		})
 	}
 }
 
 func TestBirthProxyErrorPayload(t *testing.T) {
-	for _, kind := range []string{"not_in_chat", "not_registered", "ambiguous", "failed"} {
-		_, detail, err := parseProxyIdentity(
-			map[string]any{"v": 1, "error": map[string]any{"kind": kind, "message": "lookup failed"}},
-		)
-		if err != nil || detail != "" {
-			t.Errorf("kind %s: detail=%q err=%v", kind, detail, err)
+	const unread = "caller identity lookup failed without a message"
+	for _, test := range []struct {
+		kind, message      any
+		wantKind, wantText string
+	}{
+		{"not_in_chat", "lookup failed", "not_in_chat", "lookup failed"},
+		{"not_registered", "lookup failed", "not_registered", "lookup failed"},
+		{"ambiguous", "lookup failed", "ambiguous", "lookup failed"},
+		{"failed", "lookup failed", "failed", "lookup failed"},
+		{"not_registered", " ", "not_registered", unread},
+		{"x", "bad", "failed", `bad (unknown error kind "x")`},
+		{float64(3), nil, "failed", unread + " (unknown error kind 3)"},
+	} {
+		raw := map[string]any{"kind": test.kind, "message": test.message}
+		got, detail, err := parseProxyIdentity(map[string]any{"v": 1, "error": raw})
+		want := ProxyIdentityError{Kind: test.wantKind, Message: test.wantText}
+		if err != nil || detail != "" || got.Error == nil || *got.Error != want {
+			t.Errorf(
+				"error payload %v: parsed error %+v, detail=%q err=%v; want %+v",
+				raw,
+				got.Error,
+				detail,
+				err,
+				want,
+			)
 		}
-	}
-	_, detail, err := parseProxyIdentity(map[string]any{"v": 1, "error": map[string]any{"kind": "x", "message": "bad"}})
-	if err != nil || detail != `MCP _meta.pfmProxy error kind "x" is unknown` {
-		t.Fatalf("unknown kind: detail=%q err=%v", detail, err)
 	}
 }
 
@@ -171,7 +210,6 @@ func TestBirthProxyForwardsCurrentHerdrSeatAndErrors(t *testing.T) {
 		Pane:           "wC:p24",
 		Engine:         "claude",
 		ID:             "conversation-a",
-		Source:         "herdr-ancestry",
 	}
 	currentErr := resolve.ErrNotRegistered
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return identity, currentErr }
@@ -193,8 +231,7 @@ func TestBirthProxyForwardsCurrentHerdrSeatAndErrors(t *testing.T) {
 		got := meta["pfmProxy"].(map[string]any)
 		if kind == "ok" {
 			if got["session"] != "87caf6bf" || got["backend"] != "herdr" || got["seatId"] != "87caf6bf" ||
-				got["herdrWorkspace"] != "wC" ||
-				got["source"] != "herdr-ancestry" {
+				got["herdrWorkspace"] != "wC" {
 				t.Fatalf("current Herdr identity=%v", got)
 			}
 		} else {
@@ -209,5 +246,66 @@ func TestBirthProxyForwardsCurrentHerdrSeatAndErrors(t *testing.T) {
 				t.Errorf("unresolved kind %s retained identity: %v", kind, got)
 			}
 		}
+	}
+}
+
+// A request whose caller is not proven is never placed as "outside Herdr":
+// withBirthCaller carries it unproven, and with a Herdr server running every
+// caller's chat is hosted in Herdr: a Herdr seat's in its pane, any other's on
+// the running server.
+func TestWithBirthCaller(t *testing.T) {
+	herdrSeat := resolve.Identity{Backend: "herdr", SocketPath: "/h/herdr.sock", Pane: "wC:p24", HerdrWorkspace: "wC"}
+	onServer := spawn.BackendChoice{Backend: "herdr", HerdrSocket: "/env/herdr.sock"}
+	const unproven = "caller unproven: "
+	for _, tc := range []struct {
+		name      string
+		ambient   bool
+		caller    callerIdentity
+		want      spawn.BackendChoice
+		callerErr string
+	}{
+		{name: "no caller identity", want: onServer, callerErr: unproven + "the MCP request carried no caller identity"},
+		{
+			name: "a client in no chat pane", caller: callerIdentity{present: true, absent: true, err: errors.New("not in chat")},
+			want: onServer, callerErr: unproven + "the MCP client's process is in no pfm chat pane (not in chat)",
+		},
+		{
+			name:   "a caller that did not resolve",
+			caller: callerIdentity{present: true, detail: "herdr timed out", err: errors.New("herdr timed out")},
+			want:   onServer, callerErr: unproven + "the MCP caller did not resolve: herdr timed out",
+		},
+		{
+			name: "a Herdr seat", caller: callerIdentity{present: true, valid: true, identity: herdrSeat},
+			want: spawn.BackendChoice{Backend: "herdr", HerdrSocket: "/h/herdr.sock", HerdrPane: "wC:p24", HerdrWorkspace: "wC"},
+		},
+		{
+			name: "a tmux seat", want: onServer,
+			caller: callerIdentity{present: true, valid: true, identity: resolve.Identity{Backend: "tmux"}},
+		},
+		{name: "a stdio server's own plain process", ambient: true, want: onServer, callerErr: resolve.ErrNotInChat.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range []string{
+				"TMUX", "TMUX_PANE", "HERDR_SOCKET_PATH", "HERDR_PANE_ID",
+				"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID",
+			} {
+				t.Setenv(name, "")
+			}
+			ctx, recorder := obs.Test(t)
+			ctx = pfmtmux.WithClientRunner(ctx, testjail.AbsentTmuxRunner())
+			ctx = chat.WithHerdrServer(ctx, spawn.HerdrServer{
+				Socket: "/env/herdr.sock", Up: func(context.Context, string) error { return nil },
+			})
+			service := newService("test", &backend{allowAmbientIdentity: tc.ambient})
+			choice, err := chat.BirthBackend(service.withBirthCaller(ctx, "mcp.open", tc.caller), "cli.open", "auto")
+			choice.Places = nil
+			if err != nil || !reflect.DeepEqual(choice, tc.want) {
+				t.Fatalf("choice=%+v error=%v; want %+v", choice, err, tc.want)
+			}
+			records := recorder.Records()
+			if callerErr, _ := records[len(records)-1].Field("caller_err"); callerErr != tc.callerErr {
+				t.Fatalf("caller_err=%v, want %q", callerErr, tc.callerErr)
+			}
+		})
 	}
 }

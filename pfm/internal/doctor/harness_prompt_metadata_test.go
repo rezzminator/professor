@@ -125,9 +125,8 @@ func TestHarnessFencedIdentityExampleRemainsBehavioral(t *testing.T) {
 	}
 }
 
-// A baseline that cannot be used says WHICH baseline and WHY: the .model read
-// error, the pinned body's read error, or the digest the body no longer
-// matches. "missing, unreadable or inconsistent" alone leaves the operator to
+// A baseline that cannot be used says WHICH baseline and WHY: the pinned
+// body's read error, or the digest the body no longer matches. "missing, unreadable or inconsistent" alone leaves the operator to
 // guess which of the three it was.
 func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 	saved := HarnessCaptureOverride
@@ -140,14 +139,12 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 	for _, scenario := range []struct {
 		name          string
 		breakBaseline func(dir string) error
-		cause         string
-		state         string
+		want          string
 	}{
 		{
 			name:          "baseline file missing",
 			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, model.Stem+".sha256")) },
-			cause:         "no such file or directory",
-			state:         "baseline file missing",
+			want:          "1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=open {root}/harness-original.sha256: no such file or directory — baseline file missing; update or restore the clone at {root}\n",
 		},
 		{
 			name: "baseline file unreadable",
@@ -158,32 +155,28 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 				}
 				return os.Mkdir(path, 0o700)
 			},
-			cause: "is a directory",
-			state: "baseline file unreadable",
+			want: "1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=read {root}/harness-original.sha256: is a directory — baseline file unreadable; update or restore the clone at {root}\n",
 		},
 		{
 			name: "wrong field count",
 			breakBaseline: func(dir string) error {
 				return os.WriteFile(filepath.Join(dir, model.Stem+".sha256"), []byte("not-two-fields\n"), 0o600)
 			},
-			cause: `want "<sha256> <body file>", found 1 field(s)`,
-			state: "baseline file malformed",
+			want: "1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=want \"<sha256> <body file>\", found 1 field(s) — baseline file malformed; update or restore the clone at {root}\n",
 		},
 		{
 			name: "bad digest",
 			breakBaseline: func(dir string) error {
 				return os.WriteFile(filepath.Join(dir, model.Stem+".sha256"), []byte("zz harness-prompt-fixture.md\n"), 0o600)
 			},
-			cause: "encoding/hex: invalid byte",
-			state: "baseline digest malformed",
+			want: "1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=encoding/hex: invalid byte: U+007A 'z' — baseline digest malformed; update or restore the clone at {root}\n",
 		},
 		{
 			name: "short digest",
 			breakBaseline: func(dir string) error {
 				return os.WriteFile(filepath.Join(dir, model.Stem+".sha256"), []byte("00 harness-prompt-fixture.md\n"), 0o600)
 			},
-			cause: "decoded digest has 1 byte(s), want 32",
-			state: "baseline digest malformed",
+			want: "1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=decoded digest has 1 byte(s), want 32 — baseline digest malformed; update or restore the clone at {root}\n",
 		},
 		{
 			name: "body not a base name",
@@ -195,28 +188,19 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 				raw = []byte(strings.Replace(string(raw), "harness-prompt-fixture.md", "nested/body.md", 1))
 				return os.WriteFile(filepath.Join(dir, model.Stem+".sha256"), raw, 0o600)
 			},
-			cause: `body file "nested/body.md" is not a base name`,
-			state: "baseline digest malformed",
-		},
-		{
-			name:          "model file missing",
-			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, model.Stem+".model")) },
-			cause:         model.Stem + ".model: no such file or directory",
-			state:         "baseline inconsistent",
+			want: "1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=body file \"nested/body.md\" is not a base name — baseline digest malformed; update or restore the clone at {root}\n",
 		},
 		{
 			name:          "pinned body missing",
 			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, "harness-prompt-fixture.md")) },
-			cause:         "harness-prompt-fixture.md: no such file or directory",
-			state:         "baseline inconsistent",
+			want:          "1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=captured model=\"claude-sonnet-5\" body=\"harness-prompt-fixture.md\": open {root}/harness-prompt-fixture.md: no such file or directory — baseline inconsistent; update or restore the clone at {root}\n",
 		},
 		{
 			name: "digest mismatch",
 			breakBaseline: func(dir string) error {
 				return os.WriteFile(filepath.Join(dir, "harness-prompt-fixture.md"), []byte("edited\n"), 0o600)
 			},
-			cause: "does not match",
-			state: "baseline inconsistent",
+			want: "1 doctor: harness-prompt requested=sonnet\ndoctor: harness-prompt: BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir={root} path={root}/harness-original.sha256 error=captured model=\"claude-sonnet-5\" body=\"harness-prompt-fixture.md\": digest 68f01b289aedcf28e96fce1f9444365e83b9bfc7e1bf32df20f1f15966835316 of harness-prompt-fixture.md does not match 1832797f55feeb8fba15e5c5060ba388948b1efa717da9f56ff5b49afdcddd1b — baseline inconsistent; update or restore the clone at {root}\n",
 		},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -231,20 +215,8 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 			}
 			var out bytes.Buffer
 			code := printModelHarnessPromptDoctor(context.Background(), &out, home, model)
-			line := out.String()
-			for _, want := range []string{
-				"BASELINE UNAVAILABLE",
-				"path=" + filepath.Join(dir, model.Stem+".sha256"),
-				"error=",
-				scenario.cause,
-				"— " + scenario.state + "; update or restore the clone at " + dir,
-			} {
-				if code != 1 || !strings.Contains(line, want) {
-					t.Fatalf("code=%d, row does not carry %q: %s", code, want, line)
-				}
-			}
-			if !strings.Contains(line, "identity="+model.Stem+" model=\""+model.Alias+"\"") {
-				t.Fatalf("row lost requested identity: %s", line)
+			if got := fmt.Sprintf("%d %s", code, rooted(out.String(), dir)); got != scenario.want {
+				t.Errorf("code and row = %q, want %q", got, scenario.want)
 			}
 		})
 	}

@@ -12,7 +12,6 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/headless"
 )
 
 const chatKeysUsage = "usage: pfm chat keys [--delay ms] [--literal] [--capture] <target> <key>..."
@@ -45,62 +44,38 @@ func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runti
 		return 2
 	}
 
-	ctx := context.Background()
-	chat, code := headlessTarget(ctx, target, stdout, stderr, false, runtimes...)
-	if code != 0 {
-		return code
+	keyed, err := pfmchat.PressKeys(context.Background(), firstRuntime(runtimes), target, keys)
+	if !keyed.Landed {
+		return reportChatRefusal("keys", err, target, stdout, stderr)
 	}
-	if !chat.Live {
-		fmt.Fprintf(stderr, "pfm chat keys: %q is not running\n", chat.Name)
-		return codeDeadChat
-	}
-	door, seat, err := chatSeat(chat)
+	fmt.Fprintf(stdout, "%s\t%d key(s)\t%s\n", keyed.Chat.Name, keyed.Sent.Count, strings.Join(keys.Keys, " "))
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
-		return 1
+		return reportChatRefusal("keys", err, target, stdout, stderr)
 	}
-	sent, err := pfmchat.SendKeys(ctx, door, seat, keys)
-	switch {
-	case errors.Is(err, pfmchat.ErrKeyCapability):
-		fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
-		return 2
-	case errors.Is(err, pfmchat.ErrKeySend):
-		fmt.Fprintf(stderr, "pfm chat keys: %s: %v\n", keys.Keys[sent.Count], err)
-		return codeDeadChat
-	case err != nil && !errors.Is(err, pfmchat.ErrKeyCapture):
-		fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "%s\t%d key(s)\t%s\n", chat.Name, sent.Count, strings.Join(keys.Keys, " "))
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat keys: capture: %v\n", err)
-		return codeDeadChat
-	}
-	fmt.Fprint(stdout, sent.Screen)
+	fmt.Fprint(stdout, keyed.Sent.Screen)
 	return 0
 }
 
-// chatSeat is the call engine's door on a live chat's seat — the one address
-// chat keys and chat capture both reach.
-func chatSeat(chat headless.Chat) (*pfmcall.Engine, pfmcall.Target, error) {
-	door, err := pfmchat.NewCallEngineWith(pfmchat.CallDependencies{})
-	if err != nil {
-		return nil, pfmcall.Target{}, err
+// reportChatRefusal renders a chat function's failure at the CLI door: a target scan that could not look as
+// reportTargetError, an unknown chat as its missing row (renderNoSuchChat), any other refusal (pfmchat.Refusal)
+// as the verb's stderr line exiting its code; an error that is no refusal means a step could not run (exit 1).
+func reportChatRefusal(verb string, err error, name string, stdout, stderr io.Writer) int {
+	var target *pfmchat.TargetError
+	var refusal pfmchat.Refusal
+	switch {
+	case errors.As(err, &target):
+		return reportTargetError(err, name, stdout, stderr, false)
+	case errors.As(err, &refusal) && refusal.Code == pfmcall.CodeUnknown:
+		return renderNoSuchChat(name, stdout, stderr, false)
+	case errors.As(err, &refusal) && refusal.Code == pfmcall.CodeAmbiguous:
+		fmt.Fprintf(stderr, "pfm chat: %s\n", refusal.Message)
+		return refusal.Code
+	case errors.As(err, &refusal):
+		fmt.Fprintf(stderr, "pfm chat %s: %s\n", verb, refusal.Message)
+		return refusal.Code
 	}
-	seat, err := chatTarget(chat)
-	return door, seat, err
-}
-
-// chatTarget is a live chat's seat address on either host.
-func chatTarget(chat headless.Chat) (pfmcall.Target, error) {
-	socketPath := chat.Socket
-	if chat.Backend != pfmcall.HerdrBackend {
-		var err error
-		if socketPath, err = chatSocketPath(chat.Socket); err != nil {
-			return pfmcall.Target{}, err
-		}
-	}
-	return pfmcall.Target{Backend: chat.Backend, SocketPath: socketPath, Pane: pfmchat.PaneTarget(chat)}, nil
+	fmt.Fprintf(stderr, "pfm chat %s: %v\n", verb, err)
+	return 1
 }
 
 // chatPaneTarget picks the most specific tmux address a resolved chat carries.

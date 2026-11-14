@@ -186,7 +186,8 @@ func TestRunDoesNotMarkStashRefusalWhenDisplayFails(t *testing.T) {
 		displayErr:  errors.New("display failed"),
 	}
 	err := runStashToggle(t, tmux)
-	if err == nil || PaneTold(err) || !strings.Contains(err.Error(), "display stash refusal") {
+	if err == nil || PaneTold(err) ||
+		err.Error() != "composer draft \"half-typed question\" will not stash (after Ctrl+S it shows \"half-typed question\") — /exit was not typed; clear or send the draft, then reload again\ndisplay stash refusal: display failed" {
 		t.Fatalf("stash error=%v paneTold=%t", err, PaneTold(err))
 	}
 }

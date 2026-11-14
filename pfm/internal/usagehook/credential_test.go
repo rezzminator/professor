@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -141,8 +142,10 @@ func TestLoadCredentialSurfacesAKeychainFailureRatherThanReportingAbsence(t *tes
 	if IsCredentialUnavailable(err) {
 		t.Fatalf("err=%v, a keychain we FAILED to read must not read as an absent credential", err)
 	}
-	if !strings.Contains(err.Error(), "User interaction is not allowed") {
-		t.Fatalf("err=%q, want the underlying keychain failure preserved", err)
+	if got, want := regexp.MustCompile(`credentials-[0-9a-f]+`).
+		ReplaceAllString(err.Error(), "credentials-{hash}"),
+		"read keychain item \"Claude Code-credentials-{hash}\": User interaction is not allowed"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 }
 

@@ -16,23 +16,13 @@ checks_templates_clone() {
   run "templates: clone ratchet (jscpd)" -- bash "$REPO_ROOT/scripts/clone-check.sh"
 }
 
-checks_templates_check_map_serial() {
-  # The lane↔command map gate (infra/fence/lanes/check-map.sh). --no-derive
-  # skips the command/tool surface derive, which needs a built pfm; its own
-  # broken state is a named red line and rc 1/2, never a silent pass.
-  run "templates: lane↔command map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
-}
-
-checks_templates_lanes_serial() {
-  run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
-}
-
-checks_templates_demo_serial() {
-  run "templates: demo fence self-tests" -- bash -c 'for t in "$1"/infra/demo/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
+checks_templates_fence_serial() {
+  run "templates: fence script self-tests" -- bash -c 'for t in "$1"/infra/fence/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
 }
 
 checks_templates_plugin_logs() {
   run "templates: plugin-logs self-test" -- bash "$REPO_ROOT/scripts/test-plugin-logs.sh"
+  run "templates: platform door self-test" -- bash "$REPO_ROOT/scripts/test-platform.sh"
 }
 
 # The plugin lab's hermetic half: its shell linted at warning level
@@ -204,12 +194,12 @@ checks_templates_scratch_paths() {
     # `/tmp/<name>` a host run shares with every other checkout. Allowed: the
     # derived `/tmp/$PROJECT/…` forms, anonymous `mktemp` templates (XXXXXX),
     # and tmux's own `/tmp/tmux-<uid>` socket dir. Container-only code (the
-    # fence and demo lanes, the e2e docker run) and test fixtures are excluded
+    # fence, the e2e docker run) and test fixtures are excluded
     # BY NAME and counted, never filtered in silence; zero code files scanned
     # is a broken scan, not a clean tree. A comment line names a path, it does
     # not write one, so hits whose text opens with #, // or * are dropped.
     local code_ext='\.(sh|bash|mjs|js|ts|py|go)$'
-    local code_skip='^(infra/(fence|demo)/|scripts/e2e-linux\.sh$)|(_test\.go|\.test\.(mjs|js|ts))$|/testdata/'
+    local code_skip='^(infra/fence/|scripts/e2e-linux\.sh$)|(_test\.go|\.test\.(mjs|js|ts))$|/testdata/'
     local code_z="$TMP_BASE/templates/tracked-code.z" code_n code_skipped repo_local bare
     grep -zE "$code_ext" < "$TMP_BASE/templates/tracked.z" | grep -zvE "$code_skip" > "$code_z" || true
     code_n=$(tr -cd '\0' < "$code_z" | wc -c | tr -d ' ')
@@ -221,7 +211,7 @@ checks_templates_scratch_paths() {
         /dev/null < "$code_z" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' || true)
       bare=$(xargs -0 grep -nE '(^|[^A-Za-z0-9_}.-])/tmp/[A-Za-z0-9_.-]' /dev/null < "$code_z" 2>/dev/null \
         | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' | grep -vE 'XXXXXX|/tmp/tmux-' || true)
-      info "scratch-path policy: $code_n code file(s) scanned; $code_skipped excluded by name (container-only lanes, the e2e docker run, test fixtures)"
+      info "scratch-path policy: $code_n code file(s) scanned; $code_skipped excluded by name (container-only fence code, the e2e docker run, test fixtures)"
       if [[ -z "$repo_local$bare" ]]; then
         ok "no tracked code writes a repo-local tmp/ or a fixed-name bare /tmp path"
       else
@@ -235,7 +225,7 @@ checks_templates_scratch_paths() {
 
 checks_templates_descriptions() {
   head_ "templates — description registry"
-  # A `description:` is the routing registry (/quality:description). An
+  # A `description:` is the routing registry (/law:description). An
   # unquoted `: ` in one breaks the YAML: Claude Code's lenient parser still
   # registers the entry, a stricter runtime silently drops it, and no prompt
   # rule can see it. The script distinguishes its own broken state from a
@@ -354,8 +344,8 @@ checks_templates_mirrors_generate() {
 
 checks_templates_generated_agents() {
   local es_bin="$TMP_BASE/engine-sync/engine-sync" sources="$REPO_ROOT/templates/global/agents"
-  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown="" unmapped=""
-  local tracked="$REPO_ROOT/templates/generated/agents"
+  local jail home src names declared name rendered=0 missing="" out rc=0 named="" stale unknown="" unmapped="" path
+  local tracked="$REPO_ROOT/templates/generated/agents" kept fixture inventory
   head_ "templates — generated agents render"
   # A machine agent .md file carrying from: is a declaration: engine-sync renders
   # it as a generated agent, the source agent with swapped body text; a shared file
@@ -376,8 +366,11 @@ checks_templates_generated_agents() {
   # agent's tools line names a server the twin cannot grant, so the twin loses
   # the tool, and the warning is a red line naming each server; an `unmapped
   # OpenCode model alias` warning means a twin lost its model pin, and is a red
-  # line naming each alias.
-  if ! need_tool go templates || ! need_tool python3 templates; then
+  # line naming each alias. Only files git tracks or would track are judged: a
+  # developer's gitignored local-only agent never ships, so the copy drops every
+  # ignored path before the inventory, the render and the stale comparison read
+  # it, and a git that cannot list them is a red line, never a guess.
+  if ! need_tool go templates || ! need_tool python3 templates || ! need_tool git templates; then
     fail_step "generated agents NOT RENDERED — the toolchain is missing"
     return
   elif ! engine_sync_build_once "$es_bin"; then
@@ -385,24 +378,6 @@ checks_templates_generated_agents() {
     return
   elif [[ ! -d "$sources" ]]; then
     fail_step "generated agents NOT RENDERED — $sources is missing, so nothing was looked up"
-    return
-  elif names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$sources" --declarations 2>&1)"; then
-    : # The parsed inventory is counted below.
-  else
-    rc=$?
-    # Only the producer's exit 1 REJECTED is a source parse failure.
-    if [[ "$rc" -eq 3 && "$names" == "GAP install"* ]]; then
-      fail_step "generated agents NOT RENDERED — $names"
-    elif [[ "$rc" -eq 1 && "$names" == "agent-source-inventory: REJECTED"* ]]; then
-      fail_step "generated agents NOT RENDERED — agent sources do not parse: $names"
-    else
-      fail_step "generated agents NOT RENDERED — agent source lookup failed (exit $rc): $names"
-    fi
-    return
-  fi
-  declared=$(grep -c . <<<"$names" || true)
-  if (( declared == 0 )); then
-    fail_step "generated agents NOT RENDERED — agent sources carry no declaration, so nothing could render"
     return
   fi
   mkdir -p "$TMP_BASE/engine-sync"
@@ -412,10 +387,54 @@ checks_templates_generated_agents() {
   fi
   home="$jail/home"
   src="$jail/src"
+  kept="$jail/tracked-generated"
   mkdir -p "$home/.claude" "$home/.codex" "$src"
-  # The copy drops the tracked render so an orphan or a stale file shows.
-  if ! cp -a "$REPO_ROOT/templates" "$src/templates" || ! rm -rf "$src/templates/generated"; then
+  if ! cp -a "$REPO_ROOT/templates" "$src/templates"; then
     fail_step "generated agents NOT RENDERED — templates/ could not be copied into the jail"
+    rm -rf "$jail"
+    return
+  fi
+  if ! checks_repo_git ls-files -z --others --ignored --exclude-standard -- templates >"$jail/ignored.z"; then
+    fail_step "generated agents NOT RENDERED — git could not list the ignored files under templates/ at $REPO_ROOT, so local-only files cannot be told from the tree under test"
+    rm -rf "$jail"
+    return
+  fi
+  while IFS= read -r -d '' path; do
+    rm -f -- "$src/$path" || { rc=1; break; }
+  done <"$jail/ignored.z"
+  # The tracked render moves aside so an orphan or a stale file shows against a fresh one.
+  if (( rc != 0 )) || { [[ -e "$src/templates/generated" ]] && ! mv "$src/templates/generated" "$kept"; }; then
+    fail_step "generated agents NOT RENDERED — the ignored files could not be dropped from the jail copy of templates/"
+    rm -rf "$jail"
+    return
+  fi
+  if names="$(python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" "$src/templates/global/agents" --declarations 2>&1)"; then
+    : # The parsed inventory is counted below.
+  else
+    rc=$?
+    names="${names//"$src"/"$REPO_ROOT"}" # an error names the repository path, never the removed jail
+    # Only the producer's exit 1 REJECTED is a source parse failure.
+    if [[ "$rc" -eq 3 && "$names" == "GAP install"* ]]; then
+      fail_step "generated agents NOT RENDERED — $names"
+    elif [[ "$rc" -eq 1 && "$names" == "agent-source-inventory: REJECTED"* ]]; then
+      fail_step "generated agents NOT RENDERED — agent sources do not parse: $names"
+    else
+      fail_step "generated agents NOT RENDERED — agent source lookup failed (exit $rc): $names"
+    fi
+    rm -rf "$jail"
+    return
+  fi
+  # pfm's unit tests read the agent inventory from a tracked fixture (testjail's registry.go) and
+  # start no interpreter: the fixture equals the inventory of the tree under test, or is stale.
+  fixture="$REPO_ROOT/pfm/internal/testjail/testdata/global-agents.json"
+  if ! inventory="$(cd "$src" && python3 -I "$REPO_ROOT/scripts/agent-source-inventory.py" templates/global/agents 2>&1)"; then
+    fail_step "agent inventory fixture NOT CHECKED — the inventory failed: $inventory"
+  elif [[ "$inventory" != "$(cat "$fixture" 2>&1)" ]]; then
+    fail_step "agent inventory fixture is stale: python3 -I scripts/agent-source-inventory.py templates/global/agents > pfm/internal/testjail/testdata/global-agents.json"
+  fi
+  declared=$(grep -c . <<<"$names" || true)
+  if (( declared == 0 )); then
+    fail_step "generated agents NOT RENDERED — agent sources carry no declaration, so nothing could render"
     rm -rf "$jail"
     return
   fi
@@ -454,9 +473,10 @@ checks_templates_generated_agents() {
     # A policy without a source-repository generated directory renders into
     # the home store: neither side exists and there is nothing to compare.
     stale=""
-    if [[ -e "$src/templates/generated/agents" || -e "$tracked" ]]; then
+    if [[ -e "$src/templates/generated/agents" || -e "$kept/agents" ]]; then
       mkdir -p "$src/templates/generated/agents" # a render of nothing is an empty directory: each tracked file is named
-      stale="$(diff -rq "$src/templates/generated/agents" "$tracked" 2>&1 || true)"
+      stale="$(diff -rq "$src/templates/generated/agents" "$kept/agents" 2>&1 || true)"
+      stale="${stale//"$kept/agents"/"$tracked"}" # the filtered copy stands for the tracked directory, named by its repository path
     fi
     if (( rendered != declared )); then
       cat "$out"
@@ -527,7 +547,8 @@ checks_templates_mirrors_roster() {
       fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
     fi
   fi
-  ENGINE_SYNC_BIN="$es_bin" node_test_suite "generated agent rosters" "$TMP_BASE/templates/agent-roster.tap" scripts/check-agent-roster.test.mjs
+  # Each roster test blocks on the checker it starts: eight processes share the suite.
+  ENGINE_SYNC_BIN="$es_bin" NODE_TEST_SHARDS=8 node_test_suite "generated agent rosters" "$TMP_BASE/templates/agent-roster.tap" scripts/check-agent-roster.test.mjs
 }
 
 checks_templates_release_check() {
@@ -548,12 +569,22 @@ checks_templates_refresh_scope() {
 
 }
 
+checks_templates_plugin_workflows() {
+  head_ "templates — plugin workflow shape check fixtures"
+  run "templates: plugin workflow shape check fixtures" -- python3 "$REPO_ROOT/scripts/test-check-plugin-workflows.py"
+}
+
 checks_templates_worktree_script() {
   head_ "templates — shipped worktree.sh lifecycle safety"
   if bash "$REPO_ROOT/scripts/test-worktree.sh"; then
-    ok "worktree.sh refuses dirty removal, keeps registered paths with spaces, and names failed provisioning"
+    ok "worktree.sh refuses dirty removal, keeps registered paths with spaces, names failed provisioning, and lands only a fast-forward"
   else
-    fail_step "worktree.sh lifecycle regression FAILED — dirty removal, prune registration, or provisioning failure handling broke (see output)"
+    fail_step "worktree.sh lifecycle regression FAILED — dirty removal, prune registration, provisioning failure handling, land or the header/case/rule verb agreement broke (see output)"
+  fi
+  if bash "$REPO_ROOT/scripts/test-worktree-local.sh"; then
+    ok "this repo's worktree.sh populates plugins, lands only a fast-forward of develop, and keeps plugin work on remove"
+  else
+    fail_step "this repo's worktree.sh regression FAILED — plugin init fallback, land, the plugin proof before --force or the header/case/rule verb agreement broke (see output)"
   fi
 }
 
@@ -575,11 +606,6 @@ checks_templates_format_md() {
     fail_step "format-md regression FAILED — an unfixed rumdl issue must reach the agent as exit 2 with UNFIXED lines (see output)"
   fi
 
-}
-
-checks_templates_flight_templates() {
-  head_ "templates — flight prompt contracts"
-  run "templates: flight prompt contracts" -- bash "$REPO_ROOT/scripts/test-flight-templates.sh"
 }
 
 checks_templates_unit_script() { # <name>: scripts/test-<name>.sh, the self-test of .claude/scripts/<name>.sh, on its default script
@@ -669,11 +695,11 @@ PY
 
 checks_templates_skill_tests() {
   local skill cp_out
-  for skill in codeprobe tracetree chatlog; do
+  for skill in codeprobe chatlog interaction-faults; do
     head_ "templates — $skill skill tests"
     cp_out="$TMP_BASE/templates/$skill.txt"
-    if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
-      fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
+    if ! compgen -G "templates/global/skills/$skill/*_test.py" >/dev/null; then
+      fail_step "$skill tests NOT RUN — templates/global/skills/$skill/ holds no *_test.py"
     elif ! skill_unittest_sharded "$cp_out" "templates/global/skills/$skill/"*_test.py; then
       cat "$cp_out"
       if grep -Eq '^Ran 0 tests?' "$cp_out"; then
@@ -729,8 +755,8 @@ checks_templates_output_styles() {
   [[ "$found" == 1 ]] || ok "no output style is tracked, on disk, or set in a settings file"
 }
 
-# One catalogue for the serial runner and the parallel gate. Scheduling-only
-# lane/demo aggregates and the gate's heavy check-map stay at their boundaries.
+# One catalogue for the serial runner and the parallel gate. The serial fence
+# self-test aggregate stays at its boundary: the gate registers each suite.
 checks_named_template_steps() { # <callback> <name>...: register the matching checks_templates_<name> command
   local add="$1" name
   shift
@@ -741,9 +767,9 @@ checks_named_template_steps() { # <callback> <name>...: register the matching ch
 
 checks_templates_steps() { # <callback>: callback <step name> <command> [args...]
   local add="$1" name
-  checks_named_template_steps "$add" clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions mirrors \
-    generated-agents release-check refresh-scope worktree-script dev-report \
-    format-md flight-templates theme-glyphs || return 1
+  checks_named_template_steps "$add" mirrors clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions \
+    generated-agents release-check refresh-scope plugin-workflows worktree-script dev-report \
+    format-md theme-glyphs || return 1
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1
   done
@@ -753,18 +779,19 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
 checks_templates_step_serial() { shift; "$@"; }
 
 checks_templates() {
-  checks_templates_check_map_serial
-  checks_templates_lanes_serial
-  checks_templates_demo_serial
+  checks_templates_fence_serial
   checks_templates_steps checks_templates_step_serial
 }
 
 checks_pfm_verify() {
   local d="$1"
-  run "pfm: go vet" -- go -C "$d" vet ./...
+  # Vet both test tiers: the unit tier untagged (a unit test calling a jail-only helper fails here),
+  # the jail tier under -tags jail (the *_jail_test.go files and their helpers).
+  run "pfm: go vet" -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d"
   # The release binaries ship for macOS: vet the darwin build tags too, so a
   # darwin-only file is judged here and not first by CI.
-  run "pfm: go vet (darwin/arm64)" -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./...
+  run "pfm: go vet (darwin/arm64)" -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+    bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d"
   # Formatting and lint through the pinned golangci-lint (infra/fence/tools.env):
   # the Makefile names TOOLCHAIN-MISSING when the tool is absent — `make
   # tools` on the host; the fence image bakes it in. lint-new judges only
@@ -849,8 +876,9 @@ checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   [[ -z "$history" ]] || shard_args=(--history "$history")
   # Positional arguments keep flags and output paths out of shell code.
   # The JSON is retained even on failure; timing is a separate verdict.
-  # --bin-dir keeps the prebuilt pfm in the run dir for the templates.check-map step.
-  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" --bin-dir "$run_dir/bin" "${shard_args[@]}" -- "${testflags[@]}"
+  # -tags jail: the gate runs the unit tier and the jail tier (*_jail_test.go) in one tagged binary
+  # per package, which internal/testjail admits only in the fence or on a hosted runner.
+  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- -tags jail "${testflags[@]}"
   go_test_report "$run_dir/unit.json"
   checks_pfm_profile_pointers "$run_dir/unit.json" "$run_dir/profile" "$before"
   skip_gate "pfm: skipped tests are all listed (unit)" "$run_dir/unit.json"
@@ -879,6 +907,24 @@ CHECKS_PFM_RACE_TESTS='internal/installer TestClaudeMCPLockProtectsSlowBackup
 internal/installer TestMCPWritePreservesAnEditDuringBackup
 internal/pricing/modelcost TestRefreshDuringAnUpdateHoldsOwnershipThroughPersistence
 internal/store TestClearNameReservationsAreUniqueAcrossCaches'
+
+# checks_pfm_unit_proof <pfm dir> <run dir>: the unit tier in place, as on any host, under
+# scripts/unit-proof.sh's hostile ambient and syscall trace, its out directory {run dir}/unit-proof.
+# Its FAIL (a failing test, a reach row, a missing-tool skip) or ERROR (it could not look) fails the
+# step with the verdict line and the first 40 reach rows.
+checks_pfm_unit_proof() {
+  local d="$1" run_dir="$2" out="$2/unit-proof" rc=0 verdict
+  head_ "pfm — unit proof (scripts/unit-proof.sh)"
+  bash "$d/scripts/unit-proof.sh" --out "$out" >"$run_dir/unit-proof.log" 2>&1 || rc=$?
+  verdict="$(tail -n 1 "$run_dir/unit-proof.log" 2>&1)"
+  if (( rc == 0 )); then
+    ok "pfm: unit proof — $verdict"
+    return
+  fi
+  info "first 40 reach rows of $out/reach.tsv (package, kind, target, count):"
+  head -n 40 "$out/reach.tsv" 2>&1 | cut -f1-4
+  fail_step "pfm: unit proof exit $rc — $verdict (log $run_dir/unit-proof.log)"
+}
 
 checks_pfm_race() {
   checks_module_race "$1" "$2" pfm github.com/rezzminator/professor/pfm "$CHECKS_PFM_RACE_TESTS"
@@ -1014,7 +1060,7 @@ gate_budget_limits() {
 }
 
 # gate_budget_verdict <target> <wall seconds> [budget file] [attribution]: prints the verdict
-# line, returns 1 when red, and leaves PASS, WARN, FAIL, UNPINNED or ERROR in BUDGET_VERDICT.
+# line, returns 1 when red, and leaves PASS, WARN, FAIL, UNPINNED or ERROR in BUDGET_VERDICT (gate_run sets FILTERED for a slice).
 # attribution is test-contention.sh's `<WORD><TAB><evidence>` line for the run: an over-limit line
 # ends with it, and a fail-tier wall the judge calls CONTENTION is a WARN, not a red gate.
 gate_budget_verdict() {
@@ -1123,19 +1169,6 @@ checks_templates_mirrors() {
   checks_templates_output_styles
 }
 
-checks_gate_check_map() { # run dir
-  local run_dir="$1" check_map_pfm="$1/bin/pfm"
-  # The pfm pfm.unit prebuilt (test-shard.sh --bin-dir) when this gate ran it and it built; else build one.
-  if [[ ! -x "$check_map_pfm" ]]; then
-    check_map_pfm="$run_dir/check-map-pfm"
-    if ! go -C pfm build -o "$check_map_pfm" ./cmd/pfm; then
-      fail_step "templates: check-map pfm build FAILED"
-      return
-    fi
-  fi
-  run "templates: lane↔command map (check-map)" -- bash infra/fence/lanes/check-map.sh --pfm "$check_map_pfm"
-}
-
 # gate_resources_stop <sampler pid> <run dir>: stops the gate's resource sampler and says when its
 # record is missing — the judge then reads "not measured", never a quiet pass.
 gate_resources_stop() {
@@ -1177,7 +1210,7 @@ gate_attribution() {
 
 gate_run() { # pfm, templates, or all
   local target="${1:-all}" d="$REPO_ROOT/pfm" base run_dir row stem f step_rc=0 budget_rc=0 derived=0 started
-  local gate_pid sampler_pid attribution summary_rc
+  local gate_pid sampler_pid attribution summary_rc knob knob_rc filter=""
   case "$target" in pfm|templates|all) ;; *) printf 'gate_run: unknown target: %s\n' "$target" >&2; return 2 ;; esac
   if [[ "$target" == pfm || "$target" == all ]]; then
     need_tool go pfm || return 1
@@ -1194,11 +1227,34 @@ gate_run() { # pfm, templates, or all
     return 1
   fi
   timing_run_note "$run_dir"
+  for knob in PFM_GATE_ONLY PFM_GATE_SKIP; do
+    [[ -n "${!knob:-}" ]] || continue
+    knob_rc=0; [[ "" =~ ^(${!knob})$ ]] || knob_rc=$? # errexit-safe: a sourcing caller may run set -e
+    (( knob_rc != 2 )) || { fail_step "gate: $knob is not an extended regex: ${!knob}"; return 1; }
+    filter="$filter $knob=${!knob}"
+  done
   steps_reset || return 1
   if [[ "$target" == pfm || "$target" == all ]]; then
-    steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
+    # Longest first: a step starts as soon as a slot is free, in registration order, so the steps
+    # that outlast every other open the gate and none is left to run alone at its end.
+    steps_add_heavy pfm.unit-proof checks_pfm_unit_proof "$d" "$run_dir" || return 1
     steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir" || return 1
+    steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir" || return 1
     steps_add_heavy pfm.race checks_pfm_race "$d" "$run_dir" || return 1
+    # The heavy static steps queue for the heavy slots the test steps free.
+    steps_add_heavy pfm.lint-new run 'pfm: lint-new (golangci-lint, changed lines)' -- make -C "$d" --no-print-directory lint-new || return 1
+    steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check || return 1
+    # Both test tiers, as checks_pfm_verify: untagged, then -tags jail.
+    steps_add_heavy pfm.vet run 'pfm: go vet' -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
+    steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+      bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
+    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh" || return 1
+    steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh" || return 1
+  fi
+  if [[ "$target" == templates || "$target" == all ]]; then
+    checks_templates_steps steps_add || return 1
+  fi
+  if [[ "$target" == pfm || "$target" == all ]]; then
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
@@ -1206,15 +1262,10 @@ gate_run() { # pfm, templates, or all
     done
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
-    for f in "$REPO_ROOT"/infra/fence/lanes/tests/*_test.sh; do
-      [[ -f "$f" ]] || { fail_step 'templates: lane self-tests NOT RUN — no fixture suites found'; return 1; }
+    for f in "$REPO_ROOT"/infra/fence/tests/*_test.sh; do
+      [[ -f "$f" ]] || { fail_step 'templates: fence self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
-      steps_add "templates.lanes.${stem,,}" bash "$f" || return 1
-    done
-    for f in "$REPO_ROOT"/infra/demo/tests/*_test.sh; do
-      [[ -f "$f" ]] || { fail_step 'templates: demo self-tests NOT RUN — no fixture suites found'; return 1; }
-      stem="${f##*/}"; stem="${stem%_test.sh}"
-      steps_add "templates.demo.${stem,,}" bash "$f" || return 1
+      steps_add "templates.fence.${stem,,}" bash "$f" || return 1
     done
   fi
   if [[ "${PFM_GATE_FIXTURES:-}" == 1 ]]; then
@@ -1223,19 +1274,9 @@ gate_run() { # pfm, templates, or all
       case "$stem" in go-slow) steps_set_bound 45 || return 1 ;; shell-hang) steps_set_bound 5 || return 1 ;; esac
     done
   fi
-  steps_barrier || return 1
-  if [[ "$target" == pfm || "$target" == all ]]; then
-    # Heavy static steps longest first, so the short ones queue behind them for a heavy slot.
-    steps_add_heavy pfm.lint-new run 'pfm: lint-new (golangci-lint, changed lines)' -- make -C "$d" --no-print-directory lint-new || return 1
-    steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check || return 1
-    steps_add_heavy pfm.vet run 'pfm: go vet' -- go -C "$d" vet ./... || return 1
-    steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./... || return 1
-    steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh" || return 1
-    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh" || return 1
-  fi
-  if [[ "$target" == templates || "$target" == all ]]; then
-    steps_add_heavy templates.check-map checks_gate_check_map "$run_dir" || return 1
-    checks_templates_steps steps_add || return 1
+  if [[ -n "$filter" ]] && (( ${#STEPS_NAMES[@]} == 0 )); then
+    fail_step "gate: the filter matched no step:$filter"
+    return 1
   fi
   if gate_derive_bound "$target"; then derived=1; fi
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -1253,7 +1294,11 @@ gate_run() { # pfm, templates, or all
   attribution="$(gate_attribution "$d" "$run_dir")"
   row="$(awk -F '\t' '$1=="STEPS" {print $3}' "$run_dir/gate.tsv" 2>/dev/null)"
   BUDGET_VERDICT=ERROR
-  if gate_budget_verdict "$target" "$row" "" "$attribution"; then budget_rc=0; else budget_rc=$?; fi
+  if [[ -n "$filter" ]]; then
+    # The budget times the whole gate on the fence's cores; a slice is recorded, never judged.
+    BUDGET_VERDICT=FILTERED; budget_rc=0
+    printf 'budget: gate(%s) filtered —%s; recorded, not judged\n' "$target" "$filter"
+  elif gate_budget_verdict "$target" "$row" "" "$attribution"; then budget_rc=0; else budget_rc=$?; fi
   if [[ "$row" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then row="$(gate_wall_ceil "$row")"; else row=NA; fi
   if [[ -f "$run_dir/gate.tsv" ]] && ! printf 'BUDGET\t%s\t%s\n' "$BUDGET_VERDICT" "$row" >> "$run_dir/gate.tsv"; then
     fail_step "gate: cannot append the BUDGET row to $run_dir/gate.tsv"; budget_rc=1
@@ -1262,6 +1307,13 @@ gate_run() { # pfm, templates, or all
   # gate's verdict stays the steps' and the budget's.
   if bash "$REPO_ROOT/infra/fence/profile-report.sh" summary "$run_dir"; then summary_rc=0; else summary_rc=$?; fi
   (( summary_rc == 0 )) || bad "PROFILE summary FAILED — profile-report.sh summary exit $summary_rc; no PROFILE block, profile.tsv or profile/INDEX.txt for $run_dir"
+  # The unit-isolation measure under the PROFILE block: the unit-bundle tests counted by the worst thing each
+  # touches (pfm/scripts/test-kinds.sh); a count that cannot be read is named, the verdict unchanged.
+  if [[ "$target" == pfm || "$target" == all ]]; then
+    if bash "$d/scripts/test-kinds.sh" "$d"; then :; else
+      printf 'PROFILE kinds NOT RECORDED — test-kinds.sh exit %s (its line above)\n' "$?"
+    fi
+  fi
   if ! gate_write_meta "$run_dir" "$target" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; then
     fail_step "gate: cannot rewrite $run_dir/gate.meta"; budget_rc=1
   fi

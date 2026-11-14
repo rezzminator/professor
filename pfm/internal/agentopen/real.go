@@ -7,16 +7,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -30,6 +32,8 @@ type ExecCommands struct {
 	Machine config.Config
 	Stdout  io.Writer
 	Stderr  io.Writer
+	// Runner starts the Claude child; nil is the real process table.
+	Runner deps.Runner
 }
 
 // accountFor names the account that owns one config directory. The registry
@@ -68,6 +72,7 @@ func (commands ExecCommands) command(
 		Args:    args,
 		Home:    commands.Home,
 		Machine: commands.Machine,
+		Runner:  commands.Runner,
 	}.Command(ctx)
 	if err != nil {
 		return nil, err
@@ -92,25 +97,26 @@ func (commands ExecCommands) QueryAgents(ctx context.Context, configName string)
 }
 
 func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id string, cache1H bool) error {
-	persona, err := action.WorkbenchPersona(cwd, pfmengine.Claude, workbench.Resume)
-	if err != nil {
-		return fmt.Errorf("resume agent session: %w", err)
-	}
-	account, err := commands.accountFor(configName)
-	if err != nil {
-		return fmt.Errorf("resume agent session: %w", err)
-	}
 	stderr := commands.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
+	}
+	persona, warnings, err := action.LaunchPersona(cwd, commands.Home, pfmengine.Claude, workbench.Resume)
+	if err != nil {
+		return fmt.Errorf("resume agent session: %w", err)
+	}
+	launchnotice.Print(stderr, "pfm", warnings)
+	account, err := commands.accountFor(configName)
+	if err != nil {
+		return fmt.Errorf("resume agent session: %w", err)
 	}
 	// No --name: the resumed session restores its own name from its
 	// transcript (claudelaunch.Render gives a resume none).
 	spawn := action.ClaudeSpawn{
 		Purpose: claudelaunch.PurposeResume,
 		Account: account, Cache1H: &cache1H, Resume: id,
-		Home: commands.Home, Machine: commands.Machine,
-		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
+		Home: commands.Home, Machine: commands.Machine, Runner: commands.Runner,
+		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model, Envs: persona.Envs,
 	}
 	command, err := spawn.Command(ctx)
 	if err != nil {
@@ -164,18 +170,6 @@ func (processes RealProcesses) Processes(ctx context.Context) ([]Process, error)
 func (RealProcesses) Alive(pid int) bool {
 	alive, err := gather.ProcessAlive(pid)
 	return alive || err != nil && pid > 0
-}
-
-func (RealProcesses) Terminate(pid int) error {
-	return gather.Terminate(pid)
-}
-
-func (RealProcesses) Kill(pid int) error {
-	err := syscall.Kill(pid, syscall.SIGKILL)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	return err
 }
 
 func (processes RealProcesses) ParentComm(pid int) string {
@@ -233,8 +227,13 @@ func (tmux RealTmux) SocketForPID(ctx context.Context, pid int) (string, error) 
 }
 
 func (tmux RealTmux) Attach(ctx context.Context, socket string) error {
+	if err := spawn.RefuseTmuxClient("agent open", resolve.CallerEnvironment()); err != nil {
+		return err
+	}
 	if err := tmux.command(ctx, socket, "set-option", "-g", "window-size", "latest").Run(); err != nil {
 		return fmt.Errorf("set tmux window size: %w", err)
 	}
-	return tmux.command(ctx, socket, "attach").Run()
+	// An attach lasts as long as its user keeps it: tmux.Exec's default bound
+	// would end the session under them.
+	return pfmtmux.ExecAttached(ctx, tmux.Binary, filepath.Join(tmux.Dir, socket), "attach").Run()
 }

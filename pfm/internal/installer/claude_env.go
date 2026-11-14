@@ -13,7 +13,6 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -238,6 +237,7 @@ func (installer *engine) ensureClaudeEnv(uninstall bool) (result error) {
 	targetPhysical := physicalSettingsPath(target)
 	wants := map[string]map[string]string{}
 	var pluginLogDir string
+	var failures []error
 	if !uninstall {
 		wants[targetPhysical] = want
 		if obs.AlphaBuild(installer.options.Version) {
@@ -246,49 +246,50 @@ func (installer *engine) ensureClaudeEnv(uninstall bool) (result error) {
 				logDir = filepath.Join(installer.options.Home, ".local", "state", "pfm", "plugin-logs")
 			}
 			pluginLogDir = logDir
-			if !filepath.IsAbs(logDir) {
-				return installer.fail(fmt.Errorf("%s must be absolute: %q", PluginLogDirEnv, logDir))
-			}
-			if info, err := os.Stat(logDir); errors.Is(err, fs.ErrNotExist) {
-				if err := installer.change(
-					"ensure plugin log directory "+logDir,
-					func() error { return os.MkdirAll(logDir, 0o700) },
-				); err != nil {
-					return err
+			if err := installer.ensurePluginLogDir(logDir); err != nil {
+				// A bad log directory costs only its key: every other key
+				// still lands, and each value pfm set before stays as it was.
+				failures = append(failures, err)
+				delete(want, PluginLogDirEnv)
+				pluginLogDir = ledger.PluginLogDir
+				for path, owned := range ledger.Files {
+					if value, found := owned[PluginLogDirEnv]; found {
+						if wants[path] == nil {
+							wants[path] = map[string]string{}
+						}
+						wants[path][PluginLogDirEnv] = value
+					}
 				}
-			} else if err != nil {
-				return installer.fail(fmt.Errorf("inspect plugin log directory %s: %w", logDir, err))
-			} else if !info.IsDir() {
-				return installer.fail(fmt.Errorf("plugin log directory %s is not a directory", logDir))
-			}
-			if want == nil {
-				want = map[string]string{}
-				wants[targetPhysical] = want
-			}
-			want[PluginLogDirEnv] = logDir
-			dirs := append(
-				[]string{ClaudeStore(installer.options.Home), installer.options.ConfigDir},
-				installer.options.RosterConfigDirs...)
-			for _, account := range installer.options.ClaudeAccounts {
-				dirs = append(dirs, account.ConfigDir)
-			}
-			for _, dir := range dirs {
-				if dir == "" {
-					continue
+			} else {
+				if want == nil {
+					want = map[string]string{}
+					wants[targetPhysical] = want
 				}
-				path := physicalSettingsPath(filepath.Join(dir, "settings.json"))
-				if wants[path] == nil {
-					wants[path] = map[string]string{}
+				want[PluginLogDirEnv] = logDir
+				dirs := append(
+					[]string{ClaudeStore(installer.options.Home), installer.options.ConfigDir},
+					installer.options.RosterConfigDirs...)
+				for _, account := range installer.options.ClaudeAccounts {
+					dirs = append(dirs, account.ConfigDir)
 				}
-				wants[path][PluginLogDirEnv] = logDir
+				for _, dir := range dirs {
+					if dir == "" {
+						continue
+					}
+					path := physicalSettingsPath(filepath.Join(dir, "settings.json"))
+					if wants[path] == nil {
+						wants[path] = map[string]string{}
+					}
+					wants[path][PluginLogDirEnv] = logDir
+				}
 			}
 		}
 	}
 	if len(want) == 0 && len(ledger.Files) == 0 && ledger.Target == "" && ledger.PluginLogDir == "" {
-		if !uninstall {
+		if !uninstall && len(failures) == 0 {
 			installer.ok("claude.env: empty, and pfm set no key earlier")
 		}
-		return nil
+		return errors.Join(failures...)
 	}
 	paths := slices.Sorted(maps.Keys(ledger.Files))
 	for _, path := range slices.Sorted(maps.Keys(wants)) {
@@ -304,7 +305,6 @@ func (installer *engine) ensureClaudeEnv(uninstall bool) (result error) {
 	if !uninstall && len(installer.options.ClaudeEnv) > 0 {
 		next.Target = ledger.Target
 	}
-	var failures []error
 	for _, path := range paths {
 		display, fileWant := path, wants[path]
 		if path == targetPhysical && !uninstall {
@@ -330,6 +330,29 @@ func (installer *engine) ensureClaudeEnv(uninstall bool) (result error) {
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// ensurePluginLogDir checks the plugin log directory is absolute and makes it
+// when absent; a failure is a FAIL row of the claude.env step.
+func (installer *engine) ensurePluginLogDir(logDir string) error {
+	if !filepath.IsAbs(logDir) {
+		return installer.fail(fmt.Errorf("%s must be absolute: %q", PluginLogDirEnv, logDir))
+	}
+	info, err := os.Stat(logDir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		if err := installer.change(
+			"ensure plugin log directory "+logDir,
+			func() error { return os.MkdirAll(logDir, 0o700) },
+		); err != nil {
+			return installer.fail(fmt.Errorf("create plugin log directory %s: %w", logDir, err))
+		}
+	case err != nil:
+		return installer.fail(fmt.Errorf("inspect plugin log directory %s: %w", logDir, err))
+	case !info.IsDir():
+		return installer.fail(fmt.Errorf("plugin log directory %s is not a directory", logDir))
+	}
+	return nil
 }
 
 // ensureClaudeEnvFile plans and applies one file and returns the keys pfm
@@ -460,11 +483,6 @@ func ClaudeEnvUnknownKeys(env map[string]string, targets []ClaudePluginTarget) [
 	var unknown []string
 	for _, key := range slices.Sorted(maps.Keys(env)) {
 		known := key == PluginLogDirEnv
-		for name := range pfmconfig.ExtensionRegistry() {
-			if strings.HasPrefix(key, pfmconfig.ExtensionEnvPrefix(name)) {
-				known = true
-			}
-		}
 		for index := range targets {
 			prefix := strings.ToUpper(strings.ReplaceAll(targets[index].Name, "-", "_"))
 			if key == prefix || strings.HasPrefix(key, prefix+"_") {

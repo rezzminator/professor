@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -24,14 +25,10 @@ func TestParseAcceptsShortAndLongSpellings(t *testing.T) {
 }
 
 func TestParseRefusesEmptyAndUnknown(t *testing.T) {
-	const acceptedSet = "cc/claude, cx/codex, ox/opencode"
-	for _, value := range []string{"", "bogus"} {
-		t.Run(value, func(t *testing.T) {
-			_, err := Parse(value)
-			if err == nil || !strings.Contains(err.Error(), acceptedSet) {
-				t.Fatalf("Parse(%q) error = %v; want accepted set %q", value, err, acceptedSet)
-			}
-		})
+	for value, want := range map[string]string{"": "no engine given (want cc/claude, cx/codex, ox/opencode)", "bogus": "unknown engine \"bogus\" (want cc/claude, cx/codex, ox/opencode)"} {
+		if _, err := Parse(value); fmt.Sprint(err) != want {
+			t.Errorf("Parse(%q) error = %q, want %q", value, err, want)
+		}
 	}
 }
 

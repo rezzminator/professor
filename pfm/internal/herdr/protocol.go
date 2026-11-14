@@ -3,9 +3,38 @@ package herdr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"strings"
+	"syscall"
 )
+
+// PaneGone reports whether err is Herdr refusing a pane id it does not know
+// (pane_not_found, or not_found from an older Herdr).
+func PaneGone(err error) bool {
+	var refusal *Refusal
+	return errors.As(err, &refusal) && (refusal.Code == paneNotFound || refusal.Code == "not_found")
+}
+
+// SocketFileGone is the narrower SocketGone: a dial that found no socket file
+// at its path (ENOENT), so no Herdr server can listen there any more. A
+// refused connection, a timeout or any answer may be a server that still runs.
+func SocketFileGone(err error) bool {
+	var notSent *InputNotSentError
+	var dial *net.OpError
+	return errors.As(err, &notSent) && errors.As(err, &dial) && dial.Op == "dial" && errors.Is(err, syscall.ENOENT)
+}
+
+// ServerStopping reports whether err is Herdr refusing a request because its
+// server is shutting down (server_unavailable): its panes are about to go.
+func ServerStopping(err error) bool {
+	var refusal *Refusal
+	return errors.As(err, &refusal) && refusal.Code == "server_unavailable"
+}
+
+// protocolVersionUnknown is the Version of a ping that names no release.
+const protocolVersionUnknown = "unknown"
 
 // ProtocolStatus is the measured ping identity of one server.
 type ProtocolStatus struct {
@@ -34,20 +63,27 @@ func ProbeProtocol(ctx context.Context, socket string) (ProtocolStatus, error) {
 		return ProtocolStatus{}, err
 	}
 	var pong struct {
-		Type     string  `json:"type"`
-		Version  string  `json:"version"`
-		Protocol *uint32 `json:"protocol"`
+		Type     string          `json:"type"`
+		Version  json.RawMessage `json:"version"`
+		Protocol *uint32         `json:"protocol"`
 	}
 	if err := json.Unmarshal(result, &pong); err != nil {
 		return ProtocolStatus{}, fmt.Errorf("malformed ping result: herdr socket %s: %w", socket, err)
 	}
-	if pong.Type != "pong" || strings.TrimSpace(pong.Version) == "" || pong.Protocol == nil {
+	if pong.Type != "pong" || pong.Protocol == nil {
 		return ProtocolStatus{}, fmt.Errorf(
-			"malformed ping result: herdr socket %s: type=pong, version and uint32 protocol are required",
+			"malformed ping result: herdr socket %s: type=pong and uint32 protocol are required",
 			socket,
 		)
 	}
-	status := ProtocolStatus{Version: pong.Version, Protocol: *pong.Protocol}
+	// The version is only shown (doctor); the protocol alone decides, so a
+	// version that is absent, empty or not a string reads as unknown.
+	version := protocolVersionUnknown
+	var shown string
+	if json.Unmarshal(pong.Version, &shown) == nil && strings.TrimSpace(shown) != "" {
+		version = shown
+	}
+	status := ProtocolStatus{Version: version, Protocol: *pong.Protocol}
 	if status.Protocol != SupportedProtocol {
 		return status, &ProtocolMismatch{Protocol: status.Protocol}
 	}

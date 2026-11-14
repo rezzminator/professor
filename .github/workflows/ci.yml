@@ -1,24 +1,193 @@
 name: ci
 
-# Deterministic tests the fence cannot run: macOS, and a fresh machine that
-# follows INSTALL.md then updates and rolls back across real releases. The
-# Linux unit and e2e suites run in the fence gate, not here.
+# The one check, on a pull request into main: every layer on Linux and macOS,
+# in parallel. Its `ci` job is main's only required status check, so nothing
+# merges, releases or publishes until every job here is green. The Linux gate
+# jobs run the local gate's own step list (infra/fence/checks.sh gate_run),
+# one slice per job, directly on the runner; publish.yml runs on the merge.
+# Started by hand on any branch, it skips the jobs `exclude` names, and with
+# `only` runs just the jobs and matrix entries it names (infra/fence/journey/ci-run.sh):
+#   gh workflow run ci.yml --ref develop -f exclude='gate journey fresh-install build scan release'
+#   gh workflow run ci.yml --ref develop -f only='journey (linux),gate (e2e)'
+# The rule: .claude/rules/ci-workflows.md.
 on:
-  push:
-    branches:
-      - develop
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      exclude:
+        description: "Jobs to skip, space- or comma-separated: gate, macos, journey, fresh-install, build, scan, release"
+        required: false
+        default: ""
+      only:
+        description: "Jobs or matrix entries to run, comma-separated, as CI names them: journey (linux), gate (e2e), macos; empty runs every job not excluded"
+        required: false
+        default: ""
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  macos-tests:
-    name: macos-tests
+  # The dispatch's `exclude` as a JSON array; empty on a pull request. A name no
+  # job carries fails the `ci` job, which checks it against `needs`. The matrix
+  # jobs read their entries from here: every entry, unless the dispatch's `only`
+  # names some, when each job it names no entry of joins `exclude`. An `only`
+  # name no job or entry carries fails this job.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      exclude: ${{ steps.exclude.outputs.json }}
+      gate: ${{ steps.exclude.outputs.gate }}
+      macos: ${{ steps.exclude.outputs.macos }}
+      journey: ${{ steps.exclude.outputs.journey }}
+    steps:
+      - name: Read the jobs to exclude
+        id: exclude
+        env:
+          EXCLUDE: ${{ inputs.exclude }}
+          ONLY: ${{ inputs.only }}
+          # Each `only` slice runs alone; `rest` skips exactly those, so a step
+          # added to the gate lands in CI with no edit here. A new slice adds its
+          # pattern to `rest`'s skip too.
+          GATE: >-
+            [{"slice": "unit", "only": "pfm\\.unit"},
+            {"slice": "e2e", "only": "pfm\\.e2e"},
+            {"slice": "race", "only": "pfm\\.race"},
+            {"slice": "mirrors", "only": "templates\\.mirrors"},
+            {"slice": "rest", "skip": "pfm\\.(unit|e2e|race)|templates\\.mirrors"}]
+          MACOS: '[{"part": "unit"}, {"part": "e2e"}]'
+          JOURNEY: '[{"os": "linux", "runner": "ubuntu-latest"}, {"os": "macos", "runner": "macos-15"}]'
+        run: |
+          set -euo pipefail
+          json="$(jq -cn --arg s "${EXCLUDE:-}" '$s | [splits("[ ,]+")] | map(select(. != ""))')"
+          only="$(jq -cn --arg s "${ONLY:-}" '$s | [splits(" *, *")] | map(sub("^ +| +$"; "")) | map(select(. != ""))')"
+          # Each matrix job's entries, `{job} ({first key})` naming each as CI does.
+          tables="$(jq -cn --argjson gate "$GATE" --argjson macos "$MACOS" --argjson journey "$JOURNEY" \
+            '{gate: $gate, macos: $macos, journey: $journey}
+             | with_entries(.key as $j | .value |= map({name: "\($j) (\(to_entries[0].value))", entry: .}))')"
+          jobs='["gate","macos","journey","fresh-install","build","scan","release"]'
+          unknown="$(jq -rn --argjson only "$only" --argjson t "$tables" --argjson jobs "$jobs" \
+            '$only - $jobs - [$t[][].name] | join(", ")')"
+          if [ -n "$unknown" ]; then
+            echo "::error::only names no job or matrix entry: $unknown"
+            exit 1
+          fi
+          plan="$(jq -cn --argjson only "$only" --argjson t "$tables" --argjson jobs "$jobs" --argjson ex "$json" '
+            ($t | with_entries(.key as $j | .value |= map(.name as $n | select(($only | length) == 0 or ($only | index($j)) or ($only | index($n)))))) as $sel
+            | {exclude: (if ($only | length) == 0 then $ex else
+                $ex + [$jobs[] as $j | select(if $t[$j] then ($sel[$j] | length) == 0 else ($only | index($j)) == null end) | $j] | unique end),
+               matrix: ($t | with_entries(.key as $j | .value = [(if ($sel[$j] | length) == 0 then .value else $sel[$j] end)[].entry]))}')"
+          json="$(jq -c .exclude <<<"$plan")"
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          for job in gate macos journey; do echo "$job=$(jq -c --arg j "$job" '.matrix[$j]' <<<"$plan")" >> "$GITHUB_OUTPUT"; done
+          echo "excluded jobs: $json"
+          echo "matrix entries: $(jq -c .matrix <<<"$plan")"
+
+  gate:
+    name: gate (${{ matrix.slice }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'gate') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The slices: the plan job's GATE.
+        include: ${{ fromJSON(needs.plan.outputs.gate) }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Install the system packages the fence image carries
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            tmux zsh jq python3-yaml sqlite3 rsync xz-utils libgl1 libglib2.0-0 libxcb1 strace
+
+      - name: Install the pinned shellcheck, rumdl, Node and Herdr
+        run: |
+          set -euo pipefail
+          bash infra/fence/pinned-tools.sh "$RUNNER_TEMP/pinned" shellcheck rumdl node herdr
+          echo "$RUNNER_TEMP/pinned/bin" >> "$GITHUB_PATH"
+
+      - name: Restore the pinned developer tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/tools
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/fence/tools.env', 'infra/fence/tools.sh', 'infra/fence/jscpd/package-lock.json') }}
+
+      - name: Install the pinned developer tools
+        run: bash infra/fence/tools.sh
+
+      - name: Run the gate's ${{ matrix.slice }} slice
+        env:
+          PFM_DEV_FENCE: "1"
+          PFM_FENCE_PROFILE: native
+          # The fence image's ENV: every build static, never linking the runner's libc
+          # (pfm.unit-proof judges that read a reach); the race step turns cgo on itself.
+          CGO_ENABLED: "0"
+          PFM_GATE_ONLY: ${{ matrix.only }}
+          PFM_GATE_SKIP: ${{ matrix.skip }}
+          # The fence's per-step bound derives from its own gate budget; a
+          # hosted runner has fewer cores, so each step gets the default bound.
+          STEPS_BOUND_S: "1500"
+          # The native profile sizes its step slots for the fence's own container;
+          # a hosted runner keeps the slots its slices were measured at.
+          STEPS_JOBS: "6"
+          STEPS_HEAVY_JOBS: "2"
+          # The fence mounts the engine-sync source at /engine-sync; here it is
+          # the checkout's own submodule (infra/fence/engine-sync.sh).
+          ENGINE_SYNC_FENCE_SRC: ${{ github.workspace }}/plugins/engine-sync
+          # The private leak denylist never leaves the maintainer's machine: CI
+          # runs the leak gate's self-tests and its structural patterns, and the
+          # step reports STRUCTURAL-ONLY; the pre-push hook applies the private
+          # terms on every push (scripts/leak-check.sh).
+          LEAK_TERMS: ${{ runner.temp }}/leak-structural-only.txt
+        run: |
+          printf '!structural-only\n' > "$LEAK_TERMS"
+          # The runner starts each step with SIGPIPE ignored, so a writer whose reader
+          # stops early prints "write error: Broken pipe"; the gate runs as a terminal does.
+          env --default-signal=PIPE bash .claude/scripts/dev.sh gate all
+
+      # The gate prints only its step table; each red step's own log stays on
+      # the runner, so print the log of every non-PASS row of each run's table.
+      - name: Show each failed step's log
+        if: failure()
+        run: |
+          for table in /tmp/professor/timing/run.*/gate.tsv; do
+            [ -f "$table" ] || { echo "no gate table under /tmp/professor/timing"; continue; }
+            awk -F '\t' 'NR > 1 && $1 != "STEPS" && $1 != "BUDGET" && $2 != "PASS" {print $1}' "$table" |
+              while IFS= read -r step; do
+                log="${table%/gate.tsv}/steps/$step.log"
+                echo "::group::$step.log"
+                tail -n 300 "$log" || echo "no log at $log"
+                echo "::endgroup::"
+              done
+          done
+
+  macos:
+    name: macos (${{ matrix.part }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'macos') }}
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.macos) }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,42 +200,211 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
-      # The agent source inventory the installer tests read imports yaml.
-      - name: Install test tools
+      - name: Run the macOS ${{ matrix.part }} part
+        uses: ./.github/actions/macos-suite
+        with:
+          part: ${{ matrix.part }}
+
+  # pfm's journey suite (pfm/journey): the owner's path through a real terminal, on a machine it may
+  # spend. Linux boots the journey machine (infra/fence/journey/run.sh, systemd in a container, no
+  # network); macOS has no such machine, so the runner itself is the machine.
+  journey:
+    name: journey (${{ matrix.os }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'journey') }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.journey) }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Run the suite on the journey machine
+        if: matrix.os == 'linux'
+        run: bash infra/fence/journey/run.sh
+
+      - name: Set up Go
+        if: matrix.os == 'macos'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Install tmux and Herdr
+        if: matrix.os == 'macos'
         run: |
           set -euo pipefail
-          brew install tmux jq
-          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
-          python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+          # A Mac's owner logs in to zsh; the hosted runner's account logs in to bash.
+          sudo chsh -s /bin/zsh "$USER"
+          brew install tmux
+          bash infra/fence/pinned-tools.sh "$RUNNER_TEMP/pinned" herdr
+          echo "$RUNNER_TEMP/pinned/bin" >> "$GITHUB_PATH"
+
+      # /bin/bash is the system Bash 3.2 on macOS, as on a user's Mac.
+      - name: Prepare the owner and run the suite
+        if: matrix.os == 'macos'
+        env:
+          JOURNEY_ARTIFACTS: ${{ runner.temp }}/journey
+        # No GOCOVERDIR here: Go's coverage runtime names its temporary meta file by the clock's nanoseconds,
+        # macOS's clock ticks in microseconds, and two pfm starting in the same tick fail the emit into a
+        # step's output. The Linux run measures the coverage.
+        run: |
+          set -euo pipefail
+          export SHELL=/bin/zsh
+          /bin/bash infra/fence/journey/prepare.sh "$GITHUB_WORKSPACE"
+          export PATH="$HOME/.local/bin:$PATH"
+          go -C pfm test -tags journey -count=1 -v -timeout 20m ./journey/
+
+      # Every run's profile (steps.tsv, waits.tsv, summary.md), the Linux run's coverage of pfm's source
+      # (coverage.html, coverage-packages.tsv, coverage-funcs.txt, the raw counters in covdata/) and a
+      # failed step's evidence (activity log, process table, chats, panes): run.sh copies the run's
+      # artifacts into the checkout's tmp/journey/{run id}; macOS writes JOURNEY_ARTIFACTS.
+      - name: Upload the journey profile, coverage and evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: journey-${{ matrix.os }}
+          path: |
+            ${{ matrix.os == 'linux' && 'tmp/journey/' || format('{0}/journey', runner.temp) }}
+            !tmp/journey/latest
+          if-no-files-found: warn
+          retention-days: 7
+
+  fresh-install:
+    name: fresh-install (${{ matrix.os }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'fresh-install') }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Install the runtime prerequisites INSTALL.md lists
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew install tmux jq
+            python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
+          else
+            sudo apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tmux zsh jq python3 python3-yaml
+          fi
 
       - name: Build engine-sync
         uses: ./.github/actions/engine-sync
 
-      # Exercise the fixture with the system Bash 3.2.
-      - name: Verify refresh scope with system Bash
-        run: python3 scripts/test-refresh-scope.py
+      # /bin/bash is the system Bash 3.2 on macOS, as on a user's Mac.
+      - name: Install from INSTALL.md, then update and roll back across releases
+        run: /bin/bash scripts/fresh-install-test.sh
 
-      - name: Run pfm unit tests
-        env:
-          PFM_DEV_FENCE: "1"
-          PFM_HARVESTPY_OFFLINE: "1"
-        run: go -C pfm test -count=1 ./...
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'build') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Includes the Darwin installer and the release-upgrade e2e.
-      - name: Run serial e2e
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      # publish.yml rebuilds and uploads the binaries from the merge commit.
+      - name: Build
         env:
-          PFM_DEV_FENCE: "1"
-          PFM_HARVESTPY_OFFLINE: "1"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: make release-binary
+
+  # HOL AI Plugin Scanner — the same pinned action and thresholds the
+  # awesome-ai-plugins catalog applies, so the source-side score is reproducible.
+  scan:
+    name: scan
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'scan') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      - name: Build engine-sync
+        uses: ./.github/actions/engine-sync
+
+      # The scanner scores `.opencode/` as its own package, including its
+      # generated LICENSE/SECURITY.md/opencode.jsonc — none of which are
+      # tracked (see .gitignore). Generate both mirrors before it runs, or
+      # it scores an absent, not a generated, tree. The project's
+      # .claude/engine-sync.json opencode.mirrorFiles lists LICENSE and
+      # SECURITY.md; the machine policy the action stages fills
+      # opencode.jsonc from its opencode.permission.
+      - name: Generate Codex and OpenCode mirrors
+        run: make check
+
+      - name: Scan
+        uses: hashgraph-online/ai-plugin-scanner-action@8c2dd4f9cc381ad56496ca44aab10ce19f6bdd0f # v1.2.813
+        with:
+          plugin_dir: "."
+          min_score: 80
+          fail_on_severity: high
+          # .plugin-scanner.toml (fixture paths that plant fake credentials)
+          # counts for a hand-started run (only this repository's branches can
+          # start one) and a pull request from this repository. A fork's pull
+          # request is scanned with no repository suppressions.
+          trust_repository_policy: ${{ (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}
+
+      # Every plugin keeps the one-check CI shape (.claude/rules/ci-workflows.md).
+      # It checks the plugins out only after the scanner ran, so the scanner scores
+      # the same tree as before; it runs after a red scan too.
+      - name: Plugin workflows keep the CI shape
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          export PFM_E2E_SOURCE_REPO="$GITHUB_WORKSPACE"
-          export PFM_DEV_REPO_WORK_TREE="$GITHUB_WORKSPACE"
-          PFM_DEV_REPO_GIT_DIR="$(git rev-parse --absolute-git-dir)"
-          export PFM_DEV_REPO_GIT_DIR
-          go -C pfm test -count=1 -tags e2e -p 1 -timeout 60m ./e2e/...
+          git submodule update --init
+          python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml; }
+          python3 scripts/check-plugin-workflows.py
 
-  fresh-install-linux:
-    name: fresh-install-linux
+  # main takes only release pull requests: VERSION moved past main's, and its
+  # authored notes releases/v{VERSION}.md exist and pass the grammar.
+  release:
+    name: release
+    needs: plan
+    if: ${{ !contains(fromJSON(needs.plan.outputs.exclude), 'release') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -74,48 +412,37 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          go-version-file: pfm/go.mod
-          cache-dependency-path: pfm/go.sum
+          node-version: 22
 
-      - name: Install the runtime prerequisites INSTALL.md lists
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tmux zsh jq python3 python3-yaml
+      - name: The version moved past main's, its authored release notes exist and pass the grammar
+        run: make release
 
-      - name: Build engine-sync
-        uses: ./.github/actions/engine-sync
-
-      - name: Install from INSTALL.md, then update and roll back across releases
-        run: bash scripts/fresh-install-test.sh
-
-  fresh-install-macos:
-    name: fresh-install-macos
-    runs-on: macos-15
+  # main's only required status check. always(): a skipped or cancelled job
+  # counts as passed for a required check, so this job fails unless every
+  # job it needs succeeded.
+  ci:
+    name: ci
+    needs: [plan, gate, macos, journey, fresh-install, build, scan, release]
+    if: always()
+    runs-on: ubuntu-latest
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: pfm/go.mod
-          cache-dependency-path: pfm/go.sum
-
-      - name: Install the runtime prerequisites INSTALL.md lists
+      - name: Every job not excluded succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EXCLUDE: ${{ needs.plan.outputs.exclude || '[]' }}
         run: |
           set -euo pipefail
-          brew install tmux jq
-          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --break-system-packages 'PyYAML>=6.0.2,<7'
-
-      - name: Build engine-sync
-        uses: ./.github/actions/engine-sync
-
-      # The system Bash 3.2 runs the script, as on a user's Mac.
-      - name: Install from INSTALL.md, then update and roll back across releases
-        run: /bin/bash scripts/fresh-install-test.sh
+          unknown="$(jq -rn --argjson needs "$NEEDS" --argjson ex "$EXCLUDE" '$ex - ($needs | keys) | join(" ")')"
+          if [ -n "$unknown" ]; then
+            echo "::error::exclude names no job: $unknown (jobs: $(jq -r 'keys | join(" ")' <<<"$NEEDS"))"
+            exit 1
+          fi
+          failed="$(jq -r --argjson ex "$EXCLUDE" 'to_entries[] | select(.value.result != "success" and (.key | IN($ex[]) | not)) | "\(.key)=\(.value.result)"' <<<"$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::not every CI job succeeded: $(tr '\n' ' ' <<<"$failed")"
+            exit 1
+          fi
+          echo "every CI job not excluded succeeded (excluded: $EXCLUDE)"

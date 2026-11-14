@@ -12,7 +12,7 @@ import (
 // exported only so the Claude capability package can implement Source
 // without creating an import cycle back into cmd/pfm's composition root.
 func SyncClaude(ctx context.Context, database *store.Store, roots []string, counters *Counters) error {
-	files, err := walkClaudeRoots(ctx, roots)
+	files, walkComplete, err := walkClaudeRoots(ctx, roots)
 	if err != nil {
 		return err
 	}
@@ -37,6 +37,7 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 	updates := make([]store.Transcript, 0)
 	presentPaths := make(map[string]struct{}, len(files))
 	presentIDs := make(map[string]struct{}, len(files))
+	unreadable := 0
 	for _, file := range files {
 		presentPaths[file.Path] = struct{}{}
 		presentIDs[file.ID] = struct{}{}
@@ -54,16 +55,19 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 		} else {
 			counters.FullParsed++
 		}
-		transcript, bytesRead, parseErr := parseClaudeTranscriptFile(file, start, base)
-		if parseErr != nil {
-			return parseErr
-		}
+		transcript, bytesRead, parseErr := parseClaudeTranscriptFile(ctx, file, start, base)
 		counters.BytesRead += bytesRead
+		if parseErr != nil {
+			// Its prior row, if any, stays: the path is present, so no prune.
+			warnUnreadable(ctx, "claude transcript", file.Path, parseErr)
+			unreadable++
+			continue
+		}
 		updates = append(updates, transcript)
 	}
 
 	deletes := make([]string, 0)
-	if !counters.options.PriorityOnly {
+	if !counters.options.PriorityOnly && walkComplete {
 		for i := range existing {
 			transcript := &existing[i]
 			_, pathPresent := presentPaths[transcript.Path]
@@ -81,7 +85,10 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 	}
 	counters.Deleted += len(deletes)
 	counters.RowsTouched += len(updates) + len(deletes)
-	if !counters.options.PriorityOnly && (!versionFound || storedVersion != claudeParserVersion) {
+	// A file this pass could not read keeps its old-parser row, so the version
+	// is stamped only once every file was read under it.
+	if !counters.options.PriorityOnly && walkComplete && unreadable == 0 &&
+		(!versionFound || storedVersion != claudeParserVersion) {
 		if err := database.SetMeta(ctx, claudeParserVersionKey, claudeParserVersion); err != nil {
 			return err
 		}
@@ -98,11 +105,13 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 		return nil
 	}
 	files := make([]diskFile, 0)
+	walkComplete := true
 	for _, root := range roots {
-		found, err := walkCodexRollouts(ctx, root)
+		found, complete, err := walkCodexRollouts(ctx, root)
 		if err != nil {
 			return err
 		}
+		walkComplete = walkComplete && complete
 		files = append(files, found...)
 	}
 	sort.Slice(files, func(left, right int) bool { return files[left].Path < files[right].Path })
@@ -128,6 +137,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	updates := make([]store.Rollout, 0)
 	presentPaths := make(map[string]struct{}, len(files))
 	presentIDs := make(map[string]struct{}, len(files))
+	unreadable := 0
 	for _, file := range files {
 		presentPaths[file.Path] = struct{}{}
 		previous, found := byPath[file.Path]
@@ -145,20 +155,34 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 		} else {
 			counters.FullParsed++
 		}
-		rollout, bytesRead, parseErr := parseCodexRolloutFile(file, start, base)
-		if parseErr != nil {
-			return parseErr
-		}
+		rollout, bytesRead, parseErr := parseCodexRolloutFile(ctx, file, start, base)
 		counters.BytesRead += bytesRead
+		if parseErr != nil {
+			// Its prior row, if any, stays present and unpruned.
+			warnUnreadable(ctx, "codex rollout", file.Path, parseErr)
+			unreadable++
+			if found {
+				presentIDs[previous.ID] = struct{}{}
+			}
+			continue
+		}
 		updates = append(updates, rollout)
 		presentIDs[rollout.ID] = struct{}{}
 	}
 
 	threads := make([]store.CodexThread, 0)
+	stateComplete := true
 	for _, root := range roots {
 		found, readErr := loadIndexedCodexThreads(ctx, root)
 		if readErr != nil {
-			return readErr
+			if ctx.Err() != nil {
+				return readErr
+			}
+			// A state store it cannot read costs that home's reconcile only:
+			// the rollouts still write, and no row it vouched for is pruned.
+			warnUnreadable(ctx, "codex state", root, readErr)
+			stateComplete = false
+			continue
 		}
 		threads = append(threads, found...)
 		updates = reconcileCodexState(found, root, updates, byID, presentIDs, counters)
@@ -168,7 +192,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 		rollout := &existing[i]
 		_, pathPresent := presentPaths[rollout.Path]
 		_, idPresent := presentIDs[rollout.ID]
-		if !pathPresent && !idPresent {
+		if walkComplete && stateComplete && !pathPresent && !idPresent {
 			deletes = append(deletes, rollout.ID)
 		}
 	}
@@ -195,7 +219,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	if err := reconcileCodexNames(ctx, database, threads, counters); err != nil {
 		return err
 	}
-	if !versionFound || storedVersion != codexParserVersion {
+	if walkComplete && unreadable == 0 && (!versionFound || storedVersion != codexParserVersion) {
 		if err := database.SetMeta(ctx, codexParserVersionKey, codexParserVersion); err != nil {
 			return err
 		}
@@ -223,14 +247,5 @@ func SyncOpenCode(ctx context.Context, database *store.Store, roots []string, co
 			return nil
 		}
 	}
-	for i, root := range roots {
-		rootStamp := "" // the last root's replace is the mirror a pass leaves
-		if i == len(roots)-1 {
-			rootStamp = stamp
-		}
-		if err := syncOpenCodeMirror(ctx, database, root, rootStamp, counters); err != nil {
-			return err
-		}
-	}
-	return nil
+	return syncOpenCodeMirror(ctx, database, roots, stamp, counters)
 }

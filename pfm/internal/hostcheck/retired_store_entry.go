@@ -17,6 +17,9 @@ const checkRetiredStoreEntry = "retired-store-entry"
 // migration back by design (installer.LiveChatDeferral, the door install
 // asks): its link row, and the store copy's, name that reason as deferred.
 func retiredStoreEntry(env Env) ([]Row, error) {
+	if row, unread := retiredUnread(env, checkRetiredStoreEntry); unread {
+		return []Row{row}, nil
+	}
 	var rows []Row
 	deferred := map[string]string{}
 	held := ""
@@ -39,7 +42,7 @@ func retiredStoreEntry(env Env) ([]Row, error) {
 		}
 		return problem + "; deferred: " + wait
 	}
-	for _, name := range installer.RetiredStoreEntries {
+	for _, name := range env.Retired.StoreEntries {
 		for _, account := range sortedAccounts(env) {
 			if claudelaunch.InspectConfigDir(env.Store, account.ConfigDir).State == claudelaunch.ConfigDirStore {
 				continue

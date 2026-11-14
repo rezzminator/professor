@@ -5,9 +5,11 @@
 version: "2"
 
 run:
-  timeout: 10m
+  # A hosted CI runner lints the whole module cold beside the gate's other steps:
+  # 550 s on one run, past 600 s on the next; the gate's own step bound still ends a hang.
+  timeout: 20m
   tests: true
-  build-tags: [e2e]
+  build-tags: [e2e, journey, jail]
 
 linters:
   default: none

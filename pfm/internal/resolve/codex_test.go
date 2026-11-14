@@ -141,13 +141,12 @@ func TestCodexThreadIDReportsAMissInsteadOfGuessing(t *testing.T) {
 		codexCandidates()[:3],
 	); err == nil {
 		t.Fatalf("CodexThreadID(no match) = %#v, want an error", thread)
-	} else if !strings.Contains(err.Error(), "/work/project") ||
-		!strings.Contains(err.Error(), "120s") {
+	} else if err.Error() != "no Codex thread in \"/work/project\" was created within 120s of the pane" {
 		t.Fatalf("CodexThreadID(no match) error = %v, want the directory and window", err)
 	}
 
 	if _, err := CodexThreadID("", "", "", 1100, codexCandidates()); err == nil ||
-		!strings.Contains(err.Error(), CodexThreadEnv) {
+		err.Error() != "no CODEX_THREAD_ID is exported and the pane has no directory and start time to match a Codex thread" {
 		t.Fatalf("CodexThreadID(no directory) error = %v, want a clean refusal", err)
 	}
 	if _, err := CodexThreadID("", "", "/work/project", 0, codexCandidates()); err == nil {

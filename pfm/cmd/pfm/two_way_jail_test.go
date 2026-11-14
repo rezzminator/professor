@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -38,6 +40,7 @@ func socketFromRun(t *testing.T, report string) string {
 // starts a chat, gives it work, and comes back with the reply — with the
 // answer alone on stdout, so a caller can capture it.
 func TestRunAwaitsTheAnswerItAskedFor(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -67,6 +70,7 @@ func TestRunAwaitsTheAnswerItAskedFor(t *testing.T) {
 // running answers one question, then another, and each answer belongs to its
 // own question.
 func TestAskHoldsATwoWayConversation(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -112,6 +116,7 @@ func TestAskHoldsATwoWayConversation(t *testing.T) {
 // and says nothing is a different outcome from a chat that never heard it, and
 // the exit code has to tell them apart.
 func TestAskReportsATimeoutWithoutLosingDelivery(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -164,6 +169,7 @@ func TestAskReportsATimeoutWithoutLosingDelivery(t *testing.T) {
 // verification: an engine that never records the prompt must not be reported
 // as a working chat that got its orders.
 func TestRunRefusesToCallAnUnheardPromptDelivered(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

@@ -15,6 +15,7 @@ set -euo pipefail
 # ENUMERATION-FAILED exits 1 when a source glob cannot be read or expanded;
 # an incomplete scan never emits a clean scope summary.
 MISSING_SOURCE_EXIT=3
+. "$(dirname "${BASH_SOURCE[0]}")/platform.sh" || exit 2
 
 usage() {
   echo "usage: $(basename "$0") scan|regen <project_root> [map_path]" >&2
@@ -79,14 +80,13 @@ abspath_under_project() {
 }
 
 source_hash() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
-  else
-    echo "refresh-scope: TOOLCHAIN-MISSING — sha256sum or shasum is required" >&2
+  local rc=0
+  platform_sha256 "$1" | awk '{print $1}' || rc=$?
+  if [[ "$rc" == 127 ]]; then
+    echo "refresh-scope: TOOLCHAIN-MISSING — $(platform_sha256_tools or) is required" >&2
     return 1
   fi
+  return "$rc"
 }
 
 is_ignored() {

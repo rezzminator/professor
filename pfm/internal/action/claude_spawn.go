@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 type Purpose = claudelaunch.Purpose
@@ -40,6 +41,7 @@ type ClaudeSpawn struct {
 	Model             string
 	Effort            string
 	PromptFile        string
+	Envs              map[string]string
 	Args              []string
 	Home              string
 	Machine           pfmconfig.Config
@@ -54,7 +56,7 @@ func (spawn ClaudeSpawn) request() claudelaunch.Request {
 		Purpose: spawn.Purpose, Account: spawn.Account, Cache1H: spawn.Cache1H,
 		SessionID: spawn.SessionID, Resume: spawn.Resume, Fork: spawn.Fork,
 		Name: spawn.Name, RemoteControlName: spawn.RemoteControlName, Model: spawn.Model, Effort: spawn.Effort,
-		PromptFile: spawn.PromptFile, Args: spawn.Args, Home: spawn.Home,
+		PromptFile: spawn.PromptFile, Envs: spawn.Envs, Args: spawn.Args, Home: spawn.Home,
 		Binary: spawn.binary, ConfigDir: spawn.explicitConfigDir,
 	}
 }
@@ -130,7 +132,10 @@ func (spawn ClaudeSpawn) Command(ctx context.Context) (*ProcessCommand, error) {
 	if err != nil {
 		return nil, err
 	}
-	path := deps.Executable(launch.Binary)
+	path, err := spawn.runner().LookPath(launch.Binary)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Claude binary %q: %w", launch.Binary, err)
+	}
 	args := append(append([]string{}, launch.Wrapper...), path)
 	args = append(args, launch.Argv...)
 	if len(launch.Wrapper) != 0 {
@@ -139,7 +144,7 @@ func (spawn ClaudeSpawn) Command(ctx context.Context) (*ProcessCommand, error) {
 	return &ProcessCommand{
 		ctx: ctx, runner: spawn.runner(), Path: path,
 		Args: args,
-		Env:  launchEnvironment(os.Environ(), launch),
+		Env:  claudelaunch.RunEnvironment(os.Environ(), launch),
 	}, nil
 }
 
@@ -212,22 +217,7 @@ func (spawn ClaudeSpawn) Environment(environ []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return launchEnvironment(environ, launch), nil
-}
-
-func launchEnvironment(environ []string, launch claudelaunch.Launch) []string {
-	dropped := make(map[string]bool, len(launch.Unset))
-	for _, name := range launch.Unset {
-		dropped[name] = true
-	}
-	result := make([]string, 0, len(environ)+len(launch.Env))
-	for _, entry := range environ {
-		name, _, _ := strings.Cut(entry, "=")
-		if !dropped[name] {
-			result = append(result, entry)
-		}
-	}
-	return append(result, launch.Env...)
+	return claudelaunch.RunEnvironment(environ, launch), nil
 }
 
 func writeAssignments(command *strings.Builder, assignments []string) {
@@ -249,7 +239,7 @@ func (spawn ClaudeSpawn) SeatRun(cwd string) (fleetdb.SeatRun, error) {
 	return fleetdb.SeatRun{
 		Binary:     launch.Binary,
 		Args:       append([]string(nil), launch.Argv...),
-		Env:        launchEnvironment(os.Environ(), launch),
+		Env:        claudelaunch.RunEnvironment(os.Environ(), launch),
 		CWD:        cwd,
 		CostLedger: spawn.Machine.EffectiveClaude(spawn.Account).CostLedger,
 	}, nil
@@ -262,4 +252,15 @@ func hasNUL(values ...string) bool {
 		}
 	}
 	return false
+}
+
+func claudePersonaSpawn(
+	purpose Purpose, home string, account int, cache1H bool,
+	machine pfmconfig.Config, persona workbench.Persona, name string, args ...string,
+) ClaudeSpawn {
+	return ClaudeSpawn{
+		Purpose: purpose, Home: home, Account: account, Cache1H: &cache1H,
+		Machine: machine, Name: name, Args: args,
+		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model, Envs: persona.Envs,
+	}
 }

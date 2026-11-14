@@ -61,6 +61,15 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(opencodeHome, "opencode.db"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The launched engine's zsh is a user's shell with its startup files: with
+	// none, zsh-newuser-install holds a non-root shell's first prompt, and the
+	// system zshrc's compinit asks about insecure directories where an fpath
+	// directory is writable by others (GitHub's hosted runner).
+	for name, body := range map[string]string{".zshrc": "# update-picker fixture\n", ".zshenv": "skip_global_compinit=1\n"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(
 		filepath.Join(configDir, ".credentials.json"),
 		[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
@@ -148,25 +157,26 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	}()
 
 	environment := replaceUpdateE2EEnv(os.Environ(), map[string]string{
-		"HOME":                    home,
-		"PATH":                    binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"TERM":                    "xterm-256color",
-		"TMUX":                    "",
-		"TMUX_TMPDIR":             tmuxBase,
-		"PFM_HOME":                home,
-		"PFM_CONFIG":              configPath,
-		"PFM_CACHE_DB":            filepath.Join(state, "pfm-cache.db"),
-		"PFM_STATE_DB":            filepath.Join(state, "shared.db"),
-		"PFM_SID_DIR":             filepath.Join(root, "sid"),
-		"PFM_CLAUDE_ROOTS":        filepath.Join(root, "claude"),
-		"PFM_CODEX_ROOT":          codexHome,
-		"PFM_OPENCODE_ROOT":       opencodeHome,
-		"PFM_TMUX_DIR":            tmuxDir,
-		"PFM_PROC_ROOT":           filepath.Join(root, "proc"),
-		"PFM_CGROUP_ROOT":         filepath.Join(root, "cgroup"),
-		"PFM_TMUX_CONF":           "/dev/null",
-		"PFM_UPDATE_LATEST_URL":   server.URL,
-		"PFM_UPDATE_LAUNCH_PROOF": proof,
+		"HOME":                     home,
+		"PATH":                     binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"TERM":                     "xterm-256color",
+		"TMUX":                     "",
+		"TMUX_TMPDIR":              tmuxBase,
+		"PFM_UPDATE_CHECK_OFFLINE": "",
+		"PFM_HOME":                 home,
+		"PFM_CONFIG":               configPath,
+		"PFM_CACHE_DB":             filepath.Join(state, "pfm-cache.db"),
+		"PFM_STATE_DB":             filepath.Join(state, "shared.db"),
+		"PFM_SID_DIR":              filepath.Join(root, "sid"),
+		"PFM_CLAUDE_ROOTS":         filepath.Join(root, "claude"),
+		"PFM_CODEX_ROOT":           codexHome,
+		"PFM_OPENCODE_ROOT":        opencodeHome,
+		"PFM_TMUX_DIR":             tmuxDir,
+		"PFM_PROC_ROOT":            filepath.Join(root, "proc"),
+		"PFM_CGROUP_ROOT":          filepath.Join(root, "cgroup"),
+		"PFM_TMUX_CONF":            "/dev/null",
+		"PFM_UPDATE_LATEST_URL":    server.URL,
+		"PFM_UPDATE_LAUNCH_PROOF":  proof,
 	})
 	for _, dir := range []string{
 		filepath.Join(root, "sid"), filepath.Join(root, "claude"),

@@ -166,21 +166,29 @@ func TestKeyAfterALongIdleMarksTheHeaderRefreshingUntilTheSnapshotLands(t *testi
 	model := deckModel(120, 30)
 	model.activity = NewActivityClock(time.Now())
 	model.deck.freshNS = time.Now().Add(-2 * RefreshStaleAfter).UnixNano()
-	if strings.Contains(ansi.Strip(model.chatsHeaderLine(100)), "refreshing") {
+	if ansi.Strip(
+		model.chatsHeaderLine(100),
+	) != " Chats · 🥈 account 2 · ⚡ 1h · 14 rows · 1 hidden · 3 empty                                        " {
 		t.Fatal("an idle picker with no key yet claims to be refreshing")
 	}
 	model, _ = applyKey(t, model, specialKey(tea.KeyDown))
-	if !strings.Contains(ansi.Strip(model.chatsHeaderLine(100)), "refreshing") {
+	if ansi.Strip(
+		model.chatsHeaderLine(100),
+	) != " Chats · 🥈 account 2 · ⚡ 1h · 14 rows · 1 hidden · 3 empty · ⟳ refreshing                         " {
 		t.Error("a key on a stale fleet says the wake is under way")
 	}
 	model.applyRefresh(deckFleet(120, 30))
-	if strings.Contains(ansi.Strip(model.chatsHeaderLine(100)), "refreshing") {
+	if ansi.Strip(
+		model.chatsHeaderLine(100),
+	) != " Chats · 🥈 account 2 · ⚡ 1h · 14 rows · 1 hidden · 3 empty                                        " {
 		t.Error("the landed snapshot ends the marker")
 	}
 	fresh := deckModel(120, 30)
 	fresh.activity = NewActivityClock(time.Now())
 	fresh, _ = applyKey(t, fresh, specialKey(tea.KeyDown))
-	if strings.Contains(ansi.Strip(fresh.chatsHeaderLine(100)), "refreshing") {
+	if ansi.Strip(
+		fresh.chatsHeaderLine(100),
+	) != " Chats · 🥈 account 2 · ⚡ 1h · 14 rows · 1 hidden · 3 empty                                        " {
 		t.Error("a key on a fleet refreshed moments ago must not cry refreshing")
 	}
 }
@@ -192,7 +200,9 @@ func TestKeyAfterALongIdleMarksTheHeaderRefreshingUntilTheSnapshotLands(t *testi
 func TestRefreshFailureMarksTheFleetStaleUntilAPassLands(t *testing.T) {
 	model := deckModel(120, 30)
 	rows := len(model.rows)
-	if strings.Contains(ansi.Strip(model.mastheadTitle(160)), "stale") {
+	if ansi.Strip(
+		model.mastheadTitle(160),
+	) != " ◆ pfm   ● 3 Claude   ● 1 Codex   ↻ 7 resumable   ⚙ 1 agents                                                                                                    " {
 		t.Fatal("a fleet that has not failed claims to be stale")
 	}
 	model.nowNS = model.deck.freshNS + int64(42*time.Second)
@@ -213,14 +223,16 @@ func TestRefreshFailureMarksTheFleetStaleUntilAPassLands(t *testing.T) {
 	}
 	// The fill cuts from the right: on a narrow terminal the marker must still
 	// be what shows, ahead of the fleet's counts.
-	if narrow := ansi.Strip(model.mastheadTitle(30)); !strings.Contains(narrow, "fleet stale 42s") {
+	if narrow := ansi.Strip(model.mastheadTitle(30)); narrow != " ◆ pfm   ⚠ fleet stale 42s · g" {
 		t.Errorf("a 30-column masthead lost the stale-fleet marker: %q", narrow)
 	}
 	if len(model.rows) != rows {
 		t.Errorf("a failed pass carries no fleet: rows = %d, want the last good %d", len(model.rows), rows)
 	}
 	model.applyRefresh(deckFleet(120, 30))
-	if got := ansi.Strip(model.mastheadTitle(200)); strings.Contains(got, "stale") {
+	if got := ansi.Strip(
+		model.mastheadTitle(200),
+	); got != " ◆ pfm   ● 3 Claude   ● 1 Codex   ↻ 7 resumable   ⚙ 1 agents                                                                                                                                            " {
 		t.Errorf("the next good pass must clear the stale marker: %q", got)
 	}
 }

@@ -265,13 +265,16 @@ func TestOfflineThemesWithoutCloneProfilesNameSkip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("offline install without clone profiles: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "themes NOT installed: load "+themeProfilesRelative) ||
-		!strings.Contains(output.String(), "fetch skipped: PFM_THEMES_OFFLINE=1") {
-		t.Fatalf("offline report lacks the named skip:\n%s", output.String())
-	}
+	profiles := filepath.Join(sourceRepo, "templates", "themes")
+	wantOutputLines(t, output.String(), []string{
+		"  skip    themes NOT installed: load templates/themes: local themes unavailable: list themes in " + profiles +
+			": open " + profiles + ": no such file or directory; fetch skipped: PFM_THEMES_OFFLINE=1",
+	}, "themes NOT installed")
 }
 
-func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
+// Each entry that is no theme is refused by name and costs itself alone: the
+// good theme beside it still loads; with no theme left the load fails by name.
+func TestThemeDiscoveryRefusesEachBadEntryByName(t *testing.T) {
 	t.Parallel()
 	const profile = `{"name":"X","base":"dark","overrides":{"claude":"#ffd60a"}}`
 	for _, tc := range []struct {
@@ -281,10 +284,10 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 		symlink string
 		want    string
 	}{
-		{"name leaves the bare-name law", []string{"a:b"}, nil, "", `theme a:b: name must be a bare profile name`},
-		{"ledger key collision", []string{"profile:x"}, nil, "", `theme profile:x: name must be a bare profile name`},
-		{"symlinked theme", nil, nil, "linked", `linked in `},
-		{"single-file profile", []string{"x"}, []string{"y.json"}, "", `y.json in `},
+		{"name leaves the bare-name law", []string{"a:b", "good"}, nil, "", `theme a:b: name must be a bare profile name`},
+		{"ledger key collision", []string{"profile:x", "good"}, nil, "", `theme profile:x: name must be a bare profile name`},
+		{"symlinked theme", []string{"good"}, nil, "linked", `linked in `},
+		{"single-file profile", []string{"good"}, []string{"y.json"}, "", `y.json in `},
 		{"nothing to install", nil, []string{"README.md"}, "", `no theme in `},
 	} {
 		sourceRepo := t.TempDir()
@@ -304,9 +307,18 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		_, err := loadThemeProfiles(context.Background(), Options{SourceRepo: sourceRepo})
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: err=%v, want it to contain %q", tc.name, err, tc.want)
+		profiles, refused, err := loadThemeProfiles(context.Background(), Options{SourceRepo: sourceRepo})
+		if len(tc.themes) == 0 {
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("%s: err=%v, want it to contain %q", tc.name, err, tc.want)
+			}
+			continue
+		}
+		if err != nil || strings.Join(profileKeys(profiles), ",") != "good" {
+			t.Errorf("%s: profiles=%v err=%v, want the good theme alone", tc.name, profileKeys(profiles), err)
+		}
+		if len(refused) != 1 || !strings.Contains(refused[0].Error(), tc.want) {
+			t.Errorf("%s: refused=%v, want one refusal containing %q", tc.name, refused, tc.want)
 		}
 	}
 
@@ -334,53 +346,33 @@ func TestThemeDiscoveryFailsClosedByName(t *testing.T) {
 	}
 }
 
-// TestThemeReleaseUnpublishedAlphaReturnsNamedRefusal is a REGRESSION test:
-// `pfm install --yes` run outside the source checkout falls back to a release
-// theme URL built from an -alpha VERSION, which pfm never publishes and which therefore 404s.
-// loadThemeProfiles must recognise the -alpha reference in the URL and return
-// a named refusal instead of surfacing a bare HTTP error — and must never even
-// attempt the doomed fetch. FAILS on unfixed code because the URL is fetched
-// unconditionally and the error is a bare "fetch failed"/network error, not
-// the named refusal.
-func TestThemeReleaseUnpublishedAlphaReturnsNamedRefusal(t *testing.T) {
+// TestThemeUnpublishedAlphaRefusal: an -alpha build has no published release
+// themes, so without the clone's own profiles loadThemeProfiles refuses by
+// name and fetches nothing.
+func TestThemeUnpublishedAlphaRefusal(t *testing.T) {
 	t.Parallel()
-	_, err := loadThemeProfiles(context.Background(), Options{
-		ThemeReleaseURL: "https://raw.githubusercontent.com/example/professor/0.78.0-alpha/templates/themes/",
-	})
-	if err == nil {
-		t.Fatal("loadThemeProfiles() error = nil, want a named refusal for an unpublished -alpha release")
-	}
-	want := "release themes for an unpublished -alpha build; run pfm install from the source clone"
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("loadThemeProfiles() error = %v, want it to contain %q", err, want)
-	}
-}
-
-// TestThemeSourceRepoWithoutProfilesRefusesUnpublishedAlpha covers the
-// SourceRepo branch of the same refusal: a source repository with no
-// templates/themes/ falls back to the release URL, and an -alpha URL there
-// must return the named refusal carrying the local error — never a fetch of
-// the URL pfm never publishes.
-func TestThemeSourceRepoWithoutProfilesRefusesUnpublishedAlpha(t *testing.T) {
-	t.Parallel()
+	const alphaURL = "https://raw.githubusercontent.com/example/professor/0.78.0-alpha/templates/themes/"
+	const refusal = "release themes for an unpublished -alpha build; run pfm install from the source clone"
 	client := &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		t.Errorf("fetched the unpublished -alpha release %s", request.URL)
 		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
 	})}
-	_, err := loadThemeProfiles(context.Background(), Options{
-		SourceRepo:      t.TempDir(),
-		ThemeReleaseURL: "https://raw.githubusercontent.com/example/professor/0.78.0-alpha/templates/themes/",
-		ThemeHTTPClient: client,
-	})
-	if err == nil {
-		t.Fatal("loadThemeProfiles() error = nil, want a named refusal for an unpublished -alpha release")
-	}
-	for _, want := range []string{
-		"release themes for an unpublished -alpha build; run pfm install from the source clone",
-		"local themes unavailable",
+	sourceRepo := t.TempDir()
+	profiles := filepath.Join(sourceRepo, "templates", "themes")
+	for _, tc := range []struct {
+		name    string
+		options Options
+		want    string
+	}{
+		{"no source repository", Options{ThemeReleaseURL: alphaURL, ThemeHTTPClient: client}, "no source repository: " + refusal},
+		{
+			"source repository without profiles",
+			Options{SourceRepo: sourceRepo, ThemeReleaseURL: alphaURL, ThemeHTTPClient: client},
+			"local themes unavailable: list themes in " + profiles + ": open " + profiles + ": no such file or directory; " + refusal,
+		},
 	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("loadThemeProfiles() error = %v, want it to contain %q", err, want)
+		if _, _, err := loadThemeProfiles(context.Background(), tc.options); err == nil || err.Error() != tc.want {
+			t.Errorf("%s: loadThemeProfiles() error = %v, want %q", tc.name, err, tc.want)
 		}
 	}
 }
@@ -414,12 +406,7 @@ func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
 	}
 	target := filepath.Join(home, ".claude", "themes", "sonar-gold.json")
 	want := "read bundled theme sonar-gold -> " + target
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("preview output = %q, want the read-bundled label %q", output.String(), want)
-	}
-	if strings.Contains(output.String(), "fetch theme sonar-gold") {
-		t.Fatalf("preview output still labels the bundled palette as fetched:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{"  change  " + want}, "theme sonar-gold")
 }
 
 // TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients pins

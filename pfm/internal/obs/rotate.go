@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -15,69 +14,79 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
-// DefaultKeepFiles and DefaultMaxMB are the rotation the fleet ships with when
-// pfm.config.json says nothing: five files of eight megabytes, an upper bound
-// of 40 MB of activity per pfm home.
+// DefaultKeepFiles and DefaultMaxMB are the retention the fleet ships with
+// when pfm.config.json says nothing: segments of eight megabytes, and the
+// newest ten of them — 80 MB — kept with every record; an older segment keeps
+// only its warnings and errors (retain.go).
 const (
-	DefaultKeepFiles = 5
+	DefaultKeepFiles = 10
 	DefaultMaxMB     = 8
 )
 
+// The names inside a log's folder, beside its current segment {name}.{ext}:
+// {name}.segments/ holds the older whole segments, each named by the UTC time
+// it closed, and {name}.kept/ one file per UTC day of the warnings and errors
+// of the segments that fell behind the kept size. Both names sort by time.
+const (
+	segmentsSuffix = ".segments"
+	keptSuffix     = ".kept"
+	segmentStamp   = "2006-01-02T15-04-05.000Z"
+	keptStamp      = "2006-01-02"
+)
+
+// reattachAfter is how long a writer appends without comparing its file with
+// the one at the path. A writer another process rolled past appends at most
+// this long to the closed segment, which stays whole for hours; one that idled
+// longer looks first, so no record lands in a segment already reduced.
+const reattachAfter = time.Second
+
 // OpenRotatingLog opens a private append-only diagnostic sink using the activity
-// log's cross-process rotation and error reporting, without replacing the process
-// logger. keep includes the current file; maxMB caps each generation. Callers
-// bound each record below that cap and close the returned writer.
+// log's cross-process roll and error reporting, without replacing the process
+// logger. keep counts the segments of maxMB kept; an older one is deleted whole.
+// Callers bound each record below that cap and close the returned writer.
 func OpenRotatingLog(path string, keep, maxMB int, stderr io.Writer) (io.WriteCloser, error) {
-	return newRotator(path, keep, maxMB, 0, clock.Real, stderr)
+	return newRotator(path, keep, maxMB, false, clock.Real, stderr)
 }
 
-// failureReportInterval rate-limits how often a write/rotate failure repeats
-// on stderr once OpenLog has already opened the file successfully: the first
-// failure after a healthy run is always reported, and after that at most
-// once per interval — a full disk must not turn every record's failed write
-// into its own stderr line.
+// failureReportInterval rate-limits how often a write/roll failure repeats on
+// stderr: the first failure after a healthy run is always reported, and after
+// that at most once per interval — a full disk must not turn every record's
+// failed write into its own stderr line.
 const failureReportInterval = 5 * time.Minute
 
-// rotator is the size-capped JSON-lines sink: it appends to path and, when the
-// next record would carry the file past maxBytes, renames pfm.jsonl to
-// pfm.jsonl.1 (shifting 1→2 … keep-1, dropping the oldest) and opens a fresh
-// one; prune (retain.go) then drops the generations past keepDays. Whichever
-// limit is reached first wins. In-tree on purpose — a rotation library would
-// be a dependency for twenty lines (§ Destinations and environments).
+// rotator is the segmented JSON-lines sink every process of a home appends to.
+// One record is one write(2) on an O_APPEND descriptor, which the kernel keeps
+// whole against every other appender, so a record takes no lock and no stat:
+// the descriptor's offset after the append is the segment's size (others'
+// appends included), and passing segmentBytes rolls it. The roll alone takes
+// the home-wide flock on path+".lock": it renames the current segment into
+// {name}.segments/ unless another process already did, attaches to the fresh
+// file, and applies retention. In-tree on purpose — a rotation library would be
+// a dependency for this much (§ Destinations and environments).
 //
-// Every process of a home appends to the same path, so the decision is made
-// from the file on disk, never from a byte count kept in the process: under
-// an exclusive flock on the sidecar path+".lock" each Write stats the path;
-// when its inode is not the open descriptor's another process rotated (or
-// removed) the file, and the writer attaches to the path instead of rotating
-// it; otherwise the on-disk size decides. The lock is held through the append,
-// so no record lands in a file another process is renaming.
-//
-// A write or rotate failure AFTER open would otherwise vanish: slog.Handler's
+// A write or roll failure AFTER open would otherwise vanish: slog.Handler's
 // Handle discards the error Write returns, so "no records" and "logging is
-// broken" would read identically. stderr, lastReported and failing exist so
-// that failure is surfaced once (rate-limited) instead — never breaking the
-// wrapped call — and a recovered state is announced once too.
+// broken" would read identically. stderr, lastReported and failing surface it
+// once (rate-limited), never breaking the wrapped call, and announce recovery.
 type rotator struct {
 	mutex        sync.Mutex
 	path         string
-	keep         int
-	maxBytes     int64
-	keepDays     int
+	segmentBytes int64
+	keepBytes    int64
+	reduce       bool // a segment past keepBytes keeps its warnings and errors; without, it is deleted
 	timing       clock.Clock
 	stderr       io.Writer
 	file         *os.File
 	identity     os.FileInfo // what file was when opened; the path is compared against it
-	lock         *os.File    // the sidecar path+".lock", flocked around every write
+	checked      time.Time   // when the path was last compared against file
 	failing      bool
 	lastReported time.Time
 }
 
-// newRotator opens path for append, creating its directory and the lock
-// sidecar; the first write measures the file on disk. keepDays is
-// the time limit (0 disables it), measured on timing. A later write/rotate
-// failure is reported on stderr (nil defaults to os.Stderr).
-func newRotator(path string, keep, maxMB, keepDays int, timing clock.Clock, stderr io.Writer) (*rotator, error) {
+// newRotator opens path for append, creating its folder. keep segments of maxMB
+// are kept whole; reduce keeps an older one's warnings and errors. A later
+// write/roll failure is reported on stderr (nil defaults to os.Stderr).
+func newRotator(path string, keep, maxMB int, reduce bool, timing clock.Clock, stderr io.Writer) (*rotator, error) {
 	if keep < 1 {
 		keep = DefaultKeepFiles
 	}
@@ -90,29 +99,12 @@ func newRotator(path string, keep, maxMB, keepDays int, timing clock.Clock, stde
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create activity log directory %s: %w", filepath.Dir(path), err)
 	}
+	segment := int64(maxMB) * 1024 * 1024
 	opened := &rotator{
-		path:     path,
-		keep:     keep,
-		maxBytes: int64(maxMB) * 1024 * 1024,
-		keepDays: keepDays,
-		timing:   timing,
-		stderr:   stderr,
+		path: path, segmentBytes: segment, keepBytes: int64(keep) * segment, reduce: reduce,
+		timing: timing, stderr: stderr,
 	}
-	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open activity log lock %s: %w", path+".lock", err)
-	}
-	opened.lock = lock
 	if err := opened.reopen(); err != nil {
-		if closeErr := lock.Close(); closeErr != nil {
-			return nil, fmt.Errorf("%w (and close lock: %w)", err, closeErr)
-		}
-		return nil, err
-	}
-	if err := opened.prune(); err != nil {
-		if closeErr := opened.Close(); closeErr != nil {
-			return nil, fmt.Errorf("%w (and close: %w)", err, closeErr)
-		}
 		return nil, err
 	}
 	return opened, nil
@@ -131,35 +123,29 @@ func (writer *rotator) reopen() error {
 		}
 		return fmt.Errorf("stat activity log %s: %w", writer.path, err)
 	}
-	writer.file, writer.identity = file, info
+	writer.file, writer.identity, writer.checked = file, info, writer.timing.Now()
 	return nil
 }
 
-// alignLocked makes writer.file the file at path and rotates it when record
-// bytes more would pass maxBytes, deciding from the path on disk. The caller
-// holds writer.mutex and the flock.
-func (writer *rotator) alignLocked(incoming int64) error {
+// attachLocked makes writer.file the file at path when it is not: forced, or
+// once reattachAfter has passed since the last look. The caller holds the mutex.
+func (writer *rotator) attachLocked(force bool) error {
+	now := writer.timing.Now()
+	if writer.file != nil && !force && now.Sub(writer.checked) < reattachAfter {
+		return nil
+	}
+	writer.checked = now
 	onDisk, err := os.Stat(writer.path)
-	switch {
-	case err == nil && writer.file != nil && os.SameFile(writer.identity, onDisk):
-		// Still the file this writer opened: its real size decides below.
-	case err == nil || errors.Is(err, fs.ErrNotExist):
-		// Another process rotated or removed the file (or a failed rotation
-		// left no handle): attach to what is at the path now.
-		if err := writer.dropHandle(); err != nil {
-			return err
-		}
-		if err := writer.reopen(); err != nil {
-			return err
-		}
-		onDisk = writer.identity
-	default:
+	if err == nil && writer.file != nil && os.SameFile(writer.identity, onDisk) {
+		return nil
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("stat activity log %s: %w", writer.path, err)
 	}
-	if onDisk.Size() > 0 && onDisk.Size()+incoming > writer.maxBytes {
-		return writer.rotate()
+	if err := writer.dropHandle(); err != nil {
+		return err
 	}
-	return nil
+	return writer.reopen()
 }
 
 // dropHandle closes a handle that no longer leads to the file at path. A
@@ -176,46 +162,76 @@ func (writer *rotator) dropHandle() error {
 	return nil
 }
 
-// flock takes or releases the sidecar lock, retrying an interrupted call.
-func (writer *rotator) flock(how int) error {
-	for {
-		err := syscall.Flock(int(writer.lock.Fd()), how)
-		if !errors.Is(err, syscall.EINTR) {
-			return err
-		}
-	}
-}
-
-// Write appends one record, rotating first when it would not fit on the file
-// at path (alignLocked), under the home-wide lock. A failure
-// is still returned to the caller (slog.Handler.Handle discards it, but the
-// contract here is "never silent," not "never returned") and is ALSO
-// surfaced on stderr, rate-limited by reportFailureLocked.
+// Write appends one record, then rolls the segment when the append carried it
+// past segmentBytes. A failed append is returned (slog.Handler.Handle discards
+// it, but the contract is "never silent," not "never returned") and ALSO
+// surfaced on stderr, rate-limited; a failed roll costs no record and is
+// reported the same way.
 func (writer *rotator) Write(record []byte) (int, error) {
 	writer.mutex.Lock()
 	defer writer.mutex.Unlock()
-	if err := writer.flock(syscall.LOCK_EX); err != nil {
-		wrapped := fmt.Errorf("lock activity log %s: %w", writer.path+".lock", err)
-		writer.reportFailureLocked(wrapped)
-		return 0, wrapped
-	}
-	defer func() {
-		if err := writer.flock(syscall.LOCK_UN); err != nil {
-			writer.reportFailureLocked(fmt.Errorf("unlock activity log %s: %w", writer.path+".lock", err))
-		}
-	}()
-	if err := writer.alignLocked(int64(len(record))); err != nil {
+	if err := writer.attachLocked(false); err != nil {
 		writer.reportFailureLocked(err)
 		return 0, err
 	}
 	written, err := writer.file.Write(record)
 	if err != nil {
-		wrapped := fmt.Errorf("write activity log %s: %w", writer.path, err)
+		// The handle that failed is dropped: the next write opens the path afresh.
+		wrapped := errors.Join(fmt.Errorf("write activity log %s: %w", writer.path, err), writer.dropHandle())
 		writer.reportFailureLocked(wrapped)
 		return written, wrapped
 	}
+	end, err := writer.file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		err = fmt.Errorf("read activity log offset %s: %w", writer.path, err)
+	} else if end > writer.segmentBytes {
+		err = writer.rollLocked()
+	}
+	if err != nil {
+		writer.reportFailureLocked(err)
+		return written, nil
+	}
 	writer.reportRecoveredLocked()
 	return written, nil
+}
+
+// rollLocked closes the full segment under the home-wide lock: renamed into
+// {name}.segments/ when it is still the file at path, else left to the process
+// that already rolled it; then the writer attaches to the fresh file and, when
+// it rolled, applies retention. The caller holds the mutex.
+func (writer *rotator) rollLocked() (err error) {
+	lock, err := os.OpenFile(writer.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open activity log lock %s: %w", writer.path+".lock", err)
+	}
+	defer func() {
+		if closeErr := lock.Close(); closeErr != nil { // closing releases the flock
+			err = errors.Join(err, fmt.Errorf("close activity log lock %s: %w", writer.path+".lock", closeErr))
+		}
+	}()
+	for {
+		err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX)
+		if !errors.Is(err, syscall.EINTR) {
+			break
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("lock activity log %s: %w", writer.path+".lock", err)
+	}
+	onDisk, err := os.Stat(writer.path)
+	rolled := err == nil && os.SameFile(writer.identity, onDisk)
+	if rolled {
+		if err := writer.closeSegment(); err != nil {
+			return err
+		}
+	}
+	if err := writer.attachLocked(true); err != nil {
+		return err
+	}
+	if !rolled {
+		return nil
+	}
+	return writer.retain()
 }
 
 // reportFailureLocked surfaces err on stderr: always on the first failure
@@ -241,55 +257,46 @@ func (writer *rotator) reportRecoveredLocked() {
 	fmt.Fprintf(writer.stderr, "pfm: activity log: writes to %s recovered\n", writer.path)
 }
 
-// Close releases the file handle and the lock sidecar.
+// processWriter is the activity log OpenLog opened, guarded by processMutex.
+var processWriter *rotator
+
+// RelocateLog moves this process's activity log to path, the root pfm install
+// just moved the home's logs to; a process that opened none has nothing to move.
+func RelocateLog(path string) error {
+	processMutex.Lock()
+	defer processMutex.Unlock()
+	if processWriter == nil {
+		return nil
+	}
+	return processWriter.relocate(path)
+}
+
+// relocate moves the writer to path: the process's own log after pfm install
+// moved the home's logs to their root.
+func (writer *rotator) relocate(path string) error {
+	writer.mutex.Lock()
+	defer writer.mutex.Unlock()
+	if err := writer.dropHandle(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create activity log directory %s: %w", filepath.Dir(path), err)
+	}
+	writer.path = path
+	return writer.reopen()
+}
+
+// Close releases the file handle.
 func (writer *rotator) Close() error {
 	writer.mutex.Lock()
 	defer writer.mutex.Unlock()
-	var failures []error
-	if writer.file != nil {
-		if err := writer.file.Close(); err != nil {
-			failures = append(failures, fmt.Errorf("close activity log %s: %w", writer.path, err))
-		}
-		writer.file = nil
+	if writer.file == nil {
+		return nil
 	}
-	if writer.lock != nil {
-		if err := writer.lock.Close(); err != nil {
-			failures = append(failures, fmt.Errorf("close activity log lock %s: %w", writer.path+".lock", err))
-		}
-		writer.lock = nil
-	}
-	return errors.Join(failures...)
-}
-
-// rotate shifts the generations down and opens a fresh current file. The
-// caller holds the mutex.
-func (writer *rotator) rotate() error {
-	if err := writer.file.Close(); err != nil {
-		return fmt.Errorf("close activity log %s before rotation: %w", writer.path, err)
-	}
+	err := writer.file.Close()
 	writer.file = nil
-	// keep counts every file the home retains, so the oldest generation is
-	// keep-1: it is dropped, and each younger one ages by one.
-	oldest := writer.path + "." + strconv.Itoa(writer.keep-1)
-	if err := os.Remove(oldest); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("drop oldest activity log %s: %w", oldest, err)
+	if err != nil {
+		return fmt.Errorf("close activity log %s: %w", writer.path, err)
 	}
-	for generation := writer.keep - 2; generation >= 1; generation-- {
-		aged := writer.path + "." + strconv.Itoa(generation+1)
-		current := writer.path + "." + strconv.Itoa(generation)
-		if err := os.Rename(current, aged); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("rotate activity log %s: %w", current, err)
-		}
-	}
-	if writer.keep > 1 {
-		if err := os.Rename(writer.path, writer.path+".1"); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("rotate activity log %s: %w", writer.path, err)
-		}
-	} else if err := os.Remove(writer.path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("drop activity log %s: %w", writer.path, err)
-	}
-	if err := writer.reopen(); err != nil {
-		return err
-	}
-	return writer.prune()
+	return nil
 }

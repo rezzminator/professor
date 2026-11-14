@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
@@ -11,24 +12,36 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// pfm's suites run only in the fence, or on a GitHub-hosted CI runner. On a real machine a test
-// reaches that machine's tmux, git and pfm state: a host run on 2026-10-31 overwrote the
-// operator's live pfm.db. A test binary started anywhere else re-runs its package in the fence
-// and never runs a test where it was started.
+// A test binary built with the jail tag (or the e2e or journey suite's) runs only in the fence, or on
+// a GitHub-hosted CI runner. On a real machine such a test reaches that machine's tmux, git and pfm
+// state: a host run on 2026-10-31 overwrote the operator's live pfm.db. Started anywhere else, it
+// re-runs its package in the fence and never runs a test where it was started. A unit binary, built
+// without those tags, runs anywhere once the unit net is armed (unitnet.go), and like one until then.
 const (
 	fenceMarker   = "/.dockerenv" // exists only inside a container: an exported variable alone never passes
 	fenceLauncher = ".claude/scripts/dev.sh"
 )
 
-func inFence() bool {
-	_, err := os.Stat(fenceMarker)
-	return err == nil && paths.OSEnv{}.Get(paths.EnvDevFence) == "1"
+// admitted is the one decision whether a suite may run here: PFM_DEV_FENCE=1 inside a container
+// (marker present), or a GitHub-hosted runner. scripts/platform.sh's platform_in_fence applies
+// the same rule for the shell.
+func admitted(env paths.Env, marker string) bool {
+	_, err := os.Stat(marker)
+	inFence := err == nil && env.Get(paths.EnvDevFence) == "1"
+	onHostedRunner := env.Get("GITHUB_ACTIONS") == "true" && env.Get("RUNNER_ENVIRONMENT") == "github-hosted"
+	return inFence || onHostedRunner
 }
 
-func onHostedRunner() bool {
-	env := paths.OSEnv{}
-	return env.Get("GITHUB_ACTIONS") == "true" && env.Get("RUNNER_ENVIRONMENT") == "github-hosted"
+// runsHere is the guard's one decision: an armed unit binary runs on any host; every other binary
+// runs only where admitted holds, and Run re-runs it in the fence elsewhere.
+func runsHere(unit, netArmed bool, env paths.Env, marker string) bool {
+	return (unit && netArmed) || admitted(env, marker)
 }
+
+// Disposable reports whether this process runs on a machine a suite may treat as throwaway, by
+// admitted's rule. The journey suite drives the owner's real paths with no jail: it starts only where
+// this holds and refuses everywhere else.
+func Disposable() bool { return admitted(paths.OSEnv{}, fenceMarker) }
 
 // hostPathFlags name files on the starting machine, which the fence cannot see.
 var hostPathFlags = []string{
@@ -102,4 +115,14 @@ func runInFence() int {
 func refuseHost(format string, args ...any) int {
 	warnSetup("REFUSED — pfm tests run only in the fence (dev.sh iso test pfm); "+format, args...)
 	return 1
+}
+
+// childCoverageLine is the summary line a coverage build of a test binary (go test -cover, dev.sh iso
+// cover) prints after every run, its re-exec children's included.
+var childCoverageLine = regexp.MustCompile(`(?m)^coverage: [^\n]*\n`)
+
+// ChildOutput is a re-exec of the test binary's output as an uninstrumented build prints it: a test
+// comparing its child's whole output reads it through here, so a coverage run asserts the same text.
+func ChildOutput(output []byte) string {
+	return childCoverageLine.ReplaceAllString(string(output), "")
 }

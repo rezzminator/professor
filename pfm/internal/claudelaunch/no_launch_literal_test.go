@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep"
 )
 
 // Readers and the two documented headless argv owners may name only the
@@ -24,7 +26,6 @@ type launchLiteralAllowance struct {
 }
 
 var launchLiteralReaders = map[string]launchLiteralAllowance{
-	"cmd/pfm/chat_call_resume.go": {"reads process identity", []string{"CLAUDE_CODE_SESSION_ID="}},
 	"cmd/pfm/chat_satellite_command.go": {"parses branch input", []string{
 		"usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] ",
 		"pfm chat branch: no ambient session id; pass --engine and --session-id",
@@ -63,15 +64,19 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 		"mock argv",
 		[]string{
 			"--settings", "--system-prompt-file", "--session-id", "--mcp-config",
-			"--resume", "--fork-session", "CLAUDE_CODE_SESSION_ID=",
+			"--resume", "--fork-session", "--remote-control", "CLAUDE_CODE_SESSION_ID=",
 		},
+	},
+	"internal/mockengine/claude_api.go": {
+		"mock reads the env the real CLI reads",
+		[]string{"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"},
 	},
 	"internal/resolve/whoami.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/statusline/render.go": {"reads engine telemetry", []string{
 		"ANTHROPIC_MODEL",
 	}},
 	"internal/testjail/launch_shell.go": {"pins the launch shell", []string{"CLAUDE_CODE_SHELL"}},
-	"internal/testjail/testjail.go":     {"sets fixture identity", []string{"CLAUDE_CODE_SESSION_ID"}},
+	"internal/testjail/unitnet.go":      {"clears the ambient identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 }
 
 var launchEnvFamily = regexp.MustCompile(
@@ -114,7 +119,7 @@ func TestNoLaunchLiteralOutsideRegistry(t *testing.T) {
 		}
 		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
-			if rel == "internal/claudelaunch" {
+			if rel == "internal/claudelaunch" || sourcesweep.SkipDir(rel) {
 				return filepath.SkipDir
 			}
 			return nil

@@ -58,7 +58,7 @@ func assistantSaid(text string) string {
 // a *TargetError wrapping ErrUnknownChat — and never a scan failure, a
 // zero result, or a missing-transcript answer.
 func TestVerbsReportAnUnknownTargetAsTargetError(t *testing.T) {
-	testjail.Fleet(t)
+	memoryFleet(t)
 	verbs := Verbs{}
 	ctx := context.Background()
 	_, lastErr := verbs.Last(ctx, LastRequest{Target: "ghost"})

@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.OpenCode, opencodeengine.Matcher{})
-	code := testjail.Run(m)
+	code := testjail.RunInJail(m)
 	if fleetBinaryDir != "" {
 		if err := os.RemoveAll(fleetBinaryDir); err != nil {
 			fmt.Fprintf(os.Stderr, "mcpserv: remove shared pfm build %s: %v\n", fleetBinaryDir, err)

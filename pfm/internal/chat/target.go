@@ -1,10 +1,3 @@
-// Package chat is the verb layer: one operation on one chat, reachable from
-// the CLI, the MCP server, the picker and the daemon as a typed call — never
-// as argv into package main. A verb takes a typed request and returns a typed
-// result, or an error whose kind each surface maps onto its own contract: a
-// *TargetError wrapping ErrUnknownChat when nothing answers to the target,
-// ErrNoTranscript and ErrNoAnswer when the chat exists but has nothing to
-// read, and any other error when a step could not run.
 package chat
 
 import (
@@ -12,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -25,25 +20,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
-	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
-
-type resolvedSelfKey struct{}
-
-// WithResolvedSelf binds an immutable, request-local caller seat. A shared MCP
-// daemon uses it to resolve self without consulting process-global identity.
-func WithResolvedSelf(ctx context.Context, self headless.Chat) context.Context {
-	return context.WithValue(ctx, resolvedSelfKey{}, self)
-}
-
-// ScopedSelf returns the exact request-local caller seat, when one was bound.
-func ScopedSelf(ctx context.Context) (headless.Chat, bool) {
-	if ctx == nil {
-		return headless.Chat{}, false
-	}
-	self, ok := ctx.Value(resolvedSelfKey{}).(headless.Chat)
-	return self, ok
-}
 
 var (
 	// ErrUnknownChat: nothing in the fleet answers to the target.
@@ -68,7 +46,7 @@ type TargetError struct {
 
 func (failure *TargetError) Error() string {
 	if errors.Is(failure.Err, ErrUnknownChat) {
-		return fmt.Sprintf("no chat named %q", failure.Name)
+		return pfmcall.UnknownChat(failure.Name).Message
 	}
 	return failure.Err.Error()
 }
@@ -97,6 +75,64 @@ func TargetIn(
 		return headless.Chat{}, &TargetError{Name: name, Err: ErrUnknownChat}
 	}
 	return found, nil
+}
+
+// DormantCallTarget decides whether a call every live namespace missed runs
+// the dormant ladder, and on what. A CodeUnknown result that names no
+// ambiguity is answered from the registry first: a dead Claude chat it knows
+// resumes through its own transcript, the returned ladder target, once that
+// transcript holds a turn to continue from; any other dead chat becomes a CodeDead result naming its engine, session and how to
+// revive it, and a registry that could not be read a CodeUndelivered one. A
+// target the registry does not know, or a live row the call engine missed,
+// reaches the ladder as typed. dormant is false when the result stands.
+func DormantCallTarget(
+	ctx context.Context,
+	result pfmcall.Result,
+	name string,
+	runtime *pfmconfig.Runtime,
+) (answer pfmcall.Result, ladderTarget string, dormant bool) {
+	if result.Code != pfmcall.CodeUnknown || strings.Contains(strings.ToLower(result.Message), "ambiguous") {
+		return result, name, false
+	}
+	chat, err := Target(ctx, name, runtime)
+	switch {
+	case errors.Is(err, ErrUnknownChat):
+		return result, name, true
+	case err != nil:
+		result.Code = pfmcall.CodeUndelivered
+		result.Message = fmt.Sprintf("registry lookup of %q failed: %v", name, err)
+		return result, name, false
+	case chat.Live:
+		return result, name, true
+	}
+	if chat.Engine == pfmengine.Claude && chat.Path != "" {
+		info, statErr := os.Stat(chat.Path)
+		if statErr == nil && info.Mode().IsRegular() {
+			raw, readErr := os.ReadFile(chat.Path)
+			if readErr != nil {
+				result.Code = pfmcall.CodeUndelivered
+				result.Message = fmt.Sprintf("read transcript of %q: %v", name, readErr)
+				return result, name, false
+			}
+			_, tailErr := transcript.LastUUIDEvent(raw)
+			if tailErr == nil {
+				return result, chat.Path, true
+			}
+			if !errors.Is(tailErr, transcript.ErrNoUUIDEvent) {
+				result.Code = pfmcall.CodeUndelivered
+				result.Message = fmt.Sprintf("read transcript of %q: %v", name, tailErr)
+				return result, name, false
+			}
+		}
+		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+			result.Code = pfmcall.CodeUndelivered
+			result.Message = fmt.Sprintf("stat transcript of %q: %v", name, statErr)
+			return result, name, false
+		}
+	}
+	dead := pfmcall.DeadChat(name, string(chat.Engine), chat.ID)
+	result.Status, result.Code, result.Message = dead.Status, dead.Code, dead.Message
+	return result, name, false
 }
 
 // DeliverName sends a rename command to one live chat. A concrete pane is an
@@ -312,7 +348,7 @@ func ResolveIn(
 	case resolve.CodeUnknown:
 		return headless.Chat{}, false, nil
 	case resolve.CodeAmbiguous:
-		return headless.Chat{}, false, errors.New(detail)
+		return headless.Chat{}, false, &headless.AmbiguousTargetError{Detail: detail}
 	default:
 		return headless.Chat{}, false, fmt.Errorf("resolve target %q failed with code %d: %s", name, code, detail)
 	}
@@ -330,26 +366,30 @@ func enrichResolvedSelf(resolved, indexed headless.Chat) headless.Chat {
 	return resolved
 }
 
+// enrichRecordedSelf adds the indexed transcript to a resolved self chat; an
+// index it cannot read leaves the chat resolved, its transcript unknown and warned.
 func enrichRecordedSelf(
 	ctx context.Context,
 	resolved headless.Chat,
 	warn io.Writer,
 ) (result headless.Chat, returnErr error) {
-	database, err := store.Open(store.WithWarningWriter(warn))
-	if err != nil {
-		return headless.Chat{}, err
-	}
-	defer func() {
-		if err := database.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
-		}
-	}()
 	if resolved.Engine != pfmengine.Claude {
 		return resolved, nil
 	}
+	database, closeIndex, err := openFleetIndex(warn)
+	if err != nil {
+		fmt.Fprintf(warn, "pfm WARN: self transcript %s unknown: %v\n", resolved.ID, err)
+		return resolved, nil
+	}
+	defer func() {
+		if err := closeIndex(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
+		}
+	}()
 	transcript, found, err := database.Transcript(ctx, resolved.ID)
 	if err != nil {
-		return headless.Chat{}, fmt.Errorf("resolve self transcript %q: %w", resolved.ID, err)
+		fmt.Fprintf(warn, "pfm WARN: self transcript %s unknown: %v\n", resolved.ID, err)
+		return resolved, nil
 	}
 	if !found {
 		return resolved, nil
@@ -401,23 +441,19 @@ type FleetScan struct {
 }
 
 // ScanRows is Rows with the sockets the scan could not read.
-func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (result FleetScan, returnErr error) {
-	database, err := store.Open(store.WithWarningWriter(warn))
+func ScanRows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (
+	result FleetScan, returnErr error,
+) {
+	database, closeIndex, err := openFleetIndex(warn)
 	if err != nil {
 		return FleetScan{}, err
 	}
 	defer func() {
-		if err := database.Close(); err != nil {
+		if err := closeIndex(); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
 		}
 	}()
-	scan, err := fleet.Scan(ctx, database, fleet.Request{
-		View: compose.AllView, ReadOnly: true, Runtime: runtime,
-	}, warn)
-	if err != nil {
-		return FleetScan{}, err
-	}
-	return FleetScan{Rows: scan.Output.Rows, Unreadable: scan.Live.UnreadableSockets}, nil
+	return scanFleetRows(ctx, database, warn, runtime)
 }
 
 // RosterCandidates projects composed rows onto the roster matching rule's input.
@@ -539,12 +575,12 @@ func panePID(pids []int) int {
 // CodexSeats supplies the live fleet rows for Identify's final Codex-thread rung.
 func CodexSeats(runtime *pfmconfig.Runtime) func(context.Context) ([]resolve.CodexSeat, error) {
 	return func(ctx context.Context) (seats []resolve.CodexSeat, returnErr error) {
-		database, err := store.Open(store.WithWarningWriter(io.Discard))
+		database, closeIndex, err := openFleetIndex(io.Discard)
 		if err != nil {
 			return nil, fmt.Errorf("open Codex identity store: %w", err)
 		}
 		defer func() {
-			if err := database.Close(); err != nil {
+			if err := closeIndex(); err != nil {
 				returnErr = errors.Join(returnErr, fmt.Errorf("close Codex identity store: %w", err))
 			}
 		}()
@@ -557,20 +593,23 @@ func CodexSeats(runtime *pfmconfig.Runtime) func(context.Context) ([]resolve.Cod
 		if err != nil {
 			return nil, fmt.Errorf("scan Codex identity seats: %w", err)
 		}
-		return codexSeatsFromRows(scan.Output.Rows, scan.Env.Paths)
+		return codexSeatsFromRows(scan.Output.Rows, scan.Env.Paths), nil
 	}
 }
 
-func codexSeatsFromRows(rows []compose.Row, values paths.Values) ([]resolve.CodexSeat, error) {
+// codexSeatsFromRows keeps a row whose socket cannot be resolved, its failure
+// in BackendError: only a lookup of that row's own thread fails on it.
+func codexSeatsFromRows(rows []compose.Row, values paths.Values) []resolve.CodexSeat {
 	seats := []resolve.CodexSeat{}
 	for index := range rows {
 		row := &rows[index]
 		if row.Kind != compose.LiveCodex || row.Killed || row.Socket == "" {
 			continue
 		}
+		backendError := row.BackendError
 		socket, err := targetSocket(values, row.Backend, row.Socket)
 		if err != nil {
-			return nil, fmt.Errorf("resolve Codex seat %s socket: %w", row.ID, err)
+			backendError = strings.TrimSpace(fmt.Sprintf("%s socket: %v", backendError, err))
 		}
 		backend := row.Backend
 		if backend == "" {
@@ -590,11 +629,11 @@ func codexSeatsFromRows(rows []compose.Row, values paths.Values) ([]resolve.Code
 				SocketPath:     socket,
 				Pane:           row.PaneID,
 				HerdrWorkspace: row.HerdrWorkspace,
-				BackendError:   row.BackendError,
+				BackendError:   backendError,
 			},
 		)
 	}
-	return seats, nil
+	return seats
 }
 
 // targetSocket keeps native addresses absolute; only tmux sockets use the fleet root.

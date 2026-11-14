@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -245,17 +246,25 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 		}, defaults, nil, "lists no plugins"},
 		{"a name that is not a plugin name", func(t *testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{
+				Version:    alphaVersion,
+				SourceRepo: manifest(t, `{"plugins":[{"name":"../x","source":"./x"},{"name":"good","source":"./good"}]}`),
+				Plugins:    defaults, PluginsDefault: true,
+			}
+		}, bareList("good"), nil, `plugins[0] name "../x" is not a plugin name`},
+		{"a name listed twice", func(t *testing.T) ClaudePluginBuild {
+			return ClaudePluginBuild{
+				Version: alphaVersion,
+				SourceRepo: manifest(t,
+					`{"plugins":[{"name":"a","source":"./a"},{"name":"a","source":"./b"},{"name":"b","source":"./b"}]}`),
+				Plugins: defaults, PluginsDefault: true,
+			}
+		}, bareList("a", "b"), nil, "lists a twice"},
+		{"only bad names", func(t *testing.T) ClaudePluginBuild {
+			return ClaudePluginBuild{
 				Version: alphaVersion, SourceRepo: manifest(t, `{"plugins":[{"name":"../x","source":"./x"}]}`),
 				Plugins: defaults, PluginsDefault: true,
 			}
 		}, defaults, nil, `plugins[0] name "../x" is not a plugin name`},
-		{"a name listed twice", func(t *testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{
-				Version:    alphaVersion,
-				SourceRepo: manifest(t, `{"plugins":[{"name":"a","source":"./a"},{"name":"a","source":"./b"}]}`),
-				Plugins:    defaults, PluginsDefault: true,
-			}
-		}, defaults, nil, "lists a twice"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := test.build(t).WithMarketplacePlugins()
@@ -460,7 +469,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 			if err != nil || len(gaps) != 0 {
 				t.Fatalf("marketplaces left foreign: %v %v", gaps, err)
 			}
-			var manifest devMarketplaceManifest
+			var manifest claudeplugin.Marketplace
 			if err := json.Unmarshal([]byte(readFixture(t,
 				filepath.Join(marketplace, ".claude-plugin", "marketplace.json"))), &manifest); err != nil {
 				t.Fatal(err)

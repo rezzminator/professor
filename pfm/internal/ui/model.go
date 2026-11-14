@@ -272,10 +272,12 @@ func NewModel(snapshot Snapshot) Model {
 			statsRefreshMaxInterval,
 		),
 		mergeNewChat: snapshot.MergeNewChat,
-		placeState:   placeState{projectDirs: snapshot.ProjectDirs, dirExists: snapshot.DirExists},
+		placeState: placeState{
+			projectDirs: snapshot.ProjectDirs, dirExists: snapshot.DirExists, herdrSpace: snapshot.HerdrSpace,
+		},
 		deck: deckState{
 			home: snapshot.Home, rev: 1, agg: &deckAgg{}, freshNS: snapshot.NowNS,
-			factsError: snapshot.FactsError,
+			factsError: snapshot.FactsError, scanError: snapshot.ScanError,
 		},
 		newChatEngine: defaultNewChatEngine(
 			snapshot.AccountIDs,
@@ -541,12 +543,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 					model.killStatus = "resume refused — " + row.Name + " is still ending; resume once its pane has closed"
 					return model, nil
 				}
-				if isNewChatActionKind(row.Kind) {
-					row.Account = model.accountForKind(row.Kind)
-				}
-				model.outcome = OutcomeSelected
-				model.outcomeRow = row
-				return model, tea.Quit
+				return model.selectRow(row)
 			}
 		}
 		return model, nil
@@ -1057,7 +1054,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.killedCount = snapshot.KilledCount
 	model.suppressedCount = snapshot.SuppressedCount
 	model.refreshing = snapshot.Refreshing
-	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError)
+	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError, snapshot.ScanError)
 	model.scheduleError = snapshot.ScheduleError
 	model.themeError = snapshot.ThemeError
 	for index := range model.rows {
@@ -1311,10 +1308,6 @@ func (model *Model) rebuildOrder() {
 	model.elsewhere = model.outOfPlaceRows()
 }
 
-func isNewChatActionKind(kind compose.Kind) bool {
-	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
-}
-
 func (model *Model) refilter(follow string, fallback int) {
 	query := strings.TrimSpace(model.query.Value())
 	model.filtered = model.filtered[:0]
@@ -1445,6 +1438,7 @@ func (model Model) Result() Outcome {
 		PrimaryAccount:       primary,
 		ClaudePrimaryAccount: model.primary,
 		Cache1H:              model.cache1H,
+		Resume:               model.resumeChoice,
 		Query:                model.query.Value(),
 		KillChanges:          model.appliedChanges(),
 	}

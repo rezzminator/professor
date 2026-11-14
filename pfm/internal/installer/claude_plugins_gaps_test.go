@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -63,18 +65,18 @@ func TestClaudePluginGapsSparesListedKeys(t *testing.T) {
 
 func mustSettings(t *testing.T, file string) map[string]any {
 	t.Helper()
-	document, err := readClaudeSettingsDocument(file)
+	document, err := claudeplugin.ReadSettings(file)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return document
 }
 
-// TestEnsureClaudePluginsDisablesTheRetiredAgentEffort: the plugin was renamed
-// agent-effort -> auto-effort; install ensures the successor and then
-// sets each enabled retired id false (never uninstalls it).
-func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
-	const retiredGitHub, retiredDev = "agent-effort@agent-effort", "agent-effort@agent-effort-dev"
+// TestEnsureClaudePluginsDisablesARetiredPlugin: a plugin the retired lists
+// name renamed to auto-effort; install ensures the successor and then sets
+// each enabled retired id false (never uninstalls it).
+func TestEnsureClaudePluginsDisablesARetiredPlugin(t *testing.T) {
+	const retiredGitHub, retiredDev = "old-effort@old-effort", "old-effort@old-effort-dev"
 	settings := `{"enabledPlugins":{"` + retiredGitHub + `":true,"` + retiredDev + `":true,"other@market":true}}`
 	readEnabled := func(t *testing.T, dir string) map[string]any {
 		t.Helper()
@@ -126,36 +128,45 @@ func TestEnsureClaudePluginsDisablesTheRetiredAgentEffort(t *testing.T) {
 		); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(out.String(), "disable agent-effort") {
+		if strings.Contains(out.String(), "disable old-effort") {
 			t.Fatalf("a disabled retired id was edited again:\n%s", out.String())
 		}
 	})
 }
 
 // TestEnsureClaudePluginsRefusesAListedRetiredName: claude.plugins still
-// listing sub-agent-compact, the name forward-compaction retired, is a FAIL
+// listing old-compact, a name forward-compaction retired, is a FAIL
 // naming the successor, and the retired copy is never installed or enabled:
 // ensuring it would enable what the successor's install disables. Doctor
 // reports the same gap.
 func TestEnsureClaudePluginsRefusesAListedRetiredName(t *testing.T) {
-	const retired, successor = "sub-agent-compact", "forward-compaction"
+	const retired, successor = "old-compact", "forward-compaction"
 	problem := "plugin " + retired + " is retired (now " + successor + ") but " + pfmconfig.KeyClaudePlugins + " lists it"
 	home, binary, first, second := pluginFixture(t)
 	settings := filepath.Join(first, "settings.json")
-	writeFixture(t, settings, `{"enabledPlugins":{"sub-agent-compact@sub-agent-compact-dev":true}}`)
+	writeFixture(t, settings, `{"enabledPlugins":{"old-compact@old-compact-dev":true}}`)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
 	inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: retired}, {ID: successor}}
 	err := inst.ensureClaudePlugins(context.Background())
-	if err == nil || !strings.Contains(err.Error(), problem) {
-		t.Fatalf("err = %v, want one naming %q\n%s", err, problem, out.String())
+	wantErr := "claude plugin " + retired + "@professor in " + first + ": " + problem + " — replace " + retired +
+		" with " + successor + " in " + pfmconfig.KeyClaudePlugins + ", then run pfm install --yes"
+	if err == nil || err.Error() != wantErr {
+		t.Fatalf("err = %v, want %q\n%s", err, wantErr, out.String())
 	}
+	var argvs []string
 	for _, call := range runner.calls {
-		// The successor installs from the retired name's repository; only its ids are the retired copy's.
-		if strings.Contains(call.argv, retired+"@") {
-			t.Fatalf("the retired name was ensured: %q\n%s", call.argv, out.String())
-		}
+		argvs = append(argvs, call.argv)
+	}
+	if want := []string{
+		"plugin marketplace add rezzminator/professor",
+		"plugin install " + successor + "@professor -y",
+	}; !slices.Equal(
+		argvs,
+		want,
+	) {
+		t.Fatalf("plugin commands = %q, want %q (the retired name never ensured)\n%s", argvs, want, out.String())
 	}
 	var document struct {
 		Enabled map[string]any `json:"enabledPlugins"`
@@ -163,13 +174,11 @@ func TestEnsureClaudePluginsRefusesAListedRetiredName(t *testing.T) {
 	if err := json.Unmarshal([]byte(readFixture(t, settings)), &document); err != nil {
 		t.Fatal(err)
 	}
-	for id, on := range document.Enabled {
-		if strings.HasPrefix(id, retired+"@") && on != false {
-			t.Fatalf("%s left enabled: %v\n%s", id, document.Enabled, out.String())
-		}
+	if want := map[string]any{"old-compact@old-compact-dev": false}; !maps.Equal(document.Enabled, want) {
+		t.Fatalf("enabledPlugins = %v, want %v\n%s", document.Enabled, want, out.String())
 	}
 	targets := ClaudePluginTargets(ClaudePluginBuild{Plugins: []pfmconfig.ClaudePlugin{{ID: retired}}})
-	gaps, err := ClaudePluginGaps(settings, targets)
+	gaps, err := ClaudePluginGaps(settings, targets, testRetiredPlugins)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,51 +190,20 @@ func TestEnsureClaudePluginsRefusesAListedRetiredName(t *testing.T) {
 }
 
 // TestRetiredSuccessorSparesTheSuccessorsOwnName: a successor whose own name
-// is retired under another marketplace (auto-effort@rezzminator) is no retired
+// is retired under another marketplace (auto-effort@old-market) is no retired
 // name when claude.plugins lists it; a name it retired still is.
 func TestRetiredSuccessorSparesTheSuccessorsOwnName(t *testing.T) {
-	for name, want := range map[string]string{"auto-effort": "", "agent-effort": "auto-effort"} {
-		if got := (ClaudePluginTarget{Name: name, ID: ownID(name), Own: true}).retiredSuccessor(); got != want {
+	for name, want := range map[string]string{"auto-effort": "", "old-effort": "auto-effort"} {
+		target := ClaudePluginTarget{Name: name, ID: ownID(name), Own: true}
+		if got := target.retiredSuccessor(testRetiredPlugins); got != want {
 			t.Errorf("retiredSuccessor of %s = %q, want %q", name, got, want)
 		}
 	}
 }
 
-// TestEnsureClaudePluginsReleaseMovesTheLegacyCopy: a release install
-// ensures engine-sync@professor, disables an enabled legacy
-// engine-sync@engine-sync and then drops its key, so only one copy's hooks
-// run; another plugin's key is kept.
-func TestEnsureClaudePluginsReleaseMovesTheLegacyCopy(t *testing.T) {
-	home, binary, first, second := pluginFixture(t)
-	settings := filepath.Join(first, "settings.json")
-	writeFixture(t, settings, `{"enabledPlugins":{"engine-sync@engine-sync":true,"other@market":true}}`)
-	var out bytes.Buffer
-	if err := pluginEngine(home, binary, first, second, &pluginRunner{}, &out, true).ensureClaudePlugins(
-		context.Background(),
-	); err != nil {
-		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
-	}
-	enabled, _ := mustSettings(t, settings)["enabledPlugins"].(map[string]any)
-	if _, left := enabled["engine-sync@engine-sync"]; left || enabled["other@market"] != true {
-		t.Fatalf(
-			"enabledPlugins=%v, want engine-sync@engine-sync gone and other@market kept\n%s",
-			enabled,
-			out.String(),
-		)
-	}
-	for _, line := range []string{
-		"disable engine-sync@engine-sync in " + settings + ": engine-sync@professor replaces it",
-		"drop engine-sync@engine-sync from enabledPlugins in " + settings + ": legacy ids of engine-sync@professor",
-	} {
-		if !strings.Contains(out.String(), line) {
-			t.Fatalf("no %q line:\n%s", line, out.String())
-		}
-	}
-}
-
 // TestClaudePluginGapsNamesTheBuildsID: a plugin of ours is checked under
-// its one id, {name}@professor, a legacy copy enabled in its place leaving it
-// not enabled; an install-only plugin enabled is a gap; a local copy whose
+// its one id, {name}@professor, a copy from another marketplace enabled in
+// its place leaving it not enabled; an install-only plugin enabled is a gap; a local copy whose
 // content is not the checkout's, or cannot be read, is a gap. A plugin left
 // right names nothing.
 func TestClaudePluginGapsNamesTheBuildsID(t *testing.T) {
@@ -263,8 +241,8 @@ func TestClaudePluginGapsNamesTheBuildsID(t *testing.T) {
 	}{
 		{"enabled from its checkout copy", target(marketplace, false), []string{"bar@professor"}, nil},
 		{
-			"a legacy copy enabled instead", target(marketplace, false),
-			[]string{"bar@bar-dev", "bar@bar"},
+			"another marketplace's copy enabled instead", target(marketplace, false),
+			[]string{"bar@other"},
 			[]string{"plugin bar@professor not enabled in {file}"},
 		},
 		{"install-only and disabled", target(marketplace, true), nil, nil},
@@ -295,7 +273,7 @@ func TestClaudePluginGapsNamesTheBuildsID(t *testing.T) {
 			if err := os.WriteFile(file, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			gaps, err := ClaudePluginGaps(file, []ClaudePluginTarget{test.target})
+			gaps, err := ClaudePluginGaps(file, []ClaudePluginTarget{test.target}, nil)
 			var got []string
 			for _, gap := range gaps {
 				got = append(got, gap.Problem)
@@ -315,13 +293,13 @@ func TestClaudePluginGapsNamesTheBuildsID(t *testing.T) {
 
 // TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs: install moves a
 // retired plugin's pluginConfigs entry to its successor and deletes every
-// retired and legacy entry, so Claude Code's plugin finds no duplicate to
+// retired entry, so Claude Code's plugin finds no duplicate to
 // warn on; a successor's own entry is never overwritten, and a dry run writes
 // nothing.
 func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
 	const name = "auto-effort"
-	successor, github, dev := ownID(name), name+"@"+name, name+"@"+name+"-dev"
-	retiredGitHub, retiredDev := "effort-live-control@effort-live-control", "effort-live-control@effort-live-control-dev"
+	successor := ownID(name)
+	retiredGitHub, retiredDev := "old-effort@old-effort", "old-effort@old-effort-dev"
 	patterns := `{"options":{"testCommandPatterns":["make test"]}}`
 	other := `{"options":{"testCommandPatterns":["go test"]}}`
 	for _, test := range []struct {
@@ -353,15 +331,6 @@ func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
 			map[string]string{successor: other},
 			[]string{"; drop the pluginConfigs of " + retiredGitHub + " (differs)\n"},
 		},
-		{
-			"a legacy copy's entry is dropped after it is carried", `"` + github + `":` + patterns + `,"` + dev + `":` + patterns,
-			true,
-			map[string]string{successor: patterns},
-			[]string{
-				"copy the pluginConfigs of " + github + " to " + successor + " in ",
-				"; drop the pluginConfigs of " + github + ", " + dev + " in ",
-			},
-		},
 		{"a dry run writes nothing", `"` + retiredGitHub + `":` + patterns, false, nil, []string{
 			"; copy the pluginConfigs of " + retiredGitHub + " to " + successor + "; drop the pluginConfigs of " + retiredGitHub + "\n",
 		}},
@@ -374,7 +343,7 @@ func TestEnsureClaudePluginsSettlesTheRetiredPluginConfigs(t *testing.T) {
 			inst.options.ClaudePlugins = []pfmconfig.ClaudePlugin{{ID: name}}
 			simulateClaude(t, runner)
 			// Retired ids already disabled: only their pluginConfigs are stale.
-			before := `{"enabledPlugins":{"` + retiredGitHub + `":false,"` + retiredDev + `":false,"` + github + `":false},` +
+			before := `{"enabledPlugins":{"` + retiredGitHub + `":false,"` + retiredDev + `":false},` +
 				`"pluginConfigs":{` + test.configs + `}}`
 			path := filepath.Join(first, "settings.json")
 			writeFixture(t, path, before)
@@ -430,10 +399,10 @@ func TestClaudePluginGapsNamesAStaleRetiredPluginConfig(t *testing.T) {
 	target := ClaudePluginTarget{Name: name, ID: ownID(name), Own: true}
 	file := filepath.Join(t.TempDir(), "settings.json")
 	writeFixture(t, file, `{"enabledPlugins":{"`+target.ID+`":true},"pluginConfigs":{"`+target.ID+`":{"options":{}},`+
-		`"effort-live-control@effort-live-control":{"options":{}},"agent-effort@agent-effort":{"options":{}}}}`)
-	gaps, err := ClaudePluginGaps(file, []ClaudePluginTarget{target})
+		`"old-effort@professor":{"options":{}},"old-effort@old-effort":{"options":{}}}}`)
+	gaps, err := ClaudePluginGaps(file, []ClaudePluginTarget{target}, testRetiredPlugins)
 	want := ClaudePluginGap{
-		"pluginConfigs of agent-effort@agent-effort and effort-live-control@effort-live-control still in " + file +
+		"pluginConfigs of old-effort@old-effort and old-effort@professor still in " + file +
 			": retired copies of " + target.ID,
 		"pfm install copies the first to " + target.ID + " when it has none, then drops them",
 	}
@@ -441,7 +410,12 @@ func TestClaudePluginGapsNamesAStaleRetiredPluginConfig(t *testing.T) {
 		t.Fatalf("gaps = %q, %v; want [%q]", gaps, err, want)
 	}
 	writeFixture(t, file, `{"enabledPlugins":{"`+target.ID+`":true},"pluginConfigs":{"`+target.ID+`":{"options":{}}}}`)
-	if gaps, err = ClaudePluginGaps(file, []ClaudePluginTarget{target}); err != nil || len(gaps) != 0 {
+	if gaps, err = ClaudePluginGaps(
+		file,
+		[]ClaudePluginTarget{target},
+		testRetiredPlugins,
+	); err != nil ||
+		len(gaps) != 0 {
 		t.Fatalf("a settled settings.json reported %q, %v", gaps, err)
 	}
 }

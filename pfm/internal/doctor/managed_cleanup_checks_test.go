@@ -14,7 +14,7 @@ import (
 
 func TestManagedCleanupChecks(t *testing.T) {
 	for _, scenario := range []string{
-		"missing", "wrong", "null", "ok", "off", "relative", "unreadable",
+		"missing", "wrong", "not an integer", "null", "ok", "off", "relative", "unreadable",
 		"no-prepend", "wrong-no-prepend", "other-source", "other-source-unreadable", "prepend-not-a-list",
 	} {
 		t.Run(scenario, func(t *testing.T) {
@@ -41,6 +41,10 @@ func TestManagedCleanupChecks(t *testing.T) {
 				content = `{"cleanupPeriodDays":30,"prependPlugins":[]}`
 				warnings = 1
 				want = "managed-cleanup: " + path + " cleanupPeriodDays=30, want 36500; run: " + fix + "\n"
+			case "not an integer":
+				content = `{"cleanupPeriodDays":"forever","prependPlugins":[]}`
+				warnings = 1
+				want = "managed-cleanup: " + path + ` cleanupPeriodDays="forever", want 36500; run: ` + fix + "\n"
 			case "wrong-no-prepend":
 				content = `{"cleanupPeriodDays":30}`
 				warnings = 1

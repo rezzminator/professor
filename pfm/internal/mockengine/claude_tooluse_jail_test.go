@@ -1,0 +1,382 @@
+//go:build jail
+
+package mockengine
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+)
+
+func TestClaudePostToolUseEdit(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	path := filepath.Join(fix.work, "note.txt")
+	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(`{"file_path":"` + path + `","old_string":"before","new_string":"after"}`)
+	record := filepath.Join(fix.recordDir, "post.jsonl")
+	pre := filepath.Join(fix.recordDir, "pre.jsonl")
+	transcriptCopy := filepath.Join(fix.recordDir, "transcript-at-post.jsonl")
+	command := `cat >> "` + record + `"; printf '\n' >> "` + record + `"; cp "` +
+		fix.claudeTranscript(fixtureSession) + `" "` + transcriptCopy + `"`
+	writeHookSettings(t, filepath.Join(fix.work, ".claude", "settings.json"), map[string]any{
+		hookPreToolUse:  commandHook(`cat >> "` + pre + `"; printf '\n' >> "` + pre + `"`),
+		hookPostToolUse: commandHook(command),
+	})
+	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
+		{Type: StepToolCall, Tool: "Edit", Input: input}, {Type: StepTurn, Reply: "finished"},
+	}})
+	s := fix.startTUI("claude", claudeArgs(), nil)
+	s.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+	s.typeLine("go")
+	s.waitFrame("reply", func(frame string) bool { return strings.Contains(frame, "finished") })
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(fix.recordDir, "post.jsonl"))), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["hook_event_name"] != hookPostToolUse || payload["tool_name"] != "Edit" {
+		t.Fatalf("payload %v", payload)
+	}
+	capture, err := os.ReadFile(hookCapturePath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var captured map[string]any
+	for _, line := range strings.Split(string(capture), "\n") {
+		var event map[string]any
+		if json.Unmarshal([]byte(line), &event) == nil && event["hook_event_name"] == hookPostToolUse &&
+			event["tool_name"] == "Edit" && event["effort"] != nil {
+			captured = event
+			break
+		}
+	}
+	if captured == nil {
+		t.Fatal("captured Edit missing")
+	}
+	delete(captured, "prompt_id")
+	delete(captured, "effort")
+	for key := range captured {
+		if _, ok := payload[key]; !ok {
+			t.Errorf("payload lacks %s", key)
+		}
+	}
+	for key := range payload {
+		if _, ok := captured[key]; !ok {
+			t.Errorf("payload has extra %s", key)
+		}
+	}
+	var prePayload map[string]any
+	if err := json.Unmarshal([]byte(readFile(t, pre)), &prePayload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tool_use_id"] == "" || payload["tool_use_id"] != prePayload["tool_use_id"] ||
+		payload["session_id"] != fixtureSession || payload["transcript_path"] != fix.claudeTranscript(fixtureSession) ||
+		payload["cwd"] != fix.work || payload["permission_mode"] != "bypassPermissions" ||
+		!reflect.DeepEqual(payload["tool_input"], prePayload["tool_input"]) || payload["duration_ms"].(float64) < 0 {
+		t.Fatalf("post envelope %v pre %v", payload, prePayload)
+	}
+	if got := readFile(t, transcriptCopy); !strings.Contains(got, `"tool_use"`) ||
+		strings.Contains(got, `"tool_result"`) {
+		t.Fatalf("transcript at PostToolUse: %s", got)
+	}
+	response, ok := payload["tool_response"].(map[string]any)
+	if !ok || response["originalFile"] != "before" {
+		t.Fatalf("response %v", payload["tool_response"])
+	}
+	if got := readFile(t, path); got != "before" {
+		t.Fatalf("disk changed: %q", got)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(readFile(t, fix.claudeTranscript(fixtureSession))), "\n") {
+		var entry map[string]any
+		if json.Unmarshal([]byte(line), &entry) != nil {
+			continue
+		}
+		message, ok := entry["message"].(map[string]any)
+		if !ok {
+			continue
+		}
+		parts, ok := message["content"].([]any)
+		if !ok {
+			continue
+		}
+		for _, part := range parts {
+			item, ok := part.(map[string]any)
+			if ok && item["type"] == "tool_use" && item["id"] != payload["tool_use_id"] {
+				t.Fatalf("transcript tool use %v, hook %v", item["id"], payload["tool_use_id"])
+			}
+		}
+	}
+}
+
+func TestClaudePostToolUseAdmittedMatchersAndQuiet(t *testing.T) {
+	for _, quiet := range []bool{false, true} {
+		t.Run(map[bool]string{false: "admitted", true: "quiet"}[quiet], func(t *testing.T) {
+			fix := newFixture(t)
+			t.Chdir(fix.work)
+			fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Quiet: quiet, Steps: []Step{
+				{Type: StepToolCall, Tool: "Bash"}, {Type: StepTurn, Reply: "finished"},
+			}})
+			mark := func(label string) string {
+				return `printf '%s\n' '` + label + `' >> "` + filepath.Join(fix.recordDir, "matchers") + `"`
+			}
+			entry := func(matcher, label string) any {
+				return map[string]any{
+					"matcher": matcher,
+					"hooks":   []any{map[string]any{"type": "command", "command": mark(label)}},
+				}
+			}
+			entries := []any{
+				entry("Read", "read"), entry("*", "star"), entry("", "all"),
+			}
+			writeHookSettings(t, filepath.Join(fix.work, ".claude", "settings.json"), map[string]any{
+				hookPostToolUse: entries,
+			})
+			s := fix.startTUI("claude", claudeArgs(), nil)
+			s.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+			s.typeLine("go")
+			s.waitFrame("reply", func(frame string) bool { return strings.Contains(frame, "finished") })
+			path := filepath.Join(fix.recordDir, "matchers")
+			if quiet {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("quiet hooks: %v", err)
+				}
+			} else if got := readFile(t, path); got != "star\nall\n" {
+				t.Fatalf("matchers: %q", got)
+			}
+		})
+	}
+}
+
+func TestClaudePostToolUseOtherToolResponse(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.write(Scenario{BusyMS: intPtr(0), Steps: []Step{
+		{Type: StepToolCall, Tool: "Read"}, {Type: StepTurn, Reply: "finished"},
+	}})
+	record := filepath.Join(fix.recordDir, "post.json")
+	writeHookSettings(t, filepath.Join(fix.work, ".claude", "settings.json"), map[string]any{
+		hookPostToolUse: commandHook(`cat > "` + record + `"`),
+	})
+	s := fix.startTUI("claude", claudeArgs(), nil)
+	s.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+	s.typeLine("go")
+	s.waitFrame("reply", func(frame string) bool { return strings.Contains(frame, "finished") })
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(readFile(t, record)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if string(payload["tool_response"]) != "{}" || string(payload["tool_name"]) != `"Read"` {
+		t.Fatalf("other tool response: %s", readFile(t, record))
+	}
+}
+
+func TestClaudePostToolUseDeniedAndBrokenHandler(t *testing.T) {
+	for _, test := range []struct {
+		name, pre string
+		wantExit  int
+	}{
+		{"deny-answer", `printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked"}}'`, 0},
+		{"deny-exit", `printf 'blocked\n' >&2; exit 2`, 0},
+		{"broken-post", `true`, ExitUnpinned},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fix := newFixture(t)
+			t.Chdir(fix.work)
+			fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
+				{Type: StepToolCall, Tool: "Bash"}, {Type: StepTurn, Reply: "finished"},
+			}})
+			post := `printf 'post\n' >> "` + filepath.Join(fix.recordDir, "post") + `"`
+			if test.name == "broken-post" {
+				post = `printf '{not json'`
+			}
+			writeHookSettings(t, filepath.Join(fix.work, ".claude", "settings.json"), map[string]any{
+				hookPreToolUse: commandHook(test.pre), hookPostToolUse: commandHook(post),
+			})
+			s := fix.startTUI("claude", claudeArgs(), nil)
+			s.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+			s.typeLine("go")
+			if test.wantExit == 0 {
+				s.waitFrame("reply", func(frame string) bool { return strings.Contains(frame, "finished") })
+				s.typeLine("/exit")
+			}
+			if code := s.waitExit(); code != test.wantExit {
+				t.Fatalf("exit %d want %d stderr=%s", code, test.wantExit, s.stderr.String())
+			}
+			if test.wantExit == 0 {
+				if _, err := os.Stat(filepath.Join(fix.recordDir, "post")); !os.IsNotExist(err) {
+					t.Fatalf("denied post: %v", err)
+				}
+				if !strings.Contains(readFile(t, fix.claudeTranscript(fixtureSession)), `"is_error":true`) {
+					t.Fatal("denial missing in transcript")
+				}
+			} else if !strings.Contains(s.stderr.String(), "PostToolUse") {
+				t.Fatalf("stderr %s", s.stderr.String())
+			}
+		})
+	}
+}
+
+// Real Claude runs an async handler in the background and ignores its outcome,
+// so one that cannot finish (an async hook on a stalled store) never
+// ends the turn nor keeps the event's other handlers from firing.
+func TestClaudeInlineAsyncFailureNeitherEndsTheTurnNorSkipsLaterHandlers(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	marker := filepath.Join(fix.recordDir, "after-async")
+	settings := inlineHookSettings(t, map[string]any{
+		hookUserPromptSubmit: []any{
+			map[string]any{"hooks": []any{
+				map[string]any{"type": "command", "command": "sleep 5", "async": true, "timeout": 0.2},
+				map[string]any{"type": "command", "command": `printf 'ran\n' >> "` + marker + `"`},
+			}},
+		},
+	}, "")
+	fix.write(Scenario{
+		SessionID: fixtureSession,
+		BusyMS:    intPtr(0),
+		Steps:     []Step{{Type: StepTurn, Reply: "continued"}},
+	})
+	session := fix.startTUI("claude", []string{"--settings", settings}, nil)
+	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+	session.typeLine("go")
+	session.waitFrame("continued", func(frame string) bool { return strings.Contains(frame, "continued") })
+	session.typeLine("/exit")
+	if code := session.waitExit(); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, session.stderr.String())
+	}
+	if got := readFile(t, marker); got != "ran\n" {
+		t.Fatalf("handler after the failed async one ran %q, want once", got)
+	}
+}
+
+// TestClaudePerformedToolCall: a tool_call with perform carries an allowed Bash or Write out as Claude
+// does and records its result, a Bash command seeing the chat's session in CLAUDE_CODE_SESSION_ID; a denied one runs nothing, its reason the result and each line of it a
+// row of the pane; without perform the call runs nothing and its result is "done".
+func TestClaudePerformedToolCall(t *testing.T) {
+	deny := `printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",` +
+		`"permissionDecisionReason":"first line\nsecond line"}}'`
+	for _, test := range []struct {
+		name, tool, input, pre string
+		perform                bool
+		want                   toolResult // the tool_result's content and is_error
+		file, fileText         string     // a file under the work directory and its text, "" for absent
+		rows                   []string   // pane rows that must show
+		zshrc                  string     // the owner's ~/.zshrc under a zsh login shell; "" runs sh
+	}{
+		{
+			name: "bash-allowed", tool: "Bash", perform: true,
+			input: `{"command":"printf 'hello\\n' > made.txt; printf 'out %s\\n' \"$CLAUDE_CODE_SESSION_ID\""}`,
+			want:  toolResult{Content: "out " + fixtureSession + "\n"}, file: "made.txt", fileText: "hello\n",
+			rows: []string{"⏺ Bash(…)"},
+		},
+		{
+			name: "bash-failed", tool: "Bash", perform: true, input: `{"command":"printf 'boom\\n'; exit 3"}`,
+			want: toolResult{Content: "Exit code 3\nboom\n", IsError: true}, file: "made.txt",
+		},
+		{
+			name: "bash-denied", tool: "Bash", perform: true, pre: deny,
+			input: `{"command":"printf 'hello\\n' > made.txt"}`,
+			want:  toolResult{Content: "first line\nsecond line", IsError: true}, file: "made.txt",
+			rows: []string{"⏺ Bash — denied by hook: first line", "  second line"},
+		},
+		{
+			name: "write-allowed", tool: "Write", perform: true,
+			input: `{"file_path":"sub/notes.md","content":"written\n"}`,
+			want:  toolResult{Content: "File created successfully at: {work}/sub/notes.md"},
+			file:  "sub/notes.md", fileText: "written\n",
+		},
+		{
+			name: "write-denied", tool: "Write", perform: true, pre: deny,
+			input: `{"file_path":"sub/notes.md","content":"written\n"}`,
+			want:  toolResult{Content: "first line\nsecond line", IsError: true}, file: "sub/notes.md",
+		},
+		{
+			name: "bash-zsh-snapshot", tool: "Bash", perform: true,
+			zshrc: "greet() { print hi }\n_helper() { print helper }\nshown() { _helper }\nalias hello='print aliased'\n",
+			input: `{"command":"greet; hello; [[ -o interactive ]] || print plain; shown"}`,
+			want: toolResult{
+				Content: "Exit code 127\nhi\naliased\nplain\nshown:1: command not found: _helper\n", IsError: true,
+			},
+			file: "made.txt",
+		},
+		{
+			name: "unperformed", tool: "Bash", input: `{"command":"printf 'hello\\n' > made.txt"}`,
+			want: toolResult{Content: "done"}, file: "made.txt",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fix := newFixture(t)
+			t.Chdir(fix.work)
+			if test.pre != "" {
+				writeHookSettings(t, filepath.Join(fix.work, ".claude", "settings.json"), map[string]any{
+					hookPreToolUse: commandHook(test.pre),
+				})
+			}
+			fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
+				{Type: StepToolCall, Tool: test.tool, Input: json.RawMessage(test.input), Perform: test.perform},
+				{Type: StepTurn, Reply: "finished"},
+			}})
+			// The tool shell reads the owner's login shell and its startup files from the process
+			// environment, as Claude Code does.
+			t.Setenv("SHELL", "/bin/sh")
+			if test.zshrc != "" {
+				zsh, err := exec.LookPath("zsh")
+				if err != nil {
+					t.Fatalf("the zsh snapshot row needs zsh: %v", err)
+				}
+				dotdir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dotdir, ".zshrc"), []byte(test.zshrc), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("SHELL", zsh)
+				t.Setenv("ZDOTDIR", dotdir)
+			}
+			s := fix.startTUI("claude", claudeArgs(), nil)
+			s.waitFrame("composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+			s.typeLine("go")
+			frame := s.waitFrame("reply", func(frame string) bool { return strings.Contains(frame, "⏺ finished") })
+			rows := strings.Split(frame, "\n")
+			for _, row := range test.rows {
+				if !slices.ContainsFunc(rows, func(got string) bool { return strings.TrimRight(got, " \r") == row }) {
+					t.Errorf("pane lacks the row %q:\n%s", row, frame)
+				}
+			}
+			var got *toolResult
+			transcript := fix.claudeTranscript(fixtureSession)
+			for _, line := range strings.Split(readFile(t, transcript), "\n") {
+				var record struct {
+					Message struct {
+						Content []contentPart `json:"content"`
+					} `json:"message"`
+				}
+				if json.Unmarshal([]byte(line), &record) != nil {
+					continue // a record whose content is a string carries no tool result
+				}
+				for _, part := range record.Message.Content {
+					if part.Type == "tool_result" {
+						got = &toolResult{part.Content, part.IsError}
+					}
+				}
+			}
+			want := test.want
+			want.Content = strings.ReplaceAll(want.Content, "{work}", fix.work)
+			if got == nil || *got != want {
+				t.Errorf("tool_result in %s = %+v, want %+v", transcript, got, want)
+			}
+			data, err := os.ReadFile(filepath.Join(fix.work, test.file))
+			if test.fileText == "" && !os.IsNotExist(err) {
+				t.Errorf("%s exists (%q, %v), want it never written", test.file, data, err)
+			}
+			if test.fileText != "" && (err != nil || string(data) != test.fileText) {
+				t.Errorf("%s = %q (%v), want %q", test.file, data, err, test.fileText)
+			}
+		})
+	}
+}

@@ -40,8 +40,12 @@ const (
 )
 
 // SeatHost supervises a native engine without a shell or a tmux intermediary.
-
 func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
+	return SeatHostWith(args, stdout, stderr, runtime, nil)
+}
+
+// SeatHostWith is SeatHost with the runner that starts the seat engine; nil is the real one.
+func SeatHostWith(args []string, stdout, stderr io.Writer, runtime config.Runtime, runner deps.Runner) int {
 	if len(args) != 1 {
 		fmt.Fprintln(stderr, "pfm internal seat-host: expected one seat id")
 		return 1
@@ -144,9 +148,16 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		if runErr == nil {
 			argv, options, runErr = seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
 		}
+		if runErr == nil {
+			// An in-place open execs this host from the pane's shell: Herdr reads
+			// the pane's directory from it, so it works where its chat does.
+			if err := os.Chdir(run.CWD); err != nil {
+				runErr = fmt.Errorf("enter chat directory %s: %w", run.CWD, err)
+			}
+		}
 		status, started := 1, false
 		if runErr == nil {
-			// The bound seat's Herdr socket and pane, never a herdr-keep relay's.
+			// The bound seat's Herdr socket and pane.
 			options.Env = seatEnvironment(
 				options.Env,
 				[]string{
@@ -159,7 +170,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 			)
 			options.Env, _ = armCostLedger(options.Env, paths.OSEnv{}, run.CostLedger, stderr)
 			acknowledge := seat.ReloadPending
-			status, started, runErr = runSeatEngine(argv, options, tty, func() error {
+			status, started, runErr = runSeatEngine(runner, argv, options, tty, func() error {
 				current, found, err := db.Seat(ctx, seat.SeatID)
 				if err != nil {
 					return fmt.Errorf("read started seat: %w", err)
@@ -189,21 +200,14 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 		}
 		if !started {
 			failedSeatStart(ctx, db, seat, runErr, stderr)
-			for {
-				fmt.Fprintln(stderr, "press Enter to retry, q to close")
-				line, err := input.ReadString('\n')
-				if err != nil {
-					fmt.Fprintf(stderr, "pfm internal seat-host: read retry choice: %v\n", err)
-					return 1
-				}
-				choice := strings.TrimSpace(line)
-				if choice == "q" {
-					return closeSeat(ctx, db, seat, 0, stderr, runtime)
-				}
-				if choice == "" {
-					break
-				}
+			quit, code, asked := seatRetryChoice(input, int(tty.Fd()), stderr)
+			if !asked {
+				return code
 			}
+			if quit {
+				return closeSeat(ctx, db, seat, 0, stderr, runtime)
+			}
+			refreshSeatHostImage(gather.NewProcFS(runtime.Paths.ProcRoot), os.Executable, syscall.Exec, stderr)
 			current, found, err := db.Seat(ctx, seat.SeatID)
 			if err != nil || !found {
 				fmt.Fprintf(stderr, "pfm internal seat-host: read retry seat: found=%t: %v\n", found, err)
@@ -226,6 +230,7 @@ func SeatHost(args []string, stdout, stderr io.Writer, runtime config.Runtime) i
 			return 1
 		}
 		if found && next.ReloadPending && runErr == nil {
+			refreshSeatHostImage(gather.NewProcFS(runtime.Paths.ProcRoot), os.Executable, syscall.Exec, stderr)
 			seat = next
 			continue
 		}
@@ -295,6 +300,11 @@ func closeSeat(
 			headless.Chat{Backend: current.Backend, SeatID: current.SeatID, ID: current.SessionID},
 			runtime,
 		); err != nil {
+			if herdr.ServerStopping(err) {
+				// Herdr is stopping and takes this pane with it; macOS ends the engine before
+				// the terminal hangs up. That is restoration, as the hangup is.
+				return 128 + int(syscall.SIGHUP)
+			}
 			fmt.Fprintf(stderr, "pfm internal seat-host: schedule ended seat: %v\n", err)
 			return 1
 		}
@@ -374,12 +384,7 @@ func currentClaudeBinary(recorded, home, configured string) (string, error) {
 	return resolved, nil
 }
 
-func seatCommand(
-	run fleetdb.SeatRun,
-	argv0 string,
-	tty *os.File,
-	_, _ io.Writer,
-) ([]string, deps.StartOptions, error) {
+func seatCommand(run fleetdb.SeatRun, argv0 string, tty *os.File, _, _ io.Writer) ([]string, deps.StartOptions, error) {
 	if !filepath.IsAbs(run.Binary) || !filepath.IsAbs(run.CWD) {
 		return nil, deps.StartOptions{}, fmt.Errorf("binary and cwd must be absolute")
 	}
@@ -439,6 +444,7 @@ func seatEnvironment(saved, current, keys []string) []string {
 }
 
 func runSeatEngine(
+	runner deps.Runner,
 	argv []string,
 	options deps.StartOptions,
 	tty *os.File,
@@ -454,12 +460,11 @@ func runSeatEngine(
 		// An engine may handle terminal loss by exiting 1 rather than by signal.
 		// Judge the actual PTY hangup, not its exit code or an unreachable API:
 		// ordinary engine failures must remain errors even if Herdr is offline.
-		terminal := []unix.PollFd{{Fd: int32(options.Ctty)}}
-		_, pollErr := unix.Poll(terminal, 0)
-		if pollErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("probe ended terminal: %w", pollErr))
+		hungUp, probeErr := seatTerminalHungUp(options.Ctty)
+		if probeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("probe ended terminal: %w", probeErr))
 		}
-		if pollErr == nil && terminal[0].Revents&unix.POLLHUP != 0 {
+		if hungUp {
 			status = 128 + int(syscall.SIGHUP)
 			return
 		}
@@ -468,7 +473,7 @@ func runSeatEngine(
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer signal.Stop(signals)
-	process, err := startSeatEngine(argv, options)
+	process, err := startSeatEngine(runner, argv, options)
 	if err != nil {
 		return 1, false, err
 	}
@@ -486,11 +491,7 @@ func runSeatEngine(
 			case <-done:
 				return
 			case sig := <-signals:
-				if err := syscall.Kill(
-					-process.Pid(),
-					sig.(syscall.Signal),
-				); err != nil &&
-					!errors.Is(err, syscall.ESRCH) {
+				if err := process.SignalGroup(sig.(syscall.Signal)); err != nil {
 					fmt.Fprintf(options.Stderr, "pfm internal seat-host: forward %s: %v\n", sig, err)
 				}
 			}
@@ -500,10 +501,7 @@ func runSeatEngine(
 	close(done)
 	<-forwarded
 	// The engine owns this group; reap any job it left behind before restoring the tty.
-	groupErr := syscall.Kill(-process.Pid(), syscall.SIGKILL)
-	if errors.Is(groupErr, syscall.ESRCH) {
-		groupErr = nil
-	}
+	groupErr := process.KillGroup()
 	var exit *exec.ExitError
 	if errors.As(waitErr, &exit) {
 		status := exit.ExitCode()
@@ -515,9 +513,14 @@ func runSeatEngine(
 	return 0, true, errors.Join(waitErr, groupErr)
 }
 
-func startSeatEngine(argv []string, options deps.StartOptions) (deps.Process, error) {
+// seatForeground hands the terminal's foreground to group.
+func seatForeground(tty, group int) error {
+	return unix.IoctlSetPointerInt(tty, unix.TIOCSPGRP, group)
+}
+
+func startSeatEngine(runner deps.Runner, argv []string, options deps.StartOptions) (deps.Process, error) {
 	if options.Argv0 != pfmengine.MustLookup(pfmengine.Claude).Binary {
-		process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, options)
+		process, err := obs.Runner(runner).Start(context.Background(), argv, options)
 		if err != nil {
 			return nil, fmt.Errorf("start foreground engine: %w", err)
 		}
@@ -527,7 +530,7 @@ func startSeatEngine(argv []string, options deps.StartOptions) (deps.Process, er
 	if err != nil {
 		return nil, fmt.Errorf("guard native engine account: %w", err)
 	}
-	process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, options)
+	process, err := obs.Runner(runner).Start(context.Background(), argv, options)
 	if err != nil {
 		return nil, fmt.Errorf("start foreground engine: %w", errors.Join(err, guard.Abort(), guard.Close()))
 	}

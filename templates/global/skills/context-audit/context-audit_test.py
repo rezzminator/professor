@@ -117,30 +117,30 @@ class RuleControlTest(Sandbox):
         rows, main = self.rule_rows("main")
         self.assertEqual(len(main), 1, rows)
         self.assertEqual(main[0][2], str(len(self.BODY.rstrip().encode())), "the delivered body, without frontmatter")
-        rows, sub = self.rule_rows("flights-foreman")
+        rows, sub = self.rule_rows("flights:foreman")
         self.assertEqual(sub, [], rows)
-        self.assertTrue(any(r[:2] == ["PROBE", "visible-to"] and "withheld from flights-foreman" in r[2] for r in rows), rows)
+        self.assertTrue(any(r[:2] == ["PROBE", "visible-to"] and "withheld from flights:foreman" in r[2] for r in rows), rows)
 
     def test_exclude_glob_leaves_out_matching_agent_types(self):
-        self.setUpRules(True, 'visible-to: {exclude: ["flights-*"]}\n')
+        self.setUpRules(True, 'visible-to: {exclude: ["flights:*"]}\n')
         self.assertEqual(len(self.rule_rows("main")[1]), 1)
-        self.assertEqual(self.rule_rows("flights-lander")[1], [])
+        self.assertEqual(self.rule_rows("flights:lander")[1], [])
 
     def test_without_rule_control_the_key_is_inert(self):
         self.setUpRules(False, 'visible-to:\n  include: ["main"]\n')
-        rows, sub = self.rule_rows("flights-foreman")
+        rows, sub = self.rule_rows("flights:foreman")
         self.assertEqual(len(sub), 1, rows)
         self.assertTrue(any(r[:2] == ["PROBE", "rule-control"] and r[2].startswith("not enabled") for r in rows), rows)
 
     def test_unusable_value_fails_open(self):
         self.setUpRules(True, "visible-to: include main\n")
-        rows, sub = self.rule_rows("flights-foreman")
+        rows, sub = self.rule_rows("flights:foreman")
         self.assertEqual(len(sub), 1, rows)
         self.assertTrue(any(r[0] == "WARN" and "fails open" in r[1] and r[2].endswith("scoped.md") for r in rows), rows)
 
     def test_importing_rule_stays_for_every_loop(self):
         self.setUpRules(True, 'visible-to: {include: [main]}\n', {"cfg/rules/scoped.md": "---\nvisible-to: {include: [main]}\n---\n\nSee @more.txt\n", "cfg/rules/more.txt": "imported\n"})
-        rows, sub = self.rule_rows("flights-foreman")
+        rows, sub = self.rule_rows("flights:foreman")
         self.assertEqual(len(sub), 1, rows)
 
 

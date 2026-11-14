@@ -70,13 +70,19 @@ func (gate ReaderGate) Confirm(
 	return runeValue == 's' || runeValue == 'S', nil
 }
 
-type DeviceGate struct{}
+// DeviceGate asks on the controlling terminal: Device is its path, empty for /dev/tty; a test
+// hands it a temp path instead of the machine's terminal.
+type DeviceGate struct{ Device string }
 
-func (DeviceGate) Confirm(
+func (gate DeviceGate) Confirm(
 	ctx context.Context,
 	request GateRequest,
 ) (confirmed bool, returnErr error) {
-	terminal, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	device := gate.Device
+	if device == "" {
+		device = "/dev/tty"
+	}
+	terminal, err := os.OpenFile(device, os.O_RDWR, 0)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrPermission) {
 		// No controlling terminal at all, or this process cannot open its
 		// own — the ordinary shape of a detached/service invocation. Not
@@ -88,7 +94,7 @@ func (DeviceGate) Confirm(
 		// resolvable /dev/tty entry, a transient device error) is a probe
 		// that could not run, not the ordinary "no terminal" case above —
 		// name it so a gate that silently never fires is diagnosable.
-		obs.Logger(ctx).WarnContext(ctx, "device gate: open /dev/tty failed", "err", err)
+		obs.Logger(ctx).WarnContext(ctx, "device gate: open /dev/tty failed", "device", device, "err", err)
 		return false, nil
 	}
 	defer func() {

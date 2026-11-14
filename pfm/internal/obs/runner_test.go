@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -26,7 +27,11 @@ func (p *killableProcess) Wait() error    { return nil }
 func (p *killableProcess) Release() error { return nil }
 func (p *killableProcess) Kill() error    { p.killed = append(p.killed, "kill"); return nil }
 
-func (p *killableProcess) KillGroup() error                   { p.killed = append(p.killed, "group"); return nil }
+func (p *killableProcess) KillGroup() error { p.killed = append(p.killed, "group"); return nil }
+func (p *killableProcess) SignalGroup(syscall.Signal) error {
+	p.killed = append(p.killed, "signal-group")
+	return nil
+}
 func (p *killableProcess) StdinPipe() (io.WriteCloser, error) { return nil, errors.New("no pipe") }
 func (p *killableProcess) StdoutPipe() (io.ReadCloser, error) { return nil, errors.New("no pipe") }
 

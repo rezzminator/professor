@@ -3,6 +3,7 @@ package schedule
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -25,23 +26,54 @@ func TestRunScheduleCommandRefusesBadUsageBeforeTouchingAnyStore(t *testing.T) {
 		args    []string
 		wantErr string
 	}{
-		{"no verb", nil, "pfm chat schedule set {--every <interval> | --in <delay> | --at <time>}"},
-		{"unknown verb", []string{"bogus"}, `unknown command "bogus"`},
-		{"interval below minimum", []string{"set", "--every", "30s", "--prompt", "x"}, "minimum 1m"},
-		{"interval garbage", []string{"set", "--every", "soon", "--prompt", "x"}, "weekly, <N>d"},
-		{"blank prompt", []string{"set", "--every", "1h", "--prompt", " "}, "--prompt must not be empty"},
-		{"two chats", []string{"set", "--every", "1h", "--prompt", "x", "a", "b"}, "usage: pfm chat schedule set"},
-		{"ls stray argument", []string{"ls", "extra"}, "usage: pfm chat schedule ls"},
-		{"rm without id", []string{"rm"}, "usage: pfm chat schedule rm <id>"},
-		{"rm non integer", []string{"rm", "abc"}, "usage: pfm chat schedule rm <id>"},
-		{"rm zero", []string{"rm", "0"}, "not a schedule id"},
+		{
+			"no verb",
+			nil,
+			"2 \"\" usage: pfm chat schedule set {--every <interval> | --in <delay> | --at <time>} --prompt <text> [chat]\n       pfm chat schedule ls [--json]\n       pfm chat schedule rm <id>\ninterval, delay: weekly, <N>d, or a Go duration like 90m, minimum 1m\ntime: HH:MM (its next occurrence), YYYY-MM-DD HH:MM, or RFC 3339, at least 1m ahead\n--every repeats; --in and --at fire once\n",
+		},
+		{
+			"unknown verb",
+			[]string{"bogus"},
+			"2 \"\" pfm chat schedule: unknown command \"bogus\"\nusage: pfm chat schedule set {--every <interval> | --in <delay> | --at <time>} --prompt <text> [chat]\n       pfm chat schedule ls [--json]\n       pfm chat schedule rm <id>\ninterval, delay: weekly, <N>d, or a Go duration like 90m, minimum 1m\ntime: HH:MM (its next occurrence), YYYY-MM-DD HH:MM, or RFC 3339, at least 1m ahead\n--every repeats; --in and --at fire once\n",
+		},
+		{
+			"interval below minimum",
+			[]string{"set", "--every", "30s", "--prompt", "x"},
+			"2 \"\" pfm chat schedule set: --every: interval \"30s\" is too short: minimum 1m\n",
+		},
+		{
+			"interval garbage",
+			[]string{"set", "--every", "soon", "--prompt", "x"},
+			"2 \"\" pfm chat schedule set: --every: invalid interval \"soon\" (time: invalid duration \"soon\"): use weekly, <N>d, or a Go duration like 90m, minimum 1m\n",
+		},
+		{
+			"blank prompt",
+			[]string{"set", "--every", "1h", "--prompt", " "},
+			"2 \"\" pfm chat schedule set: --prompt must not be empty\nusage: pfm chat schedule set {--every <interval> | --in <delay> | --at <time>} --prompt <text> [chat]\n",
+		},
+		{
+			"two chats",
+			[]string{"set", "--every", "1h", "--prompt", "x", "a", "b"},
+			"2 \"\" usage: pfm chat schedule set {--every <interval> | --in <delay> | --at <time>} --prompt <text> [chat]\n",
+		},
+		{"ls stray argument", []string{"ls", "extra"}, "2 \"\" usage: pfm chat schedule ls [--json]\n"},
+		{"rm without id", []string{"rm"}, "2 \"\" usage: pfm chat schedule rm <id>\n"},
+		{
+			"rm non integer",
+			[]string{"rm", "abc"},
+			"2 \"\" pfm chat schedule rm: \"abc\" is not a schedule id\nusage: pfm chat schedule rm <id>\n",
+		},
+		{
+			"rm zero",
+			[]string{"rm", "0"},
+			"2 \"\" pfm chat schedule rm: \"0\" is not a schedule id\nusage: pfm chat schedule rm <id>\n",
+		},
 	}
 	for _, tc := range cases {
 		var stdout, stderr bytes.Buffer
 		code := RunScheduleCommand(tc.args, &stdout, &stderr, nil, unreachableNotFound)
-		if code != 2 || !strings.Contains(stderr.String(), tc.wantErr) || stdout.Len() != 0 {
-			t.Errorf("%s: code=%d stdout=%q stderr=%q, want 2 and %q",
-				tc.name, code, stdout.String(), stderr.String(), tc.wantErr)
+		if got := fmt.Sprintf("%d %q %s", code, stdout.String(), stderr.String()); got != tc.wantErr {
+			t.Errorf("%s = %q, want %q", tc.name, got, tc.wantErr)
 		}
 	}
 }

@@ -244,3 +244,56 @@ func TestReadActivityLevelUsesTheOneParser(t *testing.T) {
 		t.Fatalf("stderr = %q, want every accepted level named", stderr.String())
 	}
 }
+
+// TestReadActivityReadsTheKeptArchiveTheSegmentsAndTheCurrentInTimeOrder:
+// `pfm log` reads the whole log — kept warnings and errors by day, the closed
+// segments, the current segment — oldest first; --since leaves out a file
+// whose last write is older than it, and reaches into the archive for one
+// that is not.
+func TestReadActivityReadsTheKeptArchiveTheSegmentsAndTheCurrentInTimeOrder(t *testing.T) {
+	now := time.Now()
+	path := fixtureLog(t, logLine(now, "INFO", "current", "ls", ""))
+	files := []struct {
+		name, line string
+		age        time.Duration
+	}{
+		{"pfm.kept/2026-11-10.jsonl", logLine(now.Add(-50*time.Hour), "WARN", "kept.old", "ls", ""), 50 * time.Hour},
+		{
+			"pfm.kept/2026-11-11.jsonl",
+			logLine(now.Add(-30*time.Minute), "ERROR", "kept.new", "ls", ""),
+			30 * time.Minute,
+		},
+		{
+			"pfm.segments/2026-11-12T09-00-00.000Z.jsonl",
+			logLine(now.Add(-10*time.Minute), "INFO", "segment", "ls", ""),
+			10 * time.Minute,
+		},
+	}
+	for _, file := range files {
+		full := filepath.Join(filepath.Dir(path), file.name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(file.line+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(full, now.Add(-file.age), now.Add(-file.age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, files[0].line + "\n" + files[1].line + "\n" + files[2].line + "\n" + logLine(now, "INFO", "current", "ls", "") + "\n"},
+		{[]string{"--since", "1h", "--level", "warn"}, files[1].line + "\n"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := ReadActivity(context.Background(), tc.args, &stdout, &stderr, path, clock.Real); code != 0 {
+			t.Fatalf("%v: ReadActivity = %d; stderr %q", tc.args, code, stderr.String())
+		}
+		if stdout.String() != tc.want {
+			t.Fatalf("%v: printed\n%s\nwant\n%s", tc.args, stdout.String(), tc.want)
+		}
+	}
+}

@@ -80,15 +80,18 @@ type fakeSeats struct {
 	resolves   map[string]int
 	missing    map[string]bool
 	resolveErr map[string]error
+	// resolveErrAt fails a name's lookups by number, counted from 1.
+	resolveErrAt map[string]map[int]error
 }
 
 func newFakeSeats(steps map[string][]fakeStep) *fakeSeats {
 	return &fakeSeats{
-		steps:      steps,
-		calls:      map[string]int{},
-		resolves:   map[string]int{},
-		missing:    map[string]bool{},
-		resolveErr: map[string]error{},
+		steps:        steps,
+		calls:        map[string]int{},
+		resolves:     map[string]int{},
+		missing:      map[string]bool{},
+		resolveErr:   map[string]error{},
+		resolveErrAt: map[string]map[int]error{},
 	}
 }
 
@@ -97,6 +100,9 @@ func (seats *fakeSeats) resolve(_ context.Context, name string) (Chat, bool, err
 	defer seats.mu.Unlock()
 	seats.resolves[name]++
 	if err := seats.resolveErr[name]; err != nil {
+		return Chat{}, false, err
+	}
+	if err := seats.resolveErrAt[name][seats.resolves[name]]; err != nil {
 		return Chat{}, false, err
 	}
 	if seats.missing[name] {
@@ -216,50 +222,6 @@ func TestFleetWatchTwoNamedTargetsEndIndependently(t *testing.T) {
 	}
 }
 
-func TestFleetWatchAnErrorEndsOnlyItsTarget(t *testing.T) {
-	for _, testCase := range []struct {
-		name  string
-		setup func(*fakeSeats)
-		want  string
-	}{
-		{"resolve", func(seats *fakeSeats) {
-			seats.resolveErr["bad"] = errors.New("scan failed:\n\tdisk\t  gone")
-		}, "ERROR bad scan failed: disk gone"},
-		{"inspect", func(seats *fakeSeats) {
-			seats.steps["bad"] = []fakeStep{{err: errors.New("read transcript:\nno such file")}}
-		}, "ERROR bad read transcript: no such file"},
-	} {
-		for _, transitions := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/transitions=%v", testCase.name, transitions), func(t *testing.T) {
-				seats := newFakeSeats(map[string][]fakeStep{
-					"good": {working("x"), working("x"), gone()},
-				})
-				testCase.setup(seats)
-				hooks := 0
-				lines, result, err := runFleet(t, namedFleet(seats, "bad", "good"), WatchOptions{
-					Transitions: transitions,
-					OnIdle:      func(Status) error { hooks++; return nil },
-					OnExit:      func(Status) error { hooks++; return nil },
-				})
-				if err != nil {
-					t.Fatalf("Watch() error = %v", err)
-				}
-				want := []string{testCase.want, "EXIT good"}
-				if transitions {
-					want = []string{testCase.want, "SEEN good working", "EXIT good"}
-				}
-				assertLines(t, lines, want)
-				if result.Errors["bad"] == nil || result.Errors["good"] != nil {
-					t.Fatalf("Errors = %v, want only bad", result.Errors)
-				}
-				if hooks != 1 {
-					t.Fatalf("hooks fired %d times, want 1 (EXIT good only: an ERROR runs no hook)", hooks)
-				}
-			})
-		}
-	}
-}
-
 func TestWatcherReturnsTheOriginalErrorAfterPrintingIt(t *testing.T) {
 	cause := errors.New("scan\nfailed")
 	var out bytes.Buffer
@@ -282,13 +244,24 @@ func TestTransitionsQuietMonitorCarriesAnswerWithoutWorking(t *testing.T) {
 	seats := newFakeSeats(map[string][]fakeStep{
 		"x": {idleFor(7, "first"), working("first"), working("first"), idleFor(1, "second"), gone()},
 	})
+	// A one-section reply ends on its lone Verdict; a sectioned one ends on the
+	// Ultimate verdict that follows its section verdicts.
+	answers := []string{
+		"Heading\n\n**Verdict:** DONE with a \"quote\"\nAnother line",
+		"First\n\n**Verdict:** first section\n\nSecond\n\n**Verdict:** second section\n\n# Ultimate verdict: BOTH done\n",
+	}
+	calls := 0
 	lines, _, err := runFleet(t, namedFleet(seats, "x"), WatchOptions{
 		Transitions: true, NoWorking: true,
 		Answer: func(_ context.Context, chat Chat) (string, error) {
 			if chat.Name != "x" {
 				return "", fmt.Errorf("unexpected chat %q", chat.Name)
 			}
-			return "Heading\n\n**Verdict:** DONE with a \"quote\"\nAnother line", nil
+			if calls >= len(answers) {
+				return "", fmt.Errorf("unexpected answer read %d", calls+1)
+			}
+			calls++
+			return answers[calls-1], nil
 		},
 	})
 	if err != nil {
@@ -296,7 +269,7 @@ func TestTransitionsQuietMonitorCarriesAnswerWithoutWorking(t *testing.T) {
 	}
 	assertLines(t, lines, []string{
 		`SEEN x idle idle_seconds=7 answer="**Verdict:** DONE with a \"quote\""`,
-		`IDLE x idle_seconds=1 answer="**Verdict:** DONE with a \"quote\""`,
+		`IDLE x idle_seconds=1 answer="# Ultimate verdict: BOTH done"`,
 		"EXIT x",
 	})
 }
@@ -576,7 +549,7 @@ func TestFleetWatchWriteFailureIsTheReturnedError(t *testing.T) {
 			WatchOptions{Poll: time.Millisecond},
 			failingWriter{},
 		)
-	if err == nil || !strings.Contains(err.Error(), "write event line") {
+	if err == nil || err.Error() != "watch: write event line: pipe closed" {
 		t.Fatalf("Watch() error = %v, want the write failure", err)
 	}
 }

@@ -17,6 +17,7 @@ import (
 //	◉◐◓◑◒+    the chat is mid-turn, with at least five agents out (+ is "more")
 //	◌◐◓       only its agents are working: the chat is orchestrating
 //	◉         the chat itself is working, no agents
+//	⚠         blocked: the chat waits on its owner (Herdr reads a question or a permission prompt open)
 //	          (blank)  idle: nothing is moving, so nothing is drawn
 //
 // The arcs are the four half-disc glyphs ◐ ◓ ◑ ◒ stepped clockwise, each one
@@ -42,10 +43,10 @@ const (
 // one cell, and a spinner everyone already knows how to read.
 var workArcs = [workMaxArcs]string{"◐", "◓", "◑", "◒"}
 
-// workActive reports whether a row has anything moving to draw: a chat that is
-// mid-turn or has agents mid-turn. Only a live chat can be either.
+// workActive reports whether a row has anything to draw: a chat that is
+// mid-turn, has agents mid-turn or waits on its owner. Only a live chat can.
 func workActive(row compose.Row) bool {
-	return row.Kind.IsLiveSeat() && (row.Working || row.AgentsWorking > 0)
+	return row.Kind.IsLiveSeat() && (row.Working || row.AgentsWorking > 0 || row.Blocked)
 }
 
 // workWave is the brightness of the i-th cell at a frame, 0..1.
@@ -65,7 +66,12 @@ func workGauge(row compose.Row, nowNS int64, hot, cold, bg string) []span {
 	frame := nowNS / workFrameNS
 	spans := make([]span, 0, deckWorkW)
 	core, corePaint := "◌", tone{fg: blendHex(cold, hot, 0.45+0.25*workWave(frame, 0)), bg: bg}
-	if row.Working {
+	switch {
+	case row.Blocked:
+		// The owner's answer, not the turn, holds the chat: the core stands still
+		// in the theme's blocked colour, whatever its transcript says.
+		core, corePaint = "⚠", tone{fg: palette.Warn, bg: bg, bold: true}
+	case row.Working:
 		core = "●"
 		if (frame/4)%2 == 0 {
 			core = "◉"
@@ -89,6 +95,14 @@ func workGauge(row compose.Row, nowNS int64, hot, cold, bg string) []span {
 	return append(spans, span{text: " ", paint: tone{bg: bg}})
 }
 
+// workLabel names the dossier line the gauge stands on.
+func workLabel(row compose.Row) string {
+	if row.Blocked {
+		return "blocked"
+	}
+	return "working"
+}
+
 // workSummary is the words beside the gauge in the dossier.
 func workSummary(row compose.Row) string {
 	agents := ""
@@ -99,6 +113,10 @@ func workSummary(row compose.Row) string {
 		agents = strconv.Itoa(row.AgentsWorking) + " agents"
 	}
 	switch {
+	case row.Blocked && agents != "":
+		return "waits on your answer · " + agents + " working"
+	case row.Blocked:
+		return "waits on your answer"
 	case row.Working && agents != "":
 		return "mid-turn · " + agents
 	case row.Working:

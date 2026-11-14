@@ -21,7 +21,7 @@ type tmuxTitleRenudger interface {
 
 // TmuxTitleRenudge re-emits each live tmux server's own terminal title.
 func TmuxTitleRenudge(args []string, stderr io.Writer, runtime config.Runtime) int {
-	probe := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
+	probe := gather.TmuxProbe{TmuxDir: runtime.Paths.TmuxDir}
 	return tmuxTitleRenudgeWith(args, stderr, runtime, probe)
 }
 

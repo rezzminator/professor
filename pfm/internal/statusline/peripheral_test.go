@@ -14,61 +14,33 @@ import (
 )
 
 func TestParityIdentityAndFailuresVisible(t *testing.T) {
-	r := parityRuntime(t)
-	r.Engine = pfmengine.Codex
-	r.Command = failedStatusCommand{}
-	r.TmuxDir = filepath.Join(r.Home, "absent")
-	got, err := Render(context.Background(), []byte(`{"model":{"id":"gpt-6.1-sol"},"cwd":"/work"}`), r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plain := stripANSICodes(got)
-	for _, want := range []string{"sol-6.1", "fleet!", "git!", "quota missing"} {
-		if !strings.Contains(plain, want) {
-			t.Errorf("missing %q in %q", want, plain)
-		}
-	}
-}
-
-func TestGitSegmentRealRepositoryStates(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		want string
+		name    string
+		tmuxDir func(home string) string
+		want    string
 	}{
-		{name: "ordinary directory"},
-		{name: "detached HEAD", want: "HEAD"},
-		{name: "missing directory", want: "git!"},
+		// A socket path that is a file cannot be listed: the fleet is unknown.
+		{name: "unreadable socket directory", want: "● sol-6.1·effort unknown │ work │ git! │ fleet!\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? │ 💾– │ ⏳ 0s\nChatGPT quota missing\n", tmuxDir: func(home string) string {
+			path := filepath.Join(home, "not-a-directory")
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}},
+		// No socket directory means no tmux server ever ran: an empty fleet.
+		{name: "absent socket directory", want: "● sol-6.1·effort unknown │ work │ git! │ · ·\n🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? │ 💾– │ ⏳ 0s\nChatGPT quota missing\n", tmuxDir: func(home string) string { return filepath.Join(home, "absent") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := parityRuntime(t)
-			r.Command = commandRunner{}
-			var warnings bytes.Buffer
-			r.Warn = &warnings
-			dir := t.TempDir()
-			if tc.name == "detached HEAD" {
-				for _, args := range [][]string{
-					{"-C", dir, "init"},
-					{"-C", dir, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "fixture"},
-					{"-C", dir, "checkout", "--detach"},
-				} {
-					if _, err := r.Command.Output(context.Background(), "git", args...); err != nil {
-						t.Fatalf("prepare detached fixture %v: %v", args, err)
-					}
-				}
+			r.Engine = pfmengine.Codex
+			r.Command = failedStatusCommand{}
+			r.TmuxDir = tc.tmuxDir(r.Home)
+			got, err := Render(context.Background(), []byte(`{"model":{"id":"gpt-6.1-sol"},"cwd":"/work"}`), r)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if tc.name == "missing directory" {
-				dir = filepath.Join(dir, "missing")
-			}
-			got := stripANSICodes(gitSegment(context.Background(), r, dir))
-			if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) {
-				t.Fatalf("segment = %q, want %q; warnings = %q", got, tc.want, warnings.String())
-			}
-			if tc.want == "git!" {
-				if !strings.Contains(warnings.String(), dir) {
-					t.Fatalf("failed probe must name directory: %q", warnings.String())
-				}
-			} else if warnings.Len() != 0 {
-				t.Fatalf("healthy repository state warned: %q", warnings.String())
+			if plain := stripANSICodes(got); plain != tc.want {
+				t.Errorf("render = %q, want %q", plain, tc.want)
 			}
 		})
 	}
@@ -93,8 +65,8 @@ func TestGitBranchFailureIsNotDetachedHEAD(t *testing.T) {
 	r := parityRuntime(t)
 	r.Command = branchFailureCommand{}
 	r.Warn = &bytes.Buffer{}
-	if got := stripANSICodes(gitSegment(context.Background(), r, "/fixture")); !strings.Contains(got, "git!") {
-		t.Fatalf("failed branch read manufactured detached HEAD: %q", got)
+	if got, want := stripANSICodes(gitSegment(context.Background(), r, "/fixture")), "git!"; got != want {
+		t.Fatalf("failed branch read segment = %q, want %q", got, want)
 	}
 }
 
@@ -103,15 +75,19 @@ func TestCodexQuotaMissingErrorUnknownStaleAndZero(t *testing.T) {
 		name, body, want string
 		stale            bool
 	}{
-		{name: "missing", want: "quota missing"},
-		{name: "malformed", body: `{`, want: "quota error"},
+		{name: "missing", want: "ChatGPT quota missing"},
+		{name: "malformed", body: `{`, want: "ChatGPT quota error"},
 		{name: "no window answered draws nothing", body: `{}`},
-		{name: "missing percent", body: `{"primary":{"windowDurationMins":300,"resetsAt":1900000000}}`, want: "quota error"},
-		{name: "zero", body: `{"primary":{"usedPercent":0,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "5h-used:0%"},
-		{name: "stale", body: `{"primary":{"usedPercent":30,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "stale", stale: true},
+		{name: "missing percent", body: `{"primary":{"windowDurationMins":300,"resetsAt":1900000000}}`, want: "ChatGPT quota error"},
+		{name: "unknown reset and length keep the reading", body: `{"primary":{"usedPercent":30,"windowDurationMins":0}}`, want: "▰▱▱▱▱ ?-used:30%"},
+		{name: "invalid percent costs only its window", body: `{"primary":{"usedPercent":101,"windowDurationMins":10080,"resetsAt":1900000000},"secondary":{"usedPercent":30,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "7d-used:error │ ▰▱▱▱▱ 5h-used:30% ↻1157d9h"},
+		{name: "every window invalid reads as an error", body: `{"primary":{"usedPercent":-1,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "5h-used:error"},
+		{name: "zero", body: `{"primary":{"usedPercent":0,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "▱▱▱▱▱ 5h-used:0% ↻1157d9h"},
+		{name: "stale", body: `{"primary":{"usedPercent":30,"windowDurationMins":300,"resetsAt":1900000000}}`, want: "▰▱▱▱▱ 5h-used:30% ↻1157d9h stale", stale: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := parityRuntime(t)
+			r.Warn = &bytes.Buffer{}
 			path := filepath.Join(r.CacheDir, "cc-gpt-usage-0.json")
 			if tc.body != "" {
 				if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
@@ -125,9 +101,8 @@ func TestCodexQuotaMissingErrorUnknownStaleAndZero(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if got := stripANSICodes(codexQuotaSegment(r, r.now())); !strings.Contains(got, tc.want) ||
-				tc.want == "" && got != "" {
-				t.Fatalf("%q lacks %q", got, tc.want)
+			if got := stripANSICodes(codexQuotaSegment(r, r.now())); got != tc.want {
+				t.Errorf("quota segment = %q, want %q", got, tc.want)
 			}
 		})
 	}

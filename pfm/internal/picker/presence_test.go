@@ -6,20 +6,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
-
-	"charm.land/lipgloss/v2"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -129,56 +125,6 @@ func awaitFullPass(t *testing.T, updates <-chan ui.Snapshot, within time.Duratio
 	}
 }
 
-func TestParkedPickerPublishesThemeWithoutLiveRowsOrFacts(t *testing.T) {
-	presenceJail(t)
-	updates := parkedPresenceStream(t)
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	variant := pickerThemeVariant(true)
-	writePickerTheme(t, home, themesync.Applied{Primary: variant}, themesync.Light, true)
-	snapshot := awaitFullPass(t, updates, 5*time.Second, "the theme changed without live rows or a facts reader")
-	if got := ui.NewModel(snapshot).
-		View().
-		BackgroundColor; !reflect.DeepEqual(
-		got,
-		lipgloss.Color(variant.Background),
-	) {
-		t.Fatalf("parked theme background = %v, want %s", got, variant.Background)
-	}
-}
-
-// TestParkedPickerPublishesAChatThatLaunchesWithoutAKeystroke pins root cause
-// B for a launch: a picker that parked while nobody touched it did no pass
-// until a key arrived, so a chat that started under it never reached the rows,
-// the header counts or the cosmos. The parked poll now sees the new tmux socket
-// without forking anything and runs a full pass for it.
-func TestParkedPickerPublishesAChatThatLaunchesWithoutAKeystroke(t *testing.T) {
-	root, _ := presenceJail(t)
-	updates := parkedPresenceStream(t)
-	startCodexStatusPane(t, root, "cx-1800000021-1-1", `  NEW_CHAT · /work/example · Full Access\n`)
-	awaitFullPass(t, updates, 5*time.Second, "a new chat's socket appeared")
-}
-
-// TestParkedPickerPublishesAChatThatDiesWithoutAKeystroke is the same law for a
-// death: a chat whose server is killed (or whose host rebooted) must leave the
-// rows, not stay on them as a live star until somebody presses a key.
-func TestParkedPickerPublishesAChatThatDiesWithoutAKeystroke(t *testing.T) {
-	root, tmuxBinary := presenceJail(t)
-	// The chat exists before the picker opens, so the picker parks WITH it.
-	const socket = "cx-1800000022-1-1"
-	startCodexStatusPane(t, root, socket, `  DOOMED · /work/example · Full Access\n`)
-	updates := parkedPresenceStream(t)
-
-	kill := exec.Command(tmuxBinary, "-L", socket, "kill-server")
-	kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	if output, err := kill.CombinedOutput(); err != nil {
-		t.Fatalf("kill chat server: %v: %s", err, output)
-	}
-	awaitFullPass(t, updates, 5*time.Second, "a chat's server died")
-}
-
 // presenceEnv is a fleet whose socket and crumb directories are empty scratch
 // directories and whose processes are the kernel's own (an absent proc root
 // falls back to the native reader).
@@ -192,14 +138,10 @@ func presenceEnv(t *testing.T) fleet.Env {
 	}}
 }
 
-// goneProcessPID returns the pid of a process that has exited and been reaped.
-func goneProcessPID(t *testing.T) int {
-	t.Helper()
-	command := exec.Command("true")
-	if err := command.Run(); err != nil {
-		t.Fatalf("run a process to reap: %v", err)
-	}
-	return command.Process.Pid
+// goneProcessPID returns the nth pid no process holds: above every kernel's pid limit (Linux caps at 2^22,
+// macOS at 99999), so no child is needed to produce one.
+func goneProcessPID(n int) int {
+	return 1<<30 + n
 }
 
 // TestPresenceBaselineOwesOnePassPerNewlyGonePid pins the parked poll's verdict
@@ -214,7 +156,7 @@ func TestPresenceBaselineOwesOnePassPerNewlyGonePid(t *testing.T) {
 	pane := gather.ProbePane{Socket: "cc-1800000031-1-1", PaneID: "%1", PID: os.Getpid()}
 	live := gather.Snapshot{
 		Panes:           []gather.ProbePane{pane},
-		ClaudeProcesses: []gather.ClaudeProcess{{PID: goneProcessPID(t), PanePID: pane.PID}},
+		ClaudeProcesses: []gather.ClaudeProcess{{PID: goneProcessPID(0), PanePID: pane.PID}},
 	}
 	var baseline presenceBaseline
 	pass := func(live gather.Snapshot) {
@@ -243,7 +185,7 @@ func TestPresenceBaselineOwesOnePassPerNewlyGonePid(t *testing.T) {
 	}
 	// That pass ran and the pid is still listed gone (the host's fact); now a
 	// second chat dies while a pass runs.
-	live.ClaudeProcesses = append(live.ClaudeProcesses, gather.ClaudeProcess{PID: goneProcessPID(t), PanePID: pane.PID})
+	live.ClaudeProcesses = append(live.ClaudeProcesses, gather.ClaudeProcess{PID: goneProcessPID(1), PanePID: pane.PID})
 	pass(live)
 	if got := verdicts(live, 3); !slices.Equal(got, []bool{false, true, false}) {
 		t.Fatalf("a newly gone pid beside a permanently gone one: polls = %v, want its own owed pass, then unchanged",

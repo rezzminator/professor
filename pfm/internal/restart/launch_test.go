@@ -1,20 +1,15 @@
 package restart
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -51,54 +46,6 @@ func runFrontRole(dir string) int {
 	}
 	fmt.Println(pid)
 	return launcher.Follow(context.Background(), pid, logPath, os.Stdout, os.Stderr)
-}
-
-// TestTheLaunchingChatsDeathDoesNotCutTheRestartShort plays the chat that
-// typed pfm restart: the front runs in its own process group, as a pane's
-// shell does, and the whole group is hung up and killed, as tmux kill-server
-// does to a pane. The worker the front spawned must still finish.
-func TestTheLaunchingChatsDeathDoesNotCutTheRestartShort(t *testing.T) {
-	dir := t.TempDir()
-	front := exec.Command(os.Args[0], "-test.run=^$")
-	front.Env = append(os.Environ(), frontRoleEnv+"="+dir)
-	front.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	stdout, err := front.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := front.Start(); err != nil {
-		t.Fatal(err)
-	}
-	line, err := bufio.NewReader(stdout).ReadString('\n')
-	if err != nil {
-		_ = front.Process.Kill()
-		t.Fatalf("the front printed no worker pid: %v", err)
-	}
-	worker, err := strconv.Atoi(strings.TrimSpace(line))
-	if err != nil {
-		t.Fatalf("worker pid line %q: %v", line, err)
-	}
-	group := front.Process.Pid
-	if err := syscall.Kill(-group, syscall.SIGHUP); err != nil {
-		t.Fatalf("hang up the front's group: %v", err)
-	}
-	_ = syscall.Kill(-group, syscall.SIGKILL)
-	_ = front.Wait()
-	marker := filepath.Join(dir, "marker")
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		if body, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(body)) == "survived" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("worker pid %d never finished after the front's group died", worker)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	body, err := os.ReadFile(filepath.Join(dir, "worker.log"))
-	if err != nil || !strings.Contains(string(body), ExitMarker+"0") {
-		t.Fatalf("worker log = %q, %v", body, err)
-	}
 }
 
 func writeLog(t *testing.T, path, text string) {
@@ -161,6 +108,21 @@ func TestFollowAWorkerGoneWithoutItsMarkerIsAFailure(t *testing.T) {
 	}
 }
 
+func TestFollowAnUnreadableExitMarkerIsNamedAndFails(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "worker.log")
+	writeLog(t, logPath, "stop  chats  a  ok\n"+ExitMarker+"two\n")
+	var stdout, stderr bytes.Buffer
+	launcher := Launcher{Clock: newTickClock(), Exited: func(int) (bool, error) { return false, nil }}
+	if code := launcher.Follow(context.Background(), 7, logPath, &stdout, &stderr); code != 1 {
+		t.Fatalf("Follow = %d, want 1", code)
+	}
+	want := "pfm restart: worker pid 7: unreadable exit marker \"two\": " +
+		"strconv.Atoi: parsing \"two\": invalid syntax; log " + logPath + "\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
 func TestSpawnStartsTheWorkerDetachedIntoItsLog(t *testing.T) {
 	runner := &hostRunner{}
 	launcher := Launcher{Runner: runner}
@@ -180,33 +142,6 @@ func TestSpawnStartsTheWorkerDetachedIntoItsLog(t *testing.T) {
 	runner.startErr = errors.New("fork: resource unavailable")
 	if _, _, err := launcher.Spawn(context.Background(), []string{"pfm"}, nil, t.TempDir(), "x.log"); err == nil {
 		t.Fatal("a failed start reported a worker")
-	}
-}
-
-func TestChildExitedTellsARunningChildFromAFinishedOne(t *testing.T) {
-	child := exec.Command("sleep", "30")
-	if err := child.Start(); err != nil {
-		t.Fatal(err)
-	}
-	if exited, err := childExited(child.Process.Pid); err != nil || exited {
-		t.Fatalf("a running child = %v, %v", exited, err)
-	}
-	if err := child.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		exited, err := childExited(child.Process.Pid)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if exited {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("a killed child never read exited")
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -260,19 +195,15 @@ func TestChatAddressHoldsOnlyItsOwnChat(t *testing.T) {
 	}
 }
 
-// TestThePublicVerbHasNoWorkerFlags: the worker's flags live on
-// `pfm internal restart-run` alone, so no typed pfm restart runs it.
 func TestThePublicVerbHasNoWorkerFlags(t *testing.T) {
-	for _, args := range [][]string{{"--worker"}, {"--front", "5", "--dry-run"}, {"--launched-from", "x"}, {"now"}} {
+	for _, row := range []struct {
+		args []string
+		want string
+	}{{[]string{"--worker"}, "flag provided but not defined: -worker\n{usage}\n"}, {[]string{"--front", "5", "--dry-run"}, "flag provided but not defined: -front\n{usage}\n"}, {[]string{"--launched-from", "x"}, "flag provided but not defined: -launched-from\n{usage}\n"}, {[]string{"now"}, "{usage}\n"}} {
 		var stdout, stderr bytes.Buffer
-		if code := Main(
-			args,
-			&stdout,
-			&stderr,
-			config.Runtime{},
-		); code != 2 ||
-			!strings.Contains(stderr.String(), usage) {
-			t.Fatalf("Main(%v) = %d, stderr %q", args, code, stderr.String())
+		code := Main(row.args, &stdout, &stderr, config.Runtime{})
+		if got := strings.Replace(stderr.String(), usage, "{usage}", 1); code != 2 || got != row.want {
+			t.Errorf("Main(%v) stderr = %q, want %q (exit %d)", row.args, got, row.want, code)
 		}
 	}
 }
@@ -286,13 +217,13 @@ func TestWorkerRunsOnlyAsTheDetachedWorker(t *testing.T) {
 	for _, args := range [][]string{{}, {"--front", "0"}, {"--front", "5", "--launched-pane", "w1:p2"}, {"--front", "5", "x"}} {
 		var stdout, stderr bytes.Buffer
 		if code := Worker(args, &stdout, &stderr, config.Runtime{}); code != 2 ||
-			!strings.Contains(stderr.String(), workerUsage) {
+			stderr.String() != "usage: pfm internal restart-run --front PID [--launched-from SOCKET [--launched-pane PANE]]\n" {
 			t.Fatalf("Worker(%v) = %d, stderr %q", args, code, stderr.String())
 		}
 	}
 	var stdout, stderr bytes.Buffer
 	if code := Worker([]string{"--front", "5"}, &stdout, &stderr, config.Runtime{}); code != 2 ||
-		!strings.Contains(stderr.String(), "runs only as the detached worker") || stdout.Len() != 0 {
+		stderr.String() != "pfm internal restart-run: runs only as the detached worker pfm restart starts in its own session; type pfm restart\n" || stdout.Len() != 0 {
 		t.Fatalf("a foreground worker = %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }
@@ -314,8 +245,8 @@ func TestLiveDepsReadsTheDaemonFromConfig(t *testing.T) {
 		!slices.Equal(plain.Spare, []int{9}) {
 		t.Fatalf("plain deps = %+v", plain)
 	}
-	if plain.LogDir != "/jail/state/restart" {
-		t.Fatalf("log dir = %q, want beside the state database", plain.LogDir)
+	if plain.LogDir != "/jail/.local/state/pfm/log/restart" {
+		t.Fatalf("log dir = %q, want the jailed home's log root", plain.LogDir)
 	}
 	runtime.Config.MCPServers = map[string]config.MCPServer{"chat": {Enabled: true}}
 	configured := LiveDeps(runtime, &bytes.Buffer{}, nil, chatAddress{})

@@ -1,7 +1,7 @@
 package obs
 
 import (
-	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -38,37 +38,25 @@ func TestTruncateValueAtTheCapBoundary(t *testing.T) {
 func TestTruncateValueKeepsUTF8Whole(t *testing.T) {
 	value := strings.Repeat("x", 2047) + "é" + "tail"
 	got := TruncateValue(value)
-	if strings.Contains(got, "�") || !strings.HasPrefix(got, strings.Repeat("x", 2047)+"…(truncated ") {
-		t.Fatalf("cut split the rune: %q", got[2040:])
-	}
-	if !strings.HasSuffix(got, "(truncated 6 bytes)") {
-		t.Fatalf("marker = %q, want 6 bytes dropped (é is two, tail is four)", got[len(got)-22:])
+	if got, want := runs(got), "{2047×x}…(truncated 6 bytes)"; got != want {
+		t.Fatalf("TruncateValue = %q, want %q", got, want)
 	}
 }
 
-// TestHandlerCapsEveryStringFieldAtDebug: the cap runs inside the handler, so
-// a middleware dumping a 3 KB argument at DEBUG writes 2 KB plus the marker —
-// there is no call site that can bypass it.
 func TestHandlerCapsEveryStringFieldAtDebug(t *testing.T) {
 	ctx, recorder := Test(t)
 	Logger(ctx).Debug("dump", "path", strings.Repeat("p", 3000), "reason", strings.Repeat("r", 2048))
+	Logger(ctx).Error("fail", FieldErr, slog.AnyValue(strings.Repeat("e", 2049)))
 	records := recorder.Records()
-	if len(records) != 1 {
-		t.Fatalf("records = %d, want 1: %s", len(records), recorder.Raw())
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2: %s", len(records), recorder.Raw())
 	}
 	path, _ := records[0].Field("path")
-	const marker = "…(truncated 952 bytes)"
-	if text, _ := path.(string); len(text) != 2048+len(marker) || !strings.HasSuffix(text, marker) {
-		t.Fatalf("path field = len %d, want the 2048 byte head plus the marker", len(text))
+	reason, _ := records[0].Field("reason")
+	err, _ := records[1].Field(FieldErr)
+	if got, want := runs(
+		fmt.Sprint(path, " | ", reason, " | ", err),
+	), "{2048×p}…(truncated 952 bytes) | {2048×r} | {2048×e}…(truncated 1 bytes)"; got != want {
+		t.Fatalf("path | reason | err = %q, want %q", got, want)
 	}
-	if reason, _ := records[0].Field("reason"); len(reason.(string)) != 2048 {
-		t.Fatalf("a 2048 byte field was cut to %d", len(reason.(string)))
-	}
-	// An error value is a string field too.
-	Logger(ctx).Error("fail", FieldErr, slog.AnyValue(strings.Repeat("e", 2049)))
-	last := recorder.Records()[1]
-	if err, _ := last.Field(FieldErr); !strings.HasSuffix(err.(string), "…(truncated 1 bytes)") {
-		t.Fatalf("err field = %q", err)
-	}
-	_ = context.Background()
 }

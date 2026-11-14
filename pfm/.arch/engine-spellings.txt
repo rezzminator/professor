@@ -1,8 +1,12 @@
 cmd/pfm/statusline_command.go 2
+internal/hookentry/herdr_watch_jail_linux_test.go 1
 internal/stats/limits.go 1
 internal/stats/limits_test.go 3
 internal/statusline/context_capacity.go 1
-internal/statusline/process_test.go 1
+internal/statusline/palette_test.go 1
+internal/statusline/peripheral_test.go 5
+internal/statusline/process_jail_test.go 1
+internal/statusline/quota_absence_test.go 1
 internal/statusline/refresh_codex_test.go 2
 internal/statusline/render.go 2
-internal/statusline/statusline_test.go 1
+internal/statusline/statusline_test.go 2

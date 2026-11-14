@@ -12,11 +12,20 @@ import (
 
 // quietPromptBlock is blockPromptQuietly's fixed encoding — kept as a
 // literal so tests can assert against it without re-deriving the JSON.
-const quietPromptBlock = `{"decision":"block","reason":"","suppressOriginalPrompt":true}` + "\n"
+const quietPromptBlock = `{"decision":"block","reason":"",` +
+	`"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","suppressOriginalPrompt":true}}` + "\n"
 
+// promptBlockDecision is a UserPromptSubmit block. Claude Code reads
+// suppressOriginalPrompt only under hookSpecificOutput: a top-level one is
+// ignored and the block message gains an "Original prompt: ..." line.
 type promptBlockDecision struct {
-	Decision               string `json:"decision"`
-	Reason                 string `json:"reason"`
+	Decision           string                `json:"decision"`
+	Reason             string                `json:"reason"`
+	HookSpecificOutput promptBlockHookOutput `json:"hookSpecificOutput"`
+}
+
+type promptBlockHookOutput struct {
+	HookEventName          string `json:"hookEventName"`
 	SuppressOriginalPrompt bool   `json:"suppressOriginalPrompt"`
 }
 
@@ -26,9 +35,12 @@ type promptBlockDecision struct {
 // on a SUCCESSFUL action must say why, or the user reads success as breakage.
 func blockPrompt(stdout io.Writer, reason string) int {
 	encoded, err := json.Marshal(promptBlockDecision{
-		Decision:               "block",
-		Reason:                 reason,
-		SuppressOriginalPrompt: true,
+		Decision: "block",
+		Reason:   reason,
+		HookSpecificOutput: promptBlockHookOutput{
+			HookEventName:          claudelaunch.HookEventUserPromptSubmit,
+			SuppressOriginalPrompt: true,
+		},
 	})
 	if err != nil {
 		// promptBlockDecision holds only strings and a bool — json.Marshal

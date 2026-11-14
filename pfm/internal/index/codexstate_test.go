@@ -2,7 +2,6 @@ package index
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -44,7 +44,7 @@ func buildCodexState(t *testing.T, path string, threads ...codexStateThread) {
 	if err != nil {
 		t.Fatalf("read Codex state schema: %v", err)
 	}
-	database, err := sql.Open("sqlite", path)
+	database, err := sqlitedb.OpenReadWrite(path, sqlitedb.StoreBusyTimeout)
 	if err != nil {
 		t.Fatalf("create scratch Codex state store: %v", err)
 	}
@@ -104,7 +104,7 @@ INSERT INTO threads (
 func execCodexState(t *testing.T, path, statement string, args ...any) {
 	t.Helper()
 
-	database, err := sql.Open("sqlite", path)
+	database, err := sqlitedb.OpenReadWrite(path, sqlitedb.StoreBusyTimeout)
 	if err != nil {
 		t.Fatalf("open scratch Codex state store: %v", err)
 	}
@@ -678,7 +678,7 @@ func setupMachineSpawnedFixture(t *testing.T) string {
 		},
 		{
 			ID:               "agent-worktree",
-			CWD:              "/tmp/cross-workflow-agent-vhxIa3",
+			CWD:              "/work/cross-workflow-agent-vhxIa3",
 			Source:           "exec",
 			Title:            "Return the fixed portable-effect plan",
 			FirstUserMessage: "Return the fixed portable-effect plan",

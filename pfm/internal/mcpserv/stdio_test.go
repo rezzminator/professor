@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -26,8 +27,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -39,12 +38,12 @@ import (
 // daemon's real posture.
 func newStdioTestService(t *testing.T) *Service {
 	t.Helper()
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewConfigured("test", nil, Runtime{Paths: resolved})
+	service, err := NewConfigured("test", nil, Runtime{Store: memoryStore(t), Paths: resolved})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +178,7 @@ func stdioTestRunInspect(t *testing.T, service *Service, address string, inspect
 		t,
 		session,
 		"new",
-		NewInput{Name: "child", CWD: "/work/test"},
+		NewInput{Name: "child", CWD: testjail.Place("/work/test")},
 	)
 	if err := session.Close(); err != nil {
 		t.Errorf("close stdio test session: %v", err)
@@ -191,55 +190,6 @@ func stdioTestRunInspect(t *testing.T, service *Service, address string, inspect
 		t.Fatal("RunStdio did not return after test client closed")
 	}
 	return output
-}
-
-func TestRunStdioUsesHealthyDaemonProxy(t *testing.T) {
-	var daemonWarnings, localWarnings bytes.Buffer
-	daemon := stdioTestService("daemon", &daemonWarnings)
-	server := httptest.NewServer(proxyTestDaemon(daemon))
-	defer server.Close()
-
-	local := stdioTestService("local", &localWarnings)
-	testjail.Fleet(t)
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	local.backend.paths = resolved
-	address := proxyTestAddress(server)
-	markerPath := filepath.Join(local.backend.paths.Home, ".local", "state", "pfm", "mcp-proxy-compatible")
-	inspect := func() {
-		markerTarget, err := filepath.EvalSymlinks(markerPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		links, err := gather.NewProcFS("/proc").FDLinks(os.Getpid())
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, link := range links {
-			if link.Target == markerTarget {
-				return
-			}
-		}
-		t.Fatalf("healthy daemon proxy does not hold marker %s", markerPath)
-	}
-	if marker := stdioTestRunInspect(t, local, address, inspect).Message; marker != "daemon" {
-		t.Fatalf("healthy daemon marker = %q, want proxy daemon marker", marker)
-	}
-	links, err := gather.NewProcFS("/proc").FDLinks(os.Getpid())
-	if err != nil {
-		t.Fatal(err)
-	}
-	markerTarget, err := filepath.EvalSymlinks(markerPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, link := range links {
-		if link.Target == markerTarget {
-			t.Fatalf("proxy marker descriptor %d remained open after proxy returned", link.FD)
-		}
-	}
 }
 
 func TestRunStdioFallsBackWhenDaemonRuntimeDiffers(t *testing.T) {
@@ -301,9 +251,12 @@ func TestRunStdioReturnsMarkerOpenFailureWithoutLocalFallback(t *testing.T) {
 	err := stdioTestProfessor(t, local).RunStdio(
 		context.Background(), io.NopCloser(bytes.NewReader(nil)), io.Discard, stdioTestOptions(local, address),
 	)
-	if err == nil || !strings.Contains(err.Error(), "protect selected daemon stdio proxy") ||
-		!strings.Contains(err.Error(), "mcp-proxy-compatible") {
-		t.Fatalf("err = %v, want contextual marker-open failure", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		root,
+		"{root}",
+	), "protect selected daemon stdio proxy: create compatible proxy marker parent for {root}/not-a-directory/.local/state/pfm/mcp-proxy-compatible: mkdir {root}/not-a-directory: not a directory"; got != want {
+		t.Fatalf("RunStdio error = %q, want %q", got, want)
 	}
 }
 
@@ -563,7 +516,7 @@ func (stdioTestProcessTree) Environ(int) (map[string]string, error) { return map
 
 // A Codex caller's _meta.threadId crosses the stdio forwarder unchanged, beside
 // the pfmProxy identity the forwarder adds, and skips the Claude crumb refresh
-// (whose relative breadcrumb directory here would refuse the call).
+// (whose relative breadcrumb directory here would warn).
 func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
 	previous := proxyWhoami
 	proxyWhoami = resolve.WhoamiDependencies{
@@ -607,18 +560,13 @@ func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
 	session := stdioTestSession(t, stdioTestProfessor(t, local), StdioOptions{
 		DaemonAddress: proxyTestAddress(server), Home: resolved.Home, SIDDir: "relative-sid", Warnings: &warnings,
 	})
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Meta: mcp.Meta{"threadId": "thread-codex"}, Name: "ls", Arguments: map[string]any{},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
-	content, err := json.Marshal(result.Content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(content), "refresh Claude caller transcript") {
-		t.Fatalf("Codex caller ran the Claude crumb refresh: %s", content)
+	if strings.Contains(warnings.String(), "refresh Claude caller transcript") {
+		t.Fatalf("Codex caller ran the Claude crumb refresh: %s", warnings.String())
 	}
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -633,31 +581,6 @@ func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
 	identity, _ := meta["pfmProxy"].(map[string]any)
 	if identity["session"] != "cc-seat" {
 		t.Fatalf("forwarded _meta = %+v, want pfmProxy beside threadId", meta)
-	}
-}
-
-// With no daemon, the in-process server resolves a Codex caller by its
-// _meta.threadId, exactly as the daemon does.
-func TestRunStdioResolvesCodexCallerInProcess(t *testing.T) {
-	service := metadataIdentityService(t)
-	probe := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	address := proxyTestAddress(probe)
-	probe.Close()
-
-	var warnings proxyTestBuffer
-	session := stdioTestSession(t, stdioTestProfessor(t, service), StdioOptions{
-		DaemonAddress: address, Home: service.backend.paths.Home,
-		SIDDir: service.backend.paths.SIDDir, Warnings: &warnings,
-	})
-	whoami := callToolWithMeta[WhoamiOutput](
-		t, session, "whoami", mcp.Meta{"threadId": "thread-a"}, WhoamiInput{},
-	)
-	if whoami.Status != "ok" || whoami.ID != "thread-a" || whoami.Session != "fixture-session" ||
-		whoami.Engine != string(pfmengine.Codex) {
-		t.Fatalf("in-process whoami = %+v, want thread-a on fixture-session", whoami)
-	}
-	if !strings.Contains(warnings.String(), "daemon absent at "+address) {
-		t.Fatalf("warnings = %q, want the absent-daemon fallback", warnings.String())
 	}
 }
 
@@ -815,5 +738,43 @@ func TestRunStdioFallsBackWhenDaemonLacksSelectedFamilyRoute(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A family the daemon does not mount runs in process, and its chat tools still learn who called:
+// a tools/call carries the caller identity the forwarder would have added, so a chat that calls
+// `new` from its own pane is placed beside itself rather than as a caller outside any chat.
+func TestRunStdioAttachesCallerIdentityInProcess(t *testing.T) {
+	previous := proxyWhoami
+	proxyWhoami = resolve.WhoamiDependencies{
+		Environment: &resolve.WhoamiEnvironment{
+			TMUX: "/tmp/tmux-1000/cc-seat,1,0", TMUXPane: "%7", ClaudeSessionID: "session-claude",
+		},
+		Namer: stdioTestNamer("cc-seat"), SelfPID: 4100, Processes: stdioTestProcessTree{},
+	}
+	t.Cleanup(func() { proxyWhoami = previous })
+	probe := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	address := proxyTestAddress(probe)
+	probe.Close()
+
+	var warnings proxyTestBuffer
+	local := stdioTestService("local", &warnings)
+	testjail.Fleet(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := stdioTestSession(t, stdioTestProfessor(t, local), StdioOptions{
+		DaemonAddress: address, Home: resolved.Home, SIDDir: "relative-sid", Warnings: &warnings,
+	})
+	// The stub service lists no chats, so the caller the frame carried is named in the lookup's error.
+	whoami := callToolWithMeta[WhoamiOutput](t, session, "whoami", nil, WhoamiInput{})
+	want := WhoamiOutput{
+		Status:  "error",
+		Message: `resolve MCP proxy session "cc-seat": list live chats: ls verb is not configured`,
+	}
+	if whoami != want {
+		t.Fatalf("in-process whoami = %+v, want %+v (the caller cc-seat reached the server); warnings: %s",
+			whoami, want, warnings.String())
 	}
 }

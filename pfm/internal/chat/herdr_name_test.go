@@ -5,19 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestRenameHerdrUsesPaneLabelUniqueAgentAndDurableName(t *testing.T) {
-	for _, mode := range []string{"same", "moved", "recycled", "unlearned"} {
+	for _, mode := range []string{"same", "moved", "recycled", "unlearned", "relabelled"} {
 		t.Run(mode, func(t *testing.T) {
 			testjail.Fleet(t)
+			ctx, recorder := obs.Test(t)
 			pane := "w6:p3"
 			if mode == "moved" {
 				pane = "w9:p2"
@@ -39,7 +43,11 @@ func TestRenameHerdrUsesPaneLabelUniqueAgentAndDurableName(t *testing.T) {
 					if string(req.Params["pane_id"]) != fmt.Sprintf("%q", pane) {
 						t.Errorf("noncanonical pane rename %s", req.Params["pane_id"])
 					}
-					return map[string]any{"pane": map[string]any{"pane_id": pane, "label": "INTEGRATION"}}, ""
+					label := "INTEGRATION"
+					if mode == "relabelled" {
+						label = "INTEGRATI"
+					}
+					return map[string]any{"pane": map[string]any{"pane_id": pane, "label": label}}, ""
 				case "agent.rename":
 					mutations = append(mutations, req.Method)
 					if string(req.Params["target"]) != fmt.Sprintf("%q", pane) {
@@ -48,7 +56,11 @@ func TestRenameHerdrUsesPaneLabelUniqueAgentAndDurableName(t *testing.T) {
 					if string(req.Params["name"]) == `"integration"` {
 						return nil, "agent_name_taken"
 					}
-					return map[string]any{"agent": map[string]any{"pane_id": pane, "name": "integration-2"}}, ""
+					name := "integration-2"
+					if mode == "relabelled" {
+						name = "integratio"
+					}
+					return map[string]any{"agent": map[string]any{"pane_id": pane, "name": name}}, ""
 				case "pane.get":
 					return testjail.HerdrPaneInfo(pane), ""
 				case "tab.get":
@@ -70,7 +82,7 @@ func TestRenameHerdrUsesPaneLabelUniqueAgentAndDurableName(t *testing.T) {
 			}
 			seat = nativeChatHost(t, db, seat, true)
 			err := renameHerdr(
-				context.Background(),
+				ctx,
 				headless.Chat{SeatID: seat.SeatID, ID: seat.SessionID, Socket: socket, Pane: seat.HerdrPane},
 				"INTEGRATION",
 				runtime.Paths,
@@ -93,6 +105,25 @@ func TestRenameHerdrUsesPaneLabelUniqueAgentAndDurableName(t *testing.T) {
 			current, found, err := db.Seat(context.Background(), seat.SeatID)
 			if err != nil || !found || current.Name != "INTEGRATION" || current.HerdrPane != pane {
 				t.Fatalf("seat=%+v found=%v err=%v", current, found, err)
+			}
+			// A label Herdr acknowledged differently keeps the name and is logged.
+			var warned []string
+			for _, record := range recorder.Records() {
+				if record.Level == "WARN" {
+					requested, _ := record.Field("requested")
+					chosen, _ := record.Field("chosen")
+					warned = append(warned, fmt.Sprintf("%s %v->%v", record.Message, requested, chosen))
+				}
+			}
+			var wantWarned []string
+			if mode == "relabelled" {
+				wantWarned = []string{
+					"herdr pane rename acknowledged another label INTEGRATION->INTEGRATI",
+					"herdr agent rename acknowledged another name integration-2->integratio",
+				}
+			}
+			if !reflect.DeepEqual(warned, wantWarned) {
+				t.Fatalf("warnings=%q, want %q", warned, wantWarned)
 			}
 		})
 	}
@@ -225,6 +256,13 @@ func TestRenameHerdrLabelsTheSeatsSoleTab(t *testing.T) {
 					readErr,
 					wantName,
 				)
+			}
+			// A stored name nudges the socket's blinker, whose last read of the tabs may predate it.
+			nudge := herdr.NudgePath(paths.HerdrLockDir(runtime.Paths.Home), socket)
+			if _, err := os.Stat(nudge); (err == nil) != (test.wantErr == "") ||
+				err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("nudge %s: %v; want it left only by a rename that stored the name (error %q)",
+					nudge, err, test.wantErr)
 			}
 		})
 	}

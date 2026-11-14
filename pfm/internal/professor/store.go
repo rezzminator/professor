@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -60,15 +59,11 @@ func resolveStoreWithContext(ctx context.Context, projectRoot, home string) (Sto
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return Store{}, fmt.Errorf("UNREADABLE %s: %w", manifestPath, err)
 	}
-	return inspectStoreWithContext(ctx, blueprintRoot, obs.Runner(deps.RealRunner{}))
+	return inspectStoreWithContext(ctx, blueprintRoot, storeRunner)
 }
 
 func InspectStore(root string) (Store, error) {
-	return InspectStoreWithRunner(root, obs.Runner(deps.RealRunner{}))
-}
-
-func InspectStoreWithRunner(root string, runner deps.Runner) (Store, error) {
-	return inspectStoreWithContext(context.Background(), root, runner)
+	return inspectStoreWithContext(context.Background(), root, storeRunner)
 }
 
 func inspectStoreWithContext(ctx context.Context, root string, runner deps.Runner) (Store, error) {
@@ -104,7 +99,7 @@ func inspectStoreWithContext(ctx context.Context, root string, runner deps.Runne
 }
 
 func storeSHA(root string) (string, error) {
-	return storeSHAWithRunner(root, obs.Runner(deps.RealRunner{}))
+	return storeSHAWithRunner(root, storeRunner)
 }
 
 func storeSHAWithRunner(root string, runner deps.Runner) (string, error) {
@@ -126,7 +121,11 @@ func storeSHAWithContext(ctx context.Context, root string, runner deps.Runner) (
 			return "", fmt.Errorf("UNREADABLE %s: %w", gitPath, err)
 		}
 	}
-	argv := []string{deps.Executable("git"), "rev-parse", "--short", "HEAD"}
+	git, err := runner.LookPath("git")
+	if err != nil {
+		return "", fmt.Errorf("UNREADABLE blueprint git state %s: git not found: %w", root, err)
+	}
+	argv := []string{git, "rev-parse", "--short", "HEAD"}
 	env := deps.WithoutGitRepoVars(os.Environ())
 	if useFenceGit {
 		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+root)
@@ -183,9 +182,13 @@ func adoptGit(runner deps.Runner, root string, args ...string) (string, string, 
 	if runner == nil {
 		return "", "", errors.New("adopt Git: runner is nil")
 	}
+	git, err := runner.LookPath("git")
+	if err != nil {
+		return "", "", fmt.Errorf("adopt Git: git not found: %w", err)
+	}
 	result, err := runner.Run(
 		context.Background(),
-		append([]string{deps.Executable("git")}, args...),
+		append([]string{git}, args...),
 		deps.RunOptions{Dir: root, Env: storeGitEnv(root)},
 	)
 	if err != nil {

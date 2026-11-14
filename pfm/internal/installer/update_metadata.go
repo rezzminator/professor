@@ -83,7 +83,7 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 
 	runner := installer.options.Runner
 	if runner == nil {
-		runner = execCommandRunner{}
+		runner = execCommandRunner{runner: installer.processRunner()}
 	}
 	reader, ok := runner.(OutputRunner)
 	if !ok {
@@ -278,6 +278,9 @@ func (installer *engine) recordSourceRepoMarker() error {
 }
 
 func (installer *engine) writeUpdateMetadata() error {
+	// The pre-push gate is a clone nicety: its failure is a FAIL row, and the
+	// binary-ownership ledger pfm update relies on is still written.
+	var gateErr error
 	if installer.options.SourceRepo != "" {
 		if err := installer.recordSourceRepoMarker(); err != nil {
 			return err
@@ -286,19 +289,22 @@ func (installer *engine) writeUpdateMetadata() error {
 		if err != nil {
 			return fmt.Errorf("resolve source repository %q: %w", installer.options.SourceRepo, err)
 		}
-		if err := installer.armSourceRepoPrePushGate(filepath.Clean(abs)); err != nil {
-			return err
-		}
+		gateErr = installer.armSourceRepoPrePushGate(filepath.Clean(abs))
 	} else {
 		if err := installer.reportSourceRepoMarker(); err != nil {
 			return err
 		}
 		if recorded, err := paths.ReadSourceRepoMarker(installer.options.Home); err == nil {
-			if err := installer.armSourceRepoPrePushGate(recorded); err != nil {
-				return err
-			}
+			gateErr = installer.armSourceRepoPrePushGate(recorded)
 		}
 	}
+	if gateErr != nil {
+		gateErr = installer.fail(gateErr)
+	}
+	return errors.Join(gateErr, installer.writeBinaryOwnership())
+}
+
+func (installer *engine) writeBinaryOwnership() error {
 	content, err := canonicalBinaryOwnershipContent(installer.options.Home)
 	if err != nil {
 		return err

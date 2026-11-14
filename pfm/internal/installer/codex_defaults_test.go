@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -88,9 +89,7 @@ func TestCodexDefaultsNamesYieldedMCPTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "  change  merge Professor defaults into " + config + "; remove pfm's MCP tables: mcp_servers.chat-professor\n"
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("defaults report = %q, want %q", output.String(), want)
-	}
+	wantOutputLines(t, output.String(), []string{strings.TrimSuffix(want, "\n")}, "merge Professor defaults")
 }
 
 func TestYieldedCodexMCPTables(t *testing.T) {
@@ -156,11 +155,11 @@ func TestCodexDefaultsMergeLayouts(t *testing.T) {
 		"developer_instructions = \"\"\"\n[features.multi_agent_v2]\nkeep this text\n\"\"\"\n",
 	} {
 		t.Run(input, func(t *testing.T) {
-			merged, err := mergeCodexDefaults(input, defaults)
+			merged, _, err := mergeCodexDefaults(input, defaults)
 			if err != nil {
 				t.Fatal(err)
 			}
-			again, err := mergeCodexDefaults(merged, defaults)
+			again, _, err := mergeCodexDefaults(merged, defaults)
 			if err != nil || again != merged {
 				t.Fatalf("not idempotent: %v\n%s\n%s", err, merged, again)
 			}
@@ -185,7 +184,7 @@ func TestCodexDefaultsMergeLayouts(t *testing.T) {
 		"developer_instructions = '<!-- END Professor subagent coordination -->'\n",
 		"features = { multi_agent_v2 = { custom = true } }\n",
 	} {
-		if _, err := mergeCodexDefaults(input, defaults); err == nil {
+		if _, _, err := mergeCodexDefaults(input, defaults); err == nil {
 			t.Fatalf("accepted unsafe layout: %s", input)
 		}
 	}
@@ -219,16 +218,42 @@ func TestCodexDefaultsPreservesConfigSymlink(t *testing.T) {
 	}
 }
 
-func TestCodexDefaultsRejectsInconsistentTimeouts(t *testing.T) {
+// A user's own out-of-range or unordered wait timeout leaves
+// features.multi_agent_v2 as set and names why, while the rest of the merge
+// goes ahead; a bad template value is pfm's own error.
+func TestCodexDefaultsKeepsUserTimeoutsTheyCannotOrder(t *testing.T) {
 	t.Parallel()
 	defaults := "[features.multi_agent_v2]\nmin_wait_timeout_ms = 150000\ndefault_wait_timeout_ms = 750000\nmax_wait_timeout_ms = 1500000\n"
-	for _, value := range []string{"30000", "-1", "3600001", "'wrong type'"} {
-		if _, err := mergeCodexDefaults(
-			"[features.multi_agent_v2]\nmax_wait_timeout_ms = "+value+"\n",
-			defaults,
-		); err == nil {
-			t.Fatalf("accepted incompatible maximum %s", value)
+	const outOfRange = "max_wait_timeout_ms must be an integer from 0 to 3600000"
+	for _, testCase := range []struct{ value, why string }{
+		{"30000", "default_wait_timeout_ms exceeds max_wait_timeout_ms"},
+		{"-1", outOfRange},
+		{"3600001", outOfRange},
+		{"'wrong type'", outOfRange},
+	} {
+		input := "[features.multi_agent_v2]\nmax_wait_timeout_ms = " + testCase.value + "\n"
+		merged, note, err := mergeCodexDefaults(input, defaults)
+		if err != nil {
+			t.Fatalf("maximum %s: %v", testCase.value, err)
 		}
+		want := "features.multi_agent_v2 left as set, no wait defaults inserted: " + testCase.why +
+			"; set a consistent minimum/default/maximum"
+		if note != want {
+			t.Fatalf("maximum %s: note %q, want %q", testCase.value, note, want)
+		}
+		if !strings.Contains(merged, input) || strings.Contains(merged, codexMinWaitTimeout) {
+			t.Fatalf("maximum %s: multi_agent_v2 not left as set:\n%s", testCase.value, merged)
+		}
+		if !strings.Contains(merged, codexDefaultExecYieldTime) {
+			t.Fatalf("maximum %s: the rest of the merge did not land:\n%s", testCase.value, merged)
+		}
+	}
+	if _, _, err := mergeCodexDefaults(
+		"",
+		"[features.multi_agent_v2]\nmin_wait_timeout_ms = 9\nmax_wait_timeout_ms = 1\n",
+	); err == nil ||
+		err.Error() != "wait defaults for Codex conflict: min_wait_timeout_ms exceeds max_wait_timeout_ms" {
+		t.Fatalf("unordered template defaults: err = %v", err)
 	}
 }
 
@@ -251,7 +276,7 @@ func TestCodexDefaultsLongCommandWaits(t *testing.T) {
 		{"user background wait wins", "background_terminal_max_timeout = 90000\n", codexLongYieldMs, 90000},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			merged, err := mergeCodexDefaults(testCase.input, defaults)
+			merged, _, err := mergeCodexDefaults(testCase.input, defaults)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -277,23 +302,28 @@ func TestCodexDefaultsLongCommandWaits(t *testing.T) {
 			if strings.Contains(testCase.input, "enabled = true") && codeMode["enabled"] != true {
 				t.Fatalf("sibling key lost: %s", merged)
 			}
-			again, err := mergeCodexDefaults(merged, defaults)
+			again, _, err := mergeCodexDefaults(merged, defaults)
 			if err != nil || again != merged {
 				t.Fatalf("not idempotent: %v\n%s\n%s", err, merged, again)
 			}
 		})
 	}
-	if _, err := mergeCodexDefaults("[features]\ncode_mode = true\n", defaults); err == nil {
+	if _, _, err := mergeCodexDefaults("[features]\ncode_mode = true\n", defaults); err == nil {
 		t.Fatal("accepted a non-table features.code_mode")
 	}
 }
 
-func TestCodexDefaultsRefusesDanglingConfigSymlink(t *testing.T) {
+// A dangling config link and a config the defaults cannot merge into cost
+// only their own homes' defaults: the link stays, the unmergeable home still
+// gets the fleet prompt, and every other home is still wired.
+func TestCodexDefaultsFailingHomeCostsOnlyItself(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
-	configHome := filepath.Join(home, ".codex")
+	unmergeable := filepath.Join(home, "a-unmergeable")
+	writeFixture(t, filepath.Join(unmergeable, "config.toml"), "features = true\n")
+	configHome := filepath.Join(home, "b-dangling")
 	if err := os.MkdirAll(configHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -302,33 +332,51 @@ func TestCodexDefaultsRefusesDanglingConfigSymlink(t *testing.T) {
 	if err := os.Symlink(target, config); err != nil {
 		t.Fatal(err)
 	}
-	installer := &engine{options: Options{Home: home, Stdout: io.Discard}, apply: true, stamp: "test"}
+	fresh := filepath.Join(home, "c-fresh")
+	var output bytes.Buffer
+	installer := &engine{
+		options: Options{Home: home, Stdout: &output, CodexHomes: []string{unmergeable, configHome, fresh}},
+		apply:   true, stamp: "test",
+	}
 	if err := installer.generateHarnessPrompts(); err != nil {
 		t.Fatal(err)
 	}
-	if err := installer.wireCodexDefaults(); err == nil || !strings.Contains(err.Error(), "dangling symlink") {
-		t.Fatalf("expected dangling-link refusal, got %v", err)
+	prompt, err := installer.generatedHarnessPrompt(pfmengine.Codex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = installer.wireCodexDefaults()
+	merge := "merge Codex defaults into " + filepath.Join(unmergeable, "config.toml") + ": "
+	if err == nil || !strings.Contains(err.Error(), "config for Codex is a dangling symlink: "+config) ||
+		!strings.Contains(err.Error(), merge) {
+		t.Fatalf("wireCodexDefaults = %v, want the dangling link and the merge failure", err)
+	}
+	if !strings.Contains(output.String(), "  FAIL    "+merge) {
+		t.Fatalf("output lacks the FAIL row %q:\n%s", merge, output.String())
 	}
 	if got, err := os.Readlink(config); err != nil || got != target {
 		t.Fatalf("link changed: %s %v", got, err)
+	}
+	unmerged := decodeCodexConfig(t, readFixture(t, filepath.Join(unmergeable, "config.toml")))
+	if unmerged["features"] != true || unmerged[codexInstructionsKey] != string(prompt) {
+		t.Fatalf("unmergeable home = %v, want features kept and the fleet prompt", unmerged)
+	}
+	wired := decodeCodexConfig(t, readFixture(t, filepath.Join(fresh, "config.toml")))
+	if wired[codexInstructionsKey] != string(prompt) {
+		t.Fatalf("fresh home after the failing ones lacks the fleet prompt: %v", wired)
 	}
 }
 
 func TestCodexDefaultsRemovesOnlyManagedInstructions(t *testing.T) {
 	t.Parallel()
 	input := "developer_instructions = '<!-- BEGIN Professor subagent coordination -->old<!-- END Professor subagent coordination -->' # keep note\nmodel = 'personal'\n"
-	got, err := mergeCodexDefaults(input, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
+	got, _, err := mergeCodexDefaults(input, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc map[string]any
-	if _, err := toml.Decode(got, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := doc["developer_instructions"]; ok {
-		t.Fatal("managed-only key retained")
-	}
-	if doc["model"] != "personal" || !strings.Contains(got, "# keep note") {
-		t.Fatal("unrelated config changed")
+	want := "background_terminal_max_timeout = 3600000\n # keep note\nmodel = 'personal'\n\n[features.multi_agent_v2]\n" +
+		"wait_agent_enabled = true\n\n[features.code_mode]\ndefault_exec_yield_time_ms = 3600000\n"
+	if got != want {
+		t.Fatalf("merged config = %q, want only the managed key gone: %q", got, want)
 	}
 }

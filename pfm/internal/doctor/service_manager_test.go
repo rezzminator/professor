@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // mcpEnabledRuntime is a runtime whose config serves one MCP server, so the
@@ -29,73 +30,34 @@ func mcpEnabledRuntime() config.Runtime {
 func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 	probeErr := errors.New("dial unix /run/user/1000/bus: connect: no such file or directory")
 	cases := []struct {
-		name    string
-		report  serviceManagerReport
-		want    []string
-		exclude []string
+		name   string
+		report ServiceManagerReport
+		want   string
 	}{
+		{"present and healthy", ServiceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+			Unit: "pfm-mcp.service", Present: true, Enabled: true, Active: true, State: "active",
+		}}, "doctor: service-manager=systemd unit=pfm-mcp.service present=true enabled=true active=active\n"},
 		{
-			name: "present and healthy",
-			report: serviceManagerReport{
-				Manager: "systemd",
-				Present: true,
-				Unit: serviceManagerUnitState{
-					Unit: "pfm-mcp.service", Present: true, Enabled: true, Active: true, State: "active",
-				},
-			},
-			want: []string{
-				"doctor: service-manager=systemd unit=pfm-mcp.service present=true enabled=true active=active\n",
-			},
-			exclude: []string{"could_not_ask", "state=unavailable"},
+			"no service manager on this host",
+			ServiceManagerReport{Manager: "systemd", Unit: serviceManagerUnitState{Unit: "pfm-mcp.service"}},
+			"doctor: service-manager=none manager=systemd unit=pfm-mcp.service state=unavailable — no systemd user manager on this host (container or unmanaged); the pfm daemon must be started by hand\n",
 		},
-		{
-			name: "no service manager on this host",
-			report: serviceManagerReport{
-				Manager: "systemd",
-				Present: false,
-				Unit:    serviceManagerUnitState{Unit: "pfm-mcp.service"},
-			},
-			want: []string{
-				"doctor: service-manager=none manager=systemd unit=pfm-mcp.service state=unavailable",
-				"no systemd user manager on this host",
-			},
-			exclude: []string{"could_not_ask", "error="},
-		},
-		{
-			name: "could not ask",
-			report: serviceManagerReport{
-				Manager: "systemd",
-				Present: true,
-				Unit: serviceManagerUnitState{
-					Unit: "pfm-mcp.service", Err: probeErr,
-				},
-			},
-			want: []string{
-				"doctor: service-manager=systemd unit=pfm-mcp.service could_not_ask",
-				"error=" + probeErr.Error(),
-			},
-		},
+		{"could not ask", ServiceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+			Unit: "pfm-mcp.service", Err: probeErr,
+		}}, "doctor: service-manager=systemd unit=pfm-mcp.service could_not_ask error=dial unix /run/user/1000/bus: connect: no such file or directory\n"},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
+			ServiceManagerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport {
 				return testCase.report
 			}
 			defer func() { ServiceManagerProbeOverride = nil }()
 
 			var output strings.Builder
 			printServiceManagerDoctor(context.Background(), &output, nil, mcpEnabledRuntime())
-			got := output.String()
-			for _, want := range testCase.want {
-				if !strings.Contains(got, want) {
-					t.Fatalf("output %q missing %q", got, want)
-				}
-			}
-			for _, forbidden := range testCase.exclude {
-				if strings.Contains(got, forbidden) {
-					t.Fatalf("output %q must not contain %q for state %q", got, forbidden, testCase.name)
-				}
+			if got := output.String(); got != testCase.want {
+				t.Errorf("output = %q, want %q", got, testCase.want)
 			}
 		})
 	}
@@ -108,12 +70,12 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T) {
 	cases := []struct {
 		name   string
-		report serviceManagerReport
+		report ServiceManagerReport
 		want   []string
 	}{
 		{
 			name: "systemd unit activating",
-			report: serviceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+			report: ServiceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
 				Unit: "pfm-mcp.service", Present: true, Enabled: true, State: "activating",
 			}},
 			want: []string{
@@ -123,21 +85,21 @@ func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T
 		},
 		{
 			name: "systemd unit never staged",
-			report: serviceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+			report: ServiceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
 				Unit: "pfm-mcp.service", State: "inactive",
 			}},
 			want: []string{"present=false enabled=false active=inactive", "— run pfm install --yes"},
 		},
 		{
 			name: "launchd label not running",
-			report: serviceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
+			report: ServiceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
 				Unit: "com.professor.pfm.mcp", Present: true, Enabled: true, State: "not running",
 			}},
 			want: []string{"active=not running", "launchctl kickstart -k gui/$(id -u)/com.professor.pfm.mcp"},
 		},
 		{
 			name: "launchd label unknown",
-			report: serviceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
+			report: ServiceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
 				Unit: "com.professor.pfm.mcp",
 			}},
 			want: []string{"present=false", "— run pfm install --yes"},
@@ -145,7 +107,7 @@ func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
+			ServiceManagerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport {
 				return testCase.report
 			}
 			defer func() { ServiceManagerProbeOverride = nil }()
@@ -172,9 +134,9 @@ func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T
 // server disabled there is no daemon to supervise — the row says so, asks the
 // manager nothing and warns nothing.
 func TestPrintServiceManagerDoctorDisabledInConfigNeverProbes(t *testing.T) {
-	ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
+	ServiceManagerProbeOverride = func(context.Context, deps.Runner) ServiceManagerReport {
 		t.Fatal("a disabled MCP config must not probe the service manager")
-		return serviceManagerReport{}
+		return ServiceManagerReport{}
 	}
 	defer func() { ServiceManagerProbeOverride = nil }()
 
@@ -189,5 +151,19 @@ func TestPrintServiceManagerDoctorDisabledInConfigNeverProbes(t *testing.T) {
 	want := "doctor: service-manager=" + manager + " unit=" + unit + " disabled-in-config\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
+// TestServiceManagerForPicksTheKindsRows: each kind reports its own manager
+// word, binary and units, whichever OS runs the test.
+func TestServiceManagerForPicksTheKindsRows(t *testing.T) {
+	for kind, want := range map[servicemanager.Kind][4]string{
+		servicemanager.KindSystemd: {"systemd", "systemctl", "pfm-mcp.service", "pfm-schedule.timer"},
+		servicemanager.KindLaunchd: {"launchd", "launchctl", "com.professor.pfm.mcp", "com.professor.pfm.schedule"},
+	} {
+		probe := serviceManagerFor(kind)
+		if got := [4]string{probe.manager, probe.binary, probe.mcpUnit, probe.scheduleUnit}; got != want {
+			t.Fatalf("serviceManagerFor(%s) = %q, want %q", kind, got, want)
+		}
 	}
 }

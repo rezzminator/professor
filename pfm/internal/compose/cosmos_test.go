@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestBuildCosmosResolvesParticipantsAndAggregatesEdges pins the current
@@ -298,11 +299,11 @@ func TestBuildCosmosTimestampTieKeepsNewestFirstMessage(t *testing.T) {
 }
 
 func TestBuildCosmosUnknownKindWarnsInsteadOfVanishingSilently(t *testing.T) {
-	graph := BuildCosmos(nil, []fleetdb.CommsEvent{{ID: 9, AtNS: 80, Kind: "reload"}}, 100, false)
-	if len(graph.Nodes) != 0 || len(graph.Edges) != 0 || len(graph.Warnings) != 1 ||
-		!strings.Contains(graph.Warnings[0], `event 9`) ||
-		!strings.Contains(graph.Warnings[0], `unknown kind "reload"`) {
-		t.Fatalf("unknown-kind graph = %#v", graph)
+	graph := BuildCosmos(nil, []fleetdb.CommsEvent{{ID: 9, Kind: "reload", SenderLabel: "A", Target: "B"}}, 100, false)
+	edges := []CosmosEdge{{From: "chat:name:A", To: "chat:name:B", Kind: "reload", Count: 1}}
+	warnings := []string{`comms event 9 has unknown kind "reload"; drawn as a message line`}
+	if len(graph.Nodes) != 2 || !reflect.DeepEqual(graph.Edges, edges) || !reflect.DeepEqual(graph.Warnings, warnings) {
+		t.Fatalf("unknown-kind graph = %#v, want 2 nodes, edges %#v, warnings %#v", graph, edges, warnings)
 	}
 }
 
@@ -910,7 +911,7 @@ func TestRowKeyIsTheOneJoinKeyIDThenSocketPaneThenCWDProject(t *testing.T) {
 	}{
 		{
 			name: "an ID always wins, whatever else the row carries",
-			row:  Row{Kind: LiveClaude, ID: "row-1", Socket: "cc-x", PaneID: "%1", CWD: "/work/x", Project: "x"},
+			row:  Row{Kind: LiveClaude, ID: "row-1", Socket: "cc-x", PaneID: "%1", CWD: testjail.Place("/work/x")},
 			want: "row-1",
 		},
 		{
@@ -920,8 +921,8 @@ func TestRowKeyIsTheOneJoinKeyIDThenSocketPaneThenCWDProject(t *testing.T) {
 		},
 		{
 			name: "no ID, no socket: where it lives",
-			row:  Row{Kind: ResumeClaude, CWD: "/work/beta", Project: "beta"},
-			want: ResumeClaude.String() + "\x00/work/beta\x00beta",
+			row:  Row{Kind: ResumeClaude, CWD: testjail.Place("/work/beta"), Project: "beta"},
+			want: ResumeClaude.String() + "\x00" + testjail.Place("/work/beta") + "\x00beta",
 		},
 	}
 	for _, test := range tests {

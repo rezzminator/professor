@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // decodeHerdrPanes reads a Herdr pane.list answer through its one parser
@@ -55,3 +57,73 @@ func HerdrTerminalListed(ctx context.Context, socket, terminal string) (bool, er
 	}
 	return false, nil
 }
+
+// ResolveHerdrSeat proves and persists the current address using the jail-aware
+// process reader. Callers must refuse mutation on either an error or !owned.
+func ResolveHerdrSeat(
+	ctx context.Context,
+	values paths.Values,
+	seat fleetdb.Seat,
+) (result fleetdb.Seat, owned bool, returnErr error) {
+	db := fleetdb.OpenSharedState(ctx, values)
+	defer func() { returnErr = errors.Join(returnErr, db.Close()) }()
+	return proveHerdrSeatSnapshot(ctx, db, NewProcFS(values.ProcRoot), seat, nil, false)
+}
+
+// herdrSeatPane is the pane of panes seat lives in: the one holding its saved
+// terminal (its saved pane when it has none); nil when none is listed.
+func herdrSeatPane(seat fleetdb.Seat, panes []herdr.Pane) (*herdr.Pane, error) {
+	var candidate *herdr.Pane
+	for i := range panes {
+		pane := &panes[i]
+		matches := pane.PaneID == seat.HerdrPane
+		if seat.HerdrTerminalID != "" {
+			matches = pane.TerminalID == seat.HerdrTerminalID
+		}
+		if matches {
+			if candidate != nil {
+				return nil, fmt.Errorf("ownership pane.list: duplicate terminal identity")
+			}
+			candidate = pane
+		}
+	}
+	return candidate, nil
+}
+
+// Blocked reports that Herdr reads the seat's agent as waiting on its owner (a
+// question or a permission prompt open), from the same pane.list the probe read.
+// A seat whose probe failed carries that error (Err) and reads false: its row
+// shows the error, never a state.
+func (row HerdrSeat) Blocked() bool {
+	if row.Err != nil {
+		return false
+	}
+	panes, err := herdr.ParsePanes(row.snapshot)
+	for index := 0; err == nil && index < len(panes); index++ {
+		if panes[index].PaneID == row.Seat.HerdrPane {
+			return paneBlocked(panes[index])
+		}
+	}
+	return false
+}
+
+// HerdrBlockedPanes reads one Herdr socket's pane.list and names every pane
+// whose agent Herdr reads as waiting on its owner, the read Blocked makes from
+// a pass's snapshot: a parked picker re-reads it without a full pass.
+func HerdrBlockedPanes(ctx context.Context, socket string) (map[string]bool, error) {
+	_, body, err := probeHerdrPanes(ctx, socket)
+	if err != nil {
+		return nil, err
+	}
+	panes, err := herdr.ParsePanes(body)
+	if err != nil {
+		return nil, err
+	}
+	blocked := make(map[string]bool, len(panes))
+	for index := range panes {
+		blocked[panes[index].PaneID] = paneBlocked(panes[index])
+	}
+	return blocked, nil
+}
+
+func paneBlocked(pane herdr.Pane) bool { return pane.AgentStatus == string(herdr.StateBlocked) }

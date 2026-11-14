@@ -393,7 +393,7 @@ func (model Model) dossierDetails(row compose.Row, inner int, heat float64) []do
 		details = append(details, dossierLine{label("model"), value(shown)})
 	}
 	if workActive(row) {
-		details = append(details, append(dossierLine{label("working")},
+		details = append(details, append(dossierLine{label(workLabel(row))},
 			append(workGauge(row, model.nowNS, engineHexOf(row), palette.HeatCold, ""),
 				span{text: "  " + workSummary(row), paint: tone{fg: palette.Header}})...))
 	}

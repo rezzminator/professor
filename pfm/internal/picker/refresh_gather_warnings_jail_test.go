@@ -1,3 +1,5 @@
+//go:build jail
+
 package picker
 
 import (
@@ -147,6 +149,7 @@ func TestInteractiveRefreshBuffersGatherWarningsUntilFlushed(t *testing.T) {
 // of an indexed thread name. That is unresolved screen state, not a failed
 // probe: it must neither corrupt the active frame nor print on picker close.
 func TestInteractiveRefreshKeepsUnresolvedCodexNamesSilent(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -214,8 +217,8 @@ func TestBufferedWarningsDeduplicateRepeatedRefreshFailures(t *testing.T) {
 
 	var output bytes.Buffer
 	warnings.flush(&output)
-	if got := strings.Count(output.String(), "same failure"); got != 1 {
-		t.Fatalf("same warning printed %d times, want once: %q", got, output.String())
+	if got, want := output.String(), "pfm: tmux probe warning: same failure\n"; got != want {
+		t.Fatalf("flushed warnings = %q, want %q", got, want)
 	}
 }
 

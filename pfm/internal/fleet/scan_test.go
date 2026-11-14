@@ -3,8 +3,10 @@ package fleet
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -89,7 +91,7 @@ func TestScanRecordsATransition(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	os.Exit(testjail.Run(m))
+	os.Exit(testjail.RunInJail(m))
 }
 
 func jailRuntime(t *testing.T) *pfmconfig.Runtime {
@@ -130,13 +132,34 @@ func TestResolveEnvNoCurrentDirComposesFromNowhere(t *testing.T) {
 	}
 }
 
+// An unreadable primary account must not blank the fleet: the scan composes on
+// the implicit account and reports the fallback among its errors.
+func TestResolveEnvComposesOnTheImplicitAccountPastAnUnreadablePrimary(t *testing.T) {
+	runtime := jailRuntime(t)
+	mirror := filepath.Join(runtime.Paths.Home, ".claude-primary")
+	if err := os.WriteFile(mirror, []byte("garbage\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, err := ResolveEnv(Request{Runtime: runtime})
+	if err != nil {
+		t.Fatalf("ResolveEnv() = %v, want the implicit account", err)
+	}
+	want := []string{"primary account unreadable (read primary account: parse primary account mirror: " +
+		`strconv.Atoi: parsing "garbage": invalid syntax); composing on account 1`}
+	if env.Primary != 1 || !slices.Equal(env.Faults, want) {
+		t.Fatalf("ResolveEnv() primary = %d, faults = %q; want 1, %q", env.Primary, env.Faults, want)
+	}
+}
+
 // TestResolveEnvRefusesAnUnreadableClock pins the broken state: a clock the
 // test named but that does not parse is an error, never the real clock.
 func TestResolveEnvRefusesAnUnreadableClock(t *testing.T) {
 	t.Setenv(TestNowNSEnv, "yesterday")
 	_, err := ResolveEnv(Request{Runtime: jailRuntime(t)})
-	if err == nil || !strings.Contains(err.Error(), TestNowNSEnv) {
-		t.Fatalf("ResolveEnv() error = %v, want one naming %s", err, TestNowNSEnv)
+	if got, want := fmt.Sprint(
+		err,
+	), "PFM_TEST_NOW_NS: strconv.ParseInt: parsing \"yesterday\": invalid syntax"; got != want {
+		t.Fatalf("ResolveEnv() error = %q, want %q", got, want)
 	}
 }
 
@@ -204,6 +227,43 @@ func TestResolveEnvWorkbenchCacheOptIn(t *testing.T) {
 	env, err = ResolveEnv(Request{Runtime: runtime})
 	if err != nil || len(env.Workbenches) != 0 {
 		t.Fatalf("chat environment = %+v, %v", env, err)
+	}
+}
+
+// An unreadable cache must not hide the benches under the cwd's project: they
+// are discovered live and the cache failure stays among the faults.
+func TestResolveEnvWorkbenchUnreadableCacheDiscoversLive(t *testing.T) {
+	runtime := jailRuntime(t)
+	runtime.Paths.CacheDB = filepath.Join(t.TempDir(), "index.db")
+	cachePath := paths.WorkbenchCache(runtime.Paths)
+	if err := os.WriteFile(cachePath, []byte(`{"version":2,"workbenches":[],"errors":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "docs", "scribe")
+	for path, content := range map[string]string{
+		filepath.Join(root, ".professor", "baseline.json"): "{}",
+		paths.WorkbenchManifest(dir):                       `{"prompt":"scribe.md","title":"Scribe"}`,
+		filepath.Join(dir, ".professor", "scribe.md"):      "You are scribe.",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(root)
+	env, err := ResolveEnv(Request{Runtime: runtime, Workbenches: true})
+	if err != nil || len(env.Workbenches) != 1 || env.Workbenches[0].Dir != dir {
+		t.Fatalf("environment = %+v, %v; want the live-discovered bench %s", env, err, dir)
+	}
+	if len(env.WorkbenchErrors) != 1 || env.WorkbenchErrors[0].Path != cachePath ||
+		!strings.Contains(env.WorkbenchErrors[0].Error(), "unsupported version 2") {
+		t.Fatalf("faults = %#v; want only the cache failure at %s", env.WorkbenchErrors, cachePath)
 	}
 }
 

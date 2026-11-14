@@ -1,0 +1,235 @@
+{
+  "names": [
+    {
+      "name": "/agent:use",
+      "kind": "command",
+      "successor": "/law:agent",
+      "match": "exact"
+    },
+    {
+      "name": "/claude-md:use",
+      "kind": "command",
+      "successor": "/law:claude-md",
+      "match": "exact"
+    },
+    {
+      "name": "/claude-selector:use",
+      "kind": "command",
+      "match": "exact"
+    },
+    {
+      "name": "/description:use",
+      "kind": "command",
+      "successor": "/law:description",
+      "match": "exact"
+    },
+    {
+      "name": "/doc:use",
+      "kind": "command",
+      "successor": "/law:doc",
+      "match": "exact"
+    },
+    {
+      "name": "/flights:tracer-use",
+      "kind": "command",
+      "successor": "/flights:trace-guide",
+      "match": "exact"
+    },
+    {
+      "name": "/integration-suite:use",
+      "kind": "command",
+      "successor": "/design:test-suite",
+      "match": "exact"
+    },
+    {
+      "name": "/iterative-improvement:use",
+      "kind": "command",
+      "successor": "/improve:iterative",
+      "match": "exact"
+    },
+    {
+      "name": "/llm-codebase:use",
+      "kind": "command",
+      "successor": "/design:codebase",
+      "match": "exact"
+    },
+    {
+      "name": "/md-forlint:use",
+      "kind": "command",
+      "successor": "/law:markdown",
+      "match": "exact"
+    },
+    {
+      "name": "/prompt:use",
+      "kind": "command",
+      "successor": "/law:prompt",
+      "match": "exact"
+    },
+    {
+      "name": "/rules:use",
+      "kind": "command",
+      "successor": "/law:rules",
+      "match": "exact"
+    },
+    {
+      "name": "/tracer:use",
+      "kind": "command",
+      "successor": "/flights:trace-guide",
+      "match": "exact"
+    },
+    {
+      "name": "/use:mods-builder",
+      "kind": "command",
+      "match": "exact"
+    },
+    {
+      "name": "done-herewith",
+      "kind": "skill",
+      "successor": "close-out",
+      "match": "exact"
+    },
+    {
+      "name": "flights-foreman",
+      "kind": "agent",
+      "successor": "flights:foreman",
+      "match": "exact"
+    },
+    {
+      "name": "flights-foreman-sonnet",
+      "kind": "agent",
+      "successor": "flights:foreman-sonnet",
+      "match": "exact"
+    },
+    {
+      "name": "flights-hunter",
+      "kind": "agent",
+      "successor": "flights:diff-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights-lander",
+      "kind": "agent",
+      "successor": "flights:lander",
+      "match": "exact"
+    },
+    {
+      "name": "flights-spec-walker",
+      "kind": "agent",
+      "successor": "flights:spec-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights-speccer",
+      "kind": "agent",
+      "successor": "flights:speccer",
+      "match": "exact"
+    },
+    {
+      "name": "flights-sub-lander",
+      "kind": "agent",
+      "successor": "flights:usage-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights:hunter",
+      "kind": "agent",
+      "successor": "flights:diff-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights:spec-walker",
+      "kind": "agent",
+      "successor": "flights:spec-checker",
+      "match": "exact"
+    },
+    {
+      "name": "flights:sub-lander",
+      "kind": "agent",
+      "successor": "flights:usage-checker",
+      "match": "exact"
+    },
+    {
+      "name": "lander-inventory",
+      "kind": "skill",
+      "successor": "flights:lander-inventory",
+      "match": "exact"
+    },
+    {
+      "name": "subagent_type: \"reviewer\"",
+      "kind": "agent",
+      "successor": "flights:reviewer",
+      "match": "exact",
+      "probe": ".claude/agents/reviewer.md"
+    },
+    {
+      "name": "`reviewer` agent",
+      "kind": "agent",
+      "successor": "flights:reviewer",
+      "match": "exact",
+      "probe": ".claude/agents/reviewer.md"
+    },
+    {
+      "name": "reviewer-nt",
+      "kind": "agent",
+      "match": "exact"
+    },
+    {
+      "name": "reviewer-pro",
+      "kind": "agent",
+      "successor": "flights:reviewer",
+      "match": "exact"
+    },
+    {
+      "name": "sub-tracer",
+      "kind": "agent",
+      "successor": "flights:sub-tracer",
+      "match": "exact"
+    },
+    {
+      "name": "subagent_type: \"tracer\"",
+      "kind": "agent",
+      "successor": "flights:tracer",
+      "match": "exact",
+      "probe": ".claude/agents/tracer.md"
+    },
+    {
+      "name": "`tracer` agent",
+      "kind": "agent",
+      "successor": "flights:tracer",
+      "match": "exact",
+      "probe": ".claude/agents/tracer.md"
+    },
+    {
+      "name": "tracetree",
+      "kind": "skill",
+      "successor": "flights:tracetree",
+      "match": "exact"
+    }
+  ],
+  "storeEntries": [],
+  "stateDirs": [],
+  "hookCommands": [],
+  "hookBinaries": [],
+  "hookShimHints": [],
+  "claudePlugins": {},
+  "globalAgents": [
+    "flights-foreman",
+    "flights-foreman-sonnet",
+    "flights-hunter",
+    "flights-lander",
+    "flights-spec-walker",
+    "flights-speccer",
+    "flights-sub-lander",
+    "reviewer",
+    "reviewer-nt",
+    "reviewer-pro",
+    "sub-tracer",
+    "tracer"
+  ],
+  "units": [],
+  "configFiles": [],
+  "commands": {
+    "homeBin": [],
+    "accountBin": []
+  }
+}

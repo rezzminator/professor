@@ -3,87 +3,60 @@ package gather
 import (
 	"context"
 	"errors"
-	"path/filepath"
-	"slices"
-	"strings"
+	"os/exec"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"time"
 )
 
-// TestProbeServerNeverReadsAFailureAsDead pins the one liveness answer: only
-// tmux's own "no server" words are dead, a server past the bound is
-// unresponsive, and every other failure is unknown with tmux's reason.
-func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
-	cases := []struct {
-		name      string
-		script    string
-		want      ServerState
-		wantPanes []string
-		wantErr   string
+// TestTmuxReadClassifiesAFailureAsEveryProbeDoes: a read of a socket with no
+// server behind it is ErrServerGone, one past its bound ErrServerUnresponsive,
+// and every other failure keeps tmux's reason and is neither.
+func TestTmuxReadClassifiesAFailureAsEveryProbeDoes(t *testing.T) {
+	live := context.Background()
+	expired, cancel := context.WithDeadline(live, time.Unix(0, 0))
+	defer cancel()
+	read := []string{"show-options", "-qv", "-t", "cc-1", "@pfm_herdr"}
+	const lead = "tmux show-options -qv -t cc-1 @pfm_herdr: "
+	for _, tc := range []struct {
+		name     string
+		probeCtx context.Context
+		stderr   string
+		sentinel error
+		want     string
 	}{
 		{
-			"panes",
-			"printf '" + paneLine("%%1", "42", "0") + paneLine("%%2", "42", "1") + "'",
-			ServerAlive,
-			[]string{"%1", "%2"},
-			"",
+			"socket file gone", live, "error connecting to /t/cc-1 (No such file or directory)\n", ErrServerGone,
+			lead + "no tmux server on socket: /t/cc-1",
 		},
 		{
-			// tmux 3.8 prints no pane_pid once a dead pane's descriptor closes.
-			"exited",
-			"printf '" + paneLine("%%3", "", "1") + "'",
-			ServerAlive,
-			[]string{"%3"},
-			"",
+			"no server running", live, "no server running on /t/cc-1\n", ErrServerGone,
+			lead + "no tmux server on socket: /t/cc-1",
 		},
-		{"unreadable", "printf 'garbage\\n'", ServerUnknown, nil, "returned 1 pane fields"},
-		{"empty", "echo 'no current target' >&2; exit 1", ServerAlive, nil, ""},
-		{"dead", "echo 'no server running on /tmp/x' >&2; exit 1", ServerDead, nil, ""},
-		{"refused", "echo 'error connecting to /tmp/x (Connection refused)' >&2; exit 1", ServerDead, nil, ""},
-		{"denied", "echo 'connect failed: permission denied' >&2; exit 1", ServerUnknown, nil, "permission denied"},
-	}
-	for _, tc := range cases {
+		{
+			"refused", live, "error connecting to /t/cc-1 (Connection refused)\n", ErrServerGone,
+			lead + "no tmux server on socket: /t/cc-1",
+		},
+		{
+			"permission denied", live, "error connecting to /t/cc-1 (Permission denied)\n", nil,
+			lead + "<nil>: error connecting to /t/cc-1 (Permission denied)",
+		},
+		{
+			"session missing", live, "can't find session: cc-1\n", nil,
+			lead + "<nil>: can't find session: cc-1",
+		},
+		{
+			"past its bound", expired, "", ErrServerUnresponsive,
+			lead + "tmux server did not answer within 2s: /t/cc-1",
+		},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			binary := filepath.Join(t.TempDir(), "tmux")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"+tc.script+"\n"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			state, panes, err := ProbeServer(context.Background(), binary, "/tmp/x")
-			var ids []string
-			for _, pane := range panes {
-				ids = append(ids, pane.PaneID)
-			}
-			if state != tc.want || !slices.Equal(ids, tc.wantPanes) {
-				t.Fatalf("ProbeServer() = %v %q %v, want %v %q", state, ids, err, tc.want, tc.wantPanes)
-			}
-			if tc.name == "panes" {
-				pane := panes[1]
-				if !pane.Dead || pane.PID != 42 || pane.TTY != "/dev/pts/7" || pane.CurrentCommand != "claude" ||
-					pane.WindowIndex != 3 || pane.SessionName != "cc-1" || pane.Socket != "x" || panes[0].Dead {
-					t.Fatalf("ProbeServer() panes = %+v, want every paneFormat field read", panes)
-				}
-			}
-			if tc.name == "exited" && (!panes[0].Dead || panes[0].PID != 0) {
-				t.Fatalf("ProbeServer() exited pane = %+v, want dead with PID 0", panes[0])
-			}
-			if tc.wantErr == "" && err != nil ||
-				tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
-				t.Fatalf("ProbeServer() error = %v, want %q", err, tc.wantErr)
+			err := tmuxReadFailure(live, tc.probeCtx, &exec.ExitError{Stderr: []byte(tc.stderr)}, "/t/cc-1", read)
+			gone, unresponsive := errors.Is(err, ErrServerGone), errors.Is(err, ErrServerUnresponsive)
+			if err == nil || err.Error() != tc.want ||
+				gone != (tc.sentinel == ErrServerGone) || unresponsive != (tc.sentinel == ErrServerUnresponsive) {
+				t.Fatalf("tmuxReadFailure() = %v (gone %v, unresponsive %v), want %q wrapping %v",
+					err, gone, unresponsive, tc.want, tc.sentinel)
 			}
 		})
 	}
-	t.Run("hung", func(t *testing.T) {
-		state, _, err := ProbeServer(context.Background(), testjail.HungTmux(t, 1), "/tmp/x")
-		if state != ServerUnresponsive || !errors.Is(err, ErrServerUnresponsive) {
-			t.Fatalf("ProbeServer() over a hung server = %v %v, want unresponsive", state, err)
-		}
-	})
-}
-
-// paneLine is one paneFormat answer line, printf-escaped: session cc-1
-// on /dev/pts/7 running claude in window 3.
-func paneLine(paneID, pid, dead string) string {
-	fields := []string{"cc-1", "@1", "win", "title", "/dev/pts/7", pid, paneID, "1", "/work", "claude", dead, "3"}
-	return strings.Join(fields, "\\037") + "\\n"
 }

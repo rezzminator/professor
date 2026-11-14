@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -126,9 +127,10 @@ func TestWriteUpdateMetadataWithNoSourceRepoReportsTheMarkerSkip(t *testing.T) {
 	if err := installer.writeUpdateMetadata(); err != nil {
 		t.Fatalf("writeUpdateMetadata() error = %v", err)
 	}
-	want := "source repository not found — run pfm install from inside your Professor clone or set PFM_SOURCE_REPO; pfm init and pfm update read it"
-	if !strings.Contains(stdout.String(), want) {
-		t.Fatalf("stdout = %q, want the named skip diagnostic from writeUpdateMetadata", stdout.String())
+	want := "  skip    source repository not found — run pfm install from inside your Professor clone or set " +
+		"PFM_SOURCE_REPO; pfm init and pfm update read it\n  change  write " + binaryOwnershipPath(home) + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q\nwant   %q", stdout.String(), want)
 	}
 }
 
@@ -144,7 +146,7 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 	if err := os.MkdirAll(hooks, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(
+	if err := testjail.WriteExecutableNeverRun(
 		filepath.Join(hooks, "pre-push"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o700,
@@ -161,9 +163,33 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 	if err := installer.writeUpdateMetadata(); err != nil {
 		t.Fatalf("writeUpdateMetadata() error = %v, want graceful git-unavailable skip", err)
 	}
-	want := "git unavailable — pre-push gate not armed in " + clone
-	if !strings.Contains(stdout.String(), want) {
-		t.Fatalf("stdout = %q, want named skip %q", stdout.String(), want)
+	want := "  change  write " + filepath.Join(home, ".local", "share", "pfm", "install", "source-repo") +
+		"\n  skip    git unavailable — pre-push gate not armed in " + clone + "\n  change  write " +
+		binaryOwnershipPath(home) + "\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q\nwant   %q", stdout.String(), want)
+	}
+}
+
+// A pre-push hook the gate refuses to arm is a FAIL row of its own: the
+// binary-ownership ledger pfm update relies on is still written.
+func TestWriteUpdateMetadataWritesTheLedgerPastARefusedGate(t *testing.T) {
+	t.Parallel()
+	home, clone := t.TempDir(), t.TempDir()
+	hook := filepath.Join(clone, ".githooks", "pre-push")
+	writeFixture(t, hook, "#!/bin/sh\nexit 0\n")
+	var stdout bytes.Buffer
+	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}, apply: true}
+	err := installer.writeUpdateMetadata()
+	refusal := hook + " is not an executable regular file — refusing to arm a broken pre-push hook"
+	if err == nil || err.Error() != refusal {
+		t.Fatalf("writeUpdateMetadata() error = %v, want %q", err, refusal)
+	}
+	if !strings.Contains(stdout.String(), "  FAIL    "+refusal+"\n") {
+		t.Fatalf("stdout = %q, want the FAIL row %q", stdout.String(), refusal)
+	}
+	if _, statErr := os.Stat(binaryOwnershipPath(home)); statErr != nil {
+		t.Fatalf("binary-ownership ledger not written past the refused gate: %v", statErr)
 	}
 }
 
@@ -260,11 +286,11 @@ func TestReportSourceRepoMarkerNamesAnUnusableCloneApartFromAbsence(t *testing.T
 	if err := installer.reportSourceRepoMarker(); err != nil {
 		t.Fatalf("reportSourceRepoMarker() error = %v, want a named skip", err)
 	}
-	if strings.Contains(stdout.String(), "source repository not found") {
-		t.Fatalf("a vanished recorded clone printed the absence diagnostic:\n%s", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), clone) {
-		t.Fatalf("stdout = %q, want the recorded clone %s named", stdout.String(), clone)
+	want := "  skip    recorded source repository unusable (inspect recorded source repository " + clone +
+		": recorded source repository is unusable: stat " + clone + ": no such file or directory) — rerun pfm " +
+		"install from inside your Professor clone or set PFM_SOURCE_REPO; pfm init and pfm update read it\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q\nwant   %q", stdout.String(), want)
 	}
 }
 
@@ -328,60 +354,63 @@ func armWithRunner(t *testing.T, clone string, runner *fenceGitOutputRunner) (st
 	return stdout.String(), err
 }
 
-// TestInstallArmsPrePushGateThroughTheFenceGitDir is a REGRESSION test for
-// `pfm install` inside the fence from a LINKED worktree: the gate's bare
-// `git -C <repo>` could not resolve the worktree's .git file (a host path),
-// so install died with "resolve … as a git repository". Inside the fence the
-// gate must reach git through the mounted directory, as the store does.
+// TestInstallArmsPrePushGateThroughTheFenceGitDir pins how the gate reaches git. Inside the fence, from
+// a LINKED worktree, a bare `git -C <repo>` cannot resolve the worktree's .git file (a host path), so the
+// gate goes through the mounted git directory, as the store does — but only for the fenced worktree
+// itself: any other clone is armed bare, never through another repository's config. A clone git calls
+// "not a git repository" (said on stderr) is a named skip, and an unarmed clone inside the fence is a
+// named skip with no write, since the fence mounts git read-only and the host install arms it.
 func TestInstallArmsPrePushGateThroughTheFenceGitDir(t *testing.T) {
-	clone := buildSourceCloneWithPrePushHook(t)
-	gitDir := "/pfm-git-common/worktrees/flight"
-	t.Setenv("PFM_DEV_REPO_WORK_TREE", clone)
-	t.Setenv("PFM_DEV_REPO_GIT_DIR", gitDir)
-	runner := &fenceGitOutputRunner{gitDir: gitDir, refusal: brokenGitFileRefusal}
-	stdout, err := armWithRunner(t, clone, runner)
-	if err != nil {
-		t.Fatalf("armSourceRepoPrePushGate() error = %v (git calls: %q)", err, runner.calls)
+	const fence = "/pfm-git-common/worktrees/flight"
+	bare := []string{"git -C {clone} rev-parse --show-toplevel", "git -C {clone} config --get core.hooksPath"}
+	fenced := []string{
+		"git -C {clone} --git-dir " + fence + " --work-tree {clone} rev-parse --show-toplevel",
+		"git -C {clone} --git-dir " + fence + " --work-tree {clone} config --get core.hooksPath",
 	}
-	if !strings.Contains(stdout, "pre-push gate armed") {
-		t.Fatalf("stdout = %q, want the armed gate reported", stdout)
-	}
-}
-
-// TestInstallArmsPrePushGateBareWhenTheFenceNamesAnotherWorkTree pins the
-// other side of the fence switch: the fence's git directory belongs to the
-// fenced worktree only. Arming any other clone (a --source elsewhere) through
-// it would read and write the wrong repository's config.
-func TestInstallArmsPrePushGateBareWhenTheFenceNamesAnotherWorkTree(t *testing.T) {
-	clone := buildSourceCloneWithPrePushHook(t)
-	t.Setenv("PFM_DEV_REPO_WORK_TREE", t.TempDir())
-	t.Setenv("PFM_DEV_REPO_GIT_DIR", "/pfm-git-common/worktrees/other")
-	runner := &fenceGitOutputRunner{refusal: brokenGitFileRefusal}
-	stdout, err := armWithRunner(t, clone, runner)
-	if err != nil {
-		t.Fatalf("armSourceRepoPrePushGate() error = %v (git calls: %q)", err, runner.calls)
-	}
-	if !strings.Contains(stdout, "pre-push gate armed") {
-		t.Fatalf("stdout = %q (git calls: %q), want the armed gate reported", stdout, runner.calls)
-	}
-}
-
-// TestInstallSkipsPrePushGateWhenTheCloneIsNotAGitRepository is a REGRESSION
-// test for a skip branch real git could never reach: git prints "not a git
-// repository" on stderr, which the runner carries in the error, while the
-// branch read only stdout — so the named skip was dead and install failed.
-func TestInstallSkipsPrePushGateWhenTheCloneIsNotAGitRepository(t *testing.T) {
-	clone := buildSourceCloneWithPrePushHook(t)
-	t.Setenv("PFM_DEV_REPO_WORK_TREE", "")
-	t.Setenv("PFM_DEV_REPO_GIT_DIR", "")
-	runner := &fenceGitOutputRunner{gitDir: "/never/matched", refusal: nonRepositoryRefusal}
-	stdout, err := armWithRunner(t, clone, runner)
-	if err != nil {
-		t.Fatalf("armSourceRepoPrePushGate() error = %v, want the named not-a-repository skip", err)
-	}
-	want := clone + " is not a git repository — pre-push gate not armed"
-	if !strings.Contains(stdout, want) {
-		t.Fatalf("stdout = %q, want named skip %q", stdout, want)
+	for _, tc := range []struct {
+		name, workTree, gitDir string
+		runner                 fenceGitOutputRunner
+		want                   string
+		calls                  []string
+	}{
+		{
+			"fenced worktree", "{clone}", fence,
+			fenceGitOutputRunner{gitDir: fence, refusal: brokenGitFileRefusal},
+			"  ok      pre-push gate armed core.hooksPath=.githooks in {clone}\n", fenced,
+		},
+		{
+			"another worktree fenced", "{other}", "/pfm-git-common/worktrees/other",
+			fenceGitOutputRunner{refusal: brokenGitFileRefusal},
+			"  ok      pre-push gate armed core.hooksPath=.githooks in {clone}\n", bare,
+		},
+		{
+			"not a git repository", "", "",
+			fenceGitOutputRunner{gitDir: "/never/matched", refusal: nonRepositoryRefusal},
+			"  skip    {clone} is not a git repository — pre-push gate not armed\n", bare[:1],
+		},
+		{
+			"unarmed inside the fence", "{clone}", fence,
+			fenceGitOutputRunner{gitDir: fence, refusal: brokenGitFileRefusal, unarmed: true},
+			"  skip    pre-push gate not armed in {clone} — the fence mounts git read-only; the host install arms it\n",
+			fenced,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clone := buildSourceCloneWithPrePushHook(t)
+			fill := strings.NewReplacer("{clone}", clone, "{other}", t.TempDir()).Replace
+			t.Setenv("PFM_DEV_REPO_WORK_TREE", fill(tc.workTree))
+			t.Setenv("PFM_DEV_REPO_GIT_DIR", tc.gitDir)
+			runner := tc.runner
+			stdout, err := armWithRunner(t, clone, &runner)
+			var want []string
+			for _, call := range tc.calls {
+				want = append(want, fill(call))
+			}
+			if err != nil || stdout != fill(tc.want) || !slices.Equal(runner.calls, want) {
+				t.Fatalf("armSourceRepoPrePushGate() error = %v\nstdout %q\nwant   %q\ncalls %q\nwant  %q",
+					err, stdout, fill(tc.want), runner.calls, want)
+			}
+		})
 	}
 }
 
@@ -413,32 +442,6 @@ func TestInstallFailsPrePushGateWhenTheRepositoryCannotBeReached(t *testing.T) {
 				t.Fatalf("stdout = %q, an unreachable repository reported as absent", stdout)
 			}
 		})
-	}
-}
-
-// TestInstallSkipsArmingInsideTheFenceWhenTheGateIsUnarmed pins the fence's
-// read-only git mount: arming writes core.hooksPath into the git directory,
-// which the fence mounts read-only by law, so a fenced install on an unarmed
-// clone died with "could not lock config file". Inside the fence the gate is
-// a named skip (the host install arms it), and no write is attempted.
-func TestInstallSkipsArmingInsideTheFenceWhenTheGateIsUnarmed(t *testing.T) {
-	clone := buildSourceCloneWithPrePushHook(t)
-	gitDir := "/pfm-git-common/worktrees/flight"
-	t.Setenv("PFM_DEV_REPO_WORK_TREE", clone)
-	t.Setenv("PFM_DEV_REPO_GIT_DIR", gitDir)
-	runner := &fenceGitOutputRunner{gitDir: gitDir, refusal: brokenGitFileRefusal, unarmed: true}
-	stdout, err := armWithRunner(t, clone, runner)
-	if err != nil {
-		t.Fatalf("armSourceRepoPrePushGate() error = %v, want the named fence skip (calls %q)", err, runner.calls)
-	}
-	want := "pre-push gate not armed in " + clone + " — the fence mounts git read-only; the host install arms it"
-	if !strings.Contains(stdout, want) {
-		t.Fatalf("stdout = %q, want %q", stdout, want)
-	}
-	for _, call := range runner.calls {
-		if strings.Contains(call, "config core.hooksPath .githooks") {
-			t.Fatalf("a write was attempted on the read-only fence mount: %q", call)
-		}
 	}
 }
 

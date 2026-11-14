@@ -15,10 +15,14 @@ import (
 // Only errSecItemNotFound means absence; cancellation and ACL failures do not.
 const keychainNotFoundStatus = 44
 
+// usageRunner starts the keychain read and the Claude version probe; a test points it at a
+// deps.FakeRunner.
+var usageRunner = obs.Runner(deps.RealRunner{})
+
 // runKeychain bounds both the process and inherited output pipes so a locked
 // keychain cannot stall a prompt hook or keep a cancelled sampler running.
 func runKeychain(ctx context.Context, binary, service string) ([]byte, error) {
-	return runKeychainWithRunner(ctx, binary, service, obs.Runner(deps.RealRunner{}))
+	return runKeychainWithRunner(ctx, binary, service, usageRunner)
 }
 
 func runKeychainWithRunner(ctx context.Context, binary, service string, runner deps.Runner) ([]byte, error) {

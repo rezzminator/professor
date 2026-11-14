@@ -1,6 +1,7 @@
 package picker
 
 import (
+	"context"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/ui"
@@ -60,4 +61,19 @@ func failureBackoff(streak int) time.Duration {
 		wait *= 2
 	}
 	return min(wait, fleetRefreshParkThreshold)
+}
+
+// pickThenDrain runs pick, then stops the refresh stream and waits for it to
+// close updates: a pass still in flight would otherwise read the databases the
+// caller's deferred closes shut the moment it returns.
+func pickThenDrain(
+	pick func() (ui.Outcome, error),
+	stopStream context.CancelFunc,
+	updates <-chan ui.Snapshot,
+) (ui.Outcome, error) {
+	outcome, err := pick()
+	stopStream()
+	for range updates {
+	}
+	return outcome, err
 }

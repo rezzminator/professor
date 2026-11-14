@@ -1,0 +1,782 @@
+//go:build jail
+
+package main
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
+)
+
+func clearBranchCache1HEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"ENABLE_PROMPT_CACHING_1H"} {
+		original, had := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+		t.Cleanup(func() {
+			if had {
+				if err := os.Setenv(key, original); err != nil {
+					t.Errorf("restore %s: %v", key, err)
+				}
+			}
+		})
+	}
+	t.Setenv("CLAUDECODE", "")
+}
+
+func TestChatBranchWorkbench(t *testing.T) {
+	testjail.TmuxServer(t)
+	for _, name := range []string{"Claude", "Claude no parent model", "Codex", "invalid", "mirror failure", "outside"} {
+		t.Run(name, func(t *testing.T) {
+			jail := newRunJail(t)
+			t.Cleanup(func() { jail.killSockets(t) })
+			scribe, duo := newWorkbenchRunFixture(t, jail.root)
+			engine, dir, socket, argvFile := "claude", scribe, "cc-workbench-branch", "cc-argv"
+			parentID := "a1000000-1111-4111-8111-111111111111"
+			var wantWarning, mirrorRecord string
+			wantArgs := []string{
+				"--resume " + parentID,
+				"--fork-session",
+				"--system-prompt-file " + filepath.Join(scribe, ".professor", "scribe.md"),
+				"--effort xhigh",
+			}
+			switch name {
+			case "Claude no parent model":
+				if err := atomicfile.Write(
+					paths.WorkbenchManifest(scribe),
+					[]byte(`{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				wantArgs = append(wantArgs, "--model sonnet")
+			case "Codex", "mirror failure":
+				engine, dir, socket, argvFile = "codex", duo, "cx-workbench-branch", "cx-argv"
+				if err := atomicfile.Write(
+					paths.WorkbenchManifest(duo),
+					[]byte(`{"prompt":"duo.md","engines":["codex","claude"],"model":"gpt-x","effort":"high"}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("CX_STUB_ARGV", filepath.Join(jail.root, argvFile))
+				wantArgs = []string{
+					`--model gpt-x -c model_reasoning_effort="high" -c developer_instructions="""` + "\n" + `You are duo.""" fork ` + parentID,
+				}
+				reply, code := testjail.CleanMirrorReply, 0
+				if name == "mirror failure" {
+					reply, code = testjail.FailedMirrorReply, 1
+				}
+				mirrorRecord = testjail.FakeEngineSync(t, reply, code)
+				if name == "mirror failure" {
+					persona, err := workbench.ForLaunch(duo, "", pfmengine.Codex, workbench.Resume)
+					if err != nil {
+						t.Fatal(err)
+					}
+					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, filepath.Join(jail.root, "home"), nil)
+					if err == nil {
+						t.Fatal("mirror fixture did not fail")
+					}
+					// The persona stays: the chat branches on the mirror as it stands.
+					wantWarning = "pfm chat branch: " + err.Error() + "; launching on the mirror as it stands\n"
+				}
+			case "invalid":
+				if err := atomicfile.Write(
+					paths.WorkbenchManifest(scribe),
+					[]byte(`{"prompt":""}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				wantWarning = "pfm chat branch: workbench persona not applied (" + paths.WorkbenchManifest(scribe) +
+					`: "prompt" is required); launching without it` + "\n"
+				wantArgs = []string{"--resume " + parentID, "--fork-session", "--name workbench-branch"}
+			case "outside":
+				dir = filepath.Join(jail.root, "work", "acme", "src")
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				wantArgs = []string{"--resume " + parentID, "--fork-session", "--name workbench-branch"}
+			}
+			t.Setenv("PFM_TEST_FRESH_SOCKET", socket)
+			var stdout, stderr bytes.Buffer
+			code := run(
+				[]string{
+					"chat",
+					"branch",
+					"--engine",
+					engine,
+					"--session-id",
+					parentID,
+					"--account",
+					"1",
+					"--cwd",
+					dir,
+					"--name",
+					"workbench-branch",
+				},
+				&stdout,
+				&stderr,
+			)
+			if code != 0 || stderr.String() != wantWarning {
+				t.Fatalf("branch code=%d stdout=%q stderr=%q; want 0 and stderr %q",
+					code, stdout.String(), stderr.String(), wantWarning)
+			}
+			argv := jail.await(t, argvFile, "--")
+			for _, want := range wantArgs {
+				if !strings.Contains(argv, want) {
+					t.Errorf("branch argv=%q lacks %q", argv, want)
+				}
+			}
+			if name == "invalid" && (strings.Contains(argv, "--system-prompt-file") ||
+				strings.Contains(argv, "developer_instructions")) {
+				t.Errorf("branch argv=%q carries a workbench persona the warning dropped", argv)
+			}
+			if name == "Codex" {
+				if !testjail.MirrorBuilt(t, mirrorRecord, "codex", duo) {
+					t.Fatalf("the branch built no codex mirror of %s", duo)
+				}
+			}
+		})
+	}
+}
+
+// registerParentTranscript writes a REAL (if minimal) parent transcript file
+// under the given account directory, without starting any tmux pane or
+// process — the shape `pfm chat branch` must resolve an account for even
+// when the parent chat is not currently running. A real file (rather than a
+// bare store row) is deliberate: pfmchat.Rows runs the actual
+// incremental indexer over the account's project roots on every call, and an
+// indexed row whose file does not exist on disk is stale-swept by that same
+// pass — a DB-only fixture would be pruned out from under the test.
+func registerParentTranscript(t *testing.T, accountDir, id string) {
+	t.Helper()
+	path := filepath.Join(accountDir, "projects", "proj", id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"type":"user","cwd":` + fmt.Sprintf("%q", filepath.Dir(path)) +
+		`,"message":{"content":"parent seat prompt, long enough to not be junk"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// newBranchInheritJail adds to the fixture the fake `claude` that records the
+// argv and environment its fork was born with. Jail: the tests run it as a
+// real child under a real tmux.
+func newBranchInheritJail(t *testing.T) *branchInheritJail {
+	t.Helper()
+	jail := newBranchInheritFixture(t)
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > \"$PFM_TEST_BRANCH_ARGS\"\n" +
+		"env > \"$PFM_TEST_BRANCH_ENV\"\n" +
+		"if [ -n \"$PFM_TEST_BRANCH_FORK_ID\" ]; then\n" +
+		"  fork_path=\"$PFM_HOME/.claude/projects/fork/$PFM_TEST_BRANCH_FORK_ID.jsonl\"\n" +
+		"  mkdir -p \"$(dirname \"$fork_path\")\"\n" +
+		"  printf '{}\\n' > \"$fork_path\"\n" +
+		"  printf '%s\\n' \"$fork_path\" > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n" +
+		"fi\n" +
+		"exec sleep 120\n"
+	if err := testjail.WriteExecutable(jail.fakeClaude, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return jail
+}
+
+func recordBranchParent(t *testing.T, jail *branchInheritJail, id string, account int, cache1H bool) {
+	t.Helper()
+	if err := fleetdb.RecordLaunch(context.Background(), paths.Values{
+		StateDB: filepath.Join(jail.root, "shared.db"),
+	}, fleetdb.Launch{SessionID: id, Engine: pfmengine.Claude, Account: account, Cache1H: cache1H}, 100); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// registerLiveParent starts a REAL tmux pane and a REAL (jailed) /proc claude
+// process bound to it, plus the SID crumb pointing at the given account's
+// transcript path — the same three ingredients booting_row_jail_test.go and
+// kill_cli_engine_jail_test.go use to prove a LiveClaude row, here reused so
+// the branch sees a genuinely live parent instead of a stand-in for one.
+// pid must be unique within the test's own /proc fixture. socket MUST satisfy
+// gather's strict crumb-filename grammar (ParseCrumbName / validCrumbSocket:
+// "cc-<digits>-<digits>-<digits>") — freshClaudeSocketName builds one. An
+// arbitrary "probe-..." socket silently fails ParseCrumbName and the crumb is
+// dropped, which reads as "no live parent" rather than an error.
+func registerLiveParent(
+	t *testing.T,
+	jail *branchInheritJail,
+	socket, accountDir, id string,
+	pid int,
+	environ map[string]string,
+) {
+	t.Helper()
+	panePID := startBootingPane(t, socket)
+	paneID := strings.TrimSpace(runTmuxOutput(t, socket, "list-panes", "-F", "#{pane_id}"))
+	path := filepath.Join(accountDir, "projects", "proj", id+".jsonl")
+	crumb := filepath.Join(jail.sidDir, socket+"."+paneID)
+	if err := os.WriteFile(crumb, []byte(path+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeProcess(t, jail.procRoot, fakeProcessSpec{
+		pid: pid, parentPID: panePID, comm: "claude",
+		cmdline: []string{"/opt/claude"}, environ: environ,
+	})
+}
+
+// freshClaudeSocketName builds a socket name satisfying gather's crumb-name
+// grammar (cc-<epoch>-<pid>-<n>), matching booting_row_jail_test.go's own
+// convention — suffix only needs to be unique WITHIN one test process.
+func freshClaudeSocketName(suffix int) string {
+	return fmt.Sprintf("cc-%d-%d-%d", time.Now().Unix(), os.Getpid(), suffix)
+}
+
+// parseEnvDump turns a `env`-style NAME=value dump (one assignment per line,
+// as the fake `claude` binary captures it) into a lookup map.
+func parseEnvDump(content string) map[string]string {
+	result := make(map[string]string)
+	for _, line := range strings.Split(content, "\n") {
+		if line == "" {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		result[key] = value
+	}
+	return result
+}
+
+func cleanupBranchSocket(t *testing.T, jail *branchInheritJail, socket string) {
+	t.Helper()
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-S", filepath.Join(jail.tmuxDir, socket), "kill-server").Run()
+	})
+}
+
+// forkedEnvironment blocks for the fake claude binary's captured
+// environment, the real run string `pfm chat branch` produced.
+func forkedEnvironment(t *testing.T, jail *branchInheritJail) map[string]string {
+	t.Helper()
+	content, err := waitForFile(t, jail.envPath, 10*time.Second)
+	if err != nil {
+		t.Fatalf("read forked claude environment: %v", err)
+	}
+	return parseEnvDump(string(content))
+}
+
+// TestChatBranchInheritsParentAccountWhenNoFlagGiven is the account half of
+// the user's report ("branch ... does not inherit the ... account number, it
+// has to be exactly the same"): a parent chat on account 7 (N), a machine
+// primary of account 1 (M), and no --account. Before the fix, runChatBranch
+// fed the primary straight into resolveRunEngineIDAccount and never
+// consulted the parent at all, so the fork landed on M.
+func TestChatBranchInheritsParentAccountWhenNoFlagGiven(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "a1000000-1111-4111-8111-111111111111"
+	const branchSocket = "probe-branch-acct-inherit"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+
+	registerParentTranscript(t, jail.parentDir, parentID)
+	recordBranchParent(t, jail, parentID, 7, false)
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "acct-inherit-branch",
+	)
+	if code != 0 {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	environment := forkedEnvironment(t, jail)
+	if got := environment["CLAUDE_CONFIG_DIR"]; got != jail.parentDir {
+		t.Fatalf(
+			"CLAUDE_CONFIG_DIR=%q, want the parent's own account dir %q (machine primary is %q) — the fork did not inherit the parent's account",
+			got,
+			jail.parentDir,
+			jail.primaryDir,
+		)
+	}
+}
+
+// TestChatBranchExplicitAccountFlagOverridesParent pins that an explicit
+// --account still wins over a resolved parent account — the fix must not
+// over-correct into always forking onto the parent no matter what the
+// caller asked for.
+func TestChatBranchExplicitAccountFlagOverridesParent(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "a2000000-2222-4222-8222-222222222222"
+	const branchSocket = "probe-branch-acct-explicit"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+
+	registerParentTranscript(t, jail.parentDir, parentID)
+	recordBranchParent(t, jail, parentID, 7, false)
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID, "--account", "1",
+		"--cwd", jail.root, "--name", "acct-explicit-branch",
+	)
+	if code != 0 {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	environment := forkedEnvironment(t, jail)
+	if got := environment["CLAUDE_CONFIG_DIR"]; got != jail.primaryDir {
+		t.Fatalf(
+			"CLAUDE_CONFIG_DIR=%q, want the EXPLICIT --account 1 dir %q, not the parent's account 7 dir %q",
+			got, jail.primaryDir, jail.parentDir,
+		)
+	}
+}
+
+// TestChatBranchInheritsOneHourCacheFromLiveParentThroughCachingOffShell is
+// the user's exact reported symptom: the invoking shell is itself a chat, so
+// it carries inherited cache environment. The branch inherits the launch
+// record's 1h choice, regardless of that shell environment.
+func TestChatBranchInheritsOneHourCacheFromLiveParentThroughCachingOffShell(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "a3000000-3333-4333-8333-333333333333"
+	parentSocket := freshClaudeSocketName(31)
+	const branchSocket = "probe-branch-cache1h-fork"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+
+	// The reported symptom's exact invoking-shell shape.
+	t.Setenv("ENABLE_PROMPT_CACHING_1H", "1")
+	t.Setenv("CLAUDECODE", "1")
+
+	registerLiveParent(t, jail, parentSocket, jail.parentDir, parentID, 95001, nil)
+	recordBranchParent(t, jail, parentID, 7, true)
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "cache1h-inherit-branch",
+	)
+	if code != 0 {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	environment := forkedEnvironment(t, jail)
+	if got := environment["CACHE_LIVE_CONTROL_MAIN_TTL"]; got != "1h" {
+		t.Fatalf(
+			"CACHE_LIVE_CONTROL_MAIN_TTL=%q, want \"1h\" — the fork must inherit the LIVE 1h parent, not the caching-off invoking shell",
+			got,
+		)
+	}
+	if got, present := environment["FORCE_PROMPT_CACHING_5M"]; present {
+		t.Fatalf(
+			"FORCE_PROMPT_CACHING_5M=%q present, want absent — the old global cache switch must never reach the settings env",
+			got,
+		)
+	}
+}
+
+// TestChatBranchInheritsFiveMinuteCacheFromLaunchRecord
+// guards the opposite boundary: a live parent explicitly born 5m must fork 5m
+// even when the invoking shell claims
+// 1h is armed — proving the fix does not over-correct into always 1h.
+func TestChatBranchInheritsFiveMinuteCacheFromLaunchRecord(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "a4000000-4444-4444-8444-444444444444"
+	parentSocket := freshClaudeSocketName(41)
+	const branchSocket = "probe-branch-cache5m-fork"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+
+	// The opposite of the reported symptom's shell: claims 1h is armed, to
+	// prove the fork does not read the invoking shell at all.
+	t.Setenv("ENABLE_PROMPT_CACHING_1H", "")
+	t.Setenv("CLAUDECODE", "")
+
+	registerLiveParent(t, jail, parentSocket, jail.parentDir, parentID, 95002, map[string]string{
+		"FORCE_PROMPT_CACHING_5M": "1",
+	})
+	recordBranchParent(t, jail, parentID, 7, false)
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "cache5m-inherit-branch",
+	)
+	if code != 0 {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	environment := forkedEnvironment(t, jail)
+	if got := environment["CACHE_LIVE_CONTROL_MAIN_TTL"]; got != "5m" {
+		t.Fatalf(
+			"CACHE_LIVE_CONTROL_MAIN_TTL=%q, want \"5m\" — the fork must inherit the LIVE 5m parent, not an invoking shell claiming 1h",
+			got,
+		)
+	}
+	if got, present := environment["FORCE_PROMPT_CACHING_5M"]; present {
+		t.Fatalf("FORCE_PROMPT_CACHING_5M=%q present, want absent — it outranks /cache despite a live 5m parent", got)
+	}
+	if got, present := environment["ENABLE_PROMPT_CACHING_1H"]; present {
+		t.Fatalf("ENABLE_PROMPT_CACHING_1H=%q present, want absent — it would lift every sub-agent to 1h", got)
+	}
+}
+
+// A parent whose account neither a launch record nor a live seat names, on a
+// machine with more than one account of its engine, is refused by name: the
+// fork is never guessed onto the primary.
+func TestChatBranchUnresolvableParentAccountRefuses(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const unknownID = "a6000000-6666-4666-8666-666666666666"
+	const branchSocket = "probe-branch-acct-unresolvable"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", unknownID,
+		"--cwd", jail.root, "--name", "acct-unresolvable-branch",
+	)
+	want := "pfm chat branch: the account of session " + unknownID +
+		" could not be resolved (no launch record, no live seat naming it); pass --account N\n"
+	if code != 1 || stderr != want || stdout != "" {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q, want rc=1 and stderr %q", code, stdout, stderr, want)
+	}
+
+	// A Codex parent no index row names, on a machine with two Codex homes,
+	// is refused the same way: never forked onto the first home.
+	codexHomes := fmt.Sprintf(`{"version":2,"codex":{"homes":[{"id":1,"home":%q},{"id":2,"home":%q}]}}`,
+		filepath.Join(jail.root, "codex"), filepath.Join(jail.root, "codex-2"))
+	if err := os.WriteFile(jail.configPath, []byte(codexHomes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code = runBranchForked(t, jail,
+		"--engine", "codex", "--session-id", unknownID,
+		"--cwd", jail.root, "--name", "acct-unresolvable-codex-branch",
+	)
+	if code != 1 || stderr != want || stdout != "" {
+		t.Fatalf("codex chat branch rc=%d stdout=%q stderr=%q, want rc=1 and stderr %q", code, stdout, stderr, want)
+	}
+
+	// With one configured account there is no choice to guess: the fork
+	// lands on it, with no refusal.
+	single := fmt.Sprintf(`{"version":1,"accounts":[{"id":1,"configDir":%q}]}`, jail.primaryDir)
+	if err := os.WriteFile(jail.configPath, []byte(single), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code = runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", unknownID,
+		"--cwd", jail.root, "--name", "acct-single-branch",
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("single-account chat branch rc=%d stdout=%q stderr=%q, want rc=0 and no refusal", code, stdout, stderr)
+	}
+	if got := forkedEnvironment(t, jail)["CLAUDE_CONFIG_DIR"]; got != jail.primaryDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR=%q, want the only account's dir %q", got, jail.primaryDir)
+	}
+}
+
+// TestChatBranchLiveParentAccountWithoutALaunchRecord is the owner's report:
+// the parent seat runs on account 7, but its current session id has no launch
+// record (its seat rotated to a new session id after pfm launched it). The
+// fork lands on account 7 with account 7's configured cache policy, silently,
+// never on primary account 1.
+func TestChatBranchLiveParentAccountWithoutALaunchRecord(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	config := fmt.Sprintf(
+		`{"version":1,"claude":{"cache1h":false},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q,"claude":{"cache1h":true}}]}`,
+		jail.primaryDir,
+		jail.parentDir,
+	)
+	if err := os.WriteFile(jail.configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clearBranchCache1HEnv(t)
+	const parentID = "07ec0d2e-5410-4f47-9f39-b222de8465a5"
+	parentSocket := freshClaudeSocketName(61)
+	const branchSocket = "probe-branch-acct-live-seat"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+
+	registerLiveParent(t, jail, parentSocket, jail.parentDir, parentID, 95006, map[string]string{
+		"CLAUDE_CONFIG_DIR": jail.parentDir,
+	})
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "GATEWAY",
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q, want rc=0 and no warning", code, stdout, stderr)
+	}
+	environment := forkedEnvironment(t, jail)
+	if got := environment["CLAUDE_CONFIG_DIR"]; got != jail.parentDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR=%q, want the live parent seat's account dir %q, not primary %q",
+			got, jail.parentDir, jail.primaryDir)
+	}
+	if got := environment["CACHE_LIVE_CONTROL_MAIN_TTL"]; got != "1h" {
+		t.Fatalf("CACHE_LIVE_CONTROL_MAIN_TTL=%q, want \"1h\" from account 7's configured policy", got)
+	}
+}
+
+func TestChatBranchRecordsResolvedForkFromParentLaunch(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "b1000000-1111-4111-8111-111111111111"
+	const forkID = "b2000000-2222-4222-8222-222222222222"
+	const branchSocket = "probe-branch-recorded-fork"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	t.Setenv("PFM_TEST_BRANCH_FORK_ID", forkID)
+	cleanupBranchSocket(t, jail, branchSocket)
+	registerParentTranscript(t, jail.parentDir, parentID)
+	recordBranchParent(t, jail, parentID, 7, false)
+	sharedState := paths.Values{StateDB: filepath.Join(jail.root, "shared.db")}
+	// A branch is a different chat: the parent's schedule stays the parent's.
+	schedules := fleetdb.OpenSharedState(context.Background(), sharedState)
+	if err := schedules.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = schedules.Close() }()
+	if _, err := schedules.CreateSchedule(context.Background(), fleetdb.Schedule{
+		SessionID: parentID, Engine: string(pfmengine.Claude), Prompt: "check the build",
+		Interval: time.Hour, Created: time.Unix(1_700_000_000, 0),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "recorded-fork",
+	)
+	if code != 0 {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	args, err := os.ReadFile(jail.argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--resume\n" + parentID, "--fork-session", "--name\nrecorded-fork"} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("fork argv %q lacks %q", args, want)
+		}
+	}
+	launches, err := fleetdb.OpenLaunches(context.Background(), paths.Values{
+		StateDB: filepath.Join(jail.root, "shared.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = launches.Close() }()
+	fork, err := launches.LaunchFor(context.Background(), forkID)
+	if err != nil || fork.Account != 7 || fork.Cache1H {
+		t.Fatalf("fork launch=%#v err=%v", fork, err)
+	}
+	kept, err := schedules.Schedules(context.Background())
+	if err != nil || len(kept) != 1 || kept[0].SessionID != parentID {
+		t.Fatalf("schedules after branch=%#v err=%v, want one on the parent %s", kept, err, parentID)
+	}
+}
+
+func TestChatBranchUnknownForkIDLeavesNoLaunchRecord(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "b3000000-3333-4333-8333-333333333333"
+	const branchSocket = "probe-branch-unknown-fork"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+	registerParentTranscript(t, jail.parentDir, parentID)
+	recordBranchParent(t, jail, parentID, 7, false)
+	t.Setenv("PFM_TEST_BRANCH_FORK_ID", "")
+	runtime, err := pfmconfig.LoadRuntime(jail.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A stepping clock lets the 30 s session-id wait run out in fake time.
+	clk := &steppingClock{Fake: clock.NewFake(time.Unix(1_700_000_000, 0))}
+	var out, errOut bytes.Buffer
+	code := runChatBranch([]string{
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "unknown-fork",
+	}, &out, &errOut, nil, clk, runtime)
+	stderr := errOut.String()
+	if code != 0 || !strings.Contains(stderr, "fork session id for "+parentID+" did not resolve") {
+		t.Fatalf("chat branch rc=%d stderr=%q", code, stderr)
+	}
+	launches, err := fleetdb.OpenLaunches(context.Background(), paths.Values{
+		StateDB: filepath.Join(jail.root, "shared.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = launches.Close() }()
+	if _, err := launches.LaunchFor(context.Background(), parentID); err != nil {
+		t.Fatalf("parent launch missing: %v", err)
+	}
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(jail.root, "shared.db"), sqlitedb.StoreBusyTimeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM launch").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("launch count=%d err=%v, want only the parent", count, err)
+	}
+}
+
+func TestChatBranchUnreadableParentLaunchForksOnTheGivenAccount(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "b4000000-4444-4444-8444-444444444444"
+	const branchSocket = "probe-branch-record-unreadable"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+	registerParentTranscript(t, jail.parentDir, parentID)
+	recordBranchParent(t, jail, parentID, 7, false)
+	db, err := sqlitedb.OpenReadWrite(filepath.Join(jail.root, "shared.db"), sqlitedb.StoreBusyTimeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("DROP TABLE launch; CREATE TABLE launch(session_id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runBranchForked(t, jail, "--engine", "claude", "--session-id", parentID,
+		"--account", "7", "--cwd", jail.root, "--name", "corrupt-record-fork")
+	// The torn launch table also refuses the fork's own launch record, warned on the second line.
+	warned := strings.SplitN(stderr, "\n", 2)
+	if code != 0 || !strings.HasPrefix(warned[0], "pfm chat branch: read launch record for "+parentID+": ") ||
+		!strings.HasSuffix(warned[0], "; continuing without it") || !strings.Contains(stdout, "Branched") {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q, want the record failure warned and the fork made",
+			code, stdout, stderr)
+	}
+	if got := forkedEnvironment(t, jail)["CLAUDE_CONFIG_DIR"]; got != jail.parentDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR=%q, want account 7's dir %q", got, jail.parentDir)
+	}
+}
+
+func TestChatBranchCodexRequiresLogin(t *testing.T) {
+	jail := newRunJail(t)
+	t.Cleanup(func() { jail.killSockets(t) })
+	home := filepath.Join(jail.root, "codex")
+	configPath := writeConfigFixture(t, jail.root,
+		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
+	if err := os.Remove(filepath.Join(home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-logged-out-branch")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--config", configPath, "chat", "branch", "--engine", "codex",
+		"--session-id", "a1000000-1111-4111-8111-111111111111", "--account", "1",
+		"--cwd", filepath.Join(jail.root, "work"), "--name", "logged-out-branch",
+	}, &stdout, &stderr)
+	// The rollback tail names the host's tmux, which the jail and non-jail runs differ on.
+	got, _, _ := strings.Cut(rooted(stderr.String(), jail.root), "; rollback:")
+	if want := "pfm chat branch: create detached seat: {root}/codex/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"; code != 1 ||
+		strings.TrimSuffix(got, "\n") != want {
+		t.Fatalf("chat branch code=%d stderr = %q, want %q", code, got, want)
+	}
+}
+
+// A fork that cannot carry the fleet prompt its policy asks for says so on the
+// starter's stderr, with the cause, and still forks.
+func TestChatBranchWarnsWhenTheFleetPromptCannotReachTheFork(t *testing.T) {
+	testjail.TmuxServer(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newBranchInheritJail(t)
+	const parentID = "a3000000-3333-4333-8333-333333333333"
+	const branchSocket = "probe-branch-prompt-warn"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", branchSocket)
+	cleanupBranchSocket(t, jail, branchSocket)
+	config := fmt.Sprintf(
+		`{"version":1,"claude":{"systemPrompt":"professor"},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q}]}`,
+		jail.primaryDir,
+		jail.parentDir,
+	)
+	if err := os.WriteFile(jail.configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registerParentTranscript(t, jail.parentDir, parentID)
+	recordBranchParent(t, jail, parentID, 7, false)
+
+	stdout, stderr, code := runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "prompt-warn-branch",
+	)
+	if code != 0 {
+		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "pfm chat branch: Claude started WITHOUT its system prompt file") ||
+		!strings.Contains(stderr, "no source repository recorded") {
+		t.Fatalf("chat branch stderr=%q, want the prompt warning naming the missing clone", stderr)
+	}
+
+	// A fork whose seat cannot be created never started: it is not told it
+	// started without its prompt. A server already holding the seat's session
+	// name refuses the seat after the fork is planned.
+	const refusedSocket = "probe-branch-prompt-refused"
+	t.Setenv("PFM_TEST_FRESH_SOCKET", refusedSocket)
+	cleanupBranchSocket(t, jail, refusedSocket)
+	if output, err := exec.Command(
+		"tmux", "-f", "/dev/null", "-S", filepath.Join(jail.tmuxDir, refusedSocket),
+		"new-session", "-d", "-s", refusedSocket,
+	).CombinedOutput(); err != nil {
+		t.Fatalf("hold the seat's session name: %v: %s", err, output)
+	}
+	stdout, stderr, code = runBranchForked(t, jail,
+		"--engine", "claude", "--session-id", parentID,
+		"--cwd", jail.root, "--name", "prompt-refused-branch",
+	)
+	if code != 1 || !strings.Contains(stderr, "pfm chat branch: create detached seat:") ||
+		strings.Contains(stderr, "WITHOUT") {
+		t.Fatalf("refused chat branch rc=%d stdout=%q stderr=%q, want the refusal and no prompt warning",
+			code, stdout, stderr)
+	}
+}

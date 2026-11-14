@@ -13,9 +13,9 @@
       "Bash(go vet:*)",
       "Bash(go build:*)",
       "Bash(go test:*)",
-      "Read(*)",
-      "Grep(*)",
-      "Glob(*)"
+      "Read",
+      "Grep",
+      "Glob"
     ]
   },
   "hooks": {

@@ -8,7 +8,7 @@ The harvester gets every target — page, document, paper, file — by every tec
 
 ## Rulings (the user's, binding)
 
-- One item per brief, dispatched one at a time; every brief carries: "no flights-speccer, no flights-orchestrator, no gater — execute this yourself, start to finish; run only the affected tests in the fence, never the full suite."
+- One item per brief, dispatched one at a time; every brief carries: "no flights:speccer, no flights-orchestrator, no gater — execute this yourself, start to finish; run only the affected tests in the fence, never the full suite."
 - Merges to `develop` and host installs are authorized; push, tag and release are not.
 - Only gitter writes git; never `git stash`; the user's uncommitted files in the main checkout are patch-preserved and their count checked before and after every fast-forward.
 - No more reviewer agents on this wave.
@@ -60,10 +60,10 @@ The harvester gets every target — page, document, paper, file — by every tec
 
 1. Land Product Hunt: `wave/consent` carries it rebased; verify, fast-forward `develop`, host install.
 2. S10 IMDb reviews; S11 Quora answers (briefs written).
-3. S12 Booking: the review list read page by page up to a bound, stated against loaded (today 30 of 1,389, silent).
+3. S12 hotel-review site: the review list read page by page up to a bound, stated against loaded (today 30 of 1,389, silent).
 4. G1 reader-rung checks: the wall, paywall and stated-gap checks run on reader-service output too (Bloomberg: 2 paragraphs of a paywalled article with no flag; Quora).
 5. G2 stated against loaded on every rung, when the page states a count (Glassdoor: 1 of 103, silent).
-6. G3 a redirect to a different page is named (a dead Booking hotel slug stored a city search page under the hotel's URL).
+6. G3 a redirect to a different page is named (a dead hotel-review slug stored a city search page under the hotel's URL).
 7. The surface redesign, built from `surface-spec.md` in five tasks (R1 central retrieval, R2 tools, R3 docs lanes CLI, R4 deep-rr, R5 templates). Moved ahead of the failure messages: R2 rewrites every error string that names an old tool, so F7 works on the new names once. R1 landed without the file policy's browser-download rung: the browser adapter returns rendered HTML only and cannot hand back a download's bytes, so that rung is R1b (a download-capture method on the adapter and its Python side), after R2; provider artifacts still come back in memory rather than streamed. RH (user request): `read` and `download_file` take a `headers` object extending the request headers, scoped to the target's origin (`surface-spec.md` § Caller headers); it runs after R1b and before R3, so the docs describe it once.
 8. Failure messages (user ruling: hard-site testing is closed): every target the harvester cannot get ends in a meaningful, named error — what blocked it (challenge, login wall, paywall, rate limit, not found, unsupported format) and what the caller can do — never an empty or generic "retrieval failed".
 9. Bake-offs: closed, winners recorded above.

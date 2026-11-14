@@ -137,8 +137,8 @@ func TestChatScheduleSetWithoutChatNeedsACallerIdentity(t *testing.T) {
 	jailTest(t)
 	t.Setenv("TMUX", "")
 	code, stdout, stderr := runSchedule(t, "set", "--every", "1h", "--prompt", "x")
-	if code != 1 || !strings.Contains(stderr, "cannot tell which chat this is; name the chat") {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	if want := "pfm chat schedule set: cannot tell which chat this is; name the chat\n"; code != 1 || stderr != want {
+		t.Fatalf("code=%d stdout=%q stderr = %q, want %q", code, stdout, stderr, want)
 	}
 }
 
@@ -163,14 +163,12 @@ func TestChatScheduleLsShowsAFailedFire(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, stdout, stderr := runSchedule(t, "ls")
-	if code != 0 || !strings.Contains(stdout, "  last fire failed ") || !strings.Contains(stdout, ": socket gone") ||
-		!strings.Contains(stdout, "docs") {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
-	}
-	for _, line := range strings.Split(stdout, "\n") {
-		if strings.HasPrefix(line, "1") && strings.Contains(line, "long") && len([]rune(line)) > 200 {
-			t.Fatalf("prompt column not truncated: %q", line)
-		}
+	if got, want := scrub(
+		stdout,
+		"",
+	), "ID  CHAT  EVERY   NEXT              LAST  UNSEEN  PROMPT\n1   docs  1h0m0s  {time}  -     -       long long long long long long long long long long long long…\n  last fire failed {time}: socket gone\n"; code != 0 ||
+		got != want {
+		t.Fatalf("code=%d stderr=%q stdout = %q, want %q", code, stderr, got, want)
 	}
 }
 

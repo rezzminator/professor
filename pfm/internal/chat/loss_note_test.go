@@ -128,6 +128,13 @@ func TestLossNoteUsesProducerIDsAndNeverQuotesPrompts(t *testing.T) {
 			body:    `{"type":"response_item","payload":42}`,
 			wantErr: true,
 		},
+		{
+			name:    "codex off-shape record keeps the scan",
+			want:    unanswered + "; restart loss unknown",
+			engine:  pfmengine.Codex,
+			body:    `[1]` + "\n" + `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"PRIVATE PROMPT"}]}}`,
+			wantErr: true,
+		},
 		{name: "opencode unsupported visible", engine: pfmengine.OpenCode, wantErr: true},
 	}
 	for _, tc := range cases {
@@ -165,6 +172,9 @@ func TestLossNoteReadsOpenCodeProducerSnapshot(t *testing.T) {
 		{name: "running subagent", role: "assistant", part: `{"type":"tool","callID":"agent1","tool":"task","state":{"status":"running","input":{"prompt":"PRIVATE PROMPT"}}}`, want: "a sub-agent was running and ended"},
 		{name: "completed subagent", role: "assistant", part: `{"type":"tool","callID":"agent1","tool":"task","state":{"status":"completed"}}`},
 		{name: "unknown role", role: "mystery", wantErr: true},
+		{name: "unknown role keeps the parts", role: "mystery", part: `{"type":"tool","callID":"agent1","tool":"task","state":{"status":"running"}}`, want: "a sub-agent was running and ended", wantErr: true},
+		{name: "typeless part keeps the messages", role: "user", part: `{"callID":"agent1"}`, want: "your last message was not answered — re-send it", wantErr: true},
+		{name: "unknown state keeps the messages", role: "user", part: `{"type":"tool","callID":"agent1","tool":"task","state":{"status":"paused"}}`, want: "your last message was not answered — re-send it", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

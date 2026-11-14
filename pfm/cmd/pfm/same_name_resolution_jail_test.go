@@ -1,3 +1,5 @@
+//go:build jail
+
 package main
 
 import (
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const sameNameTarget = "COSMOS:ORCHESTRATOR"
@@ -85,6 +88,7 @@ func startPreRolloutCodexFixture(
 // fallback, so abandoned panes carrying the same historical name cannot veto
 // the one row the roster actually names.
 func TestCallAndResolvePreferUniqueRosterNameOverDuplicateRawWindows(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -127,6 +131,7 @@ func TestCallAndResolvePreferUniqueRosterNameOverDuplicateRawWindows(t *testing.
 // If the roster itself names two live seats alike, refusing is honest. The
 // refusal has to identify both candidates and name the stable disambiguator.
 func TestCallRefusesRosterAmbiguityWithThreadIDsAndSockets(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -156,6 +161,7 @@ func TestCallRefusesRosterAmbiguityWithThreadIDsAndSockets(t *testing.T) {
 // A new Codex pane can exist before its first rollout makes a roster row.
 // Roster-first therefore means roster-then-raw, never roster-only.
 func TestChatResolveFallsBackToUniquePreRolloutWindow(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

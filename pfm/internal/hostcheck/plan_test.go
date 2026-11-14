@@ -25,26 +25,20 @@ func TestPlanOrdersFixesByDependency(t *testing.T) {
 	rows := []Row{
 		{Warn, "beside-backup", "/h/x.bak", "a backup beside the file", "rm -r /h/x.bak"},
 		{Warn, checkRetiredStoreEntry, "/h/store/e", "retired store copy", "run pfm install"},
-		{Block, checkPFMMCP, "/h/.cc/1/.claude.json", "carries pfm mcpServers.p", "remove mcpServers.p"},
+		{Block, "pfm-settings", "/h/.cc/1/settings.json", "carries pfm's statusLine", "remove statusLine"},
 		{Warn, "home-state-file", "/h/.claude.json", "state file", "check, then rm"},
 		{Block, "store-identity", "/h/store/.credentials.json", "identity in the store", "mv"},
 		{Block, "account-is-store", "/h/acct", "resolves to the store", "replace the link"},
 		{Warn, "zz-new-check", "/h/z", "new warn", "fix z"},
 		{Block, "aa-new-check", "/h/a", "new block", "fix a"},
 		{Warn, "aa-new-check", "/h/a2", "new warn", "fix a2"},
-		{Block, "legacy-state-db", "/h/state.db", "legacy db", "mv db"},
-		{Block, "pre-split-config", "/h/config.json", "pre-split name", "mv cfg"},
 		{Warn, "stale-state-tmp", "/h/t", "stale temp", "rm /h/t"},
-		{Block, "staged-shim", "/h/.zshrc", "retired shim", "delete the line"},
 	}
 	want := []string{
-		"/h/config.json",
-		"/h/state.db",
 		"/h/acct",
 		"/h/store/.credentials.json",
 		"/h/.claude.json",
-		"/h/.cc/1/.claude.json",
-		"/h/.zshrc",
+		"/h/.cc/1/settings.json",
 		"/h/t",
 		"/h/x.bak",
 		"/h/a",
@@ -61,7 +55,7 @@ func TestPlanOrdersFixesByDependency(t *testing.T) {
 	if got := planPaths(NewPlan(len(Detectors()), reversed).Steps); !reflect.DeepEqual(got, want) {
 		t.Fatalf("reversed input steps=%q\nwant=%q", got, want)
 	}
-	if len(plan.Failed) != 0 || plan.Blocking() != 7 {
+	if len(plan.Failed) != 0 || plan.Blocking() != 4 {
 		t.Fatalf("failed=%v blocking=%d", plan.Failed, plan.Blocking())
 	}
 }
@@ -84,10 +78,10 @@ func TestPlanRender(t *testing.T) {
 	failed := unreadable("pfm-settings", "/h/s.json", errors.New("permission denied"))
 	step := Row{
 		Block,
-		"legacy-config",
-		"/h/old.json",
-		"legacy pfm config outside the clone",
-		"mv /h/old.json /h/new.json",
+		"store-identity",
+		"/h/store/.credentials.json",
+		"identity in the store",
+		"mv /h/store/.credentials.json /h/.cc/1/.credentials.json",
 	}
 	for _, test := range []struct {
 		name string
@@ -100,8 +94,8 @@ func TestPlanRender(t *testing.T) {
 			"fixes",
 			NewPlan(3, []Row{step}),
 			"install plan: 3 host checks ran, 0 failed — 1 fixes, apply them in this order\n" +
-				"  1. BLOCK legacy-config /h/old.json — legacy pfm config outside the clone\n" +
-				"      fix: mv /h/old.json /h/new.json\n" +
+				"  1. BLOCK store-identity /h/store/.credentials.json — identity in the store\n" +
+				"      fix: mv /h/store/.credentials.json /h/.cc/1/.credentials.json\n" +
 				"  then: pfm install --yes, then pfm doctor\n",
 		},
 		{
@@ -118,8 +112,8 @@ func TestPlanRender(t *testing.T) {
 			"install plan: 3 host checks ran, 1 failed — the plan is incomplete until every failed check can look\n" +
 				"  FAILED pfm-settings /h/s.json — UNREADABLE /h/s.json: permission denied\n" +
 				"      fix: make /h/s.json readable to you, then rerun\n" +
-				"  1. BLOCK legacy-config /h/old.json — legacy pfm config outside the clone\n" +
-				"      fix: mv /h/old.json /h/new.json\n" +
+				"  1. BLOCK store-identity /h/store/.credentials.json — identity in the store\n" +
+				"      fix: mv /h/store/.credentials.json /h/.cc/1/.credentials.json\n" +
 				"  then: rerun pfm install --check --plan\n",
 		},
 	} {
@@ -179,8 +173,8 @@ func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("stdout c
 // TestPlanPrint pins install's verdict on a plan: unknown is 1, a BLOCK row
 // is 4, WARN rows alone are 0, and a plan that could not be written is 1.
 func TestPlanPrint(t *testing.T) {
-	warn := Row{Warn, "shared-db", "/h/s.db", "retired", "rm /h/s.db"}
-	block := Row{Block, "legacy-config", "/h/c.json", "legacy", "mv /h/c.json /h/n.json"}
+	warn := Row{Warn, "beside-backup", "/h/s.bak", "a backup beside the file", "rm /h/s.bak"}
+	block := Row{Block, "store-identity", "/h/c.json", "identity in the store", "mv /h/c.json /h/n.json"}
 	for _, test := range []struct {
 		name    string
 		plan    Plan

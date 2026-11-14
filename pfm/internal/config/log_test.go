@@ -20,8 +20,7 @@ func TestLogDefaultsToTheBuildLevelAndTheShippedRotation(t *testing.T) {
 	if got.Log.Level != "" {
 		t.Fatalf("Log.Level = %q, want empty — an unset level means the build decides", got.Log.Level)
 	}
-	if got.Log.KeepFiles != obs.DefaultKeepFiles || got.Log.MaxMB != obs.DefaultMaxMB ||
-		got.Log.KeepDays != obs.DefaultKeepDays {
+	if got.Log.KeepFiles != obs.DefaultKeepFiles || got.Log.MaxMB != obs.DefaultMaxMB {
 		t.Fatalf("Log rotation = %+v, want the internal/obs defaults", got.Log)
 	}
 	if len(got.Log.Components) != 0 {
@@ -34,46 +33,25 @@ func TestLogDefaultsToTheBuildLevelAndTheShippedRotation(t *testing.T) {
 
 func TestLogKeysFromFile(t *testing.T) {
 	got, err := loadTmuxConfig(t, `, "log": {"level": "WARNING", "keepFiles": 2, "maxMB": 16, "keepDays": 0,
-		"components": {"mcp": "debug", "db": "off", "tmux": "Warning"}}`)
+		"components": {"mcp": "debug", "db": "off", "tmux": "Warning", "database": "off"}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Log.Level != "warn" || got.Log.KeepFiles != 2 || got.Log.MaxMB != 16 || got.Log.KeepDays != 0 {
-		t.Fatalf("Log = %+v, want warn/2/16/0 — warning is stored as its canonical warn", got.Log)
+	if got.Log.Level != "warn" || got.Log.KeepFiles != 2 || got.Log.MaxMB != 16 {
+		t.Fatalf(
+			"Log = %+v, want warn/2/16, keepDays read and ignored — warning is stored as its canonical warn",
+			got.Log,
+		)
 	}
 	components := got.Log.Components
-	if components["mcp"] != "debug" || components["db"] != "off" || components["tmux"] != "warn" {
-		t.Fatalf("Log.Components = %v, want mcp=debug db=off tmux=warn", got.Log.Components)
+	// An unknown component is kept for obs to name, never a refused config.
+	if components["mcp"] != "debug" || components["db"] != "off" || components["tmux"] != "warn" ||
+		components["database"] != "off" {
+		t.Fatalf("Log.Components = %v, want mcp=debug db=off tmux=warn database=off", got.Log.Components)
 	}
-	for _, key := range []string{"log.level", "log.keepFiles", "log.maxMB", "log.keepDays", "log.components"} {
+	for _, key := range []string{"log.level", "log.keepFiles", "log.maxMB", "log.components"} {
 		if source := got.Source(key); source != SourceFile {
 			t.Fatalf("%s reports source %q, want file", key, source)
-		}
-	}
-}
-
-// A log nobody can size is a log nobody reads: every bad value is refused
-// loudly, never clamped to a default the operator never sees.
-func TestLogKeysRejectUnusableValues(t *testing.T) {
-	for _, test := range []struct{ body, want string }{
-		{`, "log": {"level": "chatty"}`, "log.level must be one of debug, info, warn, warning, error, off"},
-		{
-			`, "log": {"components": {"mcp": "loud"}}`,
-			"log.components.mcp must be one of debug, info, warn, warning, error, off",
-		},
-		{`, "log": {"components": {"database": "off"}}`, `log.components: "database" is not one of cli, mcp, http.in`},
-		{`, "log": {"keepDays": -1}`, "log.keepDays must be 0..3650"},
-		{`, "log": {"keepDays": 4000}`, "log.keepDays must be 0..3650"},
-		{`, "log": {"keepFiles": 0}`, "log.keepFiles must be 1..64"},
-		{`, "log": {"keepFiles": 65}`, "log.keepFiles must be 1..64"},
-		{`, "log": {"maxMB": 0}`, "log.maxMB must be 1..1024"},
-		{`, "log": {"maxMB": 4096}`, "log.maxMB must be 1..1024"},
-		{`, "log": {"keep_files": 2}`, "unknown field"},
-	} {
-		if _, err := loadTmuxConfig(t, test.body); err == nil {
-			t.Fatalf("%s was accepted", test.body)
-		} else if !strings.Contains(err.Error(), test.want) {
-			t.Fatalf("%s reported %v, want a message containing %q", test.body, err, test.want)
 		}
 	}
 }
@@ -93,35 +71,35 @@ func TestLogLevelsIsTheOneList(t *testing.T) {
 }
 
 // TestInstallLogBlockIsTheSpecDefault pins what `pfm install` writes and what a
-// fresh `pfm config init` pins: {"level": "info", "keepDays": 30}, one source.
+// fresh `pfm config init` pins: {"level": "info"}, one source.
 func TestInstallLogBlockIsTheSpecDefault(t *testing.T) {
 	encoded, err := json.Marshal(InstallLogBlock())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"keepDays":30,"level":"info"}` {
+	if string(encoded) != `{"level":"info"}` {
 		t.Fatalf("InstallLogBlock = %s", encoded)
 	}
 	if InstallLogLevel != "info" {
 		t.Fatalf("InstallLogLevel = %q", InstallLogLevel)
 	}
 	block := MarshalLog(Log{
-		Level: InstallLogLevel, KeepFiles: 5, MaxMB: 8, KeepDays: 30, Components: map[string]string{"db": "off"},
+		Level: InstallLogLevel, KeepFiles: 5, MaxMB: 8, Components: map[string]string{"db": "off"},
 	})
 	encoded, err = json.Marshal(block)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"components":{"db":"off"},"keepDays":30,"keepFiles":5,"level":"info","maxMB":8}` {
+	if string(encoded) != `{"components":{"db":"off"},"keepFiles":5,"level":"info","maxMB":8}` {
 		t.Fatalf("MarshalLog = %s", encoded)
 	}
 	// An unset level is "the build decides": Marshal leaves the key out
 	// rather than writing an empty string the loader would read as the same.
-	encoded, err = json.Marshal(MarshalLog(Log{KeepFiles: 5, MaxMB: 8, KeepDays: 30}))
+	encoded, err = json.Marshal(MarshalLog(Log{KeepFiles: 5, MaxMB: 8}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"keepDays":30,"keepFiles":5,"maxMB":8}` {
+	if string(encoded) != `{"keepFiles":5,"maxMB":8}` {
 		t.Fatalf("MarshalLog(unset level) = %s", encoded)
 	}
 }
@@ -140,7 +118,7 @@ func TestLogDefaultInsertion(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("insertion = changed %t err %v, want a change", changed, err)
 	}
-	if !strings.Contains(string(content), `"level": "info"`) || !strings.Contains(string(content), `"keepDays": 30`) ||
+	if !strings.Contains(string(content), `"level": "info"`) || strings.Contains(string(content), `"keepDays"`) ||
 		!strings.Contains(string(content), `"theme": "dark"`) {
 		t.Fatalf("content = %s", content)
 	}
@@ -174,5 +152,15 @@ func TestLogDefaultInsertion(t *testing.T) {
 	}
 	if _, _, err := LogDefaultInsertion(broken); err == nil {
 		t.Fatal("a damaged file was not an error")
+	}
+}
+
+// RedactSecrets matches a credential name however it is separated and keeps a
+// large integer exact in the display.
+func TestRedactSecretsSeparatedNamesAndLargeNumbers(t *testing.T) {
+	got := string(RedactSecrets([]byte(`{"api-key":"s1","API_KEY":"s2","id":9007199254740993}`)))
+	want := "{\n  \"API_KEY\": \"<redacted>\",\n  \"api-key\": \"<redacted>\",\n  \"id\": 9007199254740993\n}\n"
+	if got != want {
+		t.Fatalf("RedactSecrets = %q, want %q", got, want)
 	}
 }

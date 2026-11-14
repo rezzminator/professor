@@ -98,14 +98,14 @@ func (model Model) fleetVitals() fleetVitals {
 func (model Model) countVitals() fleetVitals {
 	vitals := fleetVitals{live: liveEngineCounts(model.rows)}
 	for index := range model.rows {
-		switch model.rows[index].Kind {
-		case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
+		switch kind := model.rows[index].Kind; {
+		case kind.IsResumable():
 			if model.visibleInView(model.rows[index]) {
 				vitals.resumable++
 			}
-		case compose.Agent:
+		case kind == compose.Agent:
 			vitals.agents++
-		case compose.Booting:
+		case kind == compose.Booting:
 			vitals.booting++
 		}
 	}
@@ -318,7 +318,7 @@ func (model Model) renderTabs(width int) string {
 		return paint
 	}
 	names := []string{" Chats ", " Stats ", " Limits ", " cosmos "}
-	// " tabs " is the readiness marker the lane scripts wait on (tui_open).
+	// " tabs " opens the tab row a reader of the screen waits on.
 	spans := []span{{text: " tabs ", paint: strip(tone{fg: palette.Dim})}, {text: " ", paint: strip(tone{})}}
 	for index, name := range names {
 		if Tab(index) == model.tab {
@@ -385,6 +385,9 @@ func (model Model) chatsHeaderLine(width int) string {
 	// hide that a scan is under way.
 	if model.refreshing || model.deck.waking {
 		spans = append(spans, sep, span{text: "⟳ refreshing", paint: tone{fg: palette.Accent}})
+	}
+	if model.deck.scanError != "" {
+		spans = append(spans, sep, span{text: "⚠ scan: " + model.deck.scanError, paint: tone{fg: palette.Warn}})
 	}
 	if model.deck.factsError != "" {
 		spans = append(spans, sep, span{text: "⚠ row facts: " + model.deck.factsError, paint: tone{fg: palette.Warn}})

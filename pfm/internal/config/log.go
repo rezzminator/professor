@@ -12,19 +12,18 @@ import (
 
 // Log is the activity log's machine policy: the level
 // internal/obs writes at when the build's own default is not wanted, one
-// level per component that wants its own, and the size- and time-capped
-// rotation it keeps per pfm home.
+// level per component that wants its own, and its retention per pfm home:
+// segments of MaxMB, the newest KeepFiles of them kept with every record, the
+// warnings and errors of older ones kept for good (internal/obs retain.go).
 //
 // Level is empty when the file says nothing, which means "let the build
 // decide": a -alpha VERSION logs at debug, a release at info. A stored level
-// is canonical (`warning` in the file is `warn` here). KeepDays 0 disables
-// the time limit.
+// is canonical (`warning` in the file is `warn` here).
 type Log struct {
 	Level      string
 	Components map[string]string
 	KeepFiles  int
 	MaxMB      int
-	KeepDays   int
 }
 
 // LogLevels are the level names log.level and log.components accept — the one
@@ -40,21 +39,21 @@ const InstallLogLevel = "info"
 func DefaultLog() Log {
 	// internal/obs owns the rotation and falls back to the same numbers for
 	// a zero-valued Log, so there is exactly one default per knob.
-	return Log{KeepFiles: obs.DefaultKeepFiles, MaxMB: obs.DefaultMaxMB, KeepDays: obs.DefaultKeepDays}
+	return Log{KeepFiles: obs.DefaultKeepFiles, MaxMB: obs.DefaultMaxMB}
 }
 
 // InstallLogBlock is the `log` block `pfm install` writes into a
 // pfm.config.json that has none: the switch, visible where an adopter would
 // look for it. It never replaces a block that exists (LogDefaultInsertion).
 func InstallLogBlock() map[string]any {
-	return map[string]any{"level": InstallLogLevel, "keepDays": obs.DefaultKeepDays}
+	return map[string]any{"level": InstallLogLevel}
 }
 
 // MarshalLog renders a resolved Log as its file block, the shape Marshal emits
 // for every other section. An unset level is left out: the file spelling of
 // "the build decides" is no key at all.
 func MarshalLog(log Log) map[string]any {
-	value := map[string]any{"keepFiles": log.KeepFiles, "maxMB": log.MaxMB, "keepDays": log.KeepDays}
+	value := map[string]any{"keepFiles": log.KeepFiles, "maxMB": log.MaxMB}
 	if log.Level != "" {
 		value["level"] = log.Level
 	}
@@ -120,13 +119,9 @@ func applyLog(result *Config, raw *rawLog) error {
 	}
 	if len(raw.Components) != 0 {
 		result.Log.Components = make(map[string]string, len(raw.Components))
+		// An unknown component (a newer build's, a typo) is kept: obs.ResolveLevels
+		// names it on every command's stderr and in doctor, and it sets nothing.
 		for name, value := range raw.Components {
-			if !obs.KnownComponent(name) {
-				return fmt.Errorf(
-					"config %s: log.components: %q is not one of %s",
-					result.Path, name, strings.Join(obs.Components, ", "),
-				)
-			}
 			level, err := canonicalLogLevel(value)
 			if err != nil {
 				return fmt.Errorf("config %s: log.components.%s %w", result.Path, name, err)
@@ -138,7 +133,7 @@ func applyLog(result *Config, raw *rawLog) error {
 	if raw.KeepFiles != nil {
 		if *raw.KeepFiles < 1 || *raw.KeepFiles > 64 {
 			return fmt.Errorf(
-				"config %s: log.keepFiles must be 1..64 (files kept per pfm home), got %d",
+				"config %s: log.keepFiles must be 1..64 (segments kept whole per pfm home), got %d",
 				result.Path,
 				*raw.KeepFiles,
 			)
@@ -149,7 +144,7 @@ func applyLog(result *Config, raw *rawLog) error {
 	if raw.MaxMB != nil {
 		if *raw.MaxMB < 1 || *raw.MaxMB > 1024 {
 			return fmt.Errorf(
-				"config %s: log.maxMB must be 1..1024 (megabytes per file), got %d",
+				"config %s: log.maxMB must be 1..1024 (megabytes per segment), got %d",
 				result.Path,
 				*raw.MaxMB,
 			)
@@ -157,16 +152,13 @@ func applyLog(result *Config, raw *rawLog) error {
 		result.Log.MaxMB = *raw.MaxMB
 		result.Sources["log.maxMB"] = SourceFile
 	}
-	if raw.KeepDays != nil {
-		if *raw.KeepDays < 0 || *raw.KeepDays > 3650 {
-			return fmt.Errorf(
-				"config %s: log.keepDays must be 0..3650 (days a rotated file is kept; 0 disables), got %d",
-				result.Path,
-				*raw.KeepDays,
-			)
-		}
-		result.Log.KeepDays = *raw.KeepDays
-		result.Sources["log.keepDays"] = SourceFile
+	// log.keepDays is retired: warnings and errors are kept for good, and the
+	// other records go by size. A file that still carries it (pfm install wrote
+	// it) loads as before, its range still checked, and the value acts on nothing.
+	if raw.KeepDays != nil && (*raw.KeepDays < 0 || *raw.KeepDays > 3650) {
+		return fmt.Errorf(
+			"config %s: log.keepDays must be 0..3650 (retired, no effect), got %d", result.Path, *raw.KeepDays,
+		)
 	}
 	return nil
 }

@@ -399,7 +399,7 @@ func TestEnvFailureExits1(t *testing.T) {
 		&stdout,
 		&stderr,
 	); code != 1 ||
-		!strings.Contains(stderr.String(), "pfm theme: no home") {
+		stderr.String() != "pfm theme: no home\n" {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
 	}
 }

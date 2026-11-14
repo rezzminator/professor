@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,10 +20,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/stale"
 )
@@ -163,7 +160,18 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 				}
 				switch {
 				case decodeErr != nil:
+					// No id is readable, so JSON-RPC answers with a null one; a client never waits on silence.
 					proxy.warn("decode validated client frame: %v", decodeErr)
+					code := proxyInvalidRequest
+					if !json.Valid(frame) {
+						code = proxyParseError
+					}
+					proxy.answerError(
+						output,
+						json.RawMessage("null"),
+						code,
+						"invalid JSON-RPC frame: "+decodeErr.Error(),
+					)
 				case isProxyHandshake(envelope.Method):
 					// Handshake stays ordered; later traffic may overlap.
 					proxy.forward(requestCtx, frame, output)
@@ -243,7 +251,13 @@ func (professor *FamilyServers) runStdioTransport(
 	const consequence = "if `pfm install` replaces this binary, this chat's MCP tools fail until the chat restarts"
 	inProcess := func(reason string) error {
 		fmt.Fprintf(warnings, "pfm mcp stdio: %s; using in-process MCP; %s\n", reason, consequence)
-		return professor.views[options.Family].Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
+		input := reader
+		if options.Family == pfmconfig.MCPServerChat {
+			caller := newStdioProxy(ctx, "", warnings)
+			caller.sidDir = options.SIDDir
+			input = caller.attachingCallers(ctx, reader, serialized)
+		}
+		return professor.views[options.Family].Run(ctx, &mcp.IOTransport{Reader: input, Writer: serialized})
 	}
 	for _, failed := range professor.failed {
 		if failed == options.Family {
@@ -313,53 +327,9 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 	}
 	forwarded := raw
 	if frame.Method == "tools/call" {
-		resolved, identifyErr := proxy.identify(ctx)
-		identity := ProxyIdentity{
-			Version:        ProxyWireVersion,
-			Session:        resolved.Session,
-			Backend:        resolved.Backend,
-			SeatID:         resolved.SeatID,
-			HerdrWorkspace: resolved.HerdrWorkspace,
-			SocketPath:     resolved.SocketPath,
-			SocketName:     resolved.SocketName,
-			Pane:           resolved.Pane,
-			Engine:         resolved.Engine,
-			ID:             resolved.ID,
-			Source:         resolved.Source,
-		}
-		if identifyErr != nil {
-			kind := proxyErrorKind(identifyErr)
-			if kind != statusNotRegistered {
-				identity = ProxyIdentity{Version: ProxyWireVersion}
-			}
-			identity.Error = &ProxyIdentityError{Kind: kind, Message: identifyErr.Error()}
-		}
-		explicitThreadID, err := proxyCallHasThreadID(raw)
+		withIdentity, err := proxy.attachCaller(ctx, raw)
 		if err != nil {
-			proxy.answerFailure(output, frame.ID, fmt.Errorf("inspect caller thread metadata: %w", err))
-			return
-		}
-		// Claude may change transcripts while keeping its seat.
-		engine, engineErr := pfmengine.Parse(identity.Engine)
-		if identifyErr == nil && !explicitThreadID && proxy.isChatToolCall(frame) && engineErr == nil &&
-			engine == pfmengine.Claude {
-			if !filepath.IsAbs(proxy.sidDir) {
-				proxy.answerFailure(
-					output,
-					frame.ID,
-					fmt.Errorf("refresh Claude caller transcript: breadcrumb directory is not absolute"),
-				)
-				return
-			}
-			identity.ID, _, err = reload.SessionFromCrumb(proxy.sidDir, identity.SocketName, identity.Pane)
-			if err != nil {
-				proxy.answerFailure(output, frame.ID, fmt.Errorf("refresh Claude caller transcript: %w", err))
-				return
-			}
-		}
-		withIdentity, err := addProxyIdentity(raw, identity)
-		if err != nil {
-			proxy.answerFailure(output, frame.ID, fmt.Errorf("attach caller identity: %w", err))
+			proxy.answerFailure(output, frame.ID, err)
 			return
 		}
 		forwarded = withIdentity

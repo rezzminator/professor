@@ -2,18 +2,25 @@ package resolve
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 type fakeTmux struct {
 	captures map[string]string
+	failures map[string]error
 }
 
 func (fake fakeTmux) ListPanes(context.Context, string) ([]ResolvedPane, error) {
@@ -24,7 +31,7 @@ func (fake fakeTmux) CapturePane(
 	_ context.Context,
 	socketPath, paneID string,
 ) (string, error) {
-	return fake.captures[socketPath+"\x00"+paneID], nil
+	return fake.captures[socketPath+"\x00"+paneID], fake.failures[socketPath+"\x00"+paneID]
 }
 
 func TestResolveLabelExactCaseInsensitiveAndMirrorSkip(t *testing.T) {
@@ -62,6 +69,14 @@ func TestResolveLabelExactCaseInsensitiveAndMirrorSkip(t *testing.T) {
 		t.Fatalf("empty resolveLabel() error = %v", err)
 	}
 	assertOutcome(t, outcome, 1, "", "")
+
+	// A pane whose screen cannot be read may hold the label: the miss names it.
+	resolver.tmux = fakeTmux{failures: map[string]error{"/jail/cc-100-1-1\x00%1": errors.New("exit status 1")}}
+	outcome, err = resolver.resolveLabel(context.Background(), "fleet builder", panes)
+	if err != nil {
+		t.Fatalf("unreadable resolveLabel() error = %v", err)
+	}
+	assertOutcome(t, outcome, 1, "", "could not read the screen of pane %1 (socket /jail/cc-100-1-1): exit status 1\n")
 }
 
 // Every account medal marks a 🔖 label line, including 🍀 — the retired
@@ -143,7 +158,10 @@ func TestResolveLabelAmbiguityAndSameChatNewestTieBreak(t *testing.T) {
 	}
 	if outcome.Code != 2 ||
 		outcome.Stdout != "" ||
-		!strings.Contains(outcome.Stderr, "ambiguous 🔖 label 'Same'") {
+		outcome.Stderr != `ambiguous 🔖 label 'Same' — matches panes:
+  pane %1  (socket /jail/cc-100-1-1)
+  pane %2  (socket /jail/cc-200-1-1)
+` {
 		t.Fatalf("different-chat ambiguity = %+v", outcome)
 	}
 
@@ -155,7 +173,7 @@ func TestResolveLabelAmbiguityAndSameChatNewestTieBreak(t *testing.T) {
 	}
 	if outcome.Code != 0 ||
 		outcome.Stdout != newSocket+"\t%2\n" ||
-		!strings.Contains(outcome.Stderr, "⚠2srv") {
+		outcome.Stderr != "note: 🔖 'Same' is hosted by 2 servers for ONE chat (shared) — resolving to the newest (pfm shows it ⚠2srv; open it there to reap the elders)\n" {
 		t.Fatalf("same-chat tie break = %+v", outcome)
 	}
 }
@@ -334,14 +352,7 @@ func TestResolveFailsLoudWhenTmuxCannotRun(t *testing.T) {
 // server is gone is one ended chat, not a fault — resolution skips it and
 // reports a plain miss, never an error.
 func TestResolveStillMissesPastADeadSocket(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "tmux-no-server")
-	if err := testjail.WriteExecutable(
-		binary,
-		[]byte("#!/bin/sh\necho 'no server running' >&2\nexit 1\n"),
-		0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
+	fake := testjail.TmuxRunner(deps.RunResult{Stderr: []byte("no server running\n"), ExitCode: 1})
 	tmuxDir := t.TempDir()
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(tmuxDir, "cc-1-2-3"), Net: "unix"})
 	if err != nil {
@@ -352,12 +363,64 @@ func TestResolveStillMissesPastADeadSocket(t *testing.T) {
 			t.Errorf("close listener: %v", err)
 		}
 	}()
-	resolver := &Resolver{tmux: TmuxResolver{Binary: binary}, tmuxDir: tmuxDir}
-	outcome, err := resolver.Resolve(context.Background(), Session, "any-chat")
+	resolver := &Resolver{tmux: TmuxResolver{}, tmuxDir: tmuxDir}
+	outcome, err := resolver.Resolve(pfmtmux.WithClientRunner(context.Background(), fake), Session, "any-chat")
 	if err != nil {
 		t.Fatalf("a dead socket failed resolution: %v", err)
 	}
 	if outcome.Code != 1 {
 		t.Fatalf("dead-socket resolution = %+v, want a plain miss (code 1)", outcome)
+	}
+}
+
+// A socket the listing named but no stat can read is warned and skipped; one
+// removed since the listing is an ended server, skipped without a word.
+func TestAnUnstatableSocketIsWarnedAndSkipped(t *testing.T) {
+	tmuxDir := t.TempDir()
+	socket := filepath.Join(tmuxDir, "cc-1-2-3")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+	if err != nil {
+		t.Fatalf("create socket: %v", err)
+	}
+	defer func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	}()
+	for _, testCase := range []struct {
+		name     string
+		statErr  error
+		wantLogs []string
+	}{
+		{"removed since the listing", fs.ErrNotExist, nil},
+		{"unreadable", errors.New("permission denied"), []string{socket + " permission denied"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			lstatListed = func(path string) (fs.FileInfo, error) {
+				if path == socket {
+					return nil, testCase.statErr
+				}
+				return os.Lstat(path)
+			}
+			t.Cleanup(func() { lstatListed = os.Lstat })
+			ctx, recorder := obs.Test(t)
+			resolver := &Resolver{tmux: fakeTmux{}, tmuxDir: tmuxDir}
+			panes, err := resolver.allPanes(ctx)
+			if err != nil || len(panes) != 0 {
+				t.Fatalf("allPanes() = %v, %v; want no panes and no error", panes, err)
+			}
+			var gotLogs []string
+			for _, record := range recorder.Records() {
+				if record.Message == "resolve.socket.skipped" {
+					sock, _ := record.Field(obs.FieldSock)
+					cause, _ := record.Field(obs.FieldErr)
+					gotLogs = append(gotLogs, fmt.Sprint(sock, " ", cause))
+				}
+			}
+			if !slices.Equal(gotLogs, testCase.wantLogs) {
+				t.Fatalf("resolve.socket.skipped logs = %q, want %q; log %s",
+					gotLogs, testCase.wantLogs, recorder.Raw())
+			}
+		})
 	}
 }

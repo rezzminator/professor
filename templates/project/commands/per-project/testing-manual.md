@@ -1,6 +1,6 @@
 ---
 name: {project}-testing-manual
-description: Governs how {project} ({PROJECT_ROLE}) is tested — tiers, test homes, lanes, mocks, run commands, gates and floors, bug classes, traps. Read by the flights foremen for the affected tests, the flights lander whole for the full gate; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
+description: Governs how {project} ({PROJECT_ROLE}) is tested — tiers, test homes, suite duties, mocks, run commands, gates and floors, bug classes, traps. Read by the flights foremen for the affected tests, the flights lander whole for the full gate; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
 ---
 
 # {project} testing manual
@@ -17,10 +17,11 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 - A test lives in the module that owns its contract; the path convention: {source path → test path}.
 
-## Lanes and registries
+## Suite duties
 
-- A new or changed capability lands in one commit with its landscape row, its map row, and the unit, hermetic or live row mapping it together with that row's bite: {the landscape, map and ledger paths}.
-- Where a live tier exists, every close runs the full lane sequence: {the sequence command}.
+- A new or changed capability lands in one commit with the step or test that walks it, watched red: {the tree file and the test homes}.
+- Where a live tier exists, every pull request runs the whole tree on every operating system the suite design lists: {the tree command}; while fixing, the touched branch alone: {the filtered command}.
+- An escaped bug's fix lands with its assertion on the step or test that walked past it and its `escapes.tsv` line: {the escapes path}.
 - Shared-core files with one editor per flight: {paths}.
 
 ## Mock boundary
@@ -34,9 +35,9 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 ## Run commands
 
 - Tests run only {where: the sandbox or command they run through}, against the tree holding the change; CI is never a debug loop, and every suite CI runs passes here before a push.
-- Development runs only the tests the change affects; the full gate runs once per worktree, right before its merge, and at no other time. A suite green on a tree never reruns on that tree; a red reruns only its failing tests until green, then the red suite once more.
+- Development runs only the tests the change affects; the full gate runs once per change, at no other time: on a flight once per worktree, right before its merge, by the lander; on small work by the main chat, before the commit. A suite green on a tree never reruns on that tree; a red reruns only its failing tests until green, then the red suite again, until every suite is green.
 - Affected, an executor's only run (flight or general): `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
-- Full, the flight gate's run and never an executor's: {the one command of the full suite} — timeout {n} s.
+- Full, the lander's run on a flight or the main chat's on small work, never an executor's: {the one command of the full suite} — timeout {n} s.
 - Static check, an executor's only one, run once, last, given its task's files: {the one static-check command that takes a list of files}; a red is fixed and the same command run again.
 - Type check `{PROJECT_TYPECHECK}` · lint `{PROJECT_LINT}` · format `{PROJECT_FORMAT}`.
 
@@ -61,4 +62,4 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 ## What not to test
 
 - Tests this project refuses: {kinds}.
-- This stack's spelling of the `/quality:integration-suite` refused shapes: {shape → spelling}.
+- This stack's spelling of the `/design:test-suite` refused shapes: {shape → spelling}.

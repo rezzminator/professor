@@ -9,6 +9,7 @@ func TestUnknownPFMHookCommandNeverReportsUnknownWithAnUnsetRegistry(t *testing.
 	implementedSubcommands = subcommandRegistry{}
 	binary := filepath.Join(t.TempDir(), ".local", "bin", "pfm")
 	if name, unknown := unknownPFMHookCommand(
+		fixtureRetiredHooks,
 		binary+" internal future-hook",
 		binary,
 	); unknown {

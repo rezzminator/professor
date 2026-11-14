@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -143,38 +144,47 @@ first_prompt AS MATERIALIZED (
      WHERE row_number = 1
 ),
 validation AS MATERIALIZED (
-    SELECT
-      (SELECT COUNT(*) FROM message_shape WHERE data_valid = 0) AS bad_message_json,
-      (SELECT COUNT(*)
-         FROM message_shape
-        WHERE data_valid <> 0
-          AND CASE
-                WHEN role_type IS NOT 'text' THEN 1
-                WHEN role NOT IN ('user', 'assistant') THEN 1
-                WHEN role = 'user' AND (
-                     agent_type IS NOT 'text'
-                     OR model_type IS NOT 'object'
-                     OR provider_type IS NOT 'text'
-                     OR model_id_type IS NOT 'text'
-                ) THEN 1
-				WHEN role = 'assistant' AND (
-				     agent_type IS NOT 'text'
-				     OR assistant_provider_type IS NOT 'text'
-				     OR assistant_model_id_type IS NOT 'text'
-				     OR
-				     tokens_type IS NOT 'object'
-                     OR input_type IS NOT 'integer'
-                     OR output_type IS NOT 'integer'
-                     OR (cost_type IS NOT 'integer' AND cost_type IS NOT 'real')
-                ) THEN 1
-                ELSE 0
-              END = 1) AS bad_message_shape,
-      (SELECT COUNT(*) FROM part_shape WHERE data_valid = 0) AS bad_part_json,
-      (SELECT COUNT(*)
-         FROM part_shape
-        WHERE data_valid <> 0
-          AND (part_type_type IS NOT 'text'
-               OR (part_type = 'text' AND text_type IS NOT 'text'))) AS bad_part_shape
+    SELECT session_id,
+           SUM(bad_message_json) AS bad_message_json,
+           SUM(bad_message_shape) AS bad_message_shape,
+           SUM(bad_part_json) AS bad_part_json,
+           SUM(bad_part_shape) AS bad_part_shape
+      FROM (
+        SELECT session_id,
+               CASE WHEN data_valid = 0 THEN 1 ELSE 0 END AS bad_message_json,
+               CASE WHEN data_valid <> 0
+                     AND CASE
+                        WHEN role_type IS NOT 'text' THEN 1
+                        WHEN role NOT IN ('user', 'assistant') THEN 1
+                        WHEN role = 'user' AND (
+                             agent_type IS NOT 'text'
+                             OR model_type IS NOT 'object'
+                             OR provider_type IS NOT 'text'
+                             OR model_id_type IS NOT 'text'
+                        ) THEN 1
+        				WHEN role = 'assistant' AND (
+        				     agent_type IS NOT 'text'
+        				     OR assistant_provider_type IS NOT 'text'
+        				     OR assistant_model_id_type IS NOT 'text'
+        				     OR
+        				     tokens_type IS NOT 'object'
+                             OR input_type IS NOT 'integer'
+                             OR output_type IS NOT 'integer'
+                             OR (cost_type IS NOT 'integer' AND cost_type IS NOT 'real')
+                        ) THEN 1
+                        ELSE 0
+                      END = 1 THEN 1 ELSE 0 END AS bad_message_shape,
+               0 AS bad_part_json, 0 AS bad_part_shape
+          FROM message_shape
+        UNION ALL
+        SELECT session_id, 0, 0,
+               CASE WHEN data_valid = 0 THEN 1 ELSE 0 END,
+               CASE WHEN data_valid <> 0
+                     AND (part_type_type IS NOT 'text'
+                          OR (part_type = 'text' AND text_type IS NOT 'text')) THEN 1 ELSE 0 END
+          FROM part_shape
+      )
+     GROUP BY session_id
 )
 SELECT 0 AS validation_only,
        s.id, s.title, s.directory, p.worktree, s.parent_id,
@@ -186,39 +196,61 @@ SELECT 0 AS validation_only,
        COALESCE(usage.cost, 0),
        s.time_created, s.time_updated, s.time_archived,
        COALESCE(usage.prompt_count, 0), COALESCE(usage.assistant_count, 0), first_prompt.text,
-       validation.bad_message_json, validation.bad_message_shape,
-       validation.bad_part_json, validation.bad_part_shape
+       COALESCE(validation.bad_message_json, 0), COALESCE(validation.bad_message_shape, 0),
+       COALESCE(validation.bad_part_json, 0), COALESCE(validation.bad_part_shape, 0)
 FROM session s
 LEFT JOIN project p ON p.id = s.project_id
 LEFT JOIN usage ON usage.session_id = s.id
 LEFT JOIN latest_user ON latest_user.session_id = s.id
 LEFT JOIN first_prompt ON first_prompt.session_id = s.id
-CROSS JOIN validation
+LEFT JOIN validation ON validation.session_id = s.id
 UNION ALL
 SELECT 1 AS validation_only,
        '', '', '', NULL, NULL, '', '', '',
        0, 0, 0, 0, 0, NULL, 0, 0, NULL,
-       validation.bad_message_json, validation.bad_message_shape,
-       validation.bad_part_json, validation.bad_part_shape
+       COALESCE(SUM(validation.bad_message_json), 0), COALESCE(SUM(validation.bad_message_shape), 0),
+       COALESCE(SUM(validation.bad_part_json), 0), COALESCE(SUM(validation.bad_part_shape), 0)
   FROM validation
- WHERE NOT EXISTS (SELECT 1 FROM session)
+ WHERE NOT EXISTS (SELECT 1 FROM session WHERE session.id = validation.session_id)
 `
 
 // ReadOpenCodeSessions reads OpenCode's session store into OpenCodeSession rows.
 // A missing opencode.db means the engine is not installed — that is a real,
 // checkable answer ("no store exists"), not a silent failure, so it returns
 // zero sessions and a nil error; a PRESENT database that cannot be opened or
-// parsed is an error and says so.
-func ReadOpenCodeSessions(ctx context.Context, root string) (
+// queried is an error and says so. A session holding malformed message or
+// part rows is kept with what its rows still yield, and warned. A store holding
+// only some of the mirror's tables is not ready yet, never a listing failure: no
+// sessions, and one WARN record naming the store and the tables it holds and lacks.
+func ReadOpenCodeSessions(ctx context.Context, root string) ([]store.OpenCodeSession, error) {
+	sessions, malformed, err := readOpenCodeStore(ctx, root)
+	var partial *openCodeStorePartialError
+	if errors.As(err, &partial) {
+		obs.Logger(ctx).Warn("opencode store is not ready: it holds some of the mirror's tables",
+			"path", OpenCodeStorePath(root),
+			"reason", fmt.Sprintf("holds tables %v, lacks %v", partial.held, partial.missing))
+		return nil, nil
+	}
+	for _, problem := range malformed {
+		warnUnreadable(ctx, "opencode rows", OpenCodeStorePath(root), problem)
+	}
+	return sessions, err
+}
+
+// readOpenCodeStore is ReadOpenCodeSessions with the malformed rows it read
+// past returned, one error per session (or for rows of no session) naming
+// them by kind and count, never by content.
+func readOpenCodeStore(ctx context.Context, root string) (
 	sessions []store.OpenCodeSession,
+	malformed []error,
 	returnErr error,
 ) {
 	db, err := openOpenCodeStore(root)
 	if errors.Is(err, ErrNoOpenCodeStore) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {
@@ -228,11 +260,14 @@ func ReadOpenCodeSessions(ctx context.Context, root string) (
 			)
 		}
 	}()
+	if ready, err := openCodeSchemaReady(ctx, db); !ready {
+		return nil, nil, err
+	}
 	read := obs.SQL(ctx, pfmengine.MustLookup(pfmengine.OpenCode).LongName, openCodeSessionsQuery)
 	rows, err := db.QueryContext(ctx, openCodeSessionsQuery)
 	read.End(-1, err)
 	if err != nil {
-		return nil, fmt.Errorf("query opencode sessions: %w", err)
+		return nil, nil, fmt.Errorf("query opencode sessions: %w", err)
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
@@ -257,17 +292,10 @@ func ReadOpenCodeSessions(ctx context.Context, root string) (
 			&row.badMessageJSON, &row.badMessageShape,
 			&row.badPartJSON, &row.badPartShape,
 		); err != nil {
-			return nil, fmt.Errorf("scan opencode session: %w", err)
+			return nil, nil, fmt.Errorf("scan opencode session: %w", err)
 		}
-		switch {
-		case row.badMessageJSON != 0:
-			return nil, errors.New("validate opencode message JSON: malformed rows present")
-		case row.badMessageShape != 0:
-			return nil, errors.New("validate opencode message shape: required role fields have invalid types")
-		case row.badPartJSON != 0:
-			return nil, errors.New("validate opencode part JSON: malformed rows present")
-		case row.badPartShape != 0:
-			return nil, errors.New("validate opencode part shape: required type fields have invalid types")
+		if problem := row.malformed(); problem != nil {
+			malformed = append(malformed, problem)
 		}
 		if row.validationOnly != 0 {
 			continue
@@ -292,17 +320,36 @@ func ReadOpenCodeSessions(ctx context.Context, root string) (
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate opencode sessions: %w", err)
+		return nil, nil, fmt.Errorf("iterate opencode sessions: %w", err)
 	}
-	return sessions, nil
+	return sessions, malformed, nil
 }
 
-// ProbeOpenCodeStore runs the production reader and discards its rows. Doctor
-// therefore proves that both the native schema and the stored JSON are readable;
-// a schema-only prepare could report healthy while every real index pass fails.
-func ProbeOpenCodeStore(ctx context.Context, root string) error {
-	_, err := ReadOpenCodeSessions(ctx, root)
-	return err
+// malformed names the row's malformed message and part rows by kind and
+// count, or nil when it has none.
+func (row *openCodeRow) malformed() error {
+	counts := make([]string, 0, 4)
+	for _, count := range []struct {
+		rows int64
+		kind string
+	}{
+		{row.badMessageJSON, "message JSON"},
+		{row.badMessageShape, "message shape"},
+		{row.badPartJSON, "part JSON"},
+		{row.badPartShape, "part shape"},
+	} {
+		if count.rows != 0 {
+			counts = append(counts, fmt.Sprintf("%s %d", count.kind, count.rows))
+		}
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	owner := "session " + row.sessionID + " kept with"
+	if row.validationOnly != 0 {
+		owner = "rows of no session hold"
+	}
+	return fmt.Errorf("opencode %s malformed rows (%s)", owner, strings.Join(counts, ", "))
 }
 
 func nonEmpty(value sql.NullString) string {
@@ -355,18 +402,23 @@ func openCodeStoreStamp(roots []string) (string, error) {
 	return hex.EncodeToString(signature.Sum(nil)), nil
 }
 
-// syncOpenCodeMirror replaces the oc_sessions mirror with one pass's view
-// and, when stamp is set, records it in the same transaction, so the stamp
-// stored always names the read the mirror holds, whichever pass wrote last.
+// syncOpenCodeMirror replaces the oc_sessions mirror with one pass's view of
+// every root and, when stamp is set, records it in the same transaction, so the
+// stamp stored always names the read the mirror holds, whichever pass wrote last.
 func syncOpenCodeMirror(
 	ctx context.Context,
 	database *store.Store,
-	root, stamp string,
+	roots []string,
+	stamp string,
 	counters *Counters,
 ) error {
-	sessions, err := ReadOpenCodeSessions(ctx, root)
-	if err != nil {
-		return fmt.Errorf("read opencode sessions: %w", err)
+	var sessions []store.OpenCodeSession
+	for _, root := range roots {
+		read, err := ReadOpenCodeSessions(ctx, root)
+		if err != nil {
+			return fmt.Errorf("read opencode sessions: %w", err)
+		}
+		sessions = append(sessions, read...)
 	}
 	if err := database.WithImmediateTx(ctx, func(tx *store.ImmediateTx) error {
 		if err := tx.ReplaceOpenCodeSessions(ctx, sessions); err != nil {

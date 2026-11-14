@@ -1,6 +1,8 @@
 package transcript
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -35,30 +37,90 @@ func TestFindHistoryTakesTheNewestMatchOfTheFirstPoolThatHasOne(t *testing.T) {
 	}
 }
 
+func TestFindCodexHistoryTakesTheNewestRolloutOfTheThread(t *testing.T) {
+	const thread = "71717171-7171-4171-8171-717171717171"
+	first, second := t.TempDir(), t.TempDir()
+	older := filepath.Join(first, "sessions", "2026", "01", "02", "rollout-2026-01-02T03-04-05-"+thread+".jsonl")
+	newer := filepath.Join(second, "archived_sessions", "rollout-2026-01-03T03-04-05-"+thread+".jsonl")
+	other := filepath.Join(first, "sessions", "2026", "01", "02",
+		"rollout-2026-01-04T03-04-05-72727272-7272-4272-8272-727272727272.jsonl")
+	for _, path := range []string{older, newer, other} {
+		writeHistory(t, path, "{}")
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for path, at := range map[string]time.Time{older: base, newer: base.Add(time.Hour), other: base.Add(2 * time.Hour)} {
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A home whose sessions tree cannot be resolved: a place the search could not look.
+	broken := t.TempDir()
+	loop := filepath.Join(broken, "sessions")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	unread := fmt.Sprintf("search Codex rollouts under %s: resolve Codex rollout root %q: EvalSymlinks: too many links",
+		broken, loop)
+	for _, row := range []struct {
+		name, sid string
+		homes     []string
+		want      string
+		wantErr   string
+	}{
+		{"the newest rollout across homes", thread, []string{first, second}, newer, ""},
+		{"a thread id prefix", "7171", []string{first, second}, newer, ""},
+		{"only the home that holds it", thread, []string{first}, older, ""},
+		{"no rollout of the thread", "73737373", []string{first, second}, "", ""},
+		{"no Codex home", thread, nil, "", ""},
+		{"an empty sid matches nothing", "", []string{first}, "", ""},
+		{"a found rollout stands beside an unread home", thread, []string{first, broken}, older, ""},
+		{"no match with an unread home is an error", "73737373", []string{first, broken}, "", unread},
+	} {
+		got, err := FindCodexHistory(context.Background(), row.homes, row.sid)
+		gotErr := ""
+		if err != nil {
+			gotErr = err.Error()
+		}
+		if gotErr != row.wantErr || got != row.want {
+			t.Errorf("%s: FindCodexHistory(%v, %q) = %q, %q; want %q, %q",
+				row.name, row.homes, row.sid, got, gotErr, row.want, row.wantErr)
+		}
+	}
+}
+
 func TestReadHistoryKeepsTheLastRealTurns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	writeHistory(
 		t,
 		path,
-		`{"type":"user","message":{"content":"dropped as the possibly-partial first line"}}`,
+		`{"type":"user","timestamp":"t0","message":{"content":"the first line of a short file"}}`,
 		`{"type":"user","timestamp":"t1","message":{"content":"first"}}`,
 		`not json`,
 		`{"type":"system","timestamp":"t2","message":{"content":"not a turn"}}`,
 		`{"type":"user","timestamp":"t3","message":{"content":"<system-reminder>synthetic</system-reminder>"}}`,
+		`{"type":"user","timestamp":"t3b","message":{"content":[{"type":"text","text":"<system-reminder>block</system-reminder>"},{"type":"text","text":"typed after the reminder block"}]}}`,
+		`{"type":"user","timestamp":"t3c","message":{"content":"<system-reminder>lead</system-reminder>\ntyped after the reminder string"}}`,
 		`{"type":"user","timestamp":"t4","message":{"content":"Caveat: The messages below were generated"}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"a"},{"type":"tool_use"},{"type":"text","text":"b"}]}}`,
+		`{"type":"user","timestamp":1730000000,"message":{"content":"numeric stamp"}}`,
 		`{"type":"user","timestamp":"t6","message":{"content":"last"}}`,
 	)
-	got, err := ReadHistory(path, 2)
+	got, err := ReadHistory(path, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []HistoryMessage{
+		{Timestamp: "t0", Role: RoleUser, Text: "the first line of a short file"},
+		{Timestamp: "t1", Role: RoleUser, Text: "first"},
+		{Timestamp: "?", Role: historyUnparsedRole, Text: "row skipped: not JSON (8 bytes)"},
+		{Timestamp: "t3b", Role: RoleUser, Text: "typed after the reminder block"},
+		{Timestamp: "t3c", Role: RoleUser, Text: "typed after the reminder string"},
 		{Timestamp: "?", Role: RoleAssistant, Text: "a\nb"},
+		{Timestamp: "?", Role: RoleUser, Text: "numeric stamp"},
 		{Timestamp: "t6", Role: RoleUser, Text: "last"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ReadHistory = %#v, want %#v", got, want)
+		t.Fatalf("ReadHistory(%s) = %#v, want %#v", path, got, want)
 	}
 	if _, err := ReadHistory(filepath.Join(t.TempDir(), "missing.jsonl"), 2); err == nil {
 		t.Fatal("ReadHistory of a missing file returned no error")

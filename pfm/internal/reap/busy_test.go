@@ -2,40 +2,37 @@ package reap
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// fakeClaudeAgentsBinary writes a `claude` stand-in that plays `agents
-// --json`: it ignores its argv (BusySessions' own shape is covered by
-// action.ClaudeSpawn's own tests) and answers with body on stdout, or exits
-// non-zero with body on stderr when fail is set.
-func fakeClaudeAgentsBinary(t *testing.T, body string, fail bool) string {
+// fakeClaudeAgents plays `claude agents --json`: it ignores its argv (BusySessions' own shape is covered
+// by action.ClaudeSpawn's own tests) and answers with body on stdout, or exits non-zero with body on stderr
+// when fail is set. The binary is a file the query resolves and never runs.
+func fakeClaudeAgents(t *testing.T, body string, fail bool) ClaudeAgents {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "claude")
-	script := "#!/bin/sh\n"
-	if fail {
-		script += "printf '%s' " + shQuote(body) + " >&2\nexit 1\n"
-	} else {
-		script += "printf '%s' " + shQuote(body) + "\n"
-	}
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return binary
-}
-
-// shQuote wraps a literal in single quotes for a POSIX shell fixture; the
-// bodies this file writes never contain a single quote of their own.
-func shQuote(value string) string {
-	return "'" + value + "'"
+	output := deps.StartOutput{Stdout: body}
+	if fail {
+		output = deps.StartOutput{Stderr: body, ExitCode: 1}
+	}
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath(binary, binary, nil)
+	runner.ScriptStartOutput(nil, output)
+	return ClaudeAgents{Binary: binary, ConfigDirs: []string{t.TempDir()}, Runner: runner}
 }
 
 // TestClaudeAgentsBusySessionsParsesBusyRows (L1-T5): the production probe
@@ -44,11 +41,7 @@ func shQuote(value string) string {
 // keeps only the rows the engine itself marked busy.
 func TestClaudeAgentsBusySessionsParsesBusyRows(t *testing.T) {
 	body := `[{"sessionId":"sess-busy","status":"busy"},{"sessionId":"sess-idle","status":"idle"}]`
-	directory := t.TempDir()
-	agents := ClaudeAgents{
-		Binary:     fakeClaudeAgentsBinary(t, body, false),
-		ConfigDirs: []string{directory},
-	}
+	agents := fakeClaudeAgents(t, body, false)
 	busy, err := agents.BusySessions(context.Background())
 	if err != nil {
 		t.Fatalf("BusySessions() = %v", err)
@@ -63,11 +56,7 @@ func TestClaudeAgentsBusySessionsParsesBusyRows(t *testing.T) {
 // as "nobody is busy" — the sweep would otherwise reap a chat the engine
 // could not vouch for.
 func TestClaudeAgentsBusySessionsFailsClosedOnQueryError(t *testing.T) {
-	directory := t.TempDir()
-	agents := ClaudeAgents{
-		Binary:     fakeClaudeAgentsBinary(t, "boom", true),
-		ConfigDirs: []string{directory},
-	}
+	agents := fakeClaudeAgents(t, "boom", true)
 	busy, err := agents.BusySessions(context.Background())
 	if err == nil {
 		t.Fatal("BusySessions() succeeded against a query that exited non-zero")
@@ -80,11 +69,7 @@ func TestClaudeAgentsBusySessionsFailsClosedOnQueryError(t *testing.T) {
 // TestClaudeAgentsBusySessionsFailsClosedOnMalformedJSON: output the probe
 // cannot parse must not read as an empty (safe-to-reap) busy set.
 func TestClaudeAgentsBusySessionsFailsClosedOnMalformedJSON(t *testing.T) {
-	directory := t.TempDir()
-	agents := ClaudeAgents{
-		Binary:     fakeClaudeAgentsBinary(t, "not json", false),
-		ConfigDirs: []string{directory},
-	}
+	agents := fakeClaudeAgents(t, "not json", false)
 	busy, err := agents.BusySessions(context.Background())
 	if err == nil {
 		t.Fatal("BusySessions() succeeded against malformed JSON")
@@ -119,18 +104,25 @@ func TestClaudeAgentsQueriesConfiguredDirsAndUnionsBusyRows(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	logPath := filepath.Join(home, "queries.log")
 	binary := filepath.Join(home, "claude")
-	script := "#!/bin/sh\nprintf '%s|%s\\n' \"$CLAUDE_CONFIG_DIR\" \"$*\" >> \"$PFM_TEST_QUERY_LOG\"\n" +
-		"case \"$CLAUDE_CONFIG_DIR\" in\n" +
-		"  */2) printf '[{\"sessionId\":\"second\",\"status\":\"busy\"}]' ;;\n" +
-		"  */3) printf '[{\"sessionId\":\"third\",\"status\":\"busy\"}]' ;;\n" +
-		"  *) printf '[]' ;;\n" +
-		"esac\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PFM_TEST_QUERY_LOG", logPath)
+	var queries []string
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath(binary, binary, nil)
+	runner.ScriptStartOutput(nil, deps.StartOutput{AtStart: func(argv []string, opts deps.StartOptions) {
+		configDir := lastEnv(opts.Env, "CLAUDE_CONFIG_DIR")
+		queries = append(queries, configDir+"|"+strings.Join(argv[1:], " "))
+		answer := "[]"
+		switch {
+		case strings.HasSuffix(configDir, "/2"):
+			answer = `[{"sessionId":"second","status":"busy"}]`
+		case strings.HasSuffix(configDir, "/3"):
+			answer = `[{"sessionId":"third","status":"busy"}]`
+		}
+		_, _ = io.WriteString(opts.Stdout, answer)
+	}})
 	machine := pfmconfig.Config{
 		Claude: pfmconfig.Claude{Binary: binary},
 		Accounts: []pfmconfig.Account{
@@ -143,52 +135,51 @@ func TestClaudeAgentsQueriesConfiguredDirsAndUnionsBusyRows(t *testing.T) {
 	agents := NewClaudeAgents(paths.Values{Home: home, Roots: map[pfmengine.ID][]string{
 		pfmengine.Claude: {filepath.Join(home, "transcripts", "projects")},
 	}}, machine)
+	agents.Runner = runner
 	busy, err := agents.BusySessions(context.Background())
-	if err != nil || len(busy) != 2 {
-		t.Fatalf("busy=%v err=%v", busy, err)
-	}
-	for _, id := range []string{"second", "third"} {
-		if _, found := busy[id]; !found {
-			t.Fatalf("busy=%v lacks %q", busy, id)
-		}
-	}
-	raw, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("queries=%q, want one per distinct account config dir", raw)
-	}
-	for index, line := range lines {
-		if !strings.HasPrefix(line, dirs[index]+"|") {
-			t.Fatalf("query[%d]=%q, want dir %q", index, line, dirs[index])
-		}
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%v %v\n%s", busy, err, strings.Join(queries, "\n")),
+		home,
+		"{home}",
+	),
+		"map[second:{} third:{}] <nil>\n{home}/.cc/1|agents --json --settings {\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"outputStyle\":\"default\"}\n{home}/.cc/2|agents --json --settings {\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"outputStyle\":\"default\"}\n{home}/.cc/3|agents --json --settings {\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"outputStyle\":\"default\"}"; got != want {
+		t.Fatalf("busy and queries = %q, want %q", got, want)
 	}
 }
 
 func TestClaudeAgentsQueryUsesRegistryReadShape(t *testing.T) {
 	home := t.TempDir()
-	logPath := filepath.Join(home, "query.log")
 	binary := filepath.Join(home, "claude")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$PFM_TEST_QUERY_LOG\"\nprintf '[]'\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PFM_TEST_QUERY_LOG", logPath)
-	agents := ClaudeAgents{Binary: binary, ConfigDirs: []string{home}}
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath(binary, binary, nil)
+	runner.ScriptStartOutput(nil, deps.StartOutput{Stdout: "[]"})
+	agents := ClaudeAgents{Binary: binary, ConfigDirs: []string{home}, Runner: runner}
 	if _, err := agents.BusySessions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
+	starts := runner.Starts()
+	if len(starts) != 1 {
+		t.Fatalf("agent queries = %v, want exactly 1", starts)
 	}
-	query := string(raw)
-	if !strings.Contains(query, "agents --json --settings ") ||
-		strings.Contains(query, "--system-prompt-file") || strings.Contains(query, "--mcp-config") ||
-		strings.Contains(query, "--dangerously-skip-permissions") ||
-		strings.Contains(query, "\"hooks\"") || strings.Contains(query, "\"statusLine\"") {
-		t.Fatalf("agent query argv=%q", query)
+	if got, want := strings.ReplaceAll(
+		strings.Join(starts[0].Argv[1:], " "),
+		home,
+		"{home}",
+	), "agents --json --settings {\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"outputStyle\":\"default\"}"; got != want {
+		t.Fatalf("agent query argv = %q, want %q", got, want)
 	}
+}
+
+// lastEnv is the last value an environment gives name: the one a child sees.
+func lastEnv(environment []string, name string) string {
+	value := ""
+	for _, entry := range environment {
+		if found, ok := strings.CutPrefix(entry, name+"="); ok {
+			value = found
+		}
+	}
+	return value
 }

@@ -1,0 +1,27 @@
+╭─ cosmos ─────────────────────────────────────────────────────────────────────╮
+│                                     ✳ claude  ▲ codex  ◆ opencode  ✹ project │
+│                                                                              │
+│        no chat traffic recorded yet — the ledger fills as chats talk         │
+│                                                                              │
+│               cosmos maps conversation · pfm ls maps existence               │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ cosmos ─────────────────────────────────────────────────────────────────────╮
+│                                     ✳ claude  ▲ codex  ◆ opencode  ✹ project │
+│        ┌────────────────────────────────────────────────────────────┐        │
+│        │   ⚠ comms ledger unreachable: sqlite: database is locked   │        │
+│        │ the sky below is the last recorded frame — not a live view │        │
+│        └────────────────────────────────────────────────────────────┘        │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ cosmos ─────────────────────────────────────────────────────────────────────╮
+│                                     ✳ claude  ▲ codex  ◆ opencode  ✹ project │
+│                                                                              │
+│        no chat traffic recorded yet — the ledger fills as chats talk         │
+│                                                                              │
+│               cosmos maps conversation · pfm ls maps existence               │
+│                                                                              │
+│ ⚠ showing newest 5000 events of the window                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯

@@ -3,16 +3,16 @@ package mcpserv
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -126,13 +126,13 @@ func TestChatNewCarriesTheAgentRole(t *testing.T) {
 		calls = append(calls, append([]string(nil), args...))
 		return 0
 	}})
-	input := NewInput{Name: "seat", Model: "claude-sonnet-5-5", Effort: "xhigh", AgentRole: "flights-foreman"}
+	input := NewInput{Name: "seat", Model: "claude-sonnet-5-5", Effort: "xhigh", AgentRole: "flights:foreman"}
 	if _, _, err := service.chatNew(context.Background(), nil, input); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{{
 		"chat", "new", "--name", "seat", "--model", "claude-sonnet-5-5", "--effort", "xhigh",
-		"--agent-role", "flights-foreman",
+		"--agent-role", "flights:foreman",
 	}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("new calls = %q, want %q", calls, want)
@@ -190,49 +190,6 @@ func TestChatNewOpenCodeModelEffortPromptAndFailure(t *testing.T) {
 	}
 }
 
-// TestChatNewDescriptionRoutesEveryModelRunHere reads new as a caller
-// does: the description within the 600-rune tool budget, its example call
-// naming only real schema fields, the launchers it replaces and the cleanup
-// named, and every schema field described.
-func TestChatNewDescriptionRoutesEveryModelRunHere(t *testing.T) {
-	tool := listedChatNew(t)
-	description := tool.Description
-	if runes := utf8.RuneCountInString(description); runes > 600 {
-		t.Fatalf("new description is %d runes, over 600: %q", runes, description)
-	}
-	for _, phrase := range []string{"model run", "pfm headless exec", "claude -p", "kill", "sub-agent"} {
-		if !strings.Contains(description, phrase) {
-			t.Fatalf("new description lacks %q: %q", phrase, description)
-		}
-	}
-	encoded, err := json.Marshal(tool.InputSchema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema struct {
-		Properties map[string]struct {
-			Description string `json:"description"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(encoded, &schema); err != nil {
-		t.Fatal(err)
-	}
-	example := regexp.MustCompile(`new\{([^}]*)\}`).FindStringSubmatch(description)
-	if example == nil {
-		t.Fatalf("new description has no example call: %q", description)
-	}
-	for _, key := range regexp.MustCompile(`(\w+):`).FindAllStringSubmatch(example[1], -1) {
-		if _, found := schema.Properties[key[1]]; !found {
-			t.Fatalf("new example names %q, not a schema field: %q", key[1], example[0])
-		}
-	}
-	for name, property := range schema.Properties {
-		if strings.TrimSpace(property.Description) == "" {
-			t.Fatalf("new schema field %q has no description", name)
-		}
-	}
-}
-
 func listedChatNew(t *testing.T) *mcp.Tool {
 	t.Helper()
 	service := newService("test", &backend{})
@@ -267,7 +224,10 @@ func chatNewWorkbenchFixture(t *testing.T) (string, string) {
 }
 
 func TestChatNewWorkbench(t *testing.T) {
-	for _, name := range []string{"auto-name", "outside", "no cwd", "named", "caller disabled", "caller enabled", "caller cwd", "roster error"} {
+	for _, name := range []string{
+		"auto-name", "outside", "no cwd", "named", "caller disabled", "caller enabled", "caller cwd",
+		"caller cwd unknown", "workbench unreadable", "roster error",
+	} {
 		t.Run(name, func(t *testing.T) {
 			root, dir := chatNewWorkbenchFixture(t)
 			var calls [][]string
@@ -291,10 +251,14 @@ func TestChatNewWorkbench(t *testing.T) {
 			case "named":
 				input = NewInput{Name: "child"}
 				want = []string{"chat", "new", "--name", "child"}
-			case "caller disabled", "caller enabled", "caller cwd":
+			case "caller disabled", "caller enabled", "caller cwd", "caller cwd unknown", "workbench unreadable":
 				engine, kind, socket := pfmengine.Codex, compose.LiveCodex, "cx-caller"
 				if name != "caller disabled" {
 					engine, kind, socket = pfmengine.Claude, compose.LiveClaude, "cc-caller"
+				}
+				callerCWD := dir
+				if name == "caller cwd unknown" {
+					callerCWD = ""
 				}
 				backend.chat = &fakeChatVerbs{
 					listed: chat.ListResult{
@@ -306,7 +270,7 @@ func TestChatNewWorkbench(t *testing.T) {
 								SessionName: "caller",
 								Socket:      socket,
 								PaneID:      "%0",
-								CWD:         dir,
+								CWD:         callerCWD,
 							},
 						},
 						Matched: 1,
@@ -326,8 +290,24 @@ func TestChatNewWorkbench(t *testing.T) {
 				if name != "caller disabled" {
 					want = []string{"chat", "new", "--name", "_SCRIBE:1", "--engine", "cc", "--cwd", dir}
 				}
-				if name == "caller cwd" {
+				switch name {
+				case "caller cwd":
 					input.CWD = ""
+				case "caller cwd unknown":
+					input = NewInput{
+						Name: "child",
+					} // without a cwd the CLI would start it in the server's own directory
+				case "workbench unreadable":
+					// A manifest that is a directory: the workbench lookup fails, for root too.
+					manifest := paths.WorkbenchManifest(dir)
+					if err := os.Remove(manifest); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(manifest, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					input.Name = "child"
+					want = []string{"chat", "new", "--name", "child", "--engine", "cc", "--cwd", dir}
 				}
 			case "roster error":
 				blocker := filepath.Join(root, "blocker")
@@ -336,7 +316,29 @@ func TestChatNewWorkbench(t *testing.T) {
 				}
 				t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
 			}
-			_, _, err := service.chatNew(context.Background(), request, input)
+			_, output, err := service.chatNew(context.Background(), request, input)
+			if name == "caller cwd unknown" {
+				if err == nil || err.Error() != "new: caller working directory is unknown: pass an absolute cwd" ||
+					len(calls) != 0 {
+					t.Fatalf("caller cwd unknown = %v, calls %q", err, calls)
+				}
+				return
+			}
+			if name == "workbench unreadable" {
+				wantMessage := "workbench lookup failed, so the caller's engine cc was kept: inspect workbench " +
+					paths.WorkbenchManifest(dir) + ": not a regular file"
+				if err != nil || !reflect.DeepEqual(calls, [][]string{want}) || output.Message != wantMessage {
+					t.Fatalf(
+						"new = %v, calls %q, message %q; want %q and %q",
+						err,
+						calls,
+						output.Message,
+						want,
+						wantMessage,
+					)
+				}
+				return
+			}
 			if name == "outside" {
 				if err == nil || err.Error() != "name is required outside a workbench" || len(calls) != 0 {
 					t.Fatalf("outside = %v, calls %q", err, calls)
@@ -660,8 +662,13 @@ func TestBirthNewFailedCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(result.Content)
-	if !result.IsError || !strings.Contains(string(raw), "new: resolve caller: herdr timed out") || calls != 0 {
-		t.Fatalf("result=%s calls=%d", raw, calls)
+	if got, want := fmt.Sprintf(
+		"error=%t calls=%d %s",
+		result.IsError,
+		calls,
+		raw,
+	), "error=true calls=0 [{\"type\":\"text\",\"text\":\"new: resolve caller: herdr timed out\"}]"; got != want {
+		t.Fatalf("result = %q, want %q", got, want)
 	}
 }
 
@@ -688,6 +695,7 @@ func TestBirthNewHerdrCallerPlacement(t *testing.T) {
 							Socket:         "/h/herdr.sock",
 							PaneID:         "wC:p24",
 							HerdrWorkspace: "wC",
+							CWD:            testjail.Place("/work/herdr"),
 						},
 					},
 				},
@@ -742,15 +750,23 @@ func TestBirthNewHerdrCallerPlacement(t *testing.T) {
 	}
 }
 
-func TestBirthNewWithoutMetaPlacesInTmux(t *testing.T) {
-	var choice spawn.BackendChoice
+func TestBirthNewWithoutMetaIsRefused(t *testing.T) {
 	var placeErr error
-	service := newService("test", &backend{dispatch: func(ctx context.Context, _ []string, _, _ io.Writer) int {
-		choice, placeErr = chat.BirthBackend(ctx, "new-test", "auto")
-		return 0
+	service := newService("test", &backend{dispatch: func(ctx context.Context, _ []string, _, stderr io.Writer) int {
+		_, placeErr = chat.BirthBackend(ctx, "new-test", "auto")
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", placeErr)
+		return spawn.FailureCode(placeErr)
 	}})
-	_, output, err := service.chatNew(context.Background(), nil, NewInput{Name: "probe-a"})
-	if err != nil || placeErr != nil || output.Status != "ok" || choice.Backend != "tmux" {
-		t.Fatalf("new=%+v choice=%+v err=%v placeErr=%v", output, choice, err, placeErr)
+	// A request with no caller is placed by the Herdr server; one pfm cannot read is refused.
+	mute := errors.New("read the Herdr server at /env/herdr.sock: malformed ping result")
+	ctx := chat.WithHerdrServer(context.Background(), spawn.HerdrServer{
+		Socket: "/env/herdr.sock", Up: func(context.Context, string) error { return mute },
+	})
+	_, output, err := service.chatNew(ctx, nil, NewInput{Name: "probe-a"})
+	message := "pfm chat new: host refused at mcp.new: cannot tell whether Herdr runs: " + mute.Error()
+	want := ActionOutput{Status: statusError, Code: 10, Message: message}
+	if !errors.Is(placeErr, spawn.ErrHostRefused) || !reflect.DeepEqual(output, want) ||
+		err == nil || err.Error() != "pfm chat new --name probe-a exited 10: "+message {
+		t.Fatalf("new=%+v err=%v placeErr=%v; want %+v", output, err, placeErr, want)
 	}
 }

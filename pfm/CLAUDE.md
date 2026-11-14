@@ -6,13 +6,13 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 - flow matrix: every flow, its test tier and its jail status · `TESTPLAN.md`
 - CLI adapters: stdlib `flag` dispatch plus the end-to-end jail tests; a file name starts with its unit (`chat_` is the one multi-file unit), so `ls cmd/pfm/{unit}_*` lists a unit; `pfm help` lists the subcommands · `cmd/pfm/`
-- package map: each `internal/` package opens with a doc comment naming what it owns; `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` prints the map · `internal/doctor/`, `internal/hookentry/`, `internal/picker/`, `internal/update/`, `internal/professor/`
+- package map: each package's front door, `{package}.go` (`main.go` for `package main`), opens with its `// Package` menu per the `coding` rule, C31 ratcheting it; `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` prints the map · `internal/doctor/`, `internal/hookentry/`, `internal/picker/`, `internal/update/`, `internal/professor/`
 - tagged e2e: the `-tags e2e` tier, run serially · `e2e/`
 - jail: a test run with every filesystem location redirected by `PFM_*` overrides (§ Environment Variables); reference harness `testdata/e2e.sh`, fixtures `testdata/{claude-store|codex-store|crumbs|proc|golden}/`
 - eval protocol (K1): the binary prints one shell line on stdout for the shim to `eval`, never execing the final tmux attach itself
 - K3: one implementation per rule — naming precedence, the kill ratchet, row classification, run-string synthesis — each in exactly one package with table-driven tests
-- façades: the one door per cross-cutting primitive — `atomicfile.Write` (whole-file replace), `sqlitedb` (every SQLite open), `tmux.Exec` and `tmux.Socket` over it (every tmux call on a chat socket), `internal/herdr/` (every herdr socket call), `internal/chat/` (the chat verbs a surface calls typed) · `internal/atomicfile/`, `internal/sqlitedb/`, `internal/tmux/`
-- architecture ratchet: C1–C27 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
+- façades: the one door per cross-cutting primitive — `atomicfile.Write` (whole-file replace), `sqlitedb` (every SQLite open), `tmux.Exec` and `tmux.Socket` over it (every tmux call on a chat socket), `internal/herdr/` (every herdr socket call), `internal/chat/` (the chat verbs a surface calls typed), `gather.Door` (every signal to a pid: identity re-read before it sends, a pidfd on Linux; C28 counts any other site), `internal/servicemanager/` (every launchd and `systemctl --user` call), `paths.TempDir` (every temp location, asked by purpose) · `internal/atomicfile/`, `internal/sqlitedb/`, `internal/tmux/`, `internal/gather/signal.go`, `internal/paths/temp.go`
+- architecture ratchet: the numbered `C{N}` checks the script's header lists, against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
 - lint law: gofumpt + gci + golines at 120, plus dupl, goconst, gocritic, revive, staticcheck; coverage thresholds · `.golangci.yml`, `.testcoverage.yml`, tools pinned in `infra/fence/tools.env`
 - shim: the thin zsh wrapper that `eval`s the eval-protocol line, sourced in place from the clone · `internal/installer/assets/shim/pfm.zsh`, its tests `internal/installer/shim/`
 - installer: stages every host asset embedded from `internal/installer/assets/`; the shim is read from the clone instead · `internal/installer/`
@@ -37,7 +37,8 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 ## Environment Variables
 
-- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF` · `PFM_SKILL_SOURCES_OFFLINE` (install fetches no source-fetched skill; doctor reports OFFLINE) · `PFM_PRICES_OFFLINE` (no price refresh fetches, `--force` included; the embedded or clone table serves) · `PFM_COST_LEDGER_DIR` (the cost ledger's directory) · `PFM_WATCH_SNAPSHOT` (the fleet scan snapshot `chat watch` processes share).
+- Test-jail overrides, not a config system (`internal/paths/`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF` · `PFM_SKILL_SOURCES_OFFLINE` (install fetches no source-fetched skill; doctor reports OFFLINE) · `PFM_THEMES_OFFLINE` (install downloads no release profiles; the clone's profiles still install) · `PFM_PRICES_OFFLINE` (no price refresh fetches, `--force` included; the embedded or clone table serves) · `PFM_COST_LEDGER_DIR` (the cost ledger's directory) · `PFM_WATCH_SNAPSHOT` (the fleet scan snapshot `chat watch` processes share) · `PFM_UPDATE_CHECK_OFFLINE` (the picker's update check asks GitHub nothing) · `PFM_USAGE_OFFLINE` (no usage fetch calls the provider's endpoint).
+- `PFM_INSTALL_MARK`: a digest of the install's home, set by pfm in its own environment so every process it launches carries it; `gather.Install.Owns` claims a process only by this install's mark, or by no mark and this install's binary · `internal/paths/installmark.go`
 - `PFM_TMUX_CONF` unset: a chat's tmux server loads the user's own `~/.tmux.conf`, since a chat is a terminal the user lives in; a jail sets it to `/dev/null` so a real machine config never steers a fixture.
 - Test knobs outside `internal/paths/`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`), `PFM_TEST_FRESH_SOCKET` (`internal/spawn/socket.go`).
 
@@ -58,15 +59,12 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - Lint law: `.golangci.yml` and `.testcoverage.yml` are gates — lint-new blocks a wave on the lines it changed, `make lint` is the burn-down view, coverage thresholds only ratchet up.
 - A kill is permanent, and the store table keeps its `hidden` name; a kill of a live chat always runs the detached exit choreography, `--exit` its explicit form.
 - The ratchet counts prompts, not bytes (K2): kill baselines are `baseline_prompts`; auto-unkill is `prompt_count > baseline`; legacy byte baselines convert once, at import.
-- One binary, two kernels: where Linux and macOS differ, a `_linux.go` / `_darwin.go` pair defines the same identifier and the caller stays platform-blind (`getTermios`, `nativeProcFS`, `nativeProcesses`, `schedulerIsLaunchd`) — the seam is a build tag, not a runtime `if`.
+- One binary, two kernels: the OS doors and their law live in `.claude/rules/pfm-os-doors.md`.
 - Darwin has no `/proc`: the process table comes from `sysctl`, and `ProcFS` dispatches through `gather.NewProcFS`, which still honours an existing root, because that is how the jail feeds it fixtures.
 - tmux's ioctl and format-separator spellings differ by kernel: parse through `internal/tmux/format.go`, not against one spelling.
 - Darwin has no dead-launchd jail, so the installer's rc 97 gate narrows to "not mid-execution" instead of "manager not live".
 - A platform whose constants nobody has confirmed fails to build instead of falling back to a guess.
-- `deps.Registry`: an entry with no `Platforms` field applies everywhere; everything ungated (`tmux`, `git`, `sh`, `bash`, `zsh`, `sleep`, `script`, `go`) works identically on both kernels.
-- A fallback's gate covers every platform that reaches it: `setsid` is linux-only, so darwin alone takes the `nohup` branch, and gating `nohup` to linux would strand the fallback exactly where it is needed.
-- Gate an entry on the binary's real availability, and give it `VersionArgs` only when every gated platform's build accepts them: BSD `nohup` rejects GNU's `--version`, reporting a working binary as broken.
-- Every filesystem location resolves through `internal/paths/`, and `/proc` sits behind the `ProcFS` interface — `$HOME`, `/tmp`, a socket dir and `/proc` are never literals; this is what lets the suite run in a jail.
+- `deps.Registry`: an entry with no `Platforms` field applies everywhere; everything ungated (`tmux`, `git`, `sh`, `bash`, `zsh`, `sleep`, `script`, `go`) works identically on both kernels; an entry carries `VersionArgs` only when every platform it applies to accepts them.
 - Account identity, emoji, theme and permission posture come from `internal/config/` alone: a hardcoded account count, `.cc/{N}` literal, medal emoji or bypass flag elsewhere is a defect.
 - Every Claude launch flag, env value and `--settings` key comes from the launch registry alone; a launch literal elsewhere fails `TestNoLaunchLiteralOutsideRegistry`.
 - A seat is identified by lineage, not file recency: Codex writes subagent threads into `~/.codex/sessions` beside real seats, marked `thread_source: subagent` with a `parent_thread_id`; code reading the rollout tree directly checks those two fields first.

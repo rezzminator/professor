@@ -69,8 +69,11 @@ func TestLauncherRunHygieneStripsInheritedArm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(run, " -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT") {
-		t.Fatalf("launcher run does not strip an inherited CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT: %q", run)
+	if want := "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR -u PFM_CLAUDE_CONFIG_DIR_DEFAULT -u CLAUDE_PROJECT_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_PROMPT_CACHE_TTL -u CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL -u CACHE_LIVE_CONTROL_MAIN_TTL -u CACHE_LIVE_CONTROL_AGENTS_TTL -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY -u CODEX_THREAD_ID CACHE_LIVE_CONTROL_MAIN_TTL='5m' PFM_COST_LEDGER='off' '/bin/claude' '--session-id' '{uuid}' '--settings' '{\"cleanupPeriodDays\":0,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"0\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"0\"},\"hooks\":{\"Notification\":[{\"hooks\":[{\"async\":true,\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude notification\",\"type\":\"command\"}],\"matcher\":\"permission_prompt|elicitation_dialog|idle_prompt|plugin_notification\"}],\"PermissionRequest\":[{\"hooks\":[{\"async\":true,\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude blocked\",\"type\":\"command\"}]}],\"PostToolUse\":[{\"hooks\":[{\"async\":true,\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}],\"PostToolUseFailure\":[{\"hooks\":[{\"async\":true,\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}],\"PreToolUse\":[{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal git-guard\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal store-guard\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal orchestrator-wait\",\"type\":\"command\"}],\"matcher\":\"Bash\"},{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal pcm-guard\",\"type\":\"command\"}],\"matcher\":\"Edit|Write|MultiEdit|NotebookEdit|Bash\"}],\"SessionEnd\":[{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal clear-kill\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal exit-close\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude end\",\"type\":\"command\"}]}],\"SessionStart\":[{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal launcher-repair\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude start\",\"type\":\"command\"}]},{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal resume-unkill\",\"type\":\"command\"}],\"matcher\":\"resume\"},{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal clear-name\",\"type\":\"command\"}],\"matcher\":\"clear\"}],\"Stop\":[{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude idle\",\"type\":\"command\"}]}],\"SubagentStart\":[{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal rr-dir\",\"type\":\"command\"}],\"matcher\":\"rr|rr-pro|rr-pro-max\"},{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude agent-start\",\"type\":\"command\"}]}],\"SubagentStop\":[{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude agent-stop\",\"type\":\"command\"}]}],\"UserPromptSubmit\":[{\"hooks\":[{\"command\":\"/home/test/.local/bin/pfm usage-hook\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal clear-name\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal epic-inject\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal reload-intercept\",\"type\":\"command\"},{\"command\":\"/home/test/.local/bin/pfm internal exit-intercept\",\"type\":\"command\"},{\"async\":true,\"command\":\"/home/test/.local/bin/pfm internal herdr-state --engine claude working\",\"type\":\"command\"}]}]},\"outputStyle\":\"default\",\"statusLine\":{\"command\":\"/home/test/.local/bin/pfm-statusline\",\"hideVimModeIndicator\":true,\"padding\":0,\"refreshInterval\":2,\"type\":\"command\"}}'"; uuidPattern.ReplaceAllString(
+		run,
+		"{uuid}",
+	) != want {
+		t.Errorf("launcher run = %q, want %q", run, want)
 	}
 }
 
@@ -114,7 +117,7 @@ func TestLauncherLaunchAsPromptWarning(t *testing.T) {
 		args  []string
 		want  string
 	}{
-		{"professor, no clone recorded", pfmconfig.SystemPromptProfessor, false, nil, "no source repository recorded"},
+		{"professor, no clone recorded", pfmconfig.SystemPromptProfessor, false, nil, "Claude started WITHOUT its system prompt file: the composed fleet prompt cannot be located: resolve generated harness prompt: read source repository marker {root}/001/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/001/.local/share/pfm/install/source-repo: no such file or directory — fix the cause, then reload the chat"},
 		{"professor, prompt staged", pfmconfig.SystemPromptProfessor, true, nil, ""},
 		{
 			"professor, caller states its own file", pfmconfig.SystemPromptProfessor, false,
@@ -134,8 +137,8 @@ func TestLauncherLaunchAsPromptWarning(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if entry.want == "" && got != "" || !strings.Contains(got, entry.want) {
-				t.Fatalf("LauncherLaunchAs warning = %q, want %q", got, entry.want)
+			if got := rooted(t, got); got != entry.want {
+				t.Errorf("LauncherLaunchAs warning = %q, want %q", got, entry.want)
 			}
 		})
 	}

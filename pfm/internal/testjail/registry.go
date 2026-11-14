@@ -1,15 +1,13 @@
 package testjail
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // StageGlobalAgents links every original agent from the checkout's
@@ -86,65 +84,60 @@ var agentFixtureCache struct {
 	err  error
 }
 
+// globalAgentFixtures reads the agent inventory of templates/global/agents from the tracked
+// testdata/global-agents.json, each row's path joined to this checkout; it starts nothing. The
+// fence gate's fixture step holds the file equal to a fresh run of the inventory script.
 func globalAgentFixtures() ([]globalAgentFixture, error) {
 	agentFixtureCache.Do(func() {
-		python, err := deps.Resolve("python3")
+		fixture := filepath.Join(checkoutRoot(), "pfm", "internal", "testjail", "testdata", "global-agents.json")
+		body, err := os.ReadFile(fixture)
 		if err != nil {
-			agentFixtureCache.err = fmt.Errorf("resolve agent inventory interpreter: %w", err)
+			agentFixtureCache.err = fmt.Errorf("read agent fixture inventory %s: %w", fixture, err)
 			return
 		}
-		root := checkoutRoot()
-		result, err := (deps.RealRunner{}).Run(context.Background(), []string{
-			python,
-			"-I",
-			filepath.Join(root, "scripts", "agent-source-inventory.py"),
-			filepath.Join(root, "templates", "global", "agents"),
-		}, deps.RunOptions{})
-		if err != nil {
-			agentFixtureCache.err = fmt.Errorf(
-				"read agent fixture inventory: %w: %s%s",
-				err,
-				result.Stderr,
-				result.Stdout,
-			)
+		var rows []globalAgentFixture
+		if err := json.Unmarshal(body, &rows); err != nil {
+			agentFixtureCache.err = fmt.Errorf("decode agent fixture inventory %s: %w", fixture, err)
 			return
 		}
-		if result.ExitCode != 0 {
-			agentFixtureCache.err = fmt.Errorf(
-				"read agent fixture inventory: exit status %d: %s%s", result.ExitCode, result.Stderr, result.Stdout,
-			)
-			return
+		for index := range rows {
+			rows[index].Path = filepath.Join(checkoutRoot(), rows[index].Path)
 		}
-		if err := json.Unmarshal(result.Stdout, &agentFixtureCache.rows); err != nil {
-			agentFixtureCache.err = fmt.Errorf("decode agent fixture inventory: %w", err)
-		}
+		agentFixtureCache.rows = rows
 	})
 	return agentFixtureCache.rows, agentFixtureCache.err
 }
 
-// stageTracetreeKit stages what the tracer's tracetree kit needs on a
-// healthy host: the checkout's tracetree skill linked at
-// {home}/.claude/skills/tracetree, the link pfm install makes, and a python3 in
-// shimDir, the one directory beyond the canonical bin the jail's PATH holds.
-// The shim runs the interpreter the test process resolved; a host without one
-// fails the test here, as the doctor check would fail it later.
-func stageTracetreeKit(t *testing.T, home, shimDir string) {
+// tracetreeKitStub prints the usage line the shipped kit prints when it is
+// given no subcommand. The shipped kit lives in the flights plugin, whose
+// checkout a Professor test never reads, so a staged plugin folder carries
+// this stand-in; the flights repo's own tests run the real kit.
+const tracetreeKitStub = "import sys\nsys.exit(\"usage: tracetree.py <command> ...\")\n"
+
+// stagedPluginPath is the installPath StageClaudePlugins records for id.
+func stagedPluginPath(store, id string) string { return filepath.Join(store, "plugins", "cache", id) }
+
+// StageTracetreeKit places the tracetree kit in the folder StageClaudePlugins
+// staged for every flights plugin among ids, where pfm install's copy puts it:
+// {folder}/skills/tracetree/tracetree.py. ids holding no flights plugin fail
+// the test.
+func StageTracetreeKit(t *testing.T, store string, ids []string) {
 	t.Helper()
-	python, err := deps.Resolve("python3")
-	if err != nil {
-		t.Fatalf("the jail's healthy HOME needs python3 for the tracetree kit: %v", err)
+	staged := 0
+	for _, id := range ids {
+		if plugin, _, _ := strings.Cut(id, "@"); plugin != "flights" {
+			continue
+		}
+		dir := filepath.Join(stagedPluginPath(store, id), "skills", "tracetree")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "tracetree.py"), []byte(tracetreeKitStub), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		staged++
 	}
-	if err := WriteExecutable(
-		filepath.Join(shimDir, "python3"), []byte("#!/bin/sh\nexec '"+python+"' \"$@\"\n"), 0o700,
-	); err != nil {
-		t.Fatal(err)
-	}
-	skills := filepath.Join(home, ".claude", "skills")
-	if err := os.MkdirAll(skills, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	source := filepath.Join(checkoutRoot(), "templates", "global", "skills", "tracetree")
-	if err := os.Symlink(source, filepath.Join(skills, "tracetree")); err != nil {
-		t.Fatal(err)
+	if staged == 0 {
+		t.Fatalf("plugin ids %v hold no flights plugin to stage the tracetree kit for", ids)
 	}
 }

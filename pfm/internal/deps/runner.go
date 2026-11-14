@@ -81,6 +81,9 @@ type StartOptions struct {
 	// StdinPipe; use the latter when the caller owns an interactive stream.
 	Stdin          io.Reader
 	Stdout, Stderr io.Writer
+	// ExtraFiles are inherited open files the child finds from descriptor 3
+	// on, exec.Cmd's own ExtraFiles contract.
+	ExtraFiles []*os.File
 	// StdinPipe and StdoutPipe keep the native process pipes inside deps. The
 	// returned Process exposes the corresponding handles without leaking
 	// exec.Cmd to callers.
@@ -107,7 +110,12 @@ type Process interface {
 	StdinPipe() (io.WriteCloser, error)
 	StdoutPipe() (io.ReadCloser, error)
 	Kill() error
+	// KillGroup is SignalGroup(syscall.SIGKILL).
 	KillGroup() error
+	// SignalGroup sends sig to the child's whole process group; a group that
+	// has already exited answers nil. A child started without ProcessGroup or
+	// Foreground has no group of its own and is refused by name.
+	SignalGroup(sig syscall.Signal) error
 }
 
 // RealRunner runs argv through os/exec.
@@ -117,10 +125,17 @@ type RealRunner struct{}
 // command answering, not the Runner failing to run it — Run returns a nil
 // error with ExitCode set, the same contract probeOne already holds for a
 // version-probe subprocess; only a failure to start (lookup, permission,
-// context already done) returns a non-nil error.
+// context already done, a bare argv[0] gated to another platform) returns a
+// non-nil error.
 func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunResult, error) {
 	if len(argv) == 0 {
 		return RunResult{ExitCode: -1}, errors.New("deps: RealRunner.Run: empty argv")
+	}
+	if served, ok := unitNetServedRunner(argv[0]); ok {
+		return served.Run(ctx, argv, opts)
+	}
+	if err := gateArgv0(argv); err != nil {
+		return RunResult{ExitCode: -1}, err
 	}
 	command := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	command.Env = opts.Env
@@ -130,7 +145,7 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		command.Cancel = func() error {
 			if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil {
-				if errors.Is(err, syscall.ESRCH) {
+				if GroupGone(command.Process.Pid, err) {
 					return os.ErrProcessDone
 				}
 				return err
@@ -160,9 +175,11 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 	return result, nil
 }
 
-// LookPath resolves name on $PATH exactly as exec.LookPath does.
+// LookPath resolves name through Resolve, the one executable lookup: a
+// registry name maps to its command and is refused off its platforms, and
+// anything else is found on $PATH as exec.LookPath finds it.
 func (RealRunner) LookPath(name string) (string, error) {
-	return exec.LookPath(name)
+	return Resolve(name)
 }
 
 // Start launches argv and returns immediately. A non-Detach start wraps
@@ -173,6 +190,12 @@ func (RealRunner) LookPath(name string) (string, error) {
 func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (Process, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("deps: RealRunner.Start: empty argv")
+	}
+	if served, ok := unitNetServedRunner(argv[0]); ok {
+		return served.Start(ctx, argv, opts)
+	}
+	if err := gateArgv0(argv); err != nil {
+		return nil, err
 	}
 	if opts.Foreground && (opts.Detach || opts.Ctty < 0) {
 		return nil, errors.New("deps: foreground start requires a nonnegative terminal descriptor and cannot detach")
@@ -207,6 +230,7 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 	}
 	command.Stdout = opts.Stdout
 	command.Stderr = opts.Stderr
+	command.ExtraFiles = opts.ExtraFiles
 	var stdin io.WriteCloser
 	var stdout io.ReadCloser
 	var err error
@@ -294,15 +318,17 @@ func (p *realProcess) Kill() error {
 	return p.command.Process.Kill()
 }
 
-func (p *realProcess) KillGroup() error {
+func (p *realProcess) KillGroup() error { return p.SignalGroup(syscall.SIGKILL) }
+
+func (p *realProcess) SignalGroup(sig syscall.Signal) error {
 	if !p.processGroup {
 		return errors.New("deps: process group was not requested")
 	}
 	if p.command.Process == nil {
 		return errors.New("deps: process has not started")
 	}
-	err := syscall.Kill(-p.command.Process.Pid, syscall.SIGKILL)
-	if errors.Is(err, syscall.ESRCH) {
+	err := syscall.Kill(-p.command.Process.Pid, sig)
+	if GroupGone(p.command.Process.Pid, err) {
 		return nil
 	}
 	return err
@@ -344,6 +370,10 @@ func (p *releasedProcess) KillGroup() error {
 	return errors.New("deps: detached process was released; it cannot be killed")
 }
 
+func (p *releasedProcess) SignalGroup(syscall.Signal) error {
+	return errors.New("deps: detached process was released; it cannot be signalled")
+}
+
 // FakeRunner scripts Runner responses by argv prefix and records every call
 // on a ledger. Script order does not matter: the LONGEST matching prefix
 // wins, so a caller can script a broad default ("git") alongside a
@@ -362,12 +392,6 @@ type FakeRunner struct {
 	startScripts []fakeStartScript
 	starts       []StartCall
 	lifecycle    []LifecycleCall
-}
-
-type fakeScript struct {
-	prefix []string
-	result RunResult
-	err    error
 }
 
 type fakeLookup struct {
@@ -406,6 +430,7 @@ type fakeStartScript struct {
 	killErr    error
 	groupErr   error
 	releaseErr error
+	output     *StartOutput
 }
 
 // fakeProcess is the scripted Process FakeRunner.Start hands back: a fixed
@@ -456,6 +481,12 @@ func (p *fakeProcess) KillGroup() error {
 	return p.groupErr
 }
 
+// SignalGroup records "signal-group {sig}" and answers the scripted GroupErr.
+func (p *fakeProcess) SignalGroup(sig syscall.Signal) error {
+	p.owner.recordLifecycle(p.pid, "signal-group "+sig.String())
+	return p.groupErr
+}
+
 func (f *FakeRunner) recordLifecycle(pid int, action string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -476,18 +507,6 @@ type InteractiveScript struct {
 	ReleaseErr error
 }
 
-// Script registers result/err for every Run call whose argv starts with
-// prefix.
-func (f *FakeRunner) Script(prefix []string, result RunResult, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.scripts = append(f.scripts, fakeScript{
-		prefix: append([]string(nil), prefix...),
-		result: result,
-		err:    err,
-	})
-}
-
 // ScriptLookPath registers LookPath(name)'s result.
 func (f *FakeRunner) ScriptLookPath(name, path string, err error) {
 	f.mu.Lock()
@@ -496,28 +515,6 @@ func (f *FakeRunner) ScriptLookPath(name, path string, err error) {
 		f.lookups = map[string]fakeLookup{}
 	}
 	f.lookups[name] = fakeLookup{path: path, err: err}
-}
-
-// Run records the call on the ledger, then answers with the longest
-// registered prefix match, or UnscriptedError when nothing matches.
-func (f *FakeRunner) Run(_ context.Context, argv []string, opts RunOptions) (RunResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, RunCall{Argv: append([]string(nil), argv...), Opts: opts})
-	var best *fakeScript
-	for index := range f.scripts {
-		script := &f.scripts[index]
-		if !argvHasPrefix(argv, script.prefix) {
-			continue
-		}
-		if best == nil || len(script.prefix) > len(best.prefix) {
-			best = script
-		}
-	}
-	if best == nil {
-		return RunResult{ExitCode: -1}, UnscriptedError{Argv: append([]string(nil), argv...)}
-	}
-	return best.result, best.err
 }
 
 // ScriptStart registers the Process a Start call whose argv starts with
@@ -588,8 +585,9 @@ func (f *FakeRunner) Start(_ context.Context, argv []string, opts StartOptions) 
 	if (opts.StdinPipe && best.stdin == nil) || (opts.StdoutPipe && best.stdout == nil) {
 		return nil, fmt.Errorf("deps: FakeRunner: interactive script for %q did not provide requested pipes", argv)
 	}
+	waitErr := best.output.play(argv, opts, best.waitErr)
 	return &fakeProcess{
-		pid: best.pid, waitErr: best.waitErr, stdin: best.stdin, stdout: best.stdout,
+		pid: best.pid, waitErr: waitErr, stdin: best.stdin, stdout: best.stdout,
 		killErr: best.killErr, groupErr: best.groupErr, releaseErr: best.releaseErr, owner: f,
 	}, nil
 }
@@ -625,40 +623,4 @@ func (f *FakeRunner) LookPath(name string) (string, error) {
 		}
 	}
 	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
-}
-
-// Calls returns every Run call FakeRunner has recorded, in call order. Each
-// entry's Argv is its own copy — mutating a returned call never reaches the
-// ledger, the same isolation Run already gives the recorded argv against
-// the caller's own slice.
-func (f *FakeRunner) Calls() []RunCall {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	calls := make([]RunCall, len(f.calls))
-	for index, call := range f.calls {
-		calls[index] = RunCall{Argv: append([]string(nil), call.Argv...), Opts: call.Opts}
-	}
-	return calls
-}
-
-func argvHasPrefix(argv, prefix []string) bool {
-	if len(prefix) > len(argv) {
-		return false
-	}
-	for index, want := range prefix {
-		if argv[index] != want {
-			return false
-		}
-	}
-	return true
-}
-
-// UnscriptedError names the argv a FakeRunner received with nothing
-// registered for it.
-type UnscriptedError struct {
-	Argv []string
-}
-
-func (err UnscriptedError) Error() string {
-	return fmt.Sprintf("deps: FakeRunner: unscripted call %q", err.Argv)
 }

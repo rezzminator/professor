@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // FDLink is one numeric process file descriptor and its symlink target.
@@ -22,9 +25,6 @@ type FDLink struct {
 type ProcStat struct {
 	ParentPID int
 	StartTime uint64
-	// Group is the process group; TerminalGroup the foreground group of its
-	// controlling terminal (-1 without one). Darwin leaves both 0.
-	Group, TerminalGroup int
 }
 
 // ProcFS abstracts all /proc access used by gather.
@@ -57,22 +57,20 @@ type ProcBirth interface {
 	Birth(pid int) (int64, error)
 }
 
+// ProcStart is the optional ProcFS extension that reports when the kernel
+// created a process, to its clock tick: a hook's spawn moment, which a slow
+// exec and runtime start under load do not move. Only the kernel's own table
+// has one; a jail's fixture tree has no clock its ticks count from.
+type ProcStart interface {
+	Started(pid int) (time.Time, error)
+}
+
 // ProcMemory is the optional ProcFS extension that reports a process's
 // resident set size in kilobytes. Only the reaper needs it — the RAM a socket
 // holds is the whole reason to reap one — so a ProcFS without it stays usable
 // everywhere else and the reaper reports no RAM rather than refusing to run.
 type ProcMemory interface {
 	RSSKB(pid int) (int64, error)
-}
-
-// Terminate asks a process to exit. A process that already exited satisfies
-// the request.
-func Terminate(pid int) error {
-	err := syscall.Kill(pid, syscall.SIGTERM)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	return err
 }
 
 // FileID names one file by device and inode: the identity an install's
@@ -117,6 +115,62 @@ func FileIDOfInfo(info os.FileInfo) (FileID, error) {
 	return FileID{Device: fileIDDevice(stat.Dev), Inode: stat.Ino}, nil
 }
 
+// ErrNoProcRoot marks a configured proc root that does not exist: a jail
+// whose fixture tree was never staged. It wraps fs.ErrNotExist.
+var ErrNoProcRoot = errors.New("gather: proc root does not exist")
+
+// ErrForeignProcess marks a process whose environment the kernel withholds
+// from the caller: a different user's process, one that made itself
+// non-dumpable (sshd's session), or one holding capabilities the caller lacks
+// (the systemd user manager). It can never be a pane the caller owns.
+var ErrForeignProcess = errors.New(
+	"gather: process environment withheld: another uid's, non-dumpable or privileged",
+)
+
+// ProcTerminals is the optional ProcFS extension that maps each pid to the
+// terminal its standard input names, "/dev/" trimmed.
+type ProcTerminals interface {
+	Terminals() (map[int]string, error)
+}
+
+// ProcFDNames is the optional ProcFS extension that lists every descriptor
+// entry of a process, readable or not: the census FDLinks is checked against.
+type ProcFDNames interface {
+	FDNames(pid int) ([]string, error)
+}
+
+// jailRoot is the Linux-shaped tree a proc root names, or "" when the root
+// means this kernel's own table: unset, or the system proc root itself.
+func jailRoot(root string) string {
+	if root == "" || filepath.Clean(root) == paths.SystemProcRoot() {
+		return ""
+	}
+	return root
+}
+
+// OpenProcFS returns the process-table reader for a proc root. "" (or the
+// system proc root) is the kernel's own table: /proc on Linux, sysctl on
+// macOS. Any other root is a jail, read as a Linux proc tree on either OS; a
+// jail root that does not exist is ErrNoProcRoot, so a caller keeps its own
+// answer for "no table" instead of reading the live kernel.
+func OpenProcFS(root string) (ProcFS, error) {
+	jail := jailRoot(root)
+	if jail == "" {
+		return nativeProcFS(), nil
+	}
+	info, err := os.Stat(jail)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("open proc root %s: %w: %w", jail, ErrNoProcRoot, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open proc root %s: %w", jail, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("open proc root %s: not a directory", jail)
+	}
+	return RealProcFS{Root: jail}, nil
+}
+
 // NewProcFS returns the process-table reader for a given proc root.
 //
 // A root that EXISTS is always honoured, because that is how the jail works:
@@ -130,13 +184,8 @@ func FileIDOfInfo(info os.FileInfo) (FileID, error) {
 // which is the exact failure the root law forbids: a probe that could not run
 // never returns "nothing found".
 func NewProcFS(root string) ProcFS {
-	if root != "" {
-		if info, err := os.Stat(root); err == nil && info.IsDir() {
-			if filepath.Clean(root) == "/proc" {
-				return nativeProcFS()
-			}
-			return RealProcFS{Root: root}
-		}
+	if table, err := OpenProcFS(root); err == nil {
+		return table
 	}
 	return nativeProcFS()
 }
@@ -147,10 +196,7 @@ type RealProcFS struct {
 }
 
 func (proc RealProcFS) root() string {
-	if proc.Root == "" {
-		return "/proc"
-	}
-	return proc.Root
+	return paths.ProcRootOr(proc.Root)
 }
 
 // PIDs returns numeric process directories in ascending order.
@@ -186,7 +232,7 @@ func (proc RealProcFS) Cmdline(pid int) ([]string, error) {
 func (proc RealProcFS) Environ(pid int) (map[string]string, error) {
 	content, err := os.ReadFile(proc.path(pid, "environ"))
 	if err != nil {
-		return nil, err
+		return nil, proc.withheld(pid, err)
 	}
 	environment := make(map[string]string)
 	for _, entry := range SplitNUL(content) {
@@ -229,15 +275,10 @@ func (proc RealProcFS) FDLinks(pid int) ([]FDLink, error) {
 
 // Stat reads parent pid and kernel start ticks from /proc/<pid>/stat.
 func (proc RealProcFS) Stat(pid int) (ProcStat, error) {
-	content, err := os.ReadFile(proc.path(pid, "stat"))
+	fields, err := proc.statFields(pid)
 	if err != nil {
 		return ProcStat{}, err
 	}
-	closeParen := strings.LastIndex(string(content), ") ")
-	if closeParen < 0 {
-		return ProcStat{}, fmt.Errorf("malformed proc stat for pid %d", pid)
-	}
-	fields := strings.Fields(string(content[closeParen+2:]))
 	if len(fields) <= 19 {
 		return ProcStat{}, fmt.Errorf("short proc stat for pid %d", pid)
 	}
@@ -249,15 +290,104 @@ func (proc RealProcFS) Stat(pid int) (ProcStat, error) {
 	if err != nil {
 		return ProcStat{}, fmt.Errorf("parse start time for %d: %w", pid, err)
 	}
-	group, err := strconv.Atoi(fields[2])
+	return ProcStat{ParentPID: parentPID, StartTime: startTime}, nil
+}
+
+// statFields are /proc/<pid>/stat's fields after the command name, state first.
+func (proc RealProcFS) statFields(pid int) ([]string, error) {
+	content, err := os.ReadFile(proc.path(pid, "stat"))
 	if err != nil {
-		return ProcStat{}, fmt.Errorf("parse process group for %d: %w", pid, err)
+		return nil, err
 	}
-	terminalGroup, err := strconv.Atoi(fields[5])
+	closeParen := strings.LastIndex(string(content), ") ")
+	if closeParen < 0 {
+		return nil, fmt.Errorf("malformed proc stat for pid %d", pid)
+	}
+	return strings.Fields(string(content[closeParen+2:])), nil
+}
+
+// withheld tags a refused environment read of a process that can never be a
+// pane of the caller's: another uid's or a non-dumpable one, or one with no
+// terminal holding capabilities this process lacks (a systemd user manager).
+// Any other refusal stays a read failure.
+func (proc RealProcFS) withheld(pid int, err error) error {
+	if !errors.Is(err, os.ErrPermission) {
+		return err
+	}
+	// A non-dumpable process's proc files belong to root.
+	foreign := false
+	if info, statErr := os.Stat(proc.path(pid, "environ")); statErr == nil {
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		foreign = ok && int(stat.Uid) != os.Geteuid()
+	}
+	if foreign || proc.privileged(pid) {
+		return fmt.Errorf("%w: %w", ErrForeignProcess, err)
+	}
+	return err
+}
+
+// privileged reports a process with no controlling terminal whose effective
+// capabilities exceed this process's; this process absent from the proc root
+// holds none. A pane's process has a terminal, so it is never passed over.
+func (proc RealProcFS) privileged(pid int) bool {
+	fields, err := proc.statFields(pid)
+	if err != nil || len(fields) < 5 || fields[4] != "0" {
+		return false
+	}
+	theirs, err := proc.effectiveCapabilities(pid)
 	if err != nil {
-		return ProcStat{}, fmt.Errorf("parse terminal foreground group for %d: %w", pid, err)
+		return false
 	}
-	return ProcStat{ParentPID: parentPID, StartTime: startTime, Group: group, TerminalGroup: terminalGroup}, nil
+	ours, err := proc.effectiveCapabilities(os.Getpid())
+	if errors.Is(err, os.ErrNotExist) {
+		ours = 0
+	} else if err != nil {
+		return false
+	}
+	return theirs&^ours != 0
+}
+
+func (proc RealProcFS) effectiveCapabilities(pid int) (uint64, error) {
+	path := proc.path(pid, "status")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		if value, found := strings.CutPrefix(line, "CapEff:"); found {
+			return strconv.ParseUint(strings.TrimSpace(value), 16, 64)
+		}
+	}
+	return 0, fmt.Errorf("no CapEff line in %s", path)
+}
+
+// Terminals maps each pid to the target of its fd 0, "/dev/" trimmed: the
+// pts a pane's process reads. A pid whose fd 0 cannot be read has no entry.
+func (proc RealProcFS) Terminals() (map[int]string, error) {
+	pids, err := proc.PIDs()
+	if err != nil {
+		return nil, err
+	}
+	terminals := make(map[int]string, len(pids))
+	for _, pid := range pids {
+		if target, err := os.Readlink(filepath.Join(proc.path(pid, "fd"), "0")); err == nil {
+			terminals[pid] = strings.TrimPrefix(target, "/dev/")
+		}
+	}
+	return terminals, nil
+}
+
+// FDNames lists every entry of /proc/<pid>/fd, readable link or not.
+func (proc RealProcFS) FDNames(pid int) ([]string, error) {
+	entries, err := os.ReadDir(proc.path(pid, "fd"))
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(entries))
+	for index, entry := range entries {
+		names[index] = entry.Name()
+	}
+	return names, nil
 }
 
 // userHZ is USER_HZ, the fixed tick rate the kernel reports /proc times in
@@ -368,10 +498,28 @@ func procExecutablePath(buffer []byte) (string, error) {
 // processReadError distinguishes a vanished process using an independent probe.
 func processReadError(pid int, readErr, probeErr error) error {
 	if pid > 0 && errors.Is(probeErr, syscall.ESRCH) {
-		return fmt.Errorf("process %d disappeared: %w", pid, fs.ErrNotExist)
+		// Both sentinels: callers test fs.ErrNotExist (the Linux procfs shape) or syscall.ESRCH.
+		return fmt.Errorf("process %d disappeared after %v: %w: %w", pid, readErr, probeErr, fs.ErrNotExist)
 	}
 	if probeErr != nil && !errors.Is(probeErr, syscall.EPERM) {
 		return errors.Join(readErr, fmt.Errorf("probe process %d existence: %w", pid, probeErr))
 	}
 	return readErr
+}
+
+// environWithheld tags a failed kern.procargs2 read (EINVAL for any refusal): unsignalable (EPERM) or
+// another effective uid's (setuid) is foreign, as RealProcFS.withheld on Linux; a zombie is gone.
+func environWithheld(readErr, probeErr error, identity ProcessIdentity, identityErr error) error {
+	switch {
+	case errors.Is(probeErr, syscall.EPERM):
+		return fmt.Errorf("%w: %w (probe: %w)", ErrForeignProcess, readErr, probeErr)
+	case probeErr != nil || identityErr != nil:
+		return errors.Join(readErr, identityErr)
+	case identity.EffectiveUID != uint32(os.Geteuid()):
+		return fmt.Errorf("%w: %w (effective uid %d: %w)",
+			ErrForeignProcess, readErr, identity.EffectiveUID, fs.ErrPermission)
+	case identity.Zombie:
+		return fmt.Errorf("%w (a zombie: %w)", readErr, fs.ErrNotExist)
+	}
+	return fmt.Errorf("%w (command %q, effective uid %d)", readErr, identity.Command, identity.EffectiveUID)
 }

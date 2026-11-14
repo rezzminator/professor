@@ -13,7 +13,7 @@ const (
 )
 
 // indicatorTarget is one pane or workspace as Herdr lists it: its id, its
-// agent_status and the custom tokens it holds, all sources' alike (Herdr keeps
+// agent_status and the custom tokens it holds, all sources' alike (Herdr retains
 // one token map per resource).
 type indicatorTarget struct {
 	kind   string
@@ -25,16 +25,18 @@ type indicatorTarget struct {
 // decodeIndicatorTargets reads a pane.list result and a workspace.list result
 // into their targets, panes first. A workspace's tokens are omitted by Herdr
 // when it holds none, so an absent map is an empty one; an entry with no id
-// cannot be painted and is an error, never skipped.
-func decodeIndicatorTargets(paneResult, workspaceResult json.RawMessage) ([]indicatorTarget, error) {
+// cannot be painted: it is skipped and named in skipped, and the rest paint.
+func decodeIndicatorTargets(
+	paneResult, workspaceResult json.RawMessage,
+) (targets []indicatorTarget, skipped []string, err error) {
 	// The workspace list's result type and envelope are its own parser's to
 	// judge; the fields it drops are read here.
 	panes, err := ParsePanes(paneResult)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := ParseWorkspaceList(workspaceResult); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var workspaces struct {
 		Workspaces []struct {
@@ -44,13 +46,17 @@ func decodeIndicatorTargets(paneResult, workspaceResult json.RawMessage) ([]indi
 		} `json:"workspaces"`
 	}
 	if err := json.Unmarshal(workspaceResult, &workspaces); err != nil {
-		return nil, fmt.Errorf("herdr workspace.list: decode result %q: %w", workspaceResult, err)
+		return nil, nil, fmt.Errorf("herdr workspace.list: decode result %q: %w", workspaceResult, err)
 	}
-	targets := make([]indicatorTarget, 0, len(panes)+len(workspaces.Workspaces))
+	targets = make([]indicatorTarget, 0, len(panes)+len(workspaces.Workspaces))
 	for index := range panes {
 		pane := &panes[index]
 		if pane.PaneID == "" {
-			return nil, fmt.Errorf("herdr pane.list: an entry has no pane_id (status %q)", pane.AgentStatus)
+			skipped = append(
+				skipped,
+				fmt.Sprintf("herdr pane.list: an entry has no pane_id (status %q)", pane.AgentStatus),
+			)
+			continue
 		}
 		targets = append(
 			targets,
@@ -59,13 +65,16 @@ func decodeIndicatorTargets(paneResult, workspaceResult json.RawMessage) ([]indi
 	}
 	for _, workspace := range workspaces.Workspaces {
 		if workspace.WorkspaceID == "" {
-			return nil, fmt.Errorf("herdr workspace.list: an entry has no workspace_id (status %q)", workspace.Status)
+			skipped = append(skipped, fmt.Sprintf(
+				"herdr workspace.list: an entry has no workspace_id (status %q)", workspace.Status,
+			))
+			continue
 		}
 		targets = append(targets, indicatorTarget{
 			kind: targetWorkspace, id: workspace.WorkspaceID, status: workspace.Status, tokens: workspace.Tokens,
 		})
 	}
-	return targets, nil
+	return targets, skipped, nil
 }
 
 // wantedIndicators is the indicator tokens a target in status carries: none

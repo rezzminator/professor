@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 // fakeRunner is the package tests' systemd/launchd runner: Run answers the
@@ -193,45 +193,56 @@ func TestReachableIdleUserManagerAllowsMutatingModes(t *testing.T) {
 // than silently reading that ambiguity as safe — the entire point of the fix.
 func TestUnprobedNameSyncGateProceedsButSaysSo(t *testing.T) {
 	t.Parallel()
-	if schedulerIsLaunchd {
-		t.Skip("the systemd name-sync gate is Linux-only")
-	}
 	home := t.TempDir()
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err != nil {
 		t.Fatalf("an unprobed gate refused the install: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "name-sync gate NOT probed") {
-		t.Fatalf("an unprobed name-sync gate was silent:\n%s", output.String())
-	}
+	wantOutputLines(t, output.String(), []string{
+		"  skip    name-sync gate NOT probed (systemctl show could not read the unit state);" +
+			" an apply during a name-sync or schedule run is not refused",
+	}, "gate NOT probed")
 }
 
 func TestRunningNameSyncRefusesMutatingModesBeforeWriting(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []Mode{ModeApply, ModeUninstall} {
-		t.Run(fmt.Sprint(mode), func(t *testing.T) {
-			home := t.TempDir()
-			var runner CommandRunner = &fakeRunner{nameSyncActive: true}
-			expected := ErrNameSyncRunning
-			if schedulerIsLaunchd {
-				runner = &outputRunner{printOutput: "state = running\n"}
-				expected = ErrLaunchAgentRunning
-			}
-			_, err := Run(context.Background(), Options{
-				MCPConfigPath: testConfigPath(t),
-				Mode:          mode, Home: home, Runner: runner,
+	for _, test := range []struct {
+		kind     servicemanager.Kind
+		runner   func() CommandRunner
+		expected error
+	}{
+		{
+			kind:     servicemanager.KindSystemd,
+			runner:   func() CommandRunner { return &fakeRunner{nameSyncActive: true} },
+			expected: ErrNameSyncRunning,
+		},
+		{
+			kind:     servicemanager.KindLaunchd,
+			runner:   func() CommandRunner { return &outputRunner{printOutput: "state = running\n"} },
+			expected: ErrLaunchAgentRunning,
+		},
+	} {
+		for _, mode := range []Mode{ModeApply, ModeUninstall} {
+			t.Run(fmt.Sprint(test.kind, " ", mode), func(t *testing.T) {
+				home := t.TempDir()
+				_, err := Run(context.Background(), Options{
+					MCPConfigPath: testConfigPath(t),
+					Mode:          mode, Home: home, Runner: test.runner(),
+					scheduler: schedulerFor(test.kind),
+				})
+				if !errors.Is(err, test.expected) {
+					t.Fatalf("Run() error = %v, want %v", err, test.expected)
+				}
+				if entries, readErr := os.ReadDir(home); readErr != nil || len(entries) != 0 {
+					t.Fatalf("running-service refusal wrote files: entries=%v err=%v", entries, readErr)
+				}
 			})
-			if !errors.Is(err, expected) {
-				t.Fatalf("Run() error = %v, want %v", err, expected)
-			}
-			if entries, readErr := os.ReadDir(home); readErr != nil || len(entries) != 0 {
-				t.Fatalf("running-service refusal wrote files: entries=%v err=%v", entries, readErr)
-			}
-		})
+		}
 	}
 }
 
@@ -294,43 +305,56 @@ func TestNameSyncServiceRunningClassifiesProbeAnswers(t *testing.T) {
 }
 
 // TestNameSyncServiceRunningProductionShape runs schedulerServiceRunning
-// through the real execCommandRunner against a systemctl script on PATH (none
-// when script is empty). The scripts answer `show` with a state and exit 3 for
-// `is-active`, as real systemd does for a oneshot mid-run: a gate that trusts
-// the is-active exit reads a running job as idle.
+// through the real execCommandRunner over a scripted process runner: systemctl
+// answers `show` with a state, or fails, or is not found at all. The runner's
+// ledger proves the gate asked `show` alone — a gate that trusted the
+// `is-active` exit (3 for a oneshot mid-run, as real systemd answers) would read
+// a running job as idle.
 func TestNameSyncServiceRunningProductionShape(t *testing.T) {
-	answer := func(state string) string {
-		return "#!/bin/sh\ncase \"$*\" in *show*) echo " + state + "; exit 0;; esac\nexit 3\n"
+	t.Parallel()
+	if servicemanager.Native() != servicemanager.KindSystemd {
+		t.Skip("the dependency registry refuses systemctl off a systemd host; the fake-runner rows cover the gate")
 	}
+	show := "systemctl --user show --property=ActiveState --value pfm-name-sync.service"
 	for _, testCase := range []struct {
-		name, script            string
+		name                    string
+		found                   bool
+		result                  deps.RunResult
+		wantCalls               []string
 		wantRunning, wantProbed bool
 	}{
-		{"oneshot mid-run reports activating", answer("activating"), true, true},
-		{"systemctl reports inactive", answer("inactive"), false, true},
-		{"systemctl could not reach the user bus", "#!/bin/sh\necho 'Failed to connect to bus' >&2\nexit 1\n", false, false},
-		{"systemctl cannot be found", "", false, false},
+		{"oneshot mid-run reports activating", true, deps.RunResult{Stdout: []byte("activating\n")}, []string{show}, true, true},
+		{"systemctl reports inactive", true, deps.RunResult{Stdout: []byte("inactive\n")}, []string{show}, false, true},
+		{
+			"systemctl could not reach the user bus", true,
+			deps.RunResult{ExitCode: 1, Stderr: []byte("Failed to connect to bus\n")},
+			[]string{show},
+			false, false,
+		},
+		{"systemctl cannot be found", false, deps.RunResult{}, nil, false, false},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if testCase.script != "" {
-				if err := testjail.WriteExecutable(
-					filepath.Join(dir, "systemctl"),
-					[]byte(testCase.script),
-					0o755,
-				); err != nil {
-					t.Fatal(err)
-				}
+			t.Parallel()
+			processes := &deps.FakeRunner{}
+			if testCase.found {
+				processes.ScriptLookPath("systemctl", "/fixture/systemctl", nil)
+				processes.Script([]string{"systemctl", "--user", "show"}, testCase.result, nil)
 			}
-			t.Setenv("PATH", dir)
 			running, probed := schedulerServiceRunning(
-				context.Background(), execCommandRunner{}, "pfm-name-sync.service",
+				context.Background(), execCommandRunner{runner: processes}, "pfm-name-sync.service",
 			)
 			if running != testCase.wantRunning || probed != testCase.wantProbed {
 				t.Fatalf(
 					"schedulerServiceRunning() = (%v, %v), want (%v, %v)",
 					running, probed, testCase.wantRunning, testCase.wantProbed,
 				)
+			}
+			var calls []string
+			for _, call := range processes.Calls() {
+				calls = append(calls, strings.Join(call.Argv, " "))
+			}
+			if !reflect.DeepEqual(calls, testCase.wantCalls) {
+				t.Fatalf("process calls = %q, want %q", calls, testCase.wantCalls)
 			}
 		})
 	}
@@ -402,13 +426,11 @@ func TestSchedulerRefusalNamesOnlyARunningJob(t *testing.T) {
 // not rewrite its unit or binary. The refusal names the schedule, not name-sync.
 func TestRunningScheduleRefusesMutatingModesBeforeWriting(t *testing.T) {
 	t.Parallel()
-	if schedulerIsLaunchd {
-		t.Skip("the systemd schedule gate is Linux-only")
-	}
 	for _, mode := range []Mode{ModeApply, ModeUninstall} {
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {
 			home := t.TempDir()
 			_, err := Run(context.Background(), Options{
+				scheduler:     schedulerFor(servicemanager.KindSystemd),
 				MCPConfigPath: testConfigPath(t),
 				Mode:          mode, Home: home,
 				Runner: &fakeRunner{nameSyncIdle: true, scheduleActive: true},
@@ -463,57 +485,61 @@ func TestLaunchAgentRunningProbesTheGivenLabel(t *testing.T) {
 
 func TestAwaitSchedulerGate(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"finishes", "bound", "name-sync"} {
-		t.Run(scenario, func(t *testing.T) {
-			runner := &fakeRunner{nameSyncIdle: true, scheduleStates: []string{"activating"}}
-			wantErr, wantSleeps, wantProbes := ErrScheduleRunning, make([]time.Duration, 18), 19
-			if schedulerIsLaunchd {
-				wantErr = ErrScheduleAgentRunning
-			}
-			for i := range wantSleeps {
-				wantSleeps[i] = 5 * time.Second
-			}
-			wantOutput := "  wait    the pfm schedule is delivering; waiting up to 1m30s for it to finish\n"
-			switch scenario {
-			case "finishes":
-				runner.scheduleStates = []string{"activating", "activating", "inactive"}
-				wantErr, wantSleeps, wantProbes = nil, []time.Duration{5 * time.Second, 5 * time.Second}, 3
-			case "name-sync":
-				runner.nameSyncActive = true
-				wantErr, wantSleeps, wantProbes, wantOutput = ErrNameSyncRunning, nil, 0, ""
-				if schedulerIsLaunchd {
-					wantErr = ErrLaunchAgentRunning
+	for _, kind := range schedulerKinds {
+		launchd := kind == servicemanager.KindLaunchd
+		for _, scenario := range []string{"finishes", "bound", "name-sync"} {
+			t.Run(string(kind)+" "+scenario, func(t *testing.T) {
+				runner := &fakeRunner{nameSyncIdle: true, scheduleStates: []string{"activating"}}
+				wantErr, wantSleeps, wantProbes := ErrScheduleRunning, make([]time.Duration, 18), 19
+				if launchd {
+					wantErr = ErrScheduleAgentRunning
 				}
-			}
-			var output bytes.Buffer
-			var sleeps []time.Duration
-			probed, err := awaitSchedulerGate(context.Background(), Options{
-				Runner: runner, Stdout: &output,
-				Sleep: func(d time.Duration) { sleeps = append(sleeps, d) },
+				for i := range wantSleeps {
+					wantSleeps[i] = 5 * time.Second
+				}
+				wantOutput := "  wait    the pfm schedule is delivering; waiting up to 1m30s for it to finish\n"
+				switch scenario {
+				case "finishes":
+					runner.scheduleStates = []string{"activating", "activating", "inactive"}
+					wantErr, wantSleeps, wantProbes = nil, []time.Duration{5 * time.Second, 5 * time.Second}, 3
+				case "name-sync":
+					runner.nameSyncActive = true
+					wantErr, wantSleeps, wantProbes, wantOutput = ErrNameSyncRunning, nil, 0, ""
+					if launchd {
+						wantErr = ErrLaunchAgentRunning
+					}
+				}
+				var output bytes.Buffer
+				var sleeps []time.Duration
+				probed, err := awaitSchedulerGate(context.Background(), Options{
+					Runner: runner, Stdout: &output,
+					scheduler: schedulerFor(kind),
+					Sleep:     func(d time.Duration) { sleeps = append(sleeps, d) },
+				})
+				if !probed || !errors.Is(err, wantErr) || !reflect.DeepEqual(sleeps, wantSleeps) ||
+					output.String() != wantOutput {
+					t.Fatalf(
+						"gate=(%v,%v) sleeps=%v output=%q, want (true,%v) %v %q",
+						probed,
+						err,
+						sleeps,
+						output.String(),
+						wantErr,
+						wantSleeps,
+						wantOutput,
+					)
+				}
+				probes := 0
+				for _, call := range runner.calls {
+					if call == scheduleStateProbe || strings.HasSuffix(call, "/"+scheduleLaunchdLabel) {
+						probes++
+					}
+				}
+				if probes != wantProbes {
+					t.Fatalf("schedule probes=%d, want %d: %v", probes, wantProbes, runner.calls)
+				}
 			})
-			if !probed || !errors.Is(err, wantErr) || !reflect.DeepEqual(sleeps, wantSleeps) ||
-				output.String() != wantOutput {
-				t.Fatalf(
-					"gate=(%v,%v) sleeps=%v output=%q, want (true,%v) %v %q",
-					probed,
-					err,
-					sleeps,
-					output.String(),
-					wantErr,
-					wantSleeps,
-					wantOutput,
-				)
-			}
-			probes := 0
-			for _, call := range runner.calls {
-				if call == scheduleStateProbe || strings.HasSuffix(call, "/"+scheduleLaunchdLabel) {
-					probes++
-				}
-			}
-			if probes != wantProbes {
-				t.Fatalf("schedule probes=%d, want %d: %v", probes, wantProbes, runner.calls)
-			}
-		})
+		}
 	}
 }
 
@@ -531,36 +557,40 @@ func TestCheckSchedulerWaitsForShortSchedule(t *testing.T) {
 // mid-delivery would cut a half-typed message.
 func TestAwaitSchedulerGateWaitsOutTheRetiredReminder(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"finishes", "bound"} {
-		t.Run(scenario, func(t *testing.T) {
-			wantErr := ErrScheduleRunning
-			if schedulerIsLaunchd {
-				wantErr = ErrScheduleAgentRunning
-			}
-			runner := &fakeRunner{
-				nameSyncIdle: true, scheduleStates: []string{"inactive"},
-				reminderStates: []string{"activating", "activating", "inactive"},
-			}
-			wantSleeps := []time.Duration{5 * time.Second, 5 * time.Second}
-			if scenario == "bound" {
-				runner.reminderStates = []string{"activating"}
-				wantSleeps = make([]time.Duration, 18)
-				for i := range wantSleeps {
-					wantSleeps[i] = 5 * time.Second
+	for _, kind := range schedulerKinds {
+		launchd := kind == servicemanager.KindLaunchd
+		for _, scenario := range []string{"finishes", "bound"} {
+			t.Run(string(kind)+" "+scenario, func(t *testing.T) {
+				wantErr := ErrScheduleRunning
+				if launchd {
+					wantErr = ErrScheduleAgentRunning
 				}
-			} else {
-				wantErr = nil
-			}
-			var output bytes.Buffer
-			var sleeps []time.Duration
-			probed, err := awaitSchedulerGate(context.Background(), Options{
-				Runner: runner, Stdout: &output,
-				Sleep: func(d time.Duration) { sleeps = append(sleeps, d) },
+				runner := &fakeRunner{
+					nameSyncIdle: true, scheduleStates: []string{"inactive"},
+					reminderStates: []string{"activating", "activating", "inactive"},
+				}
+				wantSleeps := []time.Duration{5 * time.Second, 5 * time.Second}
+				if scenario == "bound" {
+					runner.reminderStates = []string{"activating"}
+					wantSleeps = make([]time.Duration, 18)
+					for i := range wantSleeps {
+						wantSleeps[i] = 5 * time.Second
+					}
+				} else {
+					wantErr = nil
+				}
+				var output bytes.Buffer
+				var sleeps []time.Duration
+				probed, err := awaitSchedulerGate(context.Background(), Options{
+					Runner: runner, Stdout: &output,
+					scheduler: schedulerFor(kind),
+					Sleep:     func(d time.Duration) { sleeps = append(sleeps, d) },
+				})
+				if !probed || !errors.Is(err, wantErr) || (wantErr == nil && err != nil) ||
+					!reflect.DeepEqual(sleeps, wantSleeps) {
+					t.Fatalf("gate=(%v,%v) sleeps=%v, want (true,%v) %v", probed, err, sleeps, wantErr, wantSleeps)
+				}
 			})
-			if !probed || !errors.Is(err, wantErr) || (wantErr == nil && err != nil) ||
-				!reflect.DeepEqual(sleeps, wantSleeps) {
-				t.Fatalf("gate=(%v,%v) sleeps=%v, want (true,%v) %v", probed, err, sleeps, wantErr, wantSleeps)
-			}
-		})
+		}
 	}
 }

@@ -9,9 +9,9 @@ import (
 	"testing"
 )
 
-const vscodeLawFixture = "---\nname: quality:prompt\ndescription: routing\n---\n\n# Prompt Quality\n\nCut every line.\n"
+const vscodeLawFixture = "---\nname: law:prompt\ndescription: routing\n---\n\n# Prompt Quality\n\nCut every line.\n"
 
-// writeVSCodeLawFixture puts a /quality:prompt source into the clone repo and
+// writeVSCodeLawFixture puts a /law:prompt source into the clone repo and
 // returns repo.
 func writeVSCodeLawFixture(t *testing.T, repo string) string {
 	t.Helper()
@@ -87,8 +87,10 @@ func TestVSCodeSystemPromptMissingLawFailsByPath(t *testing.T) {
 	installer.options.SourceRepo = filepath.Join(home, "empty-clone")
 	err := installer.wireVSCode()
 	law := vscodeLawSource(installer.options.SourceRepo)
-	if err == nil || !strings.Contains(err.Error(), law) {
-		t.Fatalf("wireVSCode error = %v, want one naming %s", err, law)
+	want := "build VS Code " + vscodeSystemPromptName + ": read the prompt law " + law + ": open " + law +
+		": no such file or directory"
+	if err == nil || err.Error() != want {
+		t.Fatalf("wireVSCode error = %v, want %q", err, want)
 	}
 	requireNoPath(t, installer.vscodeSystemPromptPath(), "system prompt built without the law")
 	if _, linked := resolvedLink(filepath.Join(root, "extensions", vscodeExtensionLinkName)); !linked {
@@ -130,11 +132,11 @@ func TestVSCodeSystemPromptFrontmatter(t *testing.T) {
 	}
 }
 
-// TestVSCodeSystemPromptMissingLawRefusesAtPreflight: a full install with
-// --vscode and a clone without the law is refused by the preflight plan,
-// naming the law's path, before it changes the VS Code settings or writes a
-// system prompt.
-func TestVSCodeSystemPromptMissingLawRefusesAtPreflight(t *testing.T) {
+// TestVSCodeSystemPromptMissingLawFailsOnlyItsStep: a full install with
+// --vscode and a clone without the law writes no system prompt and names the
+// law's path in a FAIL row, while the VS Code settings and every other step
+// still land.
+func TestVSCodeSystemPromptMissingLawFailsOnlyItsStep(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	writeFixture(t, settings, `{}`)
@@ -145,15 +147,19 @@ func TestVSCodeSystemPromptMissingLawRefusesAtPreflight(t *testing.T) {
 		SourceRepo: clone, VSCode: true, vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	})
 	law := vscodeLawSource(clone)
-	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") || !strings.Contains(err.Error(), law) {
-		t.Fatalf("install error=%v output=%s, want a preflight refusal naming %s", err, output.String(), law)
+	want := "build VS Code " + vscodeSystemPromptName + ": read the prompt law " + law + ": open " + law +
+		": no such file or directory"
+	if err == nil || err.Error() != want {
+		t.Fatalf("install error=%v output=%s, want the step failure %q", err, output.String(), want)
 	}
-	if got := readFixture(t, settings); got != `{}` {
-		t.Fatalf("preflight refusal changed VS Code settings:\n%s", got)
+	wantOutputLines(t, output.String(), []string{"  FAIL    " + want}, "  FAIL    ")
+	profiles, _ := decodeSettings(t, settings)["terminal.integrated.profiles.linux"].(map[string]any)
+	if _, landed := profiles["PFM"]; !landed {
+		t.Fatalf("VS Code settings did not land past the missing law:\n%s", readFixture(t, settings))
 	}
 	requireNoPath(
 		t,
 		filepath.Join(managedRootForHome(home), filepath.FromSlash(vscodeExtensionSource), vscodeSystemPromptName),
-		"preflight refusal wrote a system prompt",
+		"a missing law wrote a system prompt",
 	)
 }

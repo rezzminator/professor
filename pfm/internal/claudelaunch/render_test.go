@@ -17,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func renderMachine(t *testing.T) (string, pfmconfig.Config) {
@@ -145,6 +146,17 @@ func TestRenderFreshInteractive(t *testing.T) {
 	}) {
 		t.Errorf("env=%q", launch.Env)
 	}
+	// The adopter settings' envs go first in name order; a name pfm sets stays pfm's.
+	adopted, _ := renderParsed(t, Request{
+		Purpose: PurposeInteractive, Home: home, Account: 2, SessionID: "S",
+		Envs: map[string]string{"TEAM_MODE": "strict", "API_REGION": "eu", "CLAUDE_CONFIG_DIR": "/adopter/store"},
+	}, machine)
+	if want := []string{
+		"API_REGION=eu", "TEAM_MODE=strict",
+		"CLAUDE_CONFIG_DIR=" + machine.Accounts[1].ConfigDir, "CACHE_LIVE_CONTROL_MAIN_TTL=1h",
+	}; !reflect.DeepEqual(adopted.Env, want) {
+		t.Errorf("settings env=%q, want %q", adopted.Env, want)
+	}
 	if parsed.SessionID != "S" || !parsed.Autonomy {
 		t.Errorf("verbs=%#v", parsed)
 	}
@@ -162,10 +174,10 @@ func TestRenderFreshInteractive(t *testing.T) {
 			t.Errorf("env %s=%q, want %q", name, got, want)
 		}
 	}
-	if len(parsed.Hooks) != 24 {
-		t.Errorf("hooks=%d", len(parsed.Hooks))
+	if len(parsed.Hooks) != 25 {
+		t.Errorf("hooks=%d, want 25", len(parsed.Hooks))
 	}
-	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {
+	if parsed.Settings["statusLine"] == nil {
 		t.Errorf("status lines=%#v", parsed.Settings)
 	}
 	var mcp map[string]any
@@ -340,30 +352,6 @@ func TestRenderCacheLifetimeMainChatOnly(t *testing.T) {
 	}
 }
 
-func TestRenderSubagentStatuslineTraceFollowsTheConfigSwitch(t *testing.T) {
-	home, machine := renderMachine(t)
-	for _, purpose := range []Purpose{PurposeInteractive, PurposeQuery} {
-		for _, on := range []bool{false, true} {
-			machine.Claude.SubagentStatuslineTrace = on
-			_, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Args: []string{"hello"}}, machine)
-			got, set := parsed.SettingsEnv[EnvSubagentStatuslineTrace]
-			if set != on || (on && got != "1") {
-				t.Errorf("purpose %v trace=%t: settings env %s = %q (set %t), want %t", purpose, on,
-					EnvSubagentStatuslineTrace, got, set, on)
-			}
-		}
-	}
-	if EnvSubagentStatuslineTrace != "PFM_SUBAGENT_STATUSLINE_TRACE" {
-		t.Errorf("EnvSubagentStatuslineTrace = %q", EnvSubagentStatuslineTrace)
-	}
-	machine.Claude.SubagentStatuslineTrace = true
-	for _, row := range Resolve(machine, 0) {
-		if row.Knob.Name == knobSubagentStatuslineTrace && row.Value != "true" {
-			t.Errorf("Resolve value = %q, want true", row.Value)
-		}
-	}
-}
-
 func TestRenderSystemPromptModes(t *testing.T) {
 	home, machine := renderMachine(t)
 	prompt := filepath.Join(t.TempDir(), "seat.md")
@@ -412,6 +400,35 @@ func TestRenderPrompted(t *testing.T) {
 	}
 }
 
+// Auto mode starts the chat under the permission classifier and keeps bypass
+// reachable; the launcher wraps a user's own claude and gets neither.
+func TestRenderAutoPermissionMode(t *testing.T) {
+	home, machine := renderMachine(t)
+	machine.Claude.PermissionMode = pfmconfig.PermissionAuto
+	want := []string{flagAllowBypass, flagPermissionMode, permissionModeAuto}
+	for _, request := range []Request{
+		{Purpose: PurposeInteractive, Home: home},
+		{Purpose: PurposeResume, Home: home, Resume: "R"},
+		{Purpose: PurposeLauncher, Home: home, Binary: "/bin/claude"},
+	} {
+		launch, parsed := renderParsed(t, request, machine)
+		if request.Purpose == PurposeLauncher {
+			if slices.Contains(launch.Argv, flagPermissionMode) || parsed.PermissionMode != "" ||
+				slices.Contains(launch.Argv, flagAllowBypass) {
+				t.Errorf("launcher carries auto mode: %q", launch.Argv)
+			}
+			continue
+		}
+		index := slices.Index(launch.Argv, flagAllowBypass)
+		if index < 0 || index+len(want) > len(launch.Argv) || !slices.Equal(launch.Argv[index:index+len(want)], want) {
+			t.Errorf("purpose %d argv %q lacks %q", request.Purpose, launch.Argv, want)
+		}
+		if parsed.PermissionMode != permissionModeAuto || parsed.Autonomy {
+			t.Errorf("purpose %d parsed mode=%q autonomy=%t", request.Purpose, parsed.PermissionMode, parsed.Autonomy)
+		}
+	}
+}
+
 func TestRenderLauncher(t *testing.T) {
 	home, machine := renderMachine(t)
 	launch, parsed := renderParsed(t, Request{Purpose: PurposeLauncher, Home: home, Binary: "/bin/claude"}, machine)
@@ -449,7 +466,7 @@ func TestRenderQuery(t *testing.T) {
 		parsed.Settings["env"] == nil {
 		t.Errorf("query settings=%#v", parsed.Settings)
 	}
-	for _, key := range []string{"hooks", "statusLine", "subagentStatusLine"} {
+	for _, key := range []string{"hooks", "statusLine"} {
 		if _, ok := parsed.Settings[key]; ok {
 			t.Errorf("query carries %s", key)
 		}
@@ -801,8 +818,8 @@ func TestPromptWarning(t *testing.T) {
 		{"seat file present", "professor", "", Request{PromptFile: seat}, "", true},
 		{
 			"seat file missing", "production", "",
-			Request{PromptFile: "/nonexistent/seat.md"},
-			"/nonexistent/seat.md", false,
+			Request{PromptFile: testjail.Place("/nonexistent/seat.md")},
+			testjail.Place("/nonexistent/seat.md"), false,
 		},
 		{"seat file is a directory", "production", "", Request{PromptFile: filepath.Dir(seat)}, "is a directory", false},
 		{

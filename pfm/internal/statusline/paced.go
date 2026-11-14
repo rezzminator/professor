@@ -1,6 +1,7 @@
 package statusline
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,12 +21,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/usagehook"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // pacedDir is the directory under the cache dir holding each chat's paced
 // render files, suffixed with the uid that owns it; it must be that uid's own
-// real directory (usagehook.EnsurePrivateDir), else the chat renders inline.
+// real directory (paths.EnsurePrivateDir), else the chat renders inline.
 const pacedDir = "cc-sl-paced"
 
 const (
@@ -81,10 +83,10 @@ type pacedLine struct {
 }
 
 // PacedKey names a chat for Paced: the first 16 bytes of the SHA-256 of its
-// session_id (else its transcript_path) and the terminal width the render
-// reads, hex. A payload naming neither, or not JSON, has no key: it renders
-// inline as before the pacer.
-func PacedKey(raw []byte, columns string) string {
+// session_id (else its transcript_path), the terminal width, the Claude config
+// directory and the pane the render reads, hex. A payload naming neither, or
+// not JSON, has no key: it renders inline as before the pacer.
+func PacedKey(raw []byte, columns, configDir string, place resolve.WhoamiEnvironment) string {
 	var chat struct {
 		SessionID      string `json:"session_id"`
 		TranscriptPath string `json:"transcript_path"`
@@ -92,16 +94,16 @@ func PacedKey(raw []byte, columns string) string {
 	if json.Unmarshal(raw, &chat) != nil {
 		return ""
 	}
-	id := chat.SessionID
-	if id == "" {
-		id = chat.TranscriptPath
-	}
+	id := cmp.Or(chat.SessionID, chat.TranscriptPath)
 	if id == "" {
 		return ""
 	}
-	// The width is the one render input the worker cannot read from stdin: it
-	// keeps its spawner's COLUMNS, so a resized terminal is another chat key.
-	digest := sha256.Sum256([]byte(id + "\x00" + columns))
+	// The worker keeps its spawner's environment, so every render input stdin
+	// does not carry is part of the key: COLUMNS (a resized terminal), the config
+	// directory (a chat resumed on another account) and the pane (a chat resumed
+	// in another tmux server or Herdr pane, whose crumb an old worker misfiles).
+	digest := sha256.Sum256([]byte(id + "\x00" + columns + "\x00" + configDir + "\x00" + place.TMUX + "\x00" +
+		place.TMUXPane + "\x00" + place.HerdrSocket + "\x00" + place.HerdrPane))
 	return hex.EncodeToString(digest[:16])
 }
 
@@ -270,7 +272,7 @@ func (paced Paced) normalized() Paced {
 // dir is the chat files' private directory, made when absent.
 func (paced Paced) dir() (string, error) {
 	dir := filepath.Join(paced.CacheDir, pacedDir+"-"+strconv.Itoa(os.Getuid()))
-	if err := usagehook.EnsurePrivateDir(dir); err != nil {
+	if err := paths.EnsurePrivateDir("paced directory", dir); err != nil {
 		return "", fmt.Errorf("paced directory refused: %w", err)
 	}
 	return dir, nil

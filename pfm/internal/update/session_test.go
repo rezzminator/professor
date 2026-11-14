@@ -2,14 +2,16 @@ package update
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // upstreamCommit changes one store template and commits it, as a later
@@ -21,10 +23,9 @@ func (f projectUpdateFixture) upstreamCommit(t *testing.T, template, content, su
 	gitTemp(t, f.store, "commit", "-qm", subject)
 }
 
-// upstreamCommits is count upstreamCommit calls on one template written as one
-// git fast-import stream: commit index (1…count) sets template to
-// content(index) under subject(index), on the store's branch after its HEAD,
-// and the store is checked out at the last, as the calls would leave it.
+// upstreamCommits is count upstreamCommit calls on one template: commit index
+// (1…count) sets template to content(index) under subject(index), on the
+// store's branch after its HEAD, as the calls would leave it.
 func (f projectUpdateFixture) upstreamCommits(
 	t *testing.T,
 	template string,
@@ -32,27 +33,9 @@ func (f projectUpdateFixture) upstreamCommits(
 	content, subject func(index int) string,
 ) {
 	t.Helper()
-	branch := updateGitBranch(t, f.store)
-	parent := updateGitRevision(t, f.store, "HEAD")
-	when := time.Now().Unix()
-	var stream strings.Builder
 	for index := 1; index <= count; index++ {
-		message, body := subject(index)+"\n", content(index)
-		fmt.Fprintf(&stream, "commit refs/heads/%s\n", branch)
-		fmt.Fprintf(&stream, "committer fixture-identity <fixture.invalid> %d +0000\n", when)
-		fmt.Fprintf(&stream, "data %d\n%s", len(message), message)
-		if index == 1 {
-			fmt.Fprintf(&stream, "from %s\n", parent)
-		}
-		fmt.Fprintf(&stream, "M 100644 inline templates/%s\ndata %d\n%s\n", template, len(body), body)
+		f.upstreamCommit(t, template, content(index), subject(index))
 	}
-	command := exec.Command("git", "fast-import", "--quiet")
-	command.Dir = f.store
-	command.Stdin = strings.NewReader(stream.String())
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git fast-import: %v\n%s", err, output)
-	}
-	gitTemp(t, f.store, "reset", "-q", "--hard")
 }
 
 // sessionVerb runs one `pfm update <verb>` in the fixture project.
@@ -65,7 +48,9 @@ func (f projectUpdateFixture) sessionVerb(args ...string) (code int, stdout, std
 // sessionReport is the report a session re-runs: the retired-name scan on.
 func (f projectUpdateFixture) sessionReport() (code int, stdout string) {
 	var out bytes.Buffer
-	code = professor.RunProjectUpdates(f.project, f.runtime.Paths.Home, false, &out, ScanRetiredNames)
+	code = professor.RunProjectUpdates(
+		f.project, f.runtime.Paths.Home, false, &out, RetiredNameScanner(context.Background(), f.runtime.Paths.Home),
+	)
 	return code, out.String()
 }
 
@@ -103,7 +88,7 @@ func TestSessionClosesEveryRowWithRecordedDecisions(t *testing.T) {
 		t.Errorf("opening report flags the URL or the project's own /km:\n%s", report)
 	}
 	// An indented line whose first field is a status word reads as a row to a
-	// report parser (infra/fence/lanes/adopt.sh takes NEW's rows that way).
+	// report parser (an adopter session takes NEW's rows that way).
 	statusWords := map[string]bool{
 		"UPDATED": true, "NEW": true, "GONE-UPSTREAM": true, "MOVED": true, "LOCAL-DELETED": true, "RETIRED-NAME": true,
 	}
@@ -271,17 +256,12 @@ func TestUpdatedRowListsTheOldestCommitsFirstPastTheCap(t *testing.T) {
 		func(index int) string { return fmt.Sprintf("step %02d", index) },
 	)
 	_, report := fixture.sessionReport()
-	// The fixture's own "new templates" commit is the oldest after the pin.
-	if !strings.Contains(report, " new templates\n") || !strings.Contains(report, " step 01\n") ||
-		!strings.Contains(report, " step 39\n") {
-		t.Errorf("the list lacks the oldest commits (new templates, step 01 … step 39):\n%s", report)
-	}
-	if strings.Contains(report, " step 40\n") || strings.Contains(report, " step 45\n") {
-		t.Errorf("the list holds commits past the cap:\n%s", report)
-	}
-	if !strings.Contains(report, "… and 6 newer commit(s) not listed: git log --reverse ") {
-		t.Errorf("the list does not count the commits it leaves out (46 since the pin, 40 listed):\n%s", report)
-	}
+	golden(
+		t,
+		"updated_row_cap.txt",
+		testjail.TempPath(`/[^\s"':]*`).
+			ReplaceAllString(regexp.MustCompile(`\b[0-9a-f]{7,40}\b`).ReplaceAllString(report, "{sha}"), "{tmp}"),
+	)
 }
 
 // TestRecordedReasonsRenderOnOneLine: a keep or accept reason taken from
@@ -390,7 +370,10 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 			}
 			if row.hit {
 				_, report := fixture.sessionReport()
-				rows, err := professor.OpenProjectRows(fixture.project, fixture.runtime.Paths.Home, ScanRetiredNames)
+				rows, err := professor.OpenProjectRows(
+					fixture.project, fixture.runtime.Paths.Home,
+					RetiredNameScanner(context.Background(), fixture.runtime.Paths.Home),
+				)
 				if err != nil || len(rows) != 1 || !strings.Contains(report, "RETIRED-NAME  1") {
 					t.Fatalf("coverage must leave earlier hit open: rows=%+v err=%v report=%s", rows, err, report)
 				}
@@ -406,7 +389,10 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 				strings.Contains(report, "matches nothing now") {
 				t.Fatalf("accepted coverage must be explicit and close review: code=%d\n%s", code, report)
 			}
-			rows, err := professor.OpenProjectRows(fixture.project, fixture.runtime.Paths.Home, ScanRetiredNames)
+			rows, err := professor.OpenProjectRows(
+				fixture.project, fixture.runtime.Paths.Home,
+				RetiredNameScanner(context.Background(), fixture.runtime.Paths.Home),
+			)
 			if err != nil || len(rows) != 0 {
 				t.Fatalf("accepted coverage remains open: rows=%+v err=%v", rows, err)
 			}
@@ -456,5 +442,22 @@ func TestSessionAcceptsReviewedIncompleteCoverage(t *testing.T) {
 				t.Fatalf("undo did not reopen coverage:\n%s", report)
 			}
 		})
+	}
+}
+
+// golden compares got with testdata/{file}; a mismatch prints the GOLDEN line the fill script writes from.
+func golden(t *testing.T, file, got string) {
+	t.Helper()
+	want, err := os.ReadFile(filepath.Join("testdata", file))
+	if err != nil || string(want) != got {
+		t.Errorf(
+			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN internal/update/testdata/%s = %q",
+			file,
+			err,
+			want,
+			got,
+			file,
+			got,
+		)
 	}
 }

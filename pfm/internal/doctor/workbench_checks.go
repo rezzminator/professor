@@ -6,13 +6,14 @@ import (
 	"io"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
-func printWorkbenchDoctor(stdout io.Writer, start, home string) (warnings, failures int) {
+func printWorkbenchDoctor(stdout io.Writer, start, home string, runner deps.Runner) (warnings, failures int) {
 	root, found, err := professor.ResolveProjectRoot(start)
 	if err != nil {
 		obs.Logger(context.Background()).Error("workbench doctor root", "path", start, obs.FieldErr, err)
@@ -43,7 +44,7 @@ func printWorkbenchDoctor(stdout io.Writer, start, home string) (warnings, failu
 			if engine != pfmengine.Codex && engine != pfmengine.OpenCode {
 				continue
 			}
-			check, err := workbench.CheckMirror(*bench, engine, home)
+			check, err := workbench.CheckMirror(*bench, engine, home, runner)
 			if err != nil {
 				fmt.Fprintf(
 					stdout,

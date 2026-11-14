@@ -17,7 +17,7 @@ import (
 
 func newTestChat(t *testing.T) *Service {
 	t.Helper()
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	service := newFixtureService(t)
 	t.Cleanup(func() {
 		if err := service.Close(); err != nil {

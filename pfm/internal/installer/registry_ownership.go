@@ -15,8 +15,6 @@ import (
 // The classes the registry-ownership scan reports (spec D24-D26): ownership is
 // decided by a link's target against the install plan, never by an entry's name.
 const (
-	// RegistryStore: a link into the retired home store.
-	RegistryStore = "STORE"
 	// RegistryOrphan: an owned link whose target exists but which the install
 	// plan does not write.
 	RegistryOrphan = "ORPHAN"
@@ -57,9 +55,12 @@ type RegistryScan struct {
 type RegistryFinding struct{ Class, Path, Target, Name string }
 
 // RegistryOwnership is the scan's result: what it lists and what it covered.
+// Unreadable holds each entry the scan could not judge; the scan's error joins
+// them, and the installer's sweep alone carries on past them.
 type RegistryOwnership struct {
 	Findings            []RegistryFinding
 	Entries, Registries int
+	Unreadable          []error
 }
 
 // errPlanSkillSources marks a plan that failed on the source-fetched skills
@@ -118,7 +119,7 @@ func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, err
 		plan.Links[filepath.Join(store, globalSkillsRegistry, entry.Name())] = true
 		plan.Links[filepath.Join(home, ".agents", globalSkillsRegistry, entry.Name())] = true
 	}
-	sources, _, err := loadSkillSources(clone, releaseURL)
+	sources, _, _, err := loadSkillSources(clone, releaseURL)
 	if err != nil {
 		return RegistryPlan{}, fmt.Errorf("%w: %w", errPlanSkillSources, err)
 	}
@@ -129,15 +130,12 @@ func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, err
 		plan.Links[filepath.Join(store, globalSkillsRegistry, source.Name)] = true
 		plan.Links[filepath.Join(home, ".agents", globalSkillsRegistry, source.Name)] = true
 	}
-	assets, err := assetFiles()
+	assets, err := assetFiles(nativeScheduler())
 	if err != nil {
 		return RegistryPlan{}, fmt.Errorf("plan registry host assets: %w", err)
 	}
 	for _, asset := range assets {
 		if target, found := commandTargetIn(store, asset.path); found {
-			plan.Links[target] = true
-		}
-		if target, found := skillTarget(store, asset.path); found {
 			plan.Links[target] = true
 		}
 	}
@@ -169,8 +167,10 @@ func ScanRegistryOwnership(home, store string, retired RetiredRegistryNames) (Re
 // registries ({store}/agents, {store}/commands, {store}/rules, {store}/skills,
 // ~/.agents/skills) and lists the unmarked entries named for a retired name.
 // A link outside the owned roots and any other unmarked entry is never listed.
-// WalkDir never follows a symlink into an operator's directory. A walk, read
-// or stat error returns the error, never a shorter list.
+// WalkDir never follows a symlink into an operator's directory. A registry it
+// cannot walk returns an empty result and the error; an entry it cannot read,
+// link or stat is listed in Unreadable and joined into the error, never a
+// shorter list read as complete.
 func InspectRegistryOwnership(scan RegistryScan) (RegistryOwnership, error) {
 	var result RegistryOwnership
 	for _, registry := range []struct{ path, kind string }{
@@ -184,7 +184,7 @@ func InspectRegistryOwnership(scan RegistryScan) (RegistryOwnership, error) {
 			return RegistryOwnership{}, err
 		}
 	}
-	return result, nil
+	return result, errors.Join(result.Unreadable...)
 }
 
 func (scan RegistryScan) walk(result *RegistryOwnership, registry, kind string) error {
@@ -193,7 +193,12 @@ func (scan RegistryScan) walk(result *RegistryOwnership, registry, kind string) 
 			return nil
 		}
 		if walkErr != nil {
-			return fmt.Errorf("inspect registry path %s: %w", path, walkErr)
+			err := fmt.Errorf("inspect registry path %s: %w", path, walkErr)
+			if path == registry {
+				return err
+			}
+			result.Unreadable = append(result.Unreadable, err)
+			return nil
 		}
 		isLink := entry.Type()&os.ModeSymlink != 0
 		if path == registry {
@@ -213,10 +218,21 @@ func (scan RegistryScan) walk(result *RegistryOwnership, registry, kind string) 
 			return nil
 		}
 		result.Entries++
+		var err error
 		if isLink {
-			return scan.link(result, path, kind, false)
+			err = scan.link(result, path, kind, false)
+		} else {
+			err = scan.regular(result, registry, path, kind, entry)
 		}
-		return scan.regular(result, registry, path, kind, entry)
+		if err == nil || errors.Is(err, fs.SkipDir) {
+			return err
+		}
+		// One entry the scan cannot judge costs only that entry.
+		result.Unreadable = append(result.Unreadable, err)
+		if entry.IsDir() {
+			return fs.SkipDir
+		}
+		return nil
 	})
 }
 
@@ -267,10 +283,9 @@ func (scan RegistryScan) regular(
 	return nil
 }
 
-// link judges one registry link by its target: into a retired store is STORE;
-// otherwise, if it is not an owned root's, it is the user's; a gone target is
-// DEAD; an existing target the plan does not write is ORPHAN. A registry root
-// that is itself a link is judged STORE or DEAD only.
+// link judges one registry link by its target: if it is not an owned root's,
+// it is the user's; a gone target is DEAD; an existing target the plan does
+// not write is ORPHAN. A registry root that is itself a link is judged DEAD only.
 func (scan RegistryScan) link(result *RegistryOwnership, path, kind string, registryRoot bool) error {
 	target, err := os.Readlink(path)
 	if err != nil {
@@ -281,19 +296,8 @@ func (scan RegistryScan) link(result *RegistryOwnership, path, kind string, regi
 	}
 	target = filepath.Clean(target)
 	finding := RegistryFinding{Path: path, Target: target}
-	for _, store := range RetiredGeneratedStores(scan.Home) {
-		if withinGlobalSource(target, store) {
-			finding.Class = RegistryStore
-			result.Findings = append(result.Findings, finding)
-			return nil
-		}
-	}
 	owned := withinGlobalSource(target, managedRootForHome(scan.Home)) ||
 		ownedGlobalLink(scan.Roots, kind, filepath.Base(path), target)
-	for _, root := range scan.Roots {
-		// Legacy skill installs linked workflows before templates/global/skills.
-		owned = owned || withinGlobalSource(target, filepath.Join(root, "workflows"))
-	}
 	if !owned {
 		return nil
 	}

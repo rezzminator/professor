@@ -98,11 +98,6 @@ FAIL_LIST=1 invoke prune
 if [[ "$rc" -ne 0 && -d "$repo/.worktrees/orphan" && ! -f "$trace" && "$out" == *'enumerat'* ]]; then
   ok 'F9: failed registration enumeration deletes nothing and fails visibly'
 else bad 'F9: failed registration enumeration deletes nothing and fails visibly' "rc=$rc; out=$out"; fi
-fixture
-FAIL_SUBMODULE=1 invoke create submodule-failed
-if [[ "$rc" -ne 0 && -d "$repo/.worktrees/submodule-failed" && "$out" == *'partial worktree:'* && "$out" != *'Worktree ready:'* && ! -f "$trace" ]]; then
-  ok 'F16: failed submodule setup names partial worktree and never claims readiness'
-else bad 'F16: failed submodule setup names partial worktree and never claims readiness' "rc=$rc; out=$out"; fi
 INSTALL_CASE=1 fixture
 invoke create install-failed
 if [[ "$rc" -ne 0 && -d "$repo/.worktrees/install-failed" && "$out" == *'partial worktree:'* && "$out" != *'Worktree ready:'* && ! -f "$trace" ]]; then
@@ -151,6 +146,25 @@ invoke prune
 if [[ "$rc" -ne 0 && ! -d "$repo/.worktrees/a-nukefails" && ! -d "$repo/.worktrees/b-orphan" && "$out" == *'Prune complete: 2 orphaned'* && "$out" == *'teardown failed for 1 pruned worktree(s): a-nukefails'* ]] && grep -qx a-nukefails "$repo/nuke-trace" && grep -qx b-orphan "$repo/nuke-trace" && grep -qx 'free b-orphan' "$trace"; then
   ok 'F5: a failed stack teardown does not abort the prune: the rest is pruned, the summary printed, the failure named and non-zero'
 else bad 'F5: a failed stack teardown does not abort the prune: the rest is pruned, the summary printed, the failure named and non-zero' "rc=$rc; out=$out"; fi
+# A caller umask of 077 checks the tree out world-readable (a container of another uid bind-mounts its
+# files), while the env files create writes after the checkout keep that umask.
+mode() { ls -ld "$1" | cut -c1-10; }
+ENV_FILES=.env.test fixture
+mkdir -p "$repo/init" && printf 'init\n' > "$repo/init/01-init.txt" && printf '#!/bin/sh\n' > "$repo/init/02-init.sh" || exit 2
+chmod 755 "$repo/init/02-init.sh" && fgit "$repo" add init && fgit "$repo" commit -q -m init || exit 2
+printf 'PORT=1\n' > "$repo/.env.test" && chmod 644 "$repo/.env.test" || exit 2
+caller_umask="$(umask)"; umask 077
+invoke create umask-077
+umask "$caller_umask"
+w="$repo/.worktrees/umask-077"
+modes="file=$(mode "$w/init/01-init.txt") exec=$(mode "$w/init/02-init.sh") dir=$(mode "$w/init")"
+if [[ "$rc" -eq 0 && "$modes" == 'file=-rw-r--r-- exec=-rwxr-xr-x dir=drwxr-xr-x' ]]; then
+  ok 'umask: a 077 caller gets a checkout readable by another uid (644 files, 755 executables and dirs)'
+else bad 'umask: a 077 caller gets a checkout readable by another uid (644 files, 755 executables and dirs)' "rc=$rc; $modes; out=$out"; fi
+envmodes="env=$(mode "$w/.env.test") ports=$(mode "$w/.env.ports")"
+if [[ "$rc" -eq 0 && "$envmodes" == 'env=-rw------- ports=-rw-------' ]]; then
+  ok 'umask: the env files create writes after the checkout keep the caller 077 umask (600)'
+else bad 'umask: the env files create writes after the checkout keep the caller 077 umask (600)' "rc=$rc; $envmodes; out=$out"; fi
 # provisioned_fixture <name> [tracked|ignored]: copy/rewrite inside create, before final bytes are recorded.
 provisioned_fixture() {
   ENV_FILES=.env.test fixture
@@ -249,7 +263,9 @@ if [[ "$rc" -eq 0 && "$out" == *'Worktree ready:'* && "$out" == *'Resuming incom
 else bad 'F6: retry after hashing recovers records final bytes before readiness' "rc=$rc; out=$out"; fi
 # A repo with a submodule: create populates it, so a clean worktree holds an initialized submodule
 # (`ignore = dirty`, as this repo's plugins carry it, hides the submodule's own edits from plain status).
-submodule_fixture() {
+# submodule_repo: a fixture whose main checkout holds the initialized submodule vendor; submodule_fixture
+# then creates worktree <name> from it.
+submodule_repo() {
   fixture
   local sub="$T/sub $seq"
   /usr/bin/git init -q -b main "$sub" || exit 2
@@ -260,10 +276,27 @@ submodule_fixture() {
   /usr/bin/git -C "$repo" config -f .gitmodules submodule.vendor.ignore dirty || exit 2
   /usr/bin/git -C "$repo" add .gitmodules
   /usr/bin/git -C "$repo" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false commit -q -m vendor || exit 2
+}
+submodule_fixture() {
+  submodule_repo
   invoke create "$1"
   [[ "$rc" -eq 0 && -f "$repo/.worktrees/$1/vendor/lib.txt" ]] || { echo "test-worktree: setup failure: create did not populate the submodule: $out" >&2; exit 2; }
 }
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always
+# A gitlink only the main checkout's clone holds: its remote never received the commit.
+submodule_repo
+sgit() { /usr/bin/git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false "${@:2}"; }
+printf 'local only\n' > "$repo/vendor/lib.txt" && sgit "$repo/vendor" commit -q -am local && sgit "$repo" commit -q -am 'bump vendor' || exit 2
+local_sha="$(sgit "$repo/vendor" rev-parse HEAD)"
+invoke create unpushed-pin
+if [[ "$rc" -eq 0 && "$out" == *'Worktree ready:'* && "$(sgit "$repo/.worktrees/unpushed-pin/vendor" rev-parse HEAD 2>&1)" == "$local_sha" && "$(grep -c "^WARN submodule vendor: pinned ${local_sha:0:12} not fetchable from remote — initialised from local clone $repo/vendor (push it)$" "$T/out")" == 2 ]]; then
+  ok 'F16: a pinned submodule commit missing on its remote inits from the main checkout clone, WARN on stderr and in the summary, exit 0'
+else bad 'F16: a pinned submodule commit missing on its remote inits from the main checkout clone, WARN on stderr and in the summary, exit 0' "rc=$rc; out=$out"; fi
+submodule_repo
+FAIL_SUBMODULE=1 invoke create submodule-failed
+if [[ "$rc" -eq 0 && "$out" == *'Worktree ready:'* && ! -e "$repo/.worktrees/submodule-failed/vendor/lib.txt" && "$(grep -c '^WARN submodule vendor: not initialised (synthetic submodule failure) — worktree created without it$' "$T/out")" == 2 ]] && grep -qx 'alloc submodule-failed' "$trace"; then
+  ok 'F16: a submodule neither its remote nor the main checkout clone serves leaves the create complete, WARN on stderr and in the summary, exit 0'
+else bad 'F16: a submodule neither its remote nor the main checkout clone serves leaves the create complete, WARN on stderr and in the summary, exit 0' "rc=$rc; out=$out"; fi
 submodule_fixture clean-sub
 invoke remove clean-sub
 if [[ "$rc" -eq 0 && ! -d "$repo/.worktrees/clean-sub" && "$out" == *'Worktree removed'* ]] && grep -qx 'free clean-sub' "$trace"; then
@@ -285,7 +318,6 @@ invoke remove unpushed-sub
 if [[ "$rc" -ne 0 && -d "$w/vendor" && "$out" == *'on no remote branch'* && "$out" != *'Worktree removed'* ]] && ! grep -qx 'free unpushed-sub' "$trace"; then
   ok 'F1: a submodule commit on no remote branch refuses removal without --discard (its objects go with the worktree)'
 else bad 'F1: a submodule commit on no remote branch refuses removal without --discard (its objects go with the worktree)' "rc=$rc; out=$out"; fi
-sgit() { /usr/bin/git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false "${@:2}"; }
 # A commit on a local submodule branch whose HEAD went back to the recorded commit: status is clean,
 # yet the branch's objects live only in this worktree's private Git directory.
 submodule_fixture branch-sub
@@ -316,4 +348,58 @@ if [[ "$rc" -eq 0 && ! -d "$w" && "$out" == *'Worktree removed'* ]]; then
   ok 'F1: a submodule pinned to a remote tag on no branch is removed without --discard'
 else bad 'F1: a submodule pinned to a remote tag on no branch is removed without --discard' "rc=$rc; out=$out"; fi
 unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+# land commits in the worktree under this identity.
+export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+# land_fixture <name>: a script-created worktree holding one committed change; tip is its branch's commit.
+land_fixture() {
+  fixture
+  invoke create "$1"
+  [[ "$rc" -eq 0 ]] || { echo "test-worktree: setup failure: create $1 failed: $out" >&2; exit 2; }
+  w="$repo/.worktrees/$1"
+  printf 'work\n' > "$w/work.txt" && fgit "$w" add work.txt && fgit "$w" commit -q -m work || exit 2
+  tip="$(fgit "$w" rev-parse HEAD)" && base="$(fgit "$repo" rev-parse main)" || exit 2
+}
+has_branch() { /usr/bin/git -C "$repo" show-ref --verify --quiet "refs/heads/pipeline/$1"; }
+land_fixture clean-land
+invoke land clean-land
+if [[ "$rc" -eq 0 && "$(fgit "$repo" rev-parse main)" == "$tip" && ! -d "$w" && "$out" == *'Landed: pipeline/clean-land on main'* ]] && ! has_branch clean-land && grep -qx 'free clean-land' "$trace"; then
+  ok 'land: a clean branch fast-forwards main, then the worktree and branch are removed'
+else bad 'land: a clean branch fast-forwards main, then the worktree and branch are removed' "rc=$rc; out=$out"; fi
+land_fixture dirty-land
+printf 'uncommitted\n' > "$w/base.txt"
+invoke land dirty-land
+if [[ "$rc" -ne 0 && "$(cat "$w/base.txt")" == uncommitted && "$(fgit "$repo" rev-parse main)" == "$base" && "$out" == "Error: $w has uncommitted changes; pass -m <message> to commit them; nothing landed" ]] && has_branch dirty-land; then
+  ok 'land: a dirty worktree without -m refuses in one line, landing and committing nothing'
+else bad 'land: a dirty worktree without -m refuses in one line, landing and committing nothing' "rc=$rc; out=$out"; fi
+land_fixture message-land
+printf 'leftover\n' > "$w/base.txt"
+invoke land message-land -m 'leftover work'
+if [[ "$rc" -eq 0 && "$(fgit "$repo" log -1 --format=%s main)" == 'leftover work' && "$(fgit "$repo" show main:base.txt)" == leftover && "$(fgit "$repo" show --name-only --format= main)" == base.txt && ! -d "$w" ]] && ! has_branch message-land; then
+  ok 'land: -m commits the dirty work (never the provisioned .env.ports) and lands it'
+else bad 'land: -m commits the dirty work (never the provisioned .env.ports) and lands it' "rc=$rc; out=$out"; fi
+land_fixture moved-land
+printf 'moved\n' > "$repo/moved.txt" && fgit "$repo" add moved.txt && fgit "$repo" commit -q -m moved || exit 2
+moved="$(fgit "$repo" rev-parse main)"
+invoke land moved-land
+if [[ "$rc" -ne 0 && "$(fgit "$repo" rev-parse main)" == "$moved" && "$(fgit "$repo" rev-parse pipeline/moved-land)" == "$tip" && -d "$w" && "$out" == 'Error: main has commits pipeline/moved-land lacks; gitter syncs it (Phase MERGE); pipeline/moved-land keeps its commits; nothing landed' ]]; then
+  ok 'land: a base that moved refuses in one line, keeping the branch, its commit and the worktree'
+else bad 'land: a base that moved refuses in one line, keeping the branch, its commit and the worktree' "rc=$rc; out=$out"; fi
+land_fixture locked-land
+/usr/bin/git -C "$repo" worktree lock --reason 'post-merge gate running' "$w" || exit 2
+invoke land locked-land
+if [[ "$rc" -eq 0 && "$(fgit "$repo" rev-parse main)" == "$tip" && -d "$w" && "$out" == *"Worktree kept (locked): $w — post-merge gate running"* ]] && has_branch locked-land && ! grep -qx 'free locked-land' "$trace"; then
+  ok 'land: a locked worktree lands and is kept with its branch, its lock reason reported'
+else bad 'land: a locked worktree lands and is kept with its branch, its lock reason reported' "rc=$rc; out=$out"; fi
+# The fixed interface: the header, the case dispatch and the rule name one verb set (git-guard keys on it).
+RULE="${2:-$SOURCE_ROOT/templates/project/rules/git-writes-through-gitter.md}"
+source "$SOURCE_ROOT/scripts/worktree-verbs.sh"
+worktree_verbs_agree "$SUT" "$RULE"; agree=$?
+if [[ "$agree" -eq 0 && "$WORKTREE_VERBS_REPORT" == "header($SUT)={create land list prune remove } case={create land list prune remove } rule($RULE)={create land list prune remove }" ]]; then
+  ok 'interface: the header, the case dispatch and the rule name the same verbs'
+else bad 'interface: the header, the case dispatch and the rule name the same verbs' "rc=$agree; $WORKTREE_VERBS_REPORT"; fi
+sed 's/^  prune)/  sweep)/' "$SUT" > "$T/drifted.sh" || exit 2
+worktree_verbs_agree "$T/drifted.sh" "$RULE"; agree=$?
+if [[ "$agree" -eq 1 && "$WORKTREE_VERBS_REPORT" == "header($T/drifted.sh)={create land list prune remove } case={create land list remove sweep } rule($RULE)={create land list prune remove }" ]]; then
+  ok 'interface: a dispatch verb the header and the rule do not name is a mismatch'
+else bad 'interface: a dispatch verb the header and the rule do not name is a mismatch' "rc=$agree; $WORKTREE_VERBS_REPORT"; fi
 shtest_end

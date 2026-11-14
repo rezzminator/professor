@@ -12,7 +12,7 @@ import (
 // writes exactly one mcp.call record under the mcp component, tool and kind
 // named, never the excerpt itself.
 func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
-	setupBackendFixture(t)
+	setupBackendPaths(t)
 	_, recorder := obs.Test(t)
 	service := newFixtureService(t)
 	defer func() {

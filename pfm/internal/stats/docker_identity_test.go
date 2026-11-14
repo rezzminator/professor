@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestDockerInspectorReadsIdentityFromJailedSocket(t *testing.T) {
 	_, recorder := obs.Test(t)
-	socket := filepath.Join(t.TempDir(), "probe-docker.sock")
+	socket := filepath.Join(testjail.ShortRoot(t), "probe-docker.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +76,7 @@ func TestDockerInspectorReadsIdentityFromJailedSocket(t *testing.T) {
 // NewSampler itself builds, not just newDockerInspector called directly.
 func TestNewSamplerWithDockerSocketWiresResolveDockerIdentities(t *testing.T) {
 	t.Parallel()
-	socket := filepath.Join(t.TempDir(), "probe-docker.sock")
+	socket := filepath.Join(testjail.ShortRoot(t), "probe-docker.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +101,7 @@ func TestNewSamplerWithDockerSocketWiresResolveDockerIdentities(t *testing.T) {
 		t.Fatal("NewSamplerWithDockerSocket built a Sampler with a nil DockerInspect")
 	}
 	containers := []Container{{ID: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}}
-	if warnings := sampler.resolveDockerIdentities(containers); len(warnings) != 0 {
+	if warnings := sampler.resolveDockerIdentities(containers, 0); len(warnings) != 0 {
 		t.Fatalf("resolveDockerIdentities warnings = %v, want none", warnings)
 	}
 	if containers[0].Name != "professor-web" || containers[0].Image != "registry.example/professor:web" {

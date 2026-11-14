@@ -3,12 +3,16 @@ package installer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // bootstrapFailureRunner models launchd's real shape: `print` answers for a
@@ -51,23 +55,20 @@ func TestLaunchAgentBootstrapFailureAfterStopSaysTheServiceIsDown(t *testing.T) 
 		apply:   true,
 	}
 	err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, true)
-	if err == nil || !strings.Contains(err.Error(), "bootstrap") {
-		t.Fatalf("bootstrap failure=%v, want actionable error", err)
+	domain := fmt.Sprintf("gui/%d", os.Getuid())
+	want := "launchctl bootstrap com.professor.pfm.mcp failed AFTER its running job was stopped to load the new plist;" +
+		" the agent file is installed and the service is now DOWN — restart it with `launchctl bootstrap " + domain +
+		" /fixture/agent.plist`: bootstrap exit status 5"
+	if err == nil || err.Error() != want {
+		t.Fatalf("bootstrap failure = %v, want %q", err, want)
 	}
-	if !strings.Contains(err.Error(), "DOWN") || !strings.Contains(err.Error(), "launchctl bootstrap gui/") {
-		t.Fatalf("error must say the service is down and how to restart it, got %v", err)
+	wantCalls := []string{
+		"launchctl print " + domain + "/com.professor.pfm.mcp",
+		"launchctl bootout " + domain + "/com.professor.pfm.mcp",
+		"launchctl bootstrap " + domain + " /fixture/agent.plist",
 	}
-	var sawBootout, sawBootstrap bool
-	for _, call := range runner.calls {
-		if strings.Contains(call, "bootout") {
-			sawBootout = true
-		}
-		if strings.Contains(call, "bootstrap") {
-			sawBootstrap = true
-		}
-	}
-	if !sawBootout || !sawBootstrap {
-		t.Fatalf("calls=%q, want both a bootout and a bootstrap", runner.calls)
+	if !slices.Equal(runner.calls, wantCalls) {
+		t.Fatalf("calls = %q, want %q", runner.calls, wantCalls)
 	}
 }
 
@@ -84,26 +85,23 @@ func TestRetirementReachesTheStore(t *testing.T) {
 	if err := os.Symlink(filepath.Join(primary, "gone-statusline.sh"), status); err != nil {
 		t.Fatal(err)
 	}
-	swap := filepath.Join(managed, "swap.command.md")
-	writeFixture(t, swap, "Run `pfm chat swap`\n")
 	installer := engine{
 		options: Options{
 			Home:       home,
 			ConfigDir:  primary,
 			CodexHomes: []string{codexHome},
 			Stdout:     io.Discard,
+			retired: &retired.Lists{
+				ConfigFiles: []retired.ConfigFile{{Path: "statusline-command.sh", Reason: "native pfm statusline"}},
+			},
 		},
 		managedRoot: managed,
 		apply:       true,
 	}
-	for _, run := range []func() error{installer.retirePredecessors, installer.retireRenamedGlobalAgents, installer.retireLegacySwapCommand} {
-		if err := run(); err != nil {
-			t.Fatal(err)
-		}
+	if err := installer.retirePredecessors(); err != nil {
+		t.Fatal(err)
 	}
-	for _, path := range []string{status, swap} {
-		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("retired artifact %s survives: %v", path, err)
-		}
+	if _, err := os.Lstat(status); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("retired artifact %s survives: %v", status, err)
 	}
 }

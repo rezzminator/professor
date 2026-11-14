@@ -20,10 +20,15 @@ func runChatSave(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 // cause per command.
 func writeRepositorySnapshot(ctx context.Context, writer io.Writer, runner deps.Runner) {
 	self, _ := pfmchat.ScopedSelf(ctx)
+	gitPath, err := runner.LookPath("git")
+	if err != nil {
+		fmt.Fprintf(writer, "(repository snapshot failed: resolve git: %v)\n", err)
+		return
+	}
 	git := func(args ...string) (result deps.RunResult, err error) {
 		result, err = runner.Run(
 			ctx,
-			append([]string{deps.Executable("git")}, args...),
+			append([]string{gitPath}, args...),
 			deps.RunOptions{Dir: self.CWD},
 		)
 		if err == nil && result.ExitCode != 0 {
@@ -35,22 +40,21 @@ func writeRepositorySnapshot(ctx context.Context, writer io.Writer, runner deps.
 		fmt.Fprintln(writer, "(not a git repository)")
 		return
 	}
+	// Each part prints on its own: one failed call names itself, never drops the others.
+	part := func(result deps.RunResult, err error) string {
+		if err != nil {
+			return fmt.Sprintf("(failed: %v)\n", err)
+		}
+		return string(result.Stdout)
+	}
 	branch, branchErr := git(branchAction, "--show-current")
 	status, statusErr := git("status", "--short")
 	worktrees, worktreeErr := git("worktree", "list")
-	if branchErr != nil || statusErr != nil || worktreeErr != nil {
-		fmt.Fprintf(
-			writer,
-			"(repository snapshot failed: branch=%v status=%v worktrees=%v)\n",
-			branchErr, statusErr, worktreeErr,
-		)
-		return
-	}
 	fmt.Fprintf(
 		writer,
 		"Branch: %s\n\n```\n%s```\n\nWorktrees:\n```\n%s```\n",
-		strings.TrimSpace(string(branch.Stdout)),
-		status.Stdout,
-		worktrees.Stdout,
+		strings.TrimSpace(part(branch, branchErr)),
+		part(status, statusErr),
+		part(worktrees, worktreeErr),
 	)
 }

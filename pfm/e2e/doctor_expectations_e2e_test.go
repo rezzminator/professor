@@ -205,7 +205,7 @@ func (h *e2eHarness) assertInstalled(home string) {
 	store := installer.ClaudeStore(home)
 	targets := installer.ClaudePluginTargets(installer.ClaudePluginBuild{Plugins: pfmconfig.DefaultClaudePlugins()})
 	settings := filepath.Join(store, "settings.json")
-	if gaps, err := installer.ClaudePluginGaps(settings, targets); err != nil || len(gaps) != 0 {
+	if gaps, err := installer.ClaudePluginGaps(settings, targets, nil); err != nil || len(gaps) != 0 {
 		h.t.Fatalf("store plugin settings gaps=%v: %v", gaps, err)
 	}
 	if missing, err := installer.ClaudePluginsNotInstalled(store, targets); err != nil || len(missing) != 0 {
@@ -255,9 +255,6 @@ func (h *e2eHarness) assertInstalled(home string) {
 		var codex map[string]any
 		if err := json.Unmarshal(raw, &codex); err != nil {
 			h.t.Fatalf("install surface failed; differing paths: .codex/hooks.json parse; status: %v", err)
-		}
-		if containsJSONString(codex, filepath.Join(home, ".local", "bin", "pfm")+" internal clear-kill") {
-			h.t.Fatal("install surface failed; differing paths: .codex/hooks.json retained retired clear-kill")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		h.t.Fatalf("install surface failed; differing paths: .codex/hooks.json; status: %v", err)
@@ -398,8 +395,8 @@ func (h *e2eHarness) applyOldShapeFixes(home string) {
 // unionFix and settingsFix are account-entry-real's printed fixes for a real
 // projects dir and settings file, as the host check renders them.
 func unionFix(path, target string) string {
-	return "mkdir -p " + target + " && cp -an " + path + "/. " + target + "/ && ! diff -rq " + path + " " + target +
-		" 2>&1 | grep -v '^Only in " + target + "' && rm -r " + path +
+	return "mkdir -p " + target + " && { cp -an " + path + "/. " + target + "/ || :; } && ! diff -rq " + path + " " +
+		target + " 2>&1 | grep -v '^Only in " + target + "' && rm -r " + path +
 		"  # union into the store; stops while a file differs"
 }
 

@@ -95,6 +95,8 @@ func watchCommand(
 	if *transitions {
 		precheck = nil // first sight answers with SEEN or ERROR
 	}
+	// Each seat's transcript is read from where the last poll left it.
+	inspector := pfmchat.NewSeatInspector(runtime)
 	// The precheck's scan is the first poll's: a watch that starts pays for
 	// one scan, shared with the watches starting beside it.
 	var first *watchRound
@@ -122,8 +124,6 @@ func watchCommand(
 	} else {
 		fingerprint = func(_ context.Context, chat headless.Chat) (string, bool) { return printer.Print(chat) }
 	}
-	// Each seat's transcript is read from where the last poll left it.
-	inspector := pfmchat.NewSeatInspector(runtime)
 	fleet := headless.FleetWatcher{
 		Targets: targets,
 		Discover: func(since time.Time) headless.Discovery {
@@ -244,27 +244,36 @@ func hookRunner(
 		return nil
 	}
 	return func(status headless.Status) error {
-		argv := []string{deps.Executable("sh"), "-c", command}
-		env := append(os.Environ(),
-			"CC_CHAT_NAME="+status.Name,
-			"CC_CHAT_STATE="+status.State,
-			"CC_CHAT_ENGINE="+string(status.Engine),
-			"CC_CHAT_SOCKET="+status.Socket,
-			"CC_CHAT_SESSION_ID="+status.SessionID,
-			"CC_CHAT_ERROR="+status.Error,
-			"CC_CHAT_IDLE_SECONDS="+strconv.FormatInt(status.IdleSeconds, 10),
-		)
-		process, err := runner.Start(
-			context.Background(),
-			argv,
-			deps.StartOptions{Env: env, Stdout: stderr, Stderr: stderr},
-		)
-		if err == nil {
-			err = process.Wait()
-		}
-		if err != nil {
+		if err := runHook(command, status, runner, stderr); err != nil {
 			fmt.Fprintf(stderr, "pfm chat watch: hook failed: %v\n", err)
 		}
 		return nil
 	}
+}
+
+// runHook launches one hook command under sh with the chat's facts in its
+// environment and waits for it.
+func runHook(command string, status headless.Status, runner deps.Runner, stderr io.Writer) error {
+	sh, err := runner.LookPath("sh")
+	if err != nil {
+		return fmt.Errorf("resolve sh: %w", err)
+	}
+	env := append(os.Environ(),
+		"CC_CHAT_NAME="+status.Name,
+		"CC_CHAT_STATE="+status.State,
+		"CC_CHAT_ENGINE="+string(status.Engine),
+		"CC_CHAT_SOCKET="+status.Socket,
+		"CC_CHAT_SESSION_ID="+status.SessionID,
+		"CC_CHAT_ERROR="+status.Error,
+		"CC_CHAT_IDLE_SECONDS="+strconv.FormatInt(status.IdleSeconds, 10),
+	)
+	process, err := runner.Start(
+		context.Background(),
+		[]string{sh, "-c", command},
+		deps.StartOptions{Env: env, Stdout: stderr, Stderr: stderr},
+	)
+	if err != nil {
+		return err
+	}
+	return process.Wait()
 }

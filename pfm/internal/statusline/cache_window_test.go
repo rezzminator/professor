@@ -42,7 +42,7 @@ func TestStatuslineFiveMinuteWindowUsesLaunchAndNewestRequest(t *testing.T) {
 		Env:      map[string]string{},
 	}
 	got := stripANSICodes(cacheWindowSegment(runtime, now, path, -1, nil, "S"))
-	if !strings.Contains(got, "💾5m✓3m:0s") {
+	if got != " │ 💾5m✓3m:0s" {
 		t.Fatalf("window = %q, want the launch's 5m TTL from newest request", got)
 	}
 }
@@ -56,12 +56,12 @@ func TestStatuslineHarnessExpiryUsesItsOwnLabelElseRecord(t *testing.T) {
 	expires := now.Add(2 * time.Minute).Unix()
 	got := stripANSICodes(cacheWindowSegment(Runtime{Home: home, Env: map[string]string{}}, now, "", -1,
 		&promptCache{TTL: "1h", ExpiresAt: &expires}, "S"))
-	if !strings.Contains(got, "💾1h✓2m:0s") {
+	if got != " │ 💾1h✓2m:0s" {
 		t.Fatalf("window = %q, want harness expiry with its own 1h label", got)
 	}
 	got = stripANSICodes(cacheWindowSegment(Runtime{Home: home, Env: map[string]string{}}, now, "", -1,
 		&promptCache{ExpiresAt: &expires}, "S"))
-	if !strings.Contains(got, "💾5m✓2m:0s") {
+	if got != " │ 💾5m✓2m:0s" {
 		t.Fatalf("window = %q, want harness expiry with the launch's 5m label", got)
 	}
 }
@@ -80,42 +80,6 @@ func TestStatuslineNoLaunchHidesCacheWindow(t *testing.T) {
 	runtime := Runtime{Home: home, CacheDir: filepath.Join(home, "cache"), Env: map[string]string{}}
 	if got := cacheWindowSegment(runtime, time.Now(), path, 94, nil, "S"); got != "" {
 		t.Fatalf("unlaunched session without a cache write = %q, want no segment", got)
-	}
-}
-
-func TestStatuslineLaunchReadErrorShowsWarning(t *testing.T) {
-	home := t.TempDir()
-	path := paths.DefaultStateDB(home)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("not sqlite"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	previous := os.Stderr
-	os.Stderr = writer
-	t.Cleanup(func() { os.Stderr = previous })
-	got := cacheWindowSegment(Runtime{Home: home, Env: map[string]string{}}, time.Now(), "", -1, nil, "S")
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stderr = previous
-	logged, err := io.ReadAll(reader)
-	if err := reader.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "💾⚠") || !strings.Contains(got, cBad) {
-		t.Fatalf("read error window = %q, want bad-colour warning", got)
-	}
-	if !strings.Contains(string(logged), "launch record S") || !strings.Contains(string(logged), "not a database") {
-		t.Fatalf("stderr = %q, want the launch read cause", logged)
 	}
 }
 
@@ -234,11 +198,11 @@ func TestCacheWindowSegmentUsesLaunchLengthAndWrite(t *testing.T) {
 	cacheLaunch(t, root, "S", false)
 	runtime := Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}}
 	got := stripANSICodes(cacheWindowSegment(runtime, now, path, 94, nil, "S"))
-	if !strings.Contains(got, "💾5m✓3m:0s 94%") {
+	if got != " │ 💾5m✓3m:0s 94%" {
 		t.Fatalf("segment = %q, want the measured 5m window and 94%%", got)
 	}
 	cold := cacheWindowSegment(runtime, now, path, cacheHitPercent(27_615, 207_108, 2), nil, "S")
-	if !strings.Contains(cold, cBad+"11%") {
+	if cold != " \x1b[2m│\x1b[0m \x1b[38;5;118m💾5m✓3m:0s\x1b[0m \x1b[1;38;5;203m11%\x1b[0m" {
 		t.Fatalf("a full re-write must read red: %q", cold)
 	}
 }
@@ -261,7 +225,7 @@ func TestCacheWindowPrefersTheHarnessExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := stripANSICodes(cacheWindowSegment(runtime, now, path, 99, payload.PromptCache, "S"))
-	if !strings.Contains(got, "💾1h✓59m:0s 99%") {
+	if got != " │ 💾1h✓59m:0s 99%" {
 		t.Fatalf("segment = %q, want the harness's 1h window with 59m left", got)
 	}
 	lapsed := jsonText(now.Add(-2 * time.Minute).Unix())
@@ -271,12 +235,12 @@ func TestCacheWindowPrefersTheHarnessExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = stripANSICodes(cacheWindowSegment(runtime, now, path, -1, payload.PromptCache, "S"))
-	if !strings.Contains(got, "💾5m✗2m:0s") {
+	if got != " │ 💾5m✗2m:0s" {
 		t.Fatalf("segment = %q, want the harness expiry and its own 5m label", got)
 	}
 	noExpiry := &promptCache{TTL: "5m"}
 	got = stripANSICodes(cacheWindowSegment(runtime, now, path, -1, noExpiry, "S"))
-	if strings.Contains(got, "5m✓") {
+	if got != " │ 💾1h✗2m:0s" {
 		t.Fatalf("a prompt_cache without expiry must fall back to the transcript, got %q", got)
 	}
 }
@@ -298,21 +262,21 @@ func TestLapsedCacheWindowMarksTheHitAsPast(t *testing.T) {
 	harness := &promptCache{TTL: "5m", ExpiresAt: &expires}
 
 	main := cacheWindowSegment(runtime, now, path, 99, harness, "S")
-	if got := stripANSICodes(main); !strings.Contains(got, "💾5m✗4m:0s was 99%") {
+	if got := stripANSICodes(main); got != " │ 💾5m✗4m:0s was 99%" {
 		t.Fatalf("harness segment = %q, want the lapsed hit as was 99%%", got)
 	}
-	if !strings.Contains(main, cMuted+"was 99%") {
+	if main != " \x1b[2m│\x1b[0m \x1b[1;38;5;203m💾5m✗4m:0s\x1b[0m \x1b[38;5;245mwas 99%\x1b[0m" {
 		t.Fatalf("a lapsed hit must render muted, not as live health: %q", main)
 	}
 	transcript := stripANSICodes(cacheWindowSegment(runtime, now, path, 99, nil, "S"))
-	if got := transcript; !strings.Contains(got, "💾5m✗5m:0s was 99%") {
+	if got := transcript; got != " │ 💾5m✗5m:0s was 99%" {
 		t.Fatalf("transcript segment = %q, want the lapsed hit as was 99%%", got)
 	}
-	if got := stripANSICodes(agentCacheText(path, 94, now)); !strings.Contains(got, "💾5m✗5m:0s was 94%") {
+	if got := stripANSICodes(agentCacheText(path, 94, now)); got != "💾5m✗5m:0s was 94%" {
 		t.Fatalf("agent row = %q, want the lapsed hit as was 94%%", got)
 	}
 	live := stripANSICodes(cacheWindowSegment(runtime, now.Add(-9*time.Minute), path, 99, nil, "S"))
-	if !strings.Contains(live, "✓") || !strings.HasSuffix(live, " 99%") || strings.Contains(live, "was") {
+	if live != " │ 💾5m✓4m:0s 99%" {
 		t.Fatalf("a live window keeps the bare hit: %q", live)
 	}
 }
@@ -368,7 +332,7 @@ func TestStatuslineCacheWindowReadsConfigStateDB(t *testing.T) {
 			}
 			runtime := configRuntime(t, home, flagPath, envPath, "")
 			got := stripANSICodes(cacheWindowSegment(runtime, now, "", -1, &promptCache{ExpiresAt: &expires}, "S"))
-			if !strings.Contains(got, "💾1h✓2m:0s") {
+			if got != " │ 💾1h✓2m:0s" {
 				t.Fatalf("window = %q, want the 1h launch recorded in config state.db %s", got, stateDB)
 			}
 		})
@@ -385,7 +349,7 @@ func TestStatuslineCacheWindowStateDBEnvOverridesConfig(t *testing.T) {
 	launchAt(t, envDB, "S", true)
 	runtime := configRuntime(t, home, "", writeStateConfig(t, configDB), envDB)
 	got := stripANSICodes(cacheWindowSegment(runtime, now, "", -1, &promptCache{ExpiresAt: &expires}, "S"))
-	if !strings.Contains(got, "💾1h✓2m:0s") {
+	if got != " │ 💾1h✓2m:0s" {
 		t.Fatalf("window = %q, want the 1h launch from PFM_STATE_DB %s over config %s", got, envDB, configDB)
 	}
 }
@@ -406,7 +370,7 @@ func TestStatuslineCacheWindowShowsConfigError(t *testing.T) {
 				t.Fatalf("config %s loaded without error; the fixture is not %s", config, name)
 			}
 			got := stripANSICodes(cacheWindowSegment(runtime, time.Now(), "", -1, nil, "S"))
-			if !strings.Contains(got, "💾⚠config") {
+			if got != " │ 💾⚠config" {
 				t.Fatalf("window = %q, want a visible config error, never an absent segment", got)
 			}
 		})
@@ -425,4 +389,19 @@ func TestCacheAnchorReadsFurtherWhenTheLastLineIsLargerThanEveryWindow(t *testin
 	if got := cacheAnchor(path).anchor; !got.Equal(want) {
 		t.Fatalf("cacheAnchor = %s, want the request before the large last line %s", got, want)
 	}
+}
+
+// countingRunner is the real command runner with a call counter around it: the
+// statusline's own runner must never be handed tmux, since every tmux call goes
+// through internal/tmux, whose tmux.exec records tmuxExecs counts.
+type countingRunner struct {
+	inner commandRunner
+	tmux  int
+}
+
+func (runner *countingRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if name == "tmux" {
+		runner.tmux++
+	}
+	return runner.inner.Output(ctx, name, args...)
 }

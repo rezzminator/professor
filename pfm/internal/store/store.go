@@ -1,3 +1,25 @@
+// Package store owns the pfm SQLite schema and queries: the Store over this
+// binary's cache (schema.sql, migration_v*.sql, migrated here) and the fleet's
+// shared state (internal/fleetdb).
+//
+// clearname.go: ReserveClearName and SeedClearTranscript, a /clear successor's name across both databases.
+// codexstate.go: CodexThread, a conversation read from the Codex CLI's own SQLite state store.
+// continuation.go: CarryContinuedSchedules and ContinuationTail, schedules that follow a continued chat.
+// epic.go: EpicInjected and RecordEpicInjection, one epic injection per chat session.
+// held.go: Held and NewHeld, one Store kept open across a long-lived reader's calls, reopened when a file is replaced or migrated.
+// health.go: RowCounts, QuickCheck and the orphaned-kill sweep doctor reads.
+// killed.go: Kill, Unkill and Killed, operator kills kept in the shared state.
+// label.go: Label, the chat's pfm label by the one naming precedence.
+// lineage.go: CodexLineage, one user-visible Codex conversation across its threads.
+// logged.go: loggedDB, the wrapper every cache statement is logged through.
+// models.go: Transcript, Rollout, CxName, OpenCodeSession and Killed, the row types.
+// ocsessions.go: the oc_sessions mirror of OpenCode's sessions.
+// open.go: Open, OpenContext and OpenMemory, the doors a Store is built through, and their options.
+// queries.go: transcript, rollout, Codex-name and meta queries, and DefaultCandidates.
+// readonly.go: OpenWithoutMigrating, both databases read-only for doctor.
+// rowcache.go: Transcripts and Rollouts, the index tables a Store rereads only where written since its last read.
+// summary.go: ChatSummary and PutChatSummary, the paid summary of a transcript frontier.
+// tx.go: ImmediateTx, a BEGIN IMMEDIATE transaction.
 package store
 
 import (
@@ -7,15 +29,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
-	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const (
@@ -50,6 +68,11 @@ var schemaV8 string
 //go:embed migration_v9.sql
 var schemaV9 string
 
+// rowSeqSchema is ensured on every open, never migrated (row_seq.sql).
+//
+//go:embed row_seq.sql
+var rowSeqSchema string
+
 var migrations = [...]string{
 	schemaV1,
 	schemaV2,
@@ -75,104 +98,14 @@ type Store struct {
 	path     string
 	readOnly bool
 
+	// transcripts and rollouts hold the index tables as last read (rowcache.go),
+	// nil unless opened withRowCache.
+	transcripts *rowCache[Transcript]
+	rollouts    *rowCache[Rollout]
+
 	warnMu sync.Mutex
 	warn   io.Writer
 	clock  clock.Clock
-}
-
-type openOptions struct {
-	warn  io.Writer
-	clock clock.Clock
-}
-
-// OpenOption customizes process-local Store behavior.
-type OpenOption func(*openOptions)
-
-// WithWarningWriter directs non-fatal busy warnings to w. The default is
-// os.Stderr.
-func WithWarningWriter(w io.Writer) OpenOption {
-	return func(options *openOptions) {
-		if w != nil {
-			options.warn = w
-		}
-	}
-}
-
-// WithClock injects the store clock for deterministic busy retry and audit timestamps.
-func WithClock(value clock.Clock) OpenOption {
-	return func(options *openOptions) {
-		if value != nil {
-			options.clock = value
-		}
-	}
-}
-
-// Open opens the database selected by internal/paths and applies migrations
-// and connection policy.
-func Open(options ...OpenOption) (*Store, error) {
-	return OpenContext(context.Background(), options...)
-}
-
-// OpenContext is Open with caller-controlled cancellation.
-func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
-	resolved, settings, err := resolveOpen(options)
-	if err != nil {
-		return nil, err
-	}
-	if err := fleetdb.CheckLegacyState(resolved); err != nil {
-		return nil, err
-	}
-
-	info, statErr := os.Stat(resolved.CacheDB)
-	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect cache database %s: %w", resolved.CacheDB, statErr)
-	}
-	existed := statErr == nil && info.Size() > 0
-	db, err := sqlitedb.OpenStore(ctx, resolved.CacheDB)
-	if err != nil {
-		return nil, err
-	}
-
-	store := &Store{
-		db:    db,
-		state: fleetdb.OpenSharedState(ctx, resolved),
-		path:  resolved.CacheDB,
-		warn:  settings.warn,
-		clock: settings.clock,
-	}
-	if err := store.migrate(ctx, existed); err != nil {
-		return nil, errors.Join(err, store.Close())
-	}
-	if degraded := store.state.Degraded(); degraded != nil {
-		store.warningf(
-			"WARNING: pfm could not open the shared state store at %s: %v; "+
-				"operator-state operations will fail\n",
-			store.state.Path(),
-			degraded,
-		)
-	}
-	return store, nil
-}
-
-// resolveOpen resolves both database paths and the open settings, refusing
-// while the legacy cache file waits for pfm doctor's fix. The state pair is
-// the caller's: OpenContext refuses on it before anything opens, and
-// OpenWithoutMigrating carries it in SharedDegraded so doctor reads past it.
-func resolveOpen(options []OpenOption) (paths.Values, openOptions, error) {
-	resolved, err := pfmconfig.ResolvePaths()
-	if err != nil {
-		return paths.Values{}, openOptions{}, fmt.Errorf("resolve store paths: %w", err)
-	}
-	if resolved.Home != "" {
-		if err := paths.CheckLegacyPending(resolved.CacheDB, paths.LegacyCacheDB(resolved.Home)); err != nil {
-			return paths.Values{}, openOptions{}, err
-		}
-	}
-	settings := openOptions{warn: os.Stderr, clock: clock.Real}
-	for _, option := range options {
-		option(&settings)
-	}
-	return resolved, settings, nil
 }
 
 func (s *Store) clockNow() time.Time {
@@ -252,7 +185,7 @@ func (s *Store) migrate(ctx context.Context, existed bool) (returnErr error) {
 			}
 		}
 		if version < 2 {
-			if err := migrateCodexLineageKills(ctx, tx); err != nil {
+			if err := s.migrateCodexLineageKills(ctx, tx); err != nil {
 				return fmt.Errorf("migrate Codex lineage kills: %w", err)
 			}
 		}
@@ -268,25 +201,52 @@ func (s *Store) migrate(ctx context.Context, existed bool) (returnErr error) {
 		// older binary's explicit transcript column list never names it, and
 		// its upsert leaves it alone. The claude parser version bump that ships
 		// with it is what fills the rows indexed before it existed.
-		return ensureColumn(ctx, tx, "transcripts", "continued_in", "TEXT NOT NULL DEFAULT ''")
+		if err := ensureColumn(ctx, tx, "transcripts", "continued_in", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+		return ensureRowSeq(ctx, tx)
 	}); err != nil {
 		return err
 	}
-	if version >= 9 {
-		return nil
-	}
-	if err := s.adoptLocalKills(ctx); err != nil {
-		return fmt.Errorf("adopt cache kills before migration 9: %w", err)
-	}
-	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
-		if _, err := tx.ExecContext(ctx, migrations[8]); err != nil {
-			return fmt.Errorf("apply database migration 9: %w", err)
+	if version < 9 {
+		if err := s.adoptLocalKills(ctx); err != nil {
+			return fmt.Errorf("adopt cache kills before migration 9: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=9"); err != nil {
-			return fmt.Errorf("set database schema version 9: %w", err)
+	}
+	for next := max(version+1, 9); next <= SchemaVersion; next++ {
+		if err := s.applyMigration(ctx, next); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMigration runs migration next and stamps its version in one transaction.
+func (s *Store) applyMigration(ctx context.Context, next int) error {
+	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
+		if _, err := tx.ExecContext(ctx, migrations[next-1]); err != nil {
+			return fmt.Errorf("apply database migration %d: %w", next, err)
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", next)); err != nil {
+			return fmt.Errorf("set database schema version %d: %w", next, err)
 		}
 		return nil
 	})
+}
+
+// ensureRowSeq ensures the index tables' write count (row_seq.sql) the same
+// way as the columns above, so the schema stays at 9 and an older binary keeps
+// opening the cache.
+func ensureRowSeq(ctx context.Context, tx *ImmediateTx) error {
+	for _, table := range []string{"transcripts", "rollouts"} {
+		if err := ensureColumn(ctx, tx, table, "seq", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, rowSeqSchema); err != nil {
+		return fmt.Errorf("ensure the index write count: %w", err)
+	}
+	return nil
 }
 
 // ensureColumn adds one additive column when the table lacks it. table,
@@ -363,8 +323,15 @@ func (s *Store) adoptLocalKills(ctx context.Context) error {
 		var id string
 		var killedAt int64
 		if err := rows.Scan(&id, &killedAt); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("scan kill awaiting adoption: %w", err)
+			// The kill is the operator's decision: a row whose id still reads is
+			// adopted with its time unknown, so migration 9 never drops it unread.
+			var at any
+			if rows.Scan(&id, &at) != nil || id == "" {
+				s.warningf("WARNING: pfm skipped a kill with no readable chat id in %s: %v\n", s.path, err)
+				continue
+			}
+			s.warningf("WARNING: pfm adopted the kill of %q from %s with its time unknown: %v\n", id, s.path, err)
+			killedAt = 0
 		}
 		adopted[id] = killedAt
 	}

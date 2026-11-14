@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -192,8 +193,9 @@ func TestStreamFilterWithMargin(t *testing.T) {
 	}
 }
 
+// A line that is not JSON is shown as written, marked "?", never dropped.
 func TestStreamWithoutAFilterPrintsEverything(t *testing.T) {
-	path := writeChat(t, userLine("go"), toolLine("Bash"), assistantLine("done"))
+	path := writeChat(t, userLine("go"), `{"type":"assistant","message":`, toolLine("Bash"), assistantLine("done"))
 	var out bytes.Buffer
 	if err := Stream(context.Background(), path, "cc", StreamOptions{
 		FromStart: true,
@@ -201,7 +203,7 @@ func TestStreamWithoutAFilterPrintsEverything(t *testing.T) {
 	}, &out); err != nil {
 		t.Fatalf("Stream() error = %v", err)
 	}
-	want := "U go\nT Bash|{}\nA done\n"
+	want := "U go\n? {\"type\":\"assistant\",\"message\":\nT Bash|{}\nA done\n"
 	if out.String() != want {
 		t.Fatalf("stream = %q, want %q", out.String(), want)
 	}
@@ -229,28 +231,43 @@ func TestStreamFollowEndsWhenTheChatDies(t *testing.T) {
 
 // An initial liveness check must not hide the transcript of an exited chat.
 // Only a follow reports death, after draining; trust and probe errors still
-// refuse before any transcript is emitted.
+// refuse before any transcript is emitted. A follow retries a failed lookup
+// and ends on it only after UnreadablePolls in a row.
 func TestStreamCheckPreservesExitedTranscript(t *testing.T) {
 	probeErr := errors.New("pane read failed")
 	for _, tc := range []struct {
 		name   string
 		follow bool
-		check  error
+		checks []error // one per call; the last repeats
 		want   error
 		output string
 	}{
-		{name: "replay exited chat", check: ErrChatGone, output: "A done\n"},
-		{name: "follow exited chat", follow: true, check: ErrChatGone, want: ErrChatGone, output: "A done\n"},
-		{name: "trust blocked", check: ErrTrustDialog, want: ErrTrustDialog},
-		{name: "probe failed", check: probeErr, want: probeErr},
+		{name: "replay exited chat", checks: []error{ErrChatGone}, output: "A done\n"},
+		{name: "follow exited chat", follow: true, checks: []error{ErrChatGone}, want: ErrChatGone, output: "A done\n"},
+		{name: "trust blocked", checks: []error{ErrTrustDialog}, want: ErrTrustDialog},
+		{name: "probe failed", checks: []error{probeErr}, want: probeErr},
+		{
+			name: "follow outlasts failed lookups", follow: true,
+			checks: []error{nil, probeErr, probeErr, nil, probeErr, probeErr, ErrChatGone}, want: ErrChatGone, output: "A done\n",
+		},
+		{
+			name: "follow ends after UnreadablePolls failed lookups", follow: true,
+			checks: []error{nil, probeErr, probeErr, probeErr}, want: probeErr, output: "A done\n",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeChat(t, assistantLine("done"))
 			var out bytes.Buffer
+			calls := 0
 			err := Stream(context.Background(), path, "cc", StreamOptions{
 				FromStart: true,
 				Follow:    tc.follow,
-				Check:     func() error { return tc.check },
+				Poll:      time.Millisecond,
+				Check: func() error {
+					check := tc.checks[min(calls, len(tc.checks)-1)]
+					calls++
+					return check
+				},
 			}, &out)
 			if !errors.Is(err, tc.want) || out.String() != tc.output {
 				t.Fatalf("Stream() output=%q error=%v, want output=%q error=%v", out.String(), err, tc.output, tc.want)
@@ -354,7 +371,7 @@ func TestWatchOnceStopsAtTheFirstIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Watch() error = %v", err)
 	}
-	if !strings.HasPrefix(out.String(), "IDLE seat") || !status.Alive() {
+	if out.String() != "IDLE seat idle_seconds=0\n" || !status.Alive() {
 		t.Fatalf("watch output = %q status = %#v", out.String(), status)
 	}
 }
@@ -461,8 +478,12 @@ func TestUnreadableClaudeSidechainDirectoryIsAnInspectError(t *testing.T) {
 	status, err := Inspect(context.Background(), Chat{
 		Name: "seat", ID: sessionID, Engine: "cc", Path: path, Live: true,
 	}, time.Now())
-	if err == nil || !strings.Contains(err.Error(), "read Claude sidechain directory") {
-		t.Fatalf("Inspect() = %#v, %v; want visible sidechain error", status, err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		filepath.Dir(path),
+		"{dir}",
+	), "read Claude sidechain directory {dir}/session-with-unreadable-agents/subagents: open {dir}/session-with-unreadable-agents/subagents: not a directory"; got != want {
+		t.Fatalf("Inspect() error = %q, want %q (status %#v)", got, want, status)
 	}
 }
 
@@ -574,9 +595,9 @@ func TestWatchAnnouncesATurnEndedOnAnErrorAsIdleWithItsKind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Watch() error = %v", err)
 	}
-	if !regexp.MustCompile(`^IDLE seat idle_seconds=\d+ error=server_error\n$`).MatchString(out.String()) ||
-		idleHooks != 1 || status.State != StateError {
-		t.Fatalf("watch output = %q hooks = %d status = %#v", out.String(), idleHooks, status)
+	got := regexp.MustCompile(`idle_seconds=\d+`).ReplaceAllString(out.String(), "idle_seconds={n}")
+	if got != "IDLE seat idle_seconds={n} error=server_error\n" || idleHooks != 1 || status.State != StateError {
+		t.Fatalf("watch output = %q hooks = %d status = %#v", got, idleHooks, status)
 	}
 }
 
@@ -605,7 +626,8 @@ func TestStatusLostNoteRendering(t *testing.T) {
 			t.Fatal(err)
 		}
 		if note != "" {
-			if output["lost_note"] != note || !strings.Contains(status.Line(), note) {
+			if output["lost_note"] != note ||
+				status.Line() != "seat\tlost\tidle=0s\t\tyour last message was not answered — re-send it" {
 				t.Fatalf("lost note missing: json=%s human=%q", data, status.Line())
 			}
 		} else if _, present := output["lost_note"]; present {

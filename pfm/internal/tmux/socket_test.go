@@ -3,7 +3,6 @@ package tmux
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -11,15 +10,15 @@ import (
 // own private command() methods used to carry as a copy each: Dir joined
 // with a bare socket name, then Exec.
 func TestSocketCommandJoinsDirAndSocket(t *testing.T) {
-	ctx := context.Background()
-	dir := t.TempDir()
-	output, err := Socket{Binary: fakeTmux(t, 0), Dir: dir}.
+	ctx := WithClientRunner(context.Background(), fakeTmux(0))
+	dir := "/run/user/1000/pfm-tmux"
+	output, err := Socket{Binary: Binary, Dir: dir}.
 		Command(ctx, "cc-1-2-3", "list-panes", "-a").Output()
 	if err != nil {
 		t.Fatalf("Command().Output() = %v", err)
 	}
 	want := filepath.Join(dir, "cc-1-2-3")
-	if !strings.Contains(string(output), want) {
+	if string(output) != "-S /run/user/1000/pfm-tmux/cc-1-2-3 list-panes -a " {
 		t.Fatalf("argv = %q, want it to address %q", output, want)
 	}
 }
@@ -28,14 +27,14 @@ func TestSocketCommandJoinsDirAndSocket(t *testing.T) {
 // Socket carries: kill's callers already hold a full socketPath, and
 // filepath.Join("", full) must not corrupt it.
 func TestSocketCommandLeavesAFullPathUnchanged(t *testing.T) {
-	ctx := context.Background()
-	full := filepath.Join(t.TempDir(), "cc-9-9-9")
-	output, err := Socket{Binary: fakeTmux(t, 0)}.
+	ctx := WithClientRunner(context.Background(), fakeTmux(0))
+	full := "/run/user/1000/pfm-tmux/cc-9-9-9"
+	output, err := Socket{Binary: Binary}.
 		Command(ctx, full, "list-panes", "-a").Output()
 	if err != nil {
 		t.Fatalf("Command().Output() = %v", err)
 	}
-	if !strings.Contains(string(output), full) {
+	if string(output) != "-S /run/user/1000/pfm-tmux/cc-9-9-9 list-panes -a " {
 		t.Fatalf("argv = %q, want it to address %q unchanged", output, full)
 	}
 }
@@ -44,8 +43,8 @@ func TestSocketCommandLeavesAFullPathUnchanged(t *testing.T) {
 // KillServer implementation action.TmuxExecutor and kill.TmuxKiller both
 // used to carry a private copy of.
 func TestSocketKillPaneAndKillServerAddressTheirTarget(t *testing.T) {
-	ctx := context.Background()
-	socket := Socket{Binary: fakeTmux(t, 0)}
+	ctx := WithClientRunner(context.Background(), fakeTmux(0))
+	socket := Socket{Binary: Binary}
 	if err := socket.KillPane(ctx, "/sockets/cc-1", "%7"); err != nil {
 		t.Fatalf("KillPane() = %v", err)
 	}
@@ -57,8 +56,8 @@ func TestSocketKillPaneAndKillServerAddressTheirTarget(t *testing.T) {
 // TestSocketKillPaneSurfacesAFailure: a real tmux failure (the target pane
 // already gone) is never swallowed.
 func TestSocketKillPaneSurfacesAFailure(t *testing.T) {
-	ctx := context.Background()
-	socket := Socket{Binary: fakeTmux(t, 1)}
+	ctx := WithClientRunner(context.Background(), fakeTmux(1))
+	socket := Socket{Binary: Binary}
 	if err := socket.KillPane(ctx, "/sockets/cc-1", "%7"); err == nil {
 		t.Fatal("KillPane() succeeded against a tmux that exited non-zero")
 	}

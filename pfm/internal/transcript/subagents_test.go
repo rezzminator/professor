@@ -53,14 +53,19 @@ func TestReadSubagentMeta(t *testing.T) {
 	good := filepath.Join(dir, "agent-a.meta.json")
 	if err := os.WriteFile(
 		good,
-		[]byte(`{"agentType":"executor","description":"task 1","spawnDepth":2,"parentAgentId":"p1","extra":true}`),
+		[]byte(`{"agentType":"executor","description":"task 1","spawnDepth":2,"parentAgentId":"p1","extra":true,`+
+			`"name":"scout","model":"sonnet","effort":"medium","pickedEffortModel":"claude-opus-5-5",`+
+			`"finished":true,"stoppedByUser":true}`),
 		0o600,
 	); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	meta, err := ReadSubagentMeta(good)
 	if err != nil ||
-		meta != (SubagentMeta{AgentType: "executor", Description: "task 1", SpawnDepth: 2, ParentAgentID: "p1"}) {
+		meta != (SubagentMeta{
+			AgentType: "executor", Description: "task 1", SpawnDepth: 2, ParentAgentID: "p1", Name: "scout",
+			Model: "sonnet", Effort: "medium", Finished: true, StoppedByUser: true,
+		}) {
 		t.Fatalf("ReadSubagentMeta = %+v, %v", meta, err)
 	}
 	if _, err := ReadSubagentMeta(filepath.Join(dir, "gone.meta.json")); !errors.Is(err, fs.ErrNotExist) ||

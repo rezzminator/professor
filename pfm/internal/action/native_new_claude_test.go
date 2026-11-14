@@ -95,7 +95,7 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	if strings.Contains(plan.Run, "skip-permissions") {
 		t.Fatalf("prompted account received autonomy bypass: %q", plan.Run)
 	}
-	if got, want := plan.Line, attachLine(request.FreshSocket, request.FreshSocket, true); got != want {
+	if got, want := plan.Line, AttachLine(request.FreshSocket, request.FreshSocket, true); got != want {
 		t.Fatalf("native fresh line = %q, want bunker attach line %q", got, want)
 	}
 	if plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {
@@ -129,9 +129,7 @@ func TestNewClaudeNativeSpawnOmitsMissingSystemPromptFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(plan.Run, "--system-prompt-file") {
-		t.Fatalf("native fresh run carried --system-prompt-file for a missing composed prompt: %q", plan.Run)
-	}
+	actionGolden(t, "action_native_new_claude_missing_prompt.txt", rooted(t, plan.Run)+"\n")
 }
 
 func TestNewClaudeNativeSpawnPreservesBypassLeanAndCachePolicy(t *testing.T) {
@@ -172,7 +170,7 @@ func TestNewClaudeRequiresFreshSocket(t *testing.T) {
 		Home:           home,
 		Config:         testMachineConfig(home),
 	})
-	if err == nil || !strings.Contains(err.Error(), "fresh socket") {
+	if err == nil || err.Error() != "new Claude action requires cwd and fresh socket" {
 		t.Fatalf("missing fresh socket error = %v", err)
 	}
 }
@@ -197,14 +195,9 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 				if err != nil {
 					t.Fatal(err)
 				}
-				if staged {
-					if len(plan.Warnings) != 0 {
-						t.Fatalf("warnings = %q, want none", plan.Warnings)
-					}
-					return
-				}
-				if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "no source repository recorded") {
-					t.Fatalf("warnings = %q, want one naming the missing clone", plan.Warnings)
+				want := map[bool]string{false: "[\"Claude started WITHOUT its system prompt file: the composed fleet prompt cannot be located: resolve generated harness prompt: read source repository marker {root}/001/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/001/.local/share/pfm/install/source-repo: no such file or directory — fix the cause, then reload the chat\"]", true: "[]"}[staged]
+				if got := rooted(t, fmt.Sprintf("%q", plan.Warnings)); got != want {
+					t.Errorf("warnings = %q, want %q", got, want)
 				}
 			})
 		}
@@ -219,7 +212,9 @@ func TestSynthesizeClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testin
 // the user set on the tab stays against every name but one a user chose (a
 // launch name, a resumed chat's user name). A tab Herdr will not read keeps
 // its label, named on stderr, and the birth proceeds; a pane this process
-// does not front is left alone and the chat is born in a new tab.
+// does not front is left alone and the chat is born in a new tab. A pane of
+// another place's workspace is left alone too: the chat is born in a new tab
+// of its place's workspace, and focus follows it there.
 func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 	const resumeID = "abcdef12-1234-1234-1234-123456789abc"
 	for _, test := range []struct {
@@ -228,34 +223,48 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 		// handLabel: pfm labelled the tab "PFM" before, then the user set
 		// "work" on it in Herdr; label "work" says it stays.
 		handLabel bool
+		// elsewhere: the caller's workspace w6 is another place's ("orchard")
+		// and w7 is the chat's.
+		elsewhere bool
 	}{
-		{"a named new claude chat", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}, false},
-		{"an unnamed new claude chat", "", "", "", compose.Row{Kind: compose.NewClaude}, false},
-		{"a new codex chat", "", "", "", compose.Row{Kind: compose.NewCodex}, false},
-		{"a new opencode chat", "", "", "", compose.Row{Kind: compose.NewOpenCode}, false},
+		{"a named new claude chat", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}, false, false},
+		{"an unnamed new claude chat", "", "", "", compose.Row{Kind: compose.NewClaude}, false, false},
+		{"a new codex chat", "", "", "", compose.Row{Kind: compose.NewCodex}, false, false},
+		{"a new opencode chat", "", "", "", compose.Row{Kind: compose.NewOpenCode}, false, false},
 		{
 			"a named claude resume", "", "OLD CHAT", "",
 			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "OLD CHAT"},
-			false,
+			false, false,
 		},
-		{"an unnamed claude resume", "", "", "", compose.Row{Kind: compose.ResumeClaude, ID: resumeID}, false},
-		{"a codex resume", "", "", "", compose.Row{Kind: compose.ResumeCodex, ID: resumeID}, false},
-		{"an opencode resume", "", "", "", compose.Row{Kind: compose.ResumeOpenCode, ID: resumeID}, false},
-		{"a tab Herdr will not read", "", "", "tab.get", compose.Row{Kind: compose.NewClaude}, false},
-		{"a pane this process does not front", "", "", "stale", compose.Row{Kind: compose.NewClaude}, false},
+		{"an unnamed claude resume", "", "", "", compose.Row{Kind: compose.ResumeClaude, ID: resumeID}, false, false},
+		{"a codex resume", "", "", "", compose.Row{Kind: compose.ResumeCodex, ID: resumeID}, false, false},
+		{"an opencode resume", "", "", "", compose.Row{Kind: compose.ResumeOpenCode, ID: resumeID}, false, false},
+		{"a tab Herdr will not read", "", "", "tab.get", compose.Row{Kind: compose.NewClaude}, false, false},
+		{"a pane this process does not front", "", "", "stale", compose.Row{Kind: compose.NewClaude}, false, false},
 		{
 			"a hand-set label against an AI title", "", "work", "",
 			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "AI TITLE"},
-			true,
+			true, false,
 		},
 		{
-			"a hand-set label against the project folder", "", "work", "", compose.Row{Kind: compose.NewClaude}, true,
+			"a hand-set label against the project folder", "", "work", "",
+			compose.Row{Kind: compose.NewClaude},
+			true, false,
 		},
-		{"a hand-set label against a launch name", "REVIEW", "REVIEW", "", compose.Row{Kind: compose.NewClaude}, true},
+		{
+			"a hand-set label against a launch name", "REVIEW", "REVIEW", "",
+			compose.Row{Kind: compose.NewClaude},
+			true, false,
+		},
 		{
 			"a hand-set label against a resumed chat's user name", "", "MINE", "",
 			compose.Row{Kind: compose.ResumeClaude, ID: resumeID, Name: "MINE", UserName: "MINE"},
-			true,
+			true, false,
+		},
+		{
+			"a chat of another place asked from the caller's pane", "", "", "",
+			compose.Row{Kind: compose.NewClaude},
+			false, true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -273,10 +282,18 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 			t.Setenv("HERDR_PANE_ID", "w6:p3")
 			t.Setenv("TMUX", "/tmp/tmux-1000/dead,1,0")
 			home := values.Home
+			if test.elsewhere {
+				fake.mu.Lock()
+				fake.workspaces = []any{
+					map[string]any{"workspace_id": "w6", "label": "orchard", "pane_count": 1},
+					map[string]any{"workspace_id": "w7", "label": filepath.Base(home), "pane_count": 1},
+				}
+				fake.mu.Unlock()
+			}
 			machine := testMachineConfig(home)
 			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 2, Home: home + "/opencode"}}
 			binary := filepath.Join(home, "engine")
-			if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			machine.Claude.Binary, machine.Codex.Binary, machine.OpenCode.Binary = binary, binary, binary
@@ -290,7 +307,7 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 						Pane:           "w6:p3",
 						HerdrWorkspace: "w6",
 						Fronted:        test.refuse != "stale",
-					}, resolve.ErrNotRegistered)
+					}, resolve.ErrNotRegistered, seatspawn.HerdrServer{})
 					choice.Places = func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil }
 					return choice, err
 				},
@@ -330,6 +347,26 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 					t.Fatalf("stale pane open line=%q err=%v caller seat=%v (%v) new tab seat=%+v found=%v (%v) "+
 						"methods=%q renames=%q stderr=%q",
 						line, err, here, hereErr, tabbed, found, readErr, methods, renames, stderr.String())
+				}
+				return
+			}
+			if test.elsewhere {
+				db := fleetdb.OpenSharedState(context.Background(), values)
+				_, here, hereErr := db.SeatByPane(context.Background(), fake.socket, "w6:p3")
+				tabbed, found, readErr := db.SeatByPane(context.Background(), fake.socket, "w7:p9")
+				if closeErr := db.Close(); closeErr != nil {
+					t.Error(closeErr)
+				}
+				methods, renames := fake.seen()
+				fake.mu.Lock()
+				focused := slices.Clone(fake.focused)
+				fake.mu.Unlock()
+				if err != nil || line != "" || here || hereErr != nil || !found || readErr != nil ||
+					tabbed.HerdrWorkspace != "w7" || !slices.Equal(focused, []string{"w7:p9"}) ||
+					len(renames) != 0 || slices.Contains(methods, "workspace.rename") || stderr.String() != "" {
+					t.Fatalf("another place's open line=%q err=%v caller seat=%v (%v) new tab seat=%+v found=%v (%v) "+
+						"focused=%q methods=%q renames=%q stderr=%q",
+						line, err, here, hereErr, tabbed, found, readErr, focused, methods, renames, stderr.String())
 				}
 				return
 			}
@@ -381,8 +418,9 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 }
 
 // pickerHerdr is a Herdr socket for a picker running in pane w6:p3, alone in
-// tab w6:t1 (labelled "2"); it records every method asked of it and every tab
-// rename as "{tab}={label}".
+// tab w6:t1 (labelled "2") and in workspace w6; it records every method asked
+// of it, every tab rename as "{tab}={label}" and every pane focused, and lays
+// a new tab out as pane p9 of the workspace asked for.
 type pickerHerdr struct {
 	socket  string
 	mu      sync.Mutex
@@ -390,6 +428,9 @@ type pickerHerdr struct {
 	renames []string
 	refuse  string // the one method answered with a refusal
 	label   string // the tab's label, "2" until a rename or a test sets it
+	// workspaces is what workspace.list lists; nil lists none.
+	workspaces []any
+	focused    []string // every pane agent.focus was asked for
 }
 
 func (fake *pickerHerdr) seen() (methods, renames []string) {
@@ -423,9 +464,11 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 					ID     string `json:"id"`
 					Method string `json:"method"`
 					Params struct {
-						PaneID string `json:"pane_id"`
-						TabID  string `json:"tab_id"`
-						Label  string `json:"label"`
+						PaneID      string `json:"pane_id"`
+						TabID       string `json:"tab_id"`
+						Label       string `json:"label"`
+						WorkspaceID string `json:"workspace_id"`
+						Target      string `json:"target"`
 					} `json:"params"`
 				}
 				if json.NewDecoder(conn).Decode(&req) != nil {
@@ -438,7 +481,10 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 					fake.renames = append(fake.renames, req.Params.TabID+"="+req.Params.Label)
 					fake.label = req.Params.Label
 				}
-				label := cmp.Or(fake.label, "2")
+				if req.Method == "agent.focus" {
+					fake.focused = append(fake.focused, req.Params.Target)
+				}
+				label, listed := cmp.Or(fake.label, "2"), fake.workspaces
 				fake.mu.Unlock()
 				if refused {
 					_, _ = fmt.Fprintf(
@@ -470,9 +516,23 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 					result = map[string]any{"type": "pong", "version": "0.9.5", "protocol": 22}
 				case "workspace.list", "workspace.create":
 					result, _ = testjail.HerdrWorkspaceReply(req.Method, req.Params.Label, "w6")
+					if req.Method == "workspace.list" && listed != nil {
+						result = map[string]any{"type": "workspace_list", "workspaces": listed}
+					}
+				case "workspace.rename":
+					result, _ = testjail.HerdrWorkspaceReply(req.Method, req.Params.Label, req.Params.WorkspaceID)
+				case "pane.list":
+					result = map[string]any{"type": "pane_list", "panes": []any{map[string]any{
+						"pane_id": "w6:p3", "workspace_id": "w6", "tab_id": "w6:t1", "terminal_id": "fixture-w6:p3",
+					}}}
+				case "agent.focus":
+					result = map[string]any{"type": "agent_info", "agent": map[string]any{
+						"pane_id": req.Params.Target, "focused": true,
+					}}
 				case "layout.apply":
+					workspace := cmp.Or(req.Params.WorkspaceID, "w6")
 					result = map[string]any{"layout": map[string]any{
-						"workspace_id": "w6", "root": map[string]any{"type": "pane", "pane_id": "w6:p9"},
+						"workspace_id": workspace, "root": map[string]any{"type": "pane", "pane_id": workspace + ":p9"},
 					}}
 				default:
 					result = map[string]any{"pane": map[string]any{"pane_id": "w6:p3"}}
@@ -489,13 +549,17 @@ func newPickerHerdr(t *testing.T) *pickerHerdr {
 	return fake
 }
 
-func TestPickerRejectsCallerReadFailure(t *testing.T) {
+// A picker whose caller read failed is no terminal proven outside Herdr: it
+// asks the Herdr server, and one pfm cannot read is refused with no birth.
+func TestPickerRefusesAnUnreadableHerdrServer(t *testing.T) {
 	home, failure := t.TempDir(), errors.New("caller pane read failed")
+	mute := errors.New("read the Herdr server at /env/herdr.sock: malformed ping result")
+	server := seatspawn.HerdrServer{Socket: "/env/herdr.sock", Up: func(context.Context, string) error { return mute }}
 	tmux := &fakeActionTmux{alive: map[string]bool{}, panes: map[string][]ActionPane{}}
 	executor, err := New(Dependencies{
 		Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
 		Place: func(ctx context.Context, door, requested string) (seatspawn.BackendChoice, error) {
-			return seatspawn.Place(ctx, door, requested, "", false, resolve.Identity{}, failure)
+			return seatspawn.Place(ctx, door, requested, "", false, resolve.Identity{}, failure, server)
 		},
 	})
 	if err != nil {
@@ -506,7 +570,8 @@ func TestPickerRejectsCallerReadFailure(t *testing.T) {
 		Home: home, PrimaryAccount: 1, FreshSocket: "cc-caller-failure",
 	}
 	_, err = executor.Open(context.Background(), request)
-	if !errors.Is(err, failure) || len(tmux.created) != 0 {
-		t.Fatalf("caller failure = %v, births = %d; want caller error and no birth", err, len(tmux.created))
+	want := "host refused at picker: cannot tell whether Herdr runs: " + mute.Error()
+	if err == nil || err.Error() != want || len(tmux.created) != 0 {
+		t.Fatalf("unreadable Herdr = %v, births = %d; want %q and no birth", err, len(tmux.created), want)
 	}
 }

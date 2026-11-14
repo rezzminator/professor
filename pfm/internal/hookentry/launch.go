@@ -124,8 +124,14 @@ func launchIsHeadless(arguments []string) bool {
 	return false
 }
 
-// Launch is the managed Claude launcher entry.
-func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env paths.Env) int {
+// LaunchWith is Launch, the managed Claude launcher entry, with the runner that looks up tmux; nil is the real one.
+func LaunchWith(
+	args []string,
+	stdout, stderr io.Writer,
+	runtime config.Runtime,
+	env paths.Env,
+	runner deps.Runner,
+) int {
 	if env == nil {
 		env = paths.OSEnv{}
 	}
@@ -151,7 +157,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		return 127
 	}
 	forcedPassThrough := env.Get("PFM_LAUNCH_PASSTHROUGH") == "1"
-	ctx := context.Background()
+	ctx := launchContext()
 	var caller resolve.Identity
 	var callerErr error
 	if !forcedPassThrough {
@@ -164,7 +170,8 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		} else {
 			caller, callerErr = identifier.Identify(ctx)
 		}
-		ctx = chat.WithCaller(ctx, "hook.launch", caller, callerErr)
+		ctx = chat.WithCaller(ctx, "hook.launch", caller, spawn.ProvenCaller(environment, caller, callerErr))
+		ctx = chat.WithHerdrServer(ctx, spawn.HerdrServerFrom(env))
 	}
 	if launchPassThrough(arguments, caller, forcedPassThrough) {
 		environment := os.Environ()
@@ -254,24 +261,21 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	choice, err := launchBackend(ctx, *backend)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
-		return 1
+		return spawn.FailureCode(err)
 	}
-	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
-	if primaryErr != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: read primary account: %v\n", primaryErr)
-		return 1
-	}
+	primary := launchPrimaryAccount(runtime, stderr)
 	configDir, accountID := launcherSeatAccount(runtime, primary, paths.OSEnv{})
 	identity, resuming, continuing := action.LauncherIdentity(arguments)
 	mode := workbench.New
 	if resuming || continuing {
 		mode = workbench.Resume
 	}
-	persona, err := action.WorkbenchPersona(workingDir, pfmengine.Claude, mode)
+	persona, personaWarnings, err := action.LaunchPersona(workingDir, runtime.Paths.Home, pfmengine.Claude, mode)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}
+	launchnotice.Print(stderr, "pfm internal launch", personaWarnings)
 	freshID := ""
 	if identity == "" && !continuing {
 		var idErr error
@@ -315,6 +319,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 				PromptFile: persona.Prompt,
 				Effort:     persona.Effort,
 				Model:      persona.Model,
+				Envs:       persona.Envs,
 			},
 			workingDir,
 			stdout,
@@ -337,7 +342,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
 		return 1
 	}
-	tmuxBinary, err := obs.Runner(deps.RealRunner{}).LookPath(pfmtmux.Binary)
+	tmuxBinary, err := obs.Runner(runner).LookPath(pfmtmux.Binary)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: find tmux: %v\n", err)
 		return 1
@@ -411,7 +416,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	if interactive {
 		failed = false
 		arguments := attachArguments(socketPath, startChannel, session, resolve.CallerEnvironmentFrom(env).TMUX != "")
-		if err := LaunchExec(tmuxBinary, arguments, deps.EnvironmentWith("TMUX", "")); err != nil {
+		if err := LaunchExec(tmuxBinary, arguments, pfmtmux.Environment()); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: attach tmux session: %v\n", err)
 			return 1
 		}
@@ -425,7 +430,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		return 1
 	}
 	if _, err := fmt.Fprintf(stdout, "pfm launch: %s %s\n", socket, session); err != nil {
-		_ = waiter.Process.Kill()
+		cancelWait() // ends the waiter on either path: exec kills it, a client runner returns
 		fmt.Fprintf(stderr, "pfm internal launch: print socket: %v\n", err)
 		return 1
 	}
@@ -437,7 +442,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		"-S",
 		startChannel,
 	).CombinedOutput(); err != nil {
-		_ = waiter.Process.Kill()
+		cancelWait() // ends the waiter on either path: exec kills it, a client runner returns
 		fmt.Fprintf(
 			stderr,
 			"pfm internal launch: release Claude pane: %v: %s\n",
@@ -455,11 +460,13 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	// can record its status and close the last pane before that connection.
 	// The durable status is authoritative only after the bounded wait ended;
 	// a timeout above still fails, and absent or invalid status never succeeds.
+	// A waiter that lost that race fails with a valid status beside it: the
+	// failure is reported only when the status cannot vouch for the run.
 	status, err := readLaunchStatus(statusPath)
-	if waitErr != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: wait for launcher status signal: %v\n", waitErr)
-	}
 	if err != nil {
+		if waitErr != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: wait for launcher status signal: %v\n", waitErr)
+		}
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		return 1
 	}
@@ -492,4 +499,14 @@ func readLaunchStatus(path string) (int, error) {
 
 func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *pfmtmux.Cmd {
 	return pfmtmux.Exec(ctx, binary, socketPath, args...)
+}
+
+// launchPrimaryAccount is the launchers' primary-account read: an unreadable
+// store launches on the implicit account with a warning, as pfm install does.
+func launchPrimaryAccount(runtime config.Runtime, stderr io.Writer) int {
+	primary, err := fleet.PrimaryAccountOrImplicit(runtime.Paths, runtime.Config)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm: primary account unreadable (%v); launching on account %d\n", err, primary)
+	}
+	return primary
 }

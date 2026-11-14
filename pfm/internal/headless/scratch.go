@@ -34,12 +34,11 @@ func readLatestExchange(ctx context.Context, chat Chat) (exchangeSnapshot, bool,
 		// Codex writes commentary between the tool calls of one turn, so an
 		// assistant entry newest is complete only once the rollout's turn
 		// record ends the turn — the end-record rule Await applies.
+		// Unread turn records leave the exchange PARTIAL: complete is cached
+		// by offset for good, so it is claimed only once a record proved it.
 		turn := codexTurnRead{at: -1}
-		open, err := turn.open(chat.Path, offset)
-		if err != nil {
-			return exchangeSnapshot{}, false, err
-		}
-		complete = !open
+		open, readOK := turn.open(ctx, chat.Path, offset)
+		complete = readOK && !open
 	}
 	return exchangeSnapshot{
 		prompt:   prompt,

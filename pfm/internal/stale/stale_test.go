@@ -3,31 +3,44 @@ package stale
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/hostfixture"
+	"github.com/rezzminator/professor/pfm/internal/gather/gathertest"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// fixture is a process table on disk — <root>/<pid>/{cmdline,exe} — the
-// shape gather.RealProcFS reads, so the sweep's classification runs against
-// real file identities with no live process touched.
+const (
+	// sweepUID is the user the fixture's processes and the sweep run as.
+	sweepUID = 4100
+	// sweepInstallMark is the fixture install's mark, carried by its processes.
+	sweepInstallMark = "5eed5eed5eed5eed"
+	sweepWait        = 10 * time.Millisecond
+)
+
+// fixture is a process table on disk — <root>/<pid>/{cmdline,environ,stat,exe}
+// — the shape gather.RealProcFS reads, so the sweep's classification runs
+// against real file identities with no live process touched. uid and exe
+// override what the kernel would report as a process's owner and executable
+// path.
 type fixture struct {
 	t      *testing.T
 	root   string
 	home   string
 	binary string
 	old    string
+	uid    map[int]uint32
+	exe    map[int]string
 }
 
 func (fixture *fixture) markerPath() string {
@@ -43,6 +56,8 @@ func newFixture(t *testing.T) *fixture {
 		home:   filepath.Join(root, "home"),
 		binary: filepath.Join(root, "bin", "pfm"),
 		old:    filepath.Join(root, "bin", "pfm.replaced"),
+		uid:    map[int]uint32{},
+		exe:    map[int]string{},
 	}
 	for _, path := range []string{fixture.binary, fixture.old} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -50,34 +65,57 @@ func newFixture(t *testing.T) *fixture {
 		}
 		// Distinct files are distinct inodes: the install renamed a new file
 		// over the path, and the old image lives on only in its processes.
-		if err := testjail.WriteExecutable(path, []byte(path), 0o700); err != nil {
+		if err := os.WriteFile(path, []byte(path), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return fixture
 }
 
+// process adds pid running image with argv, started at 1000+pid and carrying
+// this install's mark.
 func (fixture *fixture) process(pid int, image string, argv ...string) {
 	fixture.t.Helper()
 	directory := filepath.Join(fixture.root, strconv.Itoa(pid))
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		fixture.t.Fatal(err)
-	}
 	if err := os.MkdirAll(filepath.Join(directory, "fd"), 0o700); err != nil {
 		fixture.t.Fatal(err)
 	}
-	if err := os.WriteFile(
-		filepath.Join(directory, "cmdline"),
-		[]byte(strings.Join(argv, "\x00")+"\x00"),
-		0o600,
-	); err != nil {
-		fixture.t.Fatal(err)
-	}
+	fixture.rewrite(pid, uint64(1000+pid), argv...)
+	fixture.environ(pid, paths.EnvInstallMark+"="+sweepInstallMark)
 	if image != "" {
 		if err := os.Symlink(image, filepath.Join(directory, "exe")); err != nil {
 			fixture.t.Fatal(err)
 		}
 	}
+}
+
+func (fixture *fixture) write(pid int, name, content string) {
+	fixture.t.Helper()
+	if err := os.WriteFile(filepath.Join(fixture.root, strconv.Itoa(pid), name), []byte(content), 0o600); err != nil {
+		fixture.t.Fatal(err)
+	}
+}
+
+// rewrite sets pid's start time and argv in place: a later generation on the
+// same pid when start changes, an exec when it does not.
+func (fixture *fixture) rewrite(pid int, start uint64, argv ...string) {
+	fixture.t.Helper()
+	fixture.write(pid, "cmdline", strings.Join(argv, "\x00")+"\x00")
+	fixture.write(
+		pid,
+		"stat",
+		fmt.Sprintf("%d (pfm) S 1 %d 0 0 %d 0 0 0 0 0 0 0 0 0 20 0 1 0 %d 0 0", pid, pid, pid, start),
+	)
+}
+
+// environ replaces pid's environment; no entries is a process without a mark.
+func (fixture *fixture) environ(pid int, entries ...string) {
+	fixture.t.Helper()
+	var content strings.Builder
+	for _, entry := range entries {
+		content.WriteString(entry + "\x00")
+	}
+	fixture.write(pid, "environ", content.String())
 }
 
 func (fixture *fixture) markProxy(pid, fd int) {
@@ -98,23 +136,96 @@ func (fixture *fixture) markProxy(pid, fd int) {
 	}
 }
 
-// signaler plays the kernel: a TERM or KILL a pid honours removes its
-// directory (the process exited), signal 0 answers whether it still exists.
-func (fixture *fixture) signaler(ignoreTerm, ignoreKill map[int]bool, sent *[]string) Signaler {
-	return func(pid int, signal syscall.Signal) error {
-		directory := filepath.Join(fixture.root, strconv.Itoa(pid))
-		if _, err := os.Stat(directory); err != nil {
-			return syscall.ESRCH
-		}
-		if signal == 0 {
-			return nil
-		}
-		*sent = append(*sent, signal.String()+" "+strconv.Itoa(pid))
-		if (signal == syscall.SIGTERM && ignoreTerm[pid]) || (signal == syscall.SIGKILL && ignoreKill[pid]) {
-			return nil
-		}
-		return os.RemoveAll(directory)
+// fixtureTable reads the fixture as the kernel would. It is built on the
+// fixture root directly, never gather.NewProcFS, which falls back to the live
+// process table when the root does not exist.
+type fixtureTable struct {
+	gather.RealProcFS
+	fixture *fixture
+}
+
+func (fixture *fixture) table() fixtureTable {
+	return fixtureTable{RealProcFS: gather.RealProcFS{Root: fixture.root}, fixture: fixture}
+}
+
+// ProcessIdentity is pid's owner: the sweep's user unless uid says otherwise.
+func (table fixtureTable) ProcessIdentity(pid int) (gather.ProcessIdentity, error) {
+	if _, err := os.Stat(filepath.Join(table.fixture.root, strconv.Itoa(pid))); err != nil {
+		return gather.ProcessIdentity{}, err
 	}
+	uid, found := table.fixture.uid[pid]
+	if !found {
+		uid = sweepUID
+	}
+	return gather.ProcessIdentity{EffectiveUID: uid, Command: "pfm"}, nil
+}
+
+// Executable is the path pid was executed from: the installed binary unless
+// exe says otherwise, as the kernel still reports a replaced image's path.
+func (table fixtureTable) Executable(pid int) (string, error) {
+	if _, err := os.Stat(filepath.Join(table.fixture.root, strconv.Itoa(pid))); err != nil {
+		return "", err
+	}
+	if executable, found := table.fixture.exe[pid]; found {
+		return executable, nil
+	}
+	return table.fixture.binary, nil
+}
+
+// probe answers signal 0: ESRCH once pid's directory is gone.
+func (fixture *fixture) probe(pid int) error {
+	if _, err := os.Stat(filepath.Join(fixture.root, strconv.Itoa(pid))); err != nil {
+		return syscall.ESRCH
+	}
+	return nil
+}
+
+// kernel plays the kernel: a pid whose directory is gone cannot be opened, and
+// a TERM or KILL a pid honours removes its directory (the process exited).
+func (fixture *fixture) kernel(ignoreTerm, ignoreKill map[int]bool) *gathertest.Kernel {
+	return &gathertest.Kernel{
+		OnOpen: fixture.probe,
+		OnSignal: func(pid int, sig syscall.Signal) error {
+			if (sig == syscall.SIGTERM && ignoreTerm[pid]) || (sig == syscall.SIGKILL && ignoreKill[pid]) {
+				return nil
+			}
+			return os.RemoveAll(filepath.Join(fixture.root, strconv.Itoa(pid)))
+		},
+	}
+}
+
+// signalled is every signal kernel delivered, as "terminated 301,killed 302".
+func signalled(kernel *gathertest.Kernel) string {
+	delivered := make([]string, 0, len(kernel.Sent))
+	for _, sent := range kernel.Sent {
+		delivered = append(delivered, sent.Sig.String()+" "+strconv.Itoa(sent.PID))
+	}
+	return strings.Join(delivered, ",")
+}
+
+func (fixture *fixture) door(table gather.ProcFS, kernel *gathertest.Kernel) gather.Door {
+	return gathertest.Door(table, kernel, sweepUID, os.Getpid())
+}
+
+func (fixture *fixture) install() gather.Install {
+	return gather.Install{Mark: sweepInstallMark, Binary: fixture.binary}
+}
+
+// sweep sweeps the fixture through kernel against binary.
+func (fixture *fixture) sweep(table gather.ProcFS, kernel *gathertest.Kernel, binary string, stdout io.Writer) error {
+	return SweepStaleProcesses(
+		fixture.door(
+			table,
+			kernel,
+		),
+		fixture.install(),
+		binary,
+		fixture.root,
+		fixture.home,
+		fixture.probe,
+		stdout,
+		sweepWait,
+	)
 }
 
 func TestFindNamesOnlyPfmProcessesRunningAReplacedBinary(t *testing.T) {
@@ -124,8 +235,7 @@ func TestFindNamesOnlyPfmProcessesRunningAReplacedBinary(t *testing.T) {
 	fixture.process(102, fixture.binary, fixture.binary, "mcp", "serve")
 	fixture.process(103, fixture.old, "/usr/bin/sleep", "60")
 	fixture.process(104, fixture.old, "pfm")
-	var sent []string
-	scan, err := Find(gather.NewProcFS(fixture.root), fixture.binary, fixture.signaler(nil, nil, &sent))
+	scan, err := Find(fixture.table(), fixture.binary, fixture.probe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,34 +257,14 @@ func TestFindNamesAProcessItCouldNotRead(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(201, "", fixture.binary, "ls")
-	var sent []string
-	scan, err := Find(gather.NewProcFS(fixture.root), fixture.binary, fixture.signaler(nil, nil, &sent))
+	scan, err := Find(fixture.table(), fixture.binary, fixture.probe)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.Unreadable) != 1 || !strings.Contains(scan.Unreadable[0], "201") {
-		t.Fatalf("unreadable = %v, want pid 201 named", scan.Unreadable)
-	}
-}
-
-// TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable is
-// hostfixture case 9 (StaleArtifacts): a pid that exited between the pid
-// listing and the image read must be SKIPPED, not folded into
-// scan.Unreadable — that column exists for a process still alive whose
-// image genuinely could not be read, and a real ESRCH from a dead pid is
-// evidence of neither.
-func TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable(t *testing.T) {
-	// hostfixture.StaleArtifacts uses t.Setenv internally (testjail.Fleet),
-	// which testing.T refuses to combine with t.Parallel.
-	artifacts := hostfixture.StaleArtifacts(t)
-	fixture := newFixture(t)
-	fixture.process(artifacts.StalePID, "", "pfm", "mcp", "serve")
-	scan, err := Find(gather.NewProcFS(fixture.root), fixture.binary, syscall.Kill)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(scan.Unreadable) != 0 {
-		t.Fatalf("scan.Unreadable = %v, want the exited pid skipped, not reported unreadable", scan.Unreadable)
+	if got, want := strings.NewReplacer(fixture.root, "{root}", fixture.home, "{home}").
+		Replace(staleUnreadableCommand.ReplaceAllString(strings.Join(scan.Unreadable, "\n"), "${1}{cmd}")),
+		"pid=201  {cmd}: stat {root}/201/exe: no such file or directory"; got != want {
+		t.Fatalf("unreadable = %q, want %q", got, want)
 	}
 }
 
@@ -183,25 +273,22 @@ func TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable(t *testing.T)
 func TestFindRefusesATableThatCannotReadImages(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
-	var sent []string
-	_, err := Find(imageless{gather.NewProcFS(fixture.root)}, fixture.binary, fixture.signaler(nil, nil, &sent))
-	if err == nil || !strings.Contains(err.Error(), "cannot read") {
-		t.Fatalf("err = %v, want a refusal naming the missing capability", err)
+	_, err := Find(imageless{fixture.table()}, fixture.binary, fixture.probe)
+	if got, want := fmt.Sprint(
+		err,
+	), "this process table cannot read which file a process executes, so stale processes cannot be told from fresh ones"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 }
 
 type imageless struct{ gather.ProcFS }
 
 type unreadableDescriptors struct {
-	gather.ProcFS
+	fixtureTable
 	err error
 }
 
 func (table unreadableDescriptors) FDLinks(int) ([]gather.FDLink, error) { return nil, table.err }
-
-func (table unreadableDescriptors) Image(pid int) (gather.FileID, error) {
-	return table.ProcFS.(gather.ProcImage).Image(pid)
-}
 
 func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 	t.Parallel()
@@ -209,22 +296,12 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 	fixture.process(301, fixture.old, fixture.binary, "ls")
 	fixture.process(302, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	fixture.process(303, fixture.binary, fixture.binary, "mcp", "serve")
-	var sent []string
+	kernel := fixture.kernel(map[int]bool{302: true}, nil)
 	var stdout bytes.Buffer
-	err := SweepStaleProcesses(
-		gather.NewProcFS(fixture.root),
-		fixture.binary,
-		fixture.root,
-		fixture.home,
-		fixture.signaler(map[int]bool{302: true}, nil, &sent),
-		&stdout,
-		10*time.Millisecond,
-		clock.Real,
-	)
-	if err != nil {
+	if err := fixture.sweep(fixture.table(), kernel, fixture.binary, &stdout); err != nil {
 		t.Fatalf("sweep: %v\n%s", err, stdout.String())
 	}
-	if got := strings.Join(sent, ","); got != "terminated 301,terminated 302,killed 302" {
+	if got := signalled(kernel); got != "terminated 301,terminated 302,killed 302" {
 		t.Fatalf("signals = %q, want TERM to both stale, KILL to the one that ignored it", got)
 	}
 	for _, want := range []string{"sweep: TERM pid=301", "sweep: KILL pid=302", "reconnects it with /mcp", "sweep: done"} {
@@ -234,6 +311,135 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(fixture.root, "303")); err != nil {
 		t.Fatalf("the fresh daemon was touched: %v", err)
+	}
+}
+
+// TestSweepSignalsOnlyThisInstallsIdentifiedProcesses: the sweep signals a
+// stale pfm only when it is this install's — its mark, or no mark and this
+// install's binary path — and only the generation it identified, re-read
+// through the door right before each signal.
+func TestSweepSignalsOnlyThisInstallsIdentifiedProcesses(t *testing.T) {
+	t.Parallel()
+	const (
+		term = "sweep: TERM pid=301  pfm chat watch\n"
+		done = "sweep: done — no obsolete pfm process runs a replaced binary\n"
+		none = "sweep: none — no obsolete pfm process runs a replaced binary\n"
+		keep = "sweep: KEEP pid=301 another install's process  pfm chat watch\n"
+	)
+	tests := []struct {
+		name      string
+		setup     func(fixture *fixture, kernel *gathertest.Kernel)
+		oldBinary bool
+		wantSent  string
+		wantOut   string
+		wantErr   string
+	}{
+		{name: "this install's stale process", wantSent: "terminated 301", wantOut: term + done},
+		{
+			name:     "unmarked process from the installed path",
+			setup:    func(fixture *fixture, _ *gathertest.Kernel) { fixture.environ(301) },
+			wantSent: "terminated 301",
+			wantOut:  term + done,
+		},
+		{
+			name: "unmarked process from another path",
+			setup: func(fixture *fixture, _ *gathertest.Kernel) {
+				fixture.environ(301)
+				fixture.exe[301] = testjail.Place("/work/tree/bin/pfm")
+			},
+			wantOut: keep + none,
+		},
+		{
+			name: "another install's mark",
+			setup: func(fixture *fixture, _ *gathertest.Kernel) {
+				fixture.environ(301, paths.EnvInstallMark+"=0123456789abcdef")
+			},
+			wantOut: keep + none,
+		},
+		{
+			name:    "this install's mark on a build from another path",
+			setup:   func(fixture *fixture, _ *gathertest.Kernel) { fixture.exe[301] = testjail.Place("/work/tree/bin/pfm") },
+			wantOut: keep + none,
+		},
+		{
+			name: "pid reused before TERM",
+			setup: func(fixture *fixture, kernel *gathertest.Kernel) {
+				kernel.OnOpen = func(pid int) error {
+					fixture.rewrite(pid, 9301, "/usr/bin/sleep", "60")
+					return nil
+				}
+			},
+			wantOut: term + "sweep: GONE pid=301 exited or was replaced before TERM; not signalled\n" + done,
+		},
+		{
+			name: "exec'd another program before TERM",
+			setup: func(fixture *fixture, kernel *gathertest.Kernel) {
+				kernel.OnOpen = func(pid int) error {
+					fixture.rewrite(pid, 1301, "/usr/bin/vim")
+					return nil
+				}
+			},
+			wantOut: term + "sweep: SKIP pid=301 changed before TERM; not signalled\n" + done,
+		},
+		{
+			name:    "another user's process",
+			setup:   func(fixture *fixture, _ *gathertest.Kernel) { fixture.uid[301] = 0 },
+			wantOut: term,
+			wantErr: "SWEEP-INCOMPLETE: still running a replaced binary: 301 (pid 301: signal refused: runs as uid 0, not 4100)",
+		},
+		{
+			name: "pid reused after TERM",
+			setup: func(fixture *fixture, kernel *gathertest.Kernel) {
+				kernel.OnSignal = func(pid int, _ syscall.Signal) error {
+					fixture.rewrite(pid, 9301, "/usr/bin/sleep", "60")
+					return nil
+				}
+			},
+			wantSent: "terminated 301",
+			wantOut:  term + done,
+		},
+		{
+			name: "ignores TERM",
+			setup: func(fixture *fixture, kernel *gathertest.Kernel) {
+				*kernel = *fixture.kernel(map[int]bool{301: true}, nil)
+			},
+			wantSent: "terminated 301,killed 301",
+			wantOut:  term + "sweep: KILL pid=301 (ignored TERM for 10ms)\n" + done,
+		},
+		{
+			name:      "a build other than the installed one",
+			oldBinary: true,
+			wantErr: "sweep refused: {old} is not this install's pfm {binary}, " +
+				"and only the installed binary tells this install's stale processes",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newFixture(t)
+			fixture.process(301, fixture.old, "pfm", "chat", "watch")
+			kernel := fixture.kernel(nil, nil)
+			if tt.setup != nil {
+				tt.setup(fixture, kernel)
+			}
+			binary := fixture.binary
+			if tt.oldBinary {
+				binary = fixture.old
+			}
+			expand := strings.NewReplacer("{old}", fixture.old, "{binary}", fixture.binary)
+			var stdout bytes.Buffer
+			err := fixture.sweep(fixture.table(), kernel, binary, &stdout)
+			if wantErr := expand.Replace(tt.wantErr); (err == nil && wantErr != "") ||
+				(err != nil && err.Error() != wantErr) {
+				t.Fatalf("sweep error = %v; want %q", err, wantErr)
+			}
+			if got := signalled(kernel); got != tt.wantSent {
+				t.Fatalf("signals = %q; want %q", got, tt.wantSent)
+			}
+			if got, want := stdout.String(), expand.Replace(tt.wantOut); got != want {
+				t.Fatalf("sweep output:\n%s\nwant:\n%s", got, want)
+			}
+		})
 	}
 }
 
@@ -254,22 +460,12 @@ func TestSweepKeepsMarkedProxyAndTermsUnmarkedServer(t *testing.T) {
 	)
 	fixture.markProxy(311, 9)
 	fixture.process(312, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
-	var sent []string
+	kernel := fixture.kernel(nil, nil)
 	var stdout bytes.Buffer
-	err := SweepStaleProcesses(
-		gather.NewProcFS(fixture.root),
-		fixture.binary,
-		fixture.root,
-		fixture.home,
-		fixture.signaler(nil, nil, &sent),
-		&stdout,
-		10*time.Millisecond,
-		clock.Real,
-	)
-	if err != nil {
+	if err := fixture.sweep(fixture.table(), kernel, fixture.binary, &stdout); err != nil {
 		t.Fatalf("sweep: %v\n%s", err, stdout.String())
 	}
-	if got := strings.Join(sent, ","); got != "terminated 312" {
+	if got := signalled(kernel); got != "terminated 312" {
 		t.Fatalf("signals = %q, want only the unmarked server terminated", got)
 	}
 	if _, err := os.Stat(filepath.Join(fixture.root, "311")); err != nil {
@@ -287,15 +483,12 @@ func TestClassifyCompatibleProxies(t *testing.T) {
 	fixture.process(313, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	fixture.markProxy(313, 9)
 	fixture.process(314, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
-	var sent []string
-	table := gather.NewProcFS(fixture.root)
-	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	table := fixture.table()
+	scan, err := Find(table, fixture.binary, fixture.probe)
 	if err != nil {
 		t.Fatal(err)
 	}
-	obsolete, compatible, err := ClassifyCompatibleProxies(
-		table, fixture.root, fixture.home, fixture.signaler(nil, nil, &sent), scan.Stale,
-	)
+	obsolete, compatible, err := ClassifyCompatibleProxies(table, fixture.root, fixture.home, fixture.probe, scan.Stale)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,14 +595,13 @@ func TestClassifyCompatibleProxyCommandForms(t *testing.T) {
 			if test.compatible {
 				fixture.process(402, fixture.old, test.argv...)
 			}
-			var sent []string
-			table := gather.NewProcFS(fixture.root)
-			scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+			table := fixture.table()
+			scan, err := Find(table, fixture.binary, fixture.probe)
 			if err != nil {
 				t.Fatal(err)
 			}
 			obsolete, compatible, err := ClassifyCompatibleProxies(
-				table, fixture.root, fixture.home, fixture.signaler(nil, nil, &sent), scan.Stale,
+				table, fixture.root, fixture.home, fixture.probe, scan.Stale,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -433,22 +625,24 @@ func TestClassifyCompatibleProxiesFailsClosedWhenDescriptorsAreUnreadable(t *tes
 	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(315, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
-	var sent []string
-	table := gather.NewProcFS(fixture.root)
-	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	table := fixture.table()
+	scan, err := Find(table, fixture.binary, fixture.probe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	probeErr := errors.New("descriptor probe denied")
 	obsolete, compatible, err := ClassifyCompatibleProxies(
-		unreadableDescriptors{ProcFS: table, err: probeErr},
+		unreadableDescriptors{fixtureTable: table, err: probeErr},
 		fixture.root,
 		fixture.home,
-		fixture.signaler(nil, nil, &sent),
+		fixture.probe,
 		scan.Stale,
 	)
-	if err == nil || !errors.Is(err, probeErr) || !strings.Contains(err.Error(), "pid=315") {
-		t.Fatalf("err=%v, want pid and descriptor cause", err)
+	if got, want := strings.NewReplacer(fixture.root, "{root}", fixture.home, "{home}").
+		Replace(staleCommand.ReplaceAllString(fmt.Sprint(err), "${1}{cmd}")),
+		"inspect descriptors for pid=315 {cmd} against marker {home}/.local/state/pfm/mcp-proxy-compatible: descriptor probe denied"; !errors.Is(err, probeErr) ||
+		got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
 	if obsolete != nil || compatible != nil {
 		t.Fatalf("obsolete=%+v compatible=%+v, want no asserted partition on error", obsolete, compatible)
@@ -459,17 +653,16 @@ func TestClassifyCompatibleProxiesOmitsVanishedCandidate(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(316, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
-	var sent []string
-	table := gather.NewProcFS(fixture.root)
-	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	table := fixture.table()
+	scan, err := Find(table, fixture.binary, fixture.probe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	obsolete, compatible, err := ClassifyCompatibleProxies(
-		unreadableDescriptors{ProcFS: table, err: errors.New("process vanished")},
+		unreadableDescriptors{fixtureTable: table, err: errors.New("process vanished")},
 		fixture.root,
 		fixture.home,
-		func(int, syscall.Signal) error { return syscall.ESRCH },
+		func(int) error { return syscall.ESRCH },
 		scan.Stale,
 	)
 	if err != nil {
@@ -491,15 +684,11 @@ func TestSweepDoesNotKeepMarkerFileWithoutHolder(t *testing.T) {
 	if err := os.WriteFile(marker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var sent []string
-	err := SweepStaleProcesses(
-		gather.NewProcFS(fixture.root), fixture.binary, fixture.root, fixture.home,
-		fixture.signaler(nil, nil, &sent), io.Discard, 10*time.Millisecond, clock.Real,
-	)
-	if err != nil {
+	kernel := fixture.kernel(nil, nil)
+	if err := fixture.sweep(fixture.table(), kernel, fixture.binary, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(sent, ","); got != "terminated 321" {
+	if got := signalled(kernel); got != "terminated 321" {
 		t.Fatalf("signals = %q, want marker file without holder to preserve nothing", got)
 	}
 }
@@ -509,19 +698,22 @@ func TestSweepFailsBeforeSignalsWhenProxyDescriptorsAreUnreadable(t *testing.T) 
 	fixture := newFixture(t)
 	fixture.process(331, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
 	fixture.process(332, fixture.old, fixture.binary, "ls")
-	var sent []string
+	kernel := fixture.kernel(nil, nil)
 	probeErr := errors.New("descriptor probe denied")
-	err := SweepStaleProcesses(
-		unreadableDescriptors{ProcFS: gather.NewProcFS(fixture.root), err: probeErr},
-		fixture.binary, fixture.root, fixture.home,
-		fixture.signaler(nil, nil, &sent), io.Discard, 10*time.Millisecond, clock.Real,
+	err := fixture.sweep(
+		unreadableDescriptors{fixtureTable: fixture.table(), err: probeErr},
+		kernel,
+		fixture.binary,
+		io.Discard,
 	)
-	if err == nil || !strings.Contains(err.Error(), "pid=331") ||
-		!strings.Contains(err.Error(), fixture.markerPath()) || !errors.Is(err, probeErr) {
-		t.Fatalf("err = %v, want pid, marker path, and descriptor cause", err)
+	if got, want := strings.NewReplacer(fixture.root, "{root}", fixture.home, "{home}").
+		Replace(staleCommand.ReplaceAllString(fmt.Sprint(err), "${1}{cmd}")),
+		"inspect descriptors for pid=331 {cmd} against marker {home}/.local/state/pfm/mcp-proxy-compatible: descriptor probe denied"; !errors.Is(err, probeErr) ||
+		got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
-	if len(sent) != 0 {
-		t.Fatalf("signals = %v, want classification failure before the first signal", sent)
+	if len(kernel.Sent) != 0 {
+		t.Fatalf("signals = %v, want classification failure before the first signal", kernel.Sent)
 	}
 }
 
@@ -532,16 +724,15 @@ func TestSweepFailsClosedWhenOneDescriptorIsOmitted(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fixture.root, "336", "fd", "8"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var sent []string
-	err := SweepStaleProcesses(
-		gather.NewProcFS(fixture.root), fixture.binary, fixture.root, fixture.home,
-		fixture.signaler(nil, nil, &sent), io.Discard, 10*time.Millisecond, clock.Real,
-	)
-	if err == nil || !strings.Contains(err.Error(), "descriptor 8 was not readable") {
-		t.Fatalf("err = %v, want omitted descriptor named", err)
+	kernel := fixture.kernel(nil, nil)
+	err := fixture.sweep(fixture.table(), kernel, fixture.binary, io.Discard)
+	if got, want := strings.NewReplacer(fixture.root, "{root}", fixture.home, "{home}").
+		Replace(staleCommand.ReplaceAllString(fmt.Sprint(err), "${1}{cmd}")),
+		"inspect descriptors for pid=336 {cmd}: descriptor 8 was not readable"; got != want {
+		t.Fatalf("err = %q, want %q", got, want)
 	}
-	if len(sent) != 0 {
-		t.Fatalf("signals = %v, want incomplete descriptor census to fail before signalling", sent)
+	if len(kernel.Sent) != 0 {
+		t.Fatalf("signals = %v, want incomplete descriptor census to fail before signalling", kernel.Sent)
 	}
 }
 
@@ -549,56 +740,23 @@ func TestSweepOmitsProxyThatExitsDuringDescriptorProbe(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(341, fixture.old, fixture.binary, "mcp", "serve", "--stdio", "--family", "chat")
-	var sent []string
-	signal := func(pid int, which syscall.Signal) error {
-		if which == 0 && pid == 341 {
+	kernel := fixture.kernel(nil, nil)
+	table := unreadableDescriptors{fixtureTable: fixture.table(), err: errors.New("process vanished")}
+	vanished := func(pid int) error {
+		if pid == 341 {
 			return syscall.ESRCH
 		}
-		sent = append(sent, which.String()+" "+strconv.Itoa(pid))
 		return nil
 	}
 	err := SweepStaleProcesses(
-		unreadableDescriptors{ProcFS: gather.NewProcFS(fixture.root), err: errors.New("process vanished")},
-		fixture.binary, fixture.root, fixture.home, signal, io.Discard, 10*time.Millisecond, clock.Real,
+		fixture.door(table, kernel), fixture.install(), fixture.binary, fixture.root, fixture.home, vanished,
+		io.Discard, sweepWait,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sent) != 0 {
-		t.Fatalf("signals = %v, want vanished candidate omitted", sent)
-	}
-}
-
-func TestHoldCompatibleProxyOwnsDescriptorLifetime(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	handle, err := HoldCompatibleProxy(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker := compatibleProxyMarker(home)
-	target, err := compatibleProxyMarkerTarget(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("marker mode = %o, want 600", info.Mode().Perm())
-	}
-	proc := gather.NewProcFS(filepath.Join(t.TempDir(), "missing-proc-root"))
-	links, err := proc.FDLinks(os.Getpid())
-	if err != nil || !slices.ContainsFunc(links, func(link gather.FDLink) bool { return link.Target == target }) {
-		t.Fatalf("marker descriptor is not live: links=%v err=%v", links, err)
-	}
-	if err := handle.Close(); err != nil {
-		t.Fatal(err)
-	}
-	links, err = proc.FDLinks(os.Getpid())
-	if err != nil || slices.ContainsFunc(links, func(link gather.FDLink) bool { return link.Target == target }) {
-		t.Fatalf("marker descriptor after close: links=%v err=%v, want absent", links, err)
+	if len(kernel.Sent) != 0 {
+		t.Fatalf("signals = %v, want vanished candidate omitted", kernel.Sent)
 	}
 }
 
@@ -606,20 +764,14 @@ func TestSweepFailsLoudOnASurvivor(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(401, fixture.old, fixture.binary, "ls")
-	var sent []string
+	kernel := fixture.kernel(map[int]bool{401: true}, map[int]bool{401: true})
 	var stdout bytes.Buffer
-	err := SweepStaleProcesses(
-		gather.NewProcFS(fixture.root),
-		fixture.binary,
-		fixture.root,
-		fixture.home,
-		fixture.signaler(map[int]bool{401: true}, map[int]bool{401: true}, &sent),
-		&stdout,
-		10*time.Millisecond,
-		clock.Real,
-	)
-	if err == nil || !strings.Contains(err.Error(), "401") {
+	err := fixture.sweep(fixture.table(), kernel, fixture.binary, &stdout)
+	if err == nil || err.Error() != "SWEEP-INCOMPLETE: still running a replaced binary: 401" {
 		t.Fatalf("err = %v, want the survivor named", err)
+	}
+	if got := signalled(kernel); got != "terminated 401,killed 401" {
+		t.Fatalf("signals = %q, want TERM then KILL to the survivor", got)
 	}
 }
 
@@ -627,66 +779,33 @@ func TestRunReportsNoneAndStaleDistinctly(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(501, fixture.binary, fixture.binary, "mcp", "serve")
-	var sent []string
 	var stdout, stderr bytes.Buffer
-	signal := fixture.signaler(nil, nil, &sent)
-	if code := runStale(
-		nil,
-		&stdout,
-		&stderr,
-		gather.NewProcFS(fixture.root),
-		fixture.binary,
-		fixture.root,
-		fixture.home,
-		signal,
-		clock.Real,
-	); code != 0 ||
-		!strings.Contains(stdout.String(), "stale: none") {
+	run := func(args []string) int {
+		door := fixture.door(fixture.table(), fixture.kernel(nil, nil))
+		return runStale(
+			args, &stdout, &stderr, door, fixture.install(), fixture.binary, fixture.root, fixture.home, fixture.probe,
+		)
+	}
+	if code := run(nil); code != 0 || !strings.Contains(stdout.String(), "stale: none") {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want none", code, stdout.String(), stderr.String())
 	}
 	fixture.process(502, fixture.old, fixture.binary, "ls")
 	stdout.Reset()
-	if code := runStale(
-		nil,
-		&stdout,
-		&stderr,
-		gather.NewProcFS(fixture.root),
-		fixture.binary,
-		fixture.root,
-		fixture.home,
-		signal,
-		clock.Real,
-	); code != 0 ||
+	if code := run(nil); code != 0 ||
 		!strings.Contains(stdout.String(), "STALE pid=502") ||
 		!strings.Contains(stdout.String(), "make sweep-stale") {
 		t.Fatalf("code=%d stdout=%q, want pid 502 listed with the sweep named", code, stdout.String())
 	}
-	if code := runStale(
-		[]string{"--bogus"},
-		&stdout,
-		&stderr,
-		gather.NewProcFS(fixture.root),
-		fixture.binary,
-		fixture.root,
-		fixture.home,
-		signal,
-		clock.Real,
-	); code != 2 {
+	if code := run([]string{"--bogus"}); code != 2 {
 		t.Fatalf("code=%d, want a usage refusal", code)
 	}
 }
 
-// kill(2) reads pid 0 as the caller's process group and -1 as every process
-// the user owns: the sweep must never hand either to a signal.
-func TestDeliverRefusesPidsThatNameMoreThanOneProcess(t *testing.T) {
-	t.Parallel()
-	var sent []int
-	record := func(pid int, _ syscall.Signal) error { sent = append(sent, pid); return nil }
-	for _, pid := range []int{0, -1, -42} {
-		deliver(record, pid, syscall.SIGKILL)
-	}
-	deliver(record, 7, syscall.SIGTERM)
-	if len(sent) != 1 || sent[0] != 7 {
-		t.Fatalf("signalled %v, want only pid 7", sent)
-	}
-}
+// staleCommand matches a process's command column, whose temp path the scan
+// truncates at a width, so its length differs per run.
+var staleCommand = regexp.MustCompile(`(pid=\d+ +)[^\s:]+`)
+
+// staleUnreadableCommand matches the whole command column of an unreadable row, which ends at its
+// colon: clipped at its width, the column ends inside the temp path or after the arguments, by the
+// path's length in this run.
+var staleUnreadableCommand = regexp.MustCompile(`(pid=\d+ +)[^:]+`)

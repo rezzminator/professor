@@ -96,11 +96,11 @@ jailTest/InstalledHome writes temp artifacts; store.Open/Batch 256 rows; 100 str
 
 U — temp files and in-process refresh/index seams; no child process is launched.
 
-### TestReadOpenCodeSessionsRejectsMalformedNativeJSONAndShapes
+### TestReadOpenCodeSessionsKeepsSessionsPastMalformedRows
 
-**Source:** [pfm/internal/index/opencode_test.go](../../../pfm/internal/index/opencode_test.go) line 287 · **Observed:** 2.74s · **Class:** SQLite/JSON parsing
+**Source:** [pfm/internal/index/opencode_test.go](../../../pfm/internal/index/opencode_test.go) line 311 · **Observed:** 2.74s · **Class:** SQLite/JSON parsing
 
-seedOpenCodeStore; SQLite mutations via sql.Open/Exec; ReadOpenCodeSessions validation.
+seedOpenCodeStore; SQLite mutations via sql.Open/Exec; ReadOpenCodeSessions keeps each session past a malformed row and warns.
 
 U — temp SQLite and parser validation are local package seams.
 
@@ -138,7 +138,7 @@ U — “real fetch” means production fetch path, while HTTP transport is mock
 
 ### TestV4MigrationAddsCxNameProvenanceIdempotently
 
-**Source:** [pfm/internal/store/queries_test.go](../../../pfm/internal/store/queries_test.go) line 377 · **Observed:** 0.21s · **Class:** SQLite/migrations
+**Source:** [pfm/internal/store/queries_jail_test.go](../../../pfm/internal/store/queries_jail_test.go) line 16 · **Observed:** 0.21s · **Class:** SQLite/migrations
 
 setStoreTestJail; temp SQLite schema v1-v3 and row; openTestStore migration/reopen; query checks.
 
@@ -146,7 +146,7 @@ U — local temp database and SQL migration path, with no external process.
 
 ### TestEnsureOpenCodeSessionsAssistantCountAddsColumnIdempotently
 
-**Source:** [pfm/internal/store/queries_test.go](../../../pfm/internal/store/queries_test.go) line 500 · **Observed:** 0.54s · **Class:** SQLite/migrations
+**Source:** [pfm/internal/store/queries_jail_test.go](../../../pfm/internal/store/queries_jail_test.go) line 87 · **Observed:** 0.54s · **Class:** SQLite/migrations
 
 setStoreTestJail; temp SQLite schema v8; openTestStore ALTER/reopen; row round-trip.
 

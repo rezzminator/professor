@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,8 +31,9 @@ func TestErrorLogRefusesFIFOsWithoutBlocking(t *testing.T) {
 			}()
 			select {
 			case err := <-done:
-				if err == nil || !strings.Contains(err.Error(), "herdr error log") {
-					t.Fatalf("FIFO must be a contextual error, got %v", err)
+				want := map[bool]string{false: "herdr error log: {dir}/fifo.log is not a regular file", true: "herdr error log: open {dir}/fifo.log: herdr error log is not a regular file"}[read]
+				if got := strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"); got != want {
+					t.Fatalf("FIFO error = %q, want %q", got, want)
 				}
 			case <-time.After(time.Second):
 				// Release an unfixed blocking open so the red regression leaves no
@@ -131,8 +133,9 @@ func TestErrorLogStaysBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	records, err = RecentErrors(dir, at)
-	if err == nil || !strings.Contains(err.Error(), "cc-1.log.1 holds a malformed line") {
-		t.Fatalf("records=%+v err=%v, want the retained torn log reported, not silently hidden", records, err)
+	want := "herdr error log: history incomplete since 2026-10-16T01:00:00Z: " + path + ".1 holds 2 malformed line(s)"
+	if err == nil || err.Error() != want || len(records) != 1 || records[0].Message != "fresh" {
+		t.Fatalf("records=%+v err=%v, want the fresh record and %q", records, err, want)
 	}
 	if _, err := os.Stat(path + ".1"); err != nil {
 		t.Fatalf("rotated log: %v, want the old log kept beside it", err)
@@ -205,18 +208,49 @@ func TestErrorLogRetentionReportsLostErrorsAndKeepsRetainedOnes(t *testing.T) {
 	}
 }
 
+// Broken retained history is named, and every record still readable is kept.
 func TestErrorLogNamesBrokenRotationsAndWatermarks(t *testing.T) {
-	for _, suffix := range []string{".1", ".lost"} {
-		t.Run(suffix, func(t *testing.T) {
+	at := time.Date(2026, 10, 16, 1, 0, 0, 0, time.UTC)
+	for _, test := range []struct{ suffix, cause string }{
+		{".1", " holds 1 malformed line(s)"},
+		{".lost", " holds a malformed retention watermark"},
+	} {
+		t.Run(test.suffix, func(t *testing.T) {
 			dir := t.TempDir()
-			path := filepath.Join(dir, "broken.log"+suffix)
+			path := filepath.Join(dir, "broken.log"+test.suffix)
 			if err := os.WriteFile(path, []byte("bad history\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := RecentErrors(dir, time.Time{}); err == nil || !strings.Contains(err.Error(), path) {
-				t.Fatalf("broken retained history became clean: %v", err)
+			if err := AppendError(dir, "fine", at, "still readable"); err != nil {
+				t.Fatal(err)
+			}
+			records, err := RecentErrors(dir, time.Time{})
+			want := "herdr error log: history incomplete since 0001-01-01T00:00:00Z: " + path + test.cause
+			if err == nil || err.Error() != want || len(records) != 1 || records[0].Message != "still readable" {
+				t.Fatalf("records=%+v err=%v, want the readable record and %q", records, err, want)
 			}
 		})
+	}
+	// A malformed watermark never blocks the next rotation: it is rewritten.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cc-1"+ErrorLogSuffix)
+	if err := os.WriteFile(path+".lost", []byte("bad history\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendError(dir, "cc-1", at, "rotated away"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", ErrorLogBytes)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendError(dir, "cc-1", at, "after rotation"); err != nil {
+		t.Fatalf("append over a malformed watermark: %v", err)
+	}
+	if through, err := readLostErrors(dir, "cc-1.log.lost"); err != nil || !through.Equal(at) {
+		t.Fatalf("watermark = %s, %v, want %s", through, err, at)
 	}
 }
 
@@ -253,18 +287,12 @@ func TestErrorLogRotatesOnceUnderConcurrentWriters(t *testing.T) {
 			}
 		}
 		rotated, err := os.ReadFile(path + ".1")
-		if err != nil || !strings.HasPrefix(string(rotated), at.Format(time.RFC3339)+"\tkept\n") {
+		if err != nil || string(rotated) != full {
 			t.Fatalf("round %d: rotated log %d bytes, err %v, want the full log kept once", round, len(rotated), err)
 		}
 		current, err := os.ReadFile(path)
-		if err != nil || strings.Count(string(current), "\tline\n") != writers {
-			t.Fatalf(
-				"round %d: current log holds %d of %d lines, err %v",
-				round,
-				strings.Count(string(current), "\tline\n"),
-				writers,
-				err,
-			)
+		if want := strings.Repeat(at.Format(time.RFC3339)+"\tline\n", writers); err != nil || string(current) != want {
+			t.Fatalf("round %d: current log = %q (err %v), want %q", round, current, err, want)
 		}
 	}
 }

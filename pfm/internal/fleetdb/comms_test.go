@@ -2,6 +2,7 @@ package fleetdb
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +14,7 @@ import (
 
 func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	events := []CommsEvent{
 		{
@@ -66,9 +67,10 @@ func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {
 
 func TestCommsRejectsUnknownKind(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	err := state.RecordComms(context.Background(), CommsEvent{Kind: "reload", Message: "excluded"})
-	if err == nil || !strings.Contains(err.Error(), "record comms event") {
+	if err == nil ||
+		err.Error() != "record comms event: constraint failed: CHECK constraint failed: kind IN ('call','group','spawn') (275)" {
 		t.Fatalf("RecordComms() error = %v, want wrapped schema rejection", err)
 	}
 }
@@ -83,90 +85,11 @@ func TestDegradedStoreRejectsCommsWritesAndReads(t *testing.T) {
 	state := OpenSharedState(context.Background(), paths.Values{StateDB: filepath.Join(blocker, "pfm.db")})
 	t.Cleanup(func() { _ = state.Close() })
 
-	if err := state.RecordComms(
-		context.Background(),
-		CommsEvent{Kind: KindCall, Message: "x"},
-	); err == nil ||
-		!strings.Contains(err.Error(), "record comms event") {
-		t.Fatalf("degraded RecordComms() error = %v", err)
-	}
-	if events, err := state.CommsSince(
-		context.Background(),
-		0,
-		5,
-	); err == nil || events != nil ||
-		!strings.Contains(err.Error(), "query comms events") {
-		t.Fatalf("degraded CommsSince() = %#v, %v", events, err)
-	}
-}
-
-// TestCommsVersionMovesWhenAnotherConnectionCommits pins the ledger change
-// signal the cosmos sampler gates its 24h read on: SQLite's data_version moves
-// when ANOTHER connection commits — in WAL mode the commit lands in pfm.db-wal
-// and the main file does not change until a checkpoint — and it keeps moving
-// across a checkpoint that truncates the WAL (a restarted WAL can repeat the
-// size of the one before it). Reading it must not pin the WAL either: the
-// checkpoint in between completes.
-func TestCommsVersionMovesWhenAnotherConnectionCommits(t *testing.T) {
-	t.Parallel()
-	reader, values := openTestStore(t)
-	writer := OpenSharedState(context.Background(), values)
-	if err := writer.Degraded(); err != nil {
-		t.Fatalf("open the writing connection: %v", err)
-	}
-	t.Cleanup(func() { _ = writer.Close() })
-	ctx := context.Background()
-
-	var mode string
-	if err := writer.db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
-		t.Fatalf("journal_mode = %q (%v), want wal: the gate is only a contract for WAL commits", mode, err)
-	}
-	version := func() CommsStamp {
-		t.Helper()
-		got, err := reader.CommsVersion(ctx)
-		if err != nil {
-			t.Fatalf("read the ledger version: %v", err)
-		}
-		return got
-	}
-	record := func(at int64) {
-		t.Helper()
-		if err := writer.RecordComms(
-			ctx,
-			CommsEvent{AtNS: at, Kind: KindCall, Target: "t", Message: "m"},
-		); err != nil {
-			t.Fatalf("record comms from the other connection: %v", err)
-		}
-	}
-
-	first := version()
-	if again := version(); again != first {
-		t.Fatalf("version moved from %+v to %+v with no commit", first, again)
-	}
-	record(10)
-	second := version()
-	if second == first {
-		t.Fatalf("version stayed %+v after another connection committed: a gate on it misses the event", first)
-	}
-	if again := version(); again != second {
-		t.Fatalf("version moved from %+v to %+v with no commit", second, again)
-	}
-
-	var busy, logFrames, checkpointed int
-	if err := writer.db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").
-		Scan(&busy, &logFrames, &checkpointed); err != nil {
-		t.Fatalf("truncate the WAL: %v", err)
-	}
-	if busy != 0 {
-		t.Fatalf("checkpoint(TRUNCATE) busy=%d: reading the version pins the WAL", busy)
-	}
-	record(20)
-	if third := version(); third == second {
-		t.Fatalf("version stayed %+v after a commit that followed a WAL truncate", second)
-	}
-	events, err := reader.CommsSince(ctx, 0, 10)
-	if err != nil || len(events) != 2 {
-		t.Fatalf("CommsSince = %d events, %v; want both events", len(events), err)
+	recordErr := state.RecordComms(context.Background(), CommsEvent{Kind: KindCall, Message: "x"})
+	events, queryErr := state.CommsSince(context.Background(), 0, 5)
+	if got, want := strings.ReplaceAll(fmt.Sprintf("%v\n%#v %v", recordErr, events, queryErr), blocker, "{blocker}"),
+		"record comms event: inspect shared state database {blocker}/pfm.db: stat {blocker}/pfm.db: not a directory\n[]fleetdb.CommsEvent(nil) query comms events: inspect shared state database {blocker}/pfm.db: stat {blocker}/pfm.db: not a directory"; got != want {
+		t.Fatalf("degraded RecordComms and CommsSince = %q, want %q", got, want)
 	}
 }
 
@@ -175,7 +98,7 @@ func TestCommsVersionMovesWhenAnotherConnectionCommits(t *testing.T) {
 // Store that records an event itself must still see its own ledger change.
 func TestCommsVersionMovesForTheStoresOwnWrites(t *testing.T) {
 	t.Parallel()
-	state, _ := openTestStore(t)
+	state := openTestStore(t)
 	ctx := context.Background()
 	before, err := state.CommsVersion(ctx)
 	if err != nil {

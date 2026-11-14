@@ -57,7 +57,7 @@ func ApplyEngineSelector(request *Request, selector string) error {
 // personas, pfmengine.CodexModel; a full id passes through.
 func hostCodexModel(model string) (string, error) {
 	home, homeErr := paths.Home()
-	resolved, err := pfmengine.CodexModel(model, home)
+	resolved, err := pfmengine.CodexModel(model, home, paths.CodexHome(home))
 	if err != nil {
 		return "", errors.Join(fmt.Errorf("resolve codex model: %w", err), homeErr)
 	}

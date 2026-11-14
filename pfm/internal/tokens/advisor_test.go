@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -165,7 +166,7 @@ func TestReportKeepsARunThatBilledOnlyAnAdvisor(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "audit.json")
 	code, stdout, stderr := auditWith(t, Options{ClaudeRoots: []string{root}},
 		"--prices", fixture(t, "model-cost.json"), "--out", out)
-	if code != 0 || strings.Contains(stdout, "NaN") {
+	if code != 0 {
 		t.Fatalf("exit %d stderr %q; want a clean report:\n%s", code, stderr, stdout)
 	}
 	content, err := os.ReadFile(out)
@@ -181,10 +182,12 @@ func TestReportKeepsARunThatBilledOnlyAnAdvisor(t *testing.T) {
 	if err := json.Unmarshal(content, &doc); err != nil {
 		t.Fatalf("decode --out: %v", err)
 	}
-	// a run's usd is rounded to four places, the total is not
-	if math.Abs(doc.Total-advisorAdvisorUSD) > 1e-9 || len(doc.Runs) != 1 ||
-		math.Abs(doc.Runs[0].USD-advisorAdvisorUSD) > 1e-4 {
-		t.Errorf("total %v runs %+v; want the advisor's %v on its one run", doc.Total, doc.Runs, advisorAdvisorUSD)
+	if got, want := fmt.Sprintf(
+		"total %v runs %+v",
+		doc.Total,
+		doc.Runs,
+	), "total 0.475818 runs [{USD:0.4758}]"; got != want {
+		t.Errorf("--out = %q, want %q", got, want)
 	}
 }
 

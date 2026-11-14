@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,8 +82,12 @@ func TestReloadBirthUnreadableRecordStops(t *testing.T) {
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(root, "one")}}}
 	const session = "11111111-1111-4111-8111-111111111111"
 	_, _, err := BirthAccount(values, machine, "cc-seat", session, Pane{}, &bytes.Buffer{}, &paths.MapEnv{})
-	if err == nil || !strings.Contains(err.Error(), "read launch record for "+session) {
-		t.Fatalf("corrupt record error = %v", err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		root,
+		"{root}",
+	), "read launch record for 11111111-1111-4111-8111-111111111111: open launch database {root}/broken.db: sqlite database {root}/broken.db is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles"; got != want {
+		t.Fatalf("corrupt record error = %q, want %q", got, want)
 	}
 }
 
@@ -103,11 +108,11 @@ func TestValidateReloadAccountUsesTheSeatEngineRoster(t *testing.T) {
 		t.Fatalf("requested Codex account rejected: %v", err)
 	}
 	if _, err := ValidateAccount(machine, "cc", 1); err == nil ||
-		!strings.Contains(err.Error(), "no Claude accounts configured") {
+		err.Error() != "no Claude accounts configured" {
 		t.Fatalf("empty Claude roster error = %v", err)
 	}
 	if _, err := ValidateAccount(machine, "cx", 4); err == nil ||
-		!strings.Contains(err.Error(), "requested Codex account 4") {
+		err.Error() != "requested Codex account 4 is not in the configured roster" {
 		t.Fatalf("off-roster Codex error = %v", err)
 	}
 }
@@ -115,13 +120,13 @@ func TestValidateReloadAccountUsesTheSeatEngineRoster(t *testing.T) {
 func TestReloadExplicitlyRejectsOpenCode(t *testing.T) {
 	machine := pfmconfig.Config{OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/opencode"}}}
 	if _, err := ValidateAccount(machine, pfmengine.OpenCode, 1); err == nil ||
-		!strings.Contains(err.Error(), "OpenCode") {
+		err.Error() != "OpenCode does not support in-place reload" {
 		t.Fatalf("ValidateAccount(OpenCode) error=%v, want product-level refusal", err)
 	}
 	_, err := SessionTranscript(paths.Values{Roots: map[pfmengine.ID][]string{
 		pfmengine.Claude: {t.TempDir()}, pfmengine.OpenCode: {t.TempDir()},
 	}}, machine, pfmengine.OpenCode, "ses-fixture")
-	if err == nil || !strings.Contains(err.Error(), "OpenCode") {
+	if err == nil || err.Error() != "OpenCode does not support in-place reload" {
 		t.Fatalf("SessionTranscript(OpenCode) error=%v, want product-level refusal", err)
 	}
 }
@@ -153,13 +158,27 @@ func TestSessionTranscriptFindsACompressedCodexRollout(t *testing.T) {
 	finished := compress(write("rollout-2026-09-23T12-07-24-finished-thread.jsonl"))
 	compress(write("rollout-2026-09-23T12-07-24-twin-thread.jsonl"))
 	twin := write("rollout-2026-09-23T12-07-24-twin-thread.jsonl")
-	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: home}}}
-	for _, row := range []struct{ id, want string }{
-		{"plain-thread", plain}, {"finished-thread", finished}, {"twin-thread", twin}, {"absent-thread", ""},
+	// An unreadable home (a NUL byte fails lstat even for root) costs only
+	// itself: the next home is still searched, and "could not look" is an
+	// error only when no home holds the rollout.
+	unreadable := "unreadable\x00home"
+	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: unreadable}, {ID: 2, Home: home}}}
+	for _, row := range []struct{ id, want, wantErr string }{
+		{"plain-thread", plain, ""},
+		{"finished-thread", finished, ""},
+		{"twin-thread", twin, ""},
+		{
+			"absent-thread", "", `search Codex rollouts under "unreadable\x00home": lstat unreadable` + "\x00" +
+				`home/sessions: invalid argument`,
+		},
 	} {
 		got, err := SessionTranscript(paths.Values{}, machine, pfmengine.Codex, row.id)
-		if err != nil || got != row.want {
-			t.Errorf("SessionTranscript(codex, %s) = %q, %v; want %q", row.id, got, err, row.want)
+		gotErr := ""
+		if err != nil {
+			gotErr = err.Error()
+		}
+		if gotErr != row.wantErr || got != row.want {
+			t.Errorf("SessionTranscript(codex, %s) = %q, %q; want %q, %q", row.id, got, gotErr, row.want, row.wantErr)
 		}
 	}
 }
@@ -202,8 +221,12 @@ func TestValidateCodexReloadRequiresLogin(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "codex-3")
 	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 3, Home: home}}}
 	_, err := ValidateAccount(machine, "cx", 3)
-	want := "Codex account 3: " + filepath.Join(home, "auth.json") + " "
-	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) {
-		t.Fatalf("ValidateAccount error=%v; want %q", err, want)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		home,
+		"{home}",
+	), "Codex account 3: {home}/auth.json must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"; !errors.Is(err, pfmconfig.ErrCodexLoggedOut) ||
+		got != want {
+		t.Fatalf("ValidateAccount error = %q, want %q", got, want)
 	}
 }

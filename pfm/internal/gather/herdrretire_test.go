@@ -3,21 +3,25 @@ package gather
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// herdrRefusalSocket answers pane.list with list and pane.get with get, and
-// counts the pane.get requests it answered.
+// herdrRefusalSocket answers pane.list with list and pane.get and
+// pane.process_info with get, and counts the pane.get requests it answered.
 func herdrRefusalSocket(t *testing.T, list, get string) (string, *atomic.Int32) {
 	t.Helper()
 	socket := filepath.Join(testjail.ShortRoot(t), "herdr.sock")
@@ -50,6 +54,8 @@ func herdrRefusalSocket(t *testing.T, list, get string) (string, *atomic.Int32) 
 				case "pane.get":
 					gets.Add(1)
 					reply = get
+				case "pane.process_info":
+					reply = get
 				}
 				var body map[string]any
 				_ = json.Unmarshal([]byte(reply), &body)
@@ -67,6 +73,7 @@ const (
 	retirePaneGone  = `{"error":{"code":"pane_not_found","message":"pane not found"}}`
 	retireLostNote  = "retired by pfm scan: saved supervisor exited; resume recipe retained"
 	retireDeadLabel = "HERDR DEAD"
+	failedBirthNote = "retired by pfm scan: birth failed: no pane within the 2m0s birth window"
 )
 
 // A writable scan that proves a seat dead retires it once; the next scan
@@ -168,12 +175,6 @@ func TestProvedListingNeverRetiresUnprovedDeath(t *testing.T) {
 		{name: "reload-pending", get: retirePaneGone, proc: absent, dead: true, pending: func(seat *fleetdb.Seat) {
 			seat.ReloadPending = true
 		}},
-		// A birth reserves its row before layout.apply names the pane or the
-		// seat-host exists: the empty address proves nothing yet.
-		{name: "birth-reservation", get: retirePaneGone, proc: absent, dead: true, pending: func(seat *fleetdb.Seat) {
-			seat.HerdrPane = ""
-			seat.UpdatedAt = time.Now().Unix()
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -194,7 +195,13 @@ func TestProvedListingNeverRetiresUnprovedDeath(t *testing.T) {
 			if err := db.PutSeat(ctx, seat); err != nil {
 				t.Fatal(err)
 			}
-			rows := proveHerdrSeats(ctx, db, tc.proc, probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}), false)
+			rows := proveHerdrSeats(
+				ctx,
+				db,
+				tc.proc,
+				probeHerdrSeatRows(ctx, []fleetdb.Seat{seat}),
+				false,
+			)
 			if len(rows) != 1 || rows[0].Err == nil ||
 				strings.Contains(rows[0].Err.Error(), retireDeadLabel) != tc.dead {
 				t.Fatalf("row=%+v (want dead=%t)", rows, tc.dead)
@@ -241,7 +248,7 @@ func TestRetireDeadHerdrSeatWindowAndState(t *testing.T) {
 			if err := db.PutSeat(ctx, seat); err != nil {
 				t.Fatal(err)
 			}
-			got, err := retireDeadHerdrSeat(ctx, db, seat)
+			got, err := retireDeadHerdrSeat(ctx, db, seat, herdrHostExited)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,6 +259,395 @@ func TestRetireDeadHerdrSeatWindowAndState(t *testing.T) {
 			retired := stored.State == "lost" && stored.LostNote == retireLostNote
 			if retired != tc.retired || got != stored {
 				t.Fatalf("stored %+v returned %+v (want retired=%t)", stored, got, tc.retired)
+			}
+		})
+	}
+}
+
+// unreadableHostProc models a saved supervisor whose kernel birth cannot be
+// read: unknown evidence, never positive death.
+type unreadableHostProc struct {
+	ProcFS
+	pid int
+}
+
+func (proc unreadableHostProc) Stat(pid int) (ProcStat, error) {
+	if pid == proc.pid {
+		return ProcStat{}, fs.ErrPermission
+	}
+	return proc.ProcFS.Stat(pid)
+}
+
+func TestProvedListingRetiresDeadSeatOnly(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read-only=%t", readOnly), func(t *testing.T) {
+			ctx, recorder := obs.Test(t)
+			dbPath := filepath.Join(t.TempDir(), "pfm.db")
+			db := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: dbPath})
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			// The dead seat's old pane id now hosts a recycled occupant.
+			socket, _ := herdrOwnershipSocket(
+				t,
+				`{"result":{"type":"pane_list","panes":[`+
+					`{"pane_id":"w1:p1","workspace_id":"w1","terminal_id":"healthy","cwd":"/jail/healthy"},`+
+					`{"pane_id":"w1:p2","workspace_id":"w1","terminal_id":"recycled","cwd":"/jail/recycled"},`+
+					`{"pane_id":"w1:p3","workspace_id":"w1","terminal_id":"unknown","cwd":"/jail/unknown"}]}}`,
+				"w1:p1",
+			)
+			seat := func(id, pane, terminal string, pid int) fleetdb.Seat {
+				return fleetdb.Seat{
+					SeatID: id, SessionID: id, Engine: "cc", Backend: "herdr", State: "live",
+					HerdrSocket: socket, HerdrPane: pane, HerdrWorkspace: "w1", HerdrTerminalID: terminal,
+					SeatHostPID: pid, SeatHostStart: 9,
+				}
+			}
+			// Beside them: a seat ended while the listing reads it, and two seats
+			// on a Herdr server that is gone, one whose supervisor died with it.
+			gone := seat("gone", "w1:p4", "gone", 20)
+			stopped := filepath.Join(testjail.ShortRoot(t), "stopped.sock")
+			unanswered := func(id, pane string, pid int) fleetdb.Seat {
+				s := seat(id, pane, id, pid)
+				s.HerdrSocket = stopped
+				return s
+			}
+			// And two births that reserved their row before layout.apply named a pane: one inside its
+			// birth window, its seat-host already waiting for the pane; one long past it.
+			reservation := func(id string, updated time.Time) fleetdb.Seat {
+				s := seat(id, "", "", 0)
+				s.SeatHostStart, s.UpdatedAt = 0, updated.Unix()
+				return s
+			}
+			// Each on a server of its own, whose one pane runs shell 10 and no seat-host of the seat.
+			unbound := func(id string, updated time.Time) fleetdb.Seat {
+				own, _ := herdrOwnershipSocket(t, `{"result":{"type":"pane_list","panes":[`+
+					`{"pane_id":"w1:p1","workspace_id":"w1","terminal_id":"`+id+`","cwd":"/jail/`+id+`"}]}}`, "w1:p1")
+				s := seat(id, "w1:p1", id, 0)
+				s.HerdrSocket, s.SeatHostStart, s.UpdatedAt = own, 0, updated.Unix()
+				return s
+			}
+			seats := []fleetdb.Seat{
+				seat("healthy", "w1:p1", "healthy", 20),
+				seat("dead", "w1:p2", "dead-terminal", 30),
+				seat("unknown", "w1:p3", "unknown", 40),
+				unanswered("stopped-dead", "w2:p1", 50),
+				unanswered("stopped-alive", "w2:p2", 20),
+				reservation("reserved", time.Now()),
+				reservation("stale-reserved", time.Now().Add(-herdrBirthGrace-time.Minute)),
+				// Its pane is closed and its supervisor has not exited yet.
+				seat("closed", "w1:p6", "closed", 70),
+				// Two seats whose listed pane runs no seat-host of theirs: one bound inside its birth window, its
+				// seat-host not started yet; one long past it, its supervisor gone from a pane that still runs.
+				unbound("starting", time.Now()),
+				unbound("orphaned", time.Now().Add(-herdrBirthGrace-time.Minute)),
+			}
+			for _, item := range append([]fleetdb.Seat{gone}, seats...) {
+				if err := db.PutSeat(ctx, item); err != nil {
+					t.Fatal(err)
+				}
+			}
+			probed := probeHerdrSeatRows(ctx, append([]fleetdb.Seat{gone}, seats...))
+			if err := db.DeleteSeat(ctx, gone.SeatID); err != nil {
+				t.Fatal(err)
+			}
+			proc := unreadableHostProc{pid: 40, ProcFS: &fakeProcFS{
+				processes: map[int]fakeProcess{
+					10: {stat: ProcStat{ParentPID: 1, StartTime: 3}},
+					20: {
+						cmdline: []string{"pfm", "internal", "seat-host", "healthy"},
+						stat:    ProcStat{ParentPID: 10, StartTime: 9},
+					},
+					60: {
+						cmdline: []string{"pfm", "internal", "seat-host", "reserved"},
+						stat:    ProcStat{ParentPID: 1, StartTime: 9},
+					},
+					70: {
+						cmdline: []string{"pfm", "internal", "seat-host", "closed"},
+						stat:    ProcStat{ParentPID: 1, StartTime: 9},
+					},
+				},
+			}}
+			proofDB := db
+			if readOnly {
+				proofDB = fleetdb.OpenSharedStateReadOnly(ctx, paths.Values{StateDB: dbPath})
+				defer func() {
+					if err := proofDB.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+			}
+			rows := proveHerdrSeats(ctx, proofDB, proc, probed, readOnly)
+			var listed []string
+			for _, row := range rows {
+				listed = append(listed, row.Seat.SeatID)
+			}
+			// A reservation past its birth window that never named a pane is a failed birth: never listed.
+			want := "healthy dead unknown stopped-dead stopped-alive closed orphaned"
+			if strings.Join(listed, " ") != want {
+				t.Fatalf("listed seats %q, want %q", listed, want)
+			}
+			want = "HERDR DEAD closed: pane closed; saved supervisor 70 has not exited"
+			if rows[5].Err == nil || rows[5].Err.Error() != want || rows[5].Seat.State != "lost" {
+				t.Fatalf("seat whose pane is closed under a running supervisor = %+v, want lost with %q", rows[5], want)
+			}
+			want = "HERDR ERROR " + seats[len(seats)-1].HerdrSocket + ": seat orphaned supervisor ownership unproved: " +
+				"its pane runs no seat-host past the 2m0s birth window"
+			if rows[6].Err == nil || rows[6].Err.Error() != want || rows[6].Seat.State != "live" {
+				t.Fatalf(
+					"seat whose pane runs no seat-host past its birth window = %+v,\nwant live with %q",
+					rows[6],
+					want,
+				)
+			}
+			// A writable listing retires the failed birth and says so once; a read-only one leaves it be.
+			var warned []string
+			for _, record := range recorder.Records() {
+				if record.Message == "gather.herdr.birth_failed" {
+					seat, _ := record.Field(obs.FieldSeat)
+					warned = append(warned, fmt.Sprintf("%s %v", record.Level, seat))
+				}
+			}
+			if want := map[bool]string{false: "WARN stale-reserved", true: ""}[readOnly]; strings.Join(
+				warned, ",",
+			) != want {
+				t.Fatalf("failed-birth records %q, want %q:\n%s", warned, want, recorder.Raw())
+			}
+			healthy, dead, unknown := rows[0], rows[1], rows[2]
+			stoppedDead, stoppedAlive := rows[3], rows[4]
+			goneNote := "Herdr socket " + stopped + " is gone and the seat's supervisor with it"
+			if want := "HERDR DEAD stopped-dead: " + goneNote; stoppedDead.Err == nil ||
+				stoppedDead.Err.Error() != want || stoppedDead.Seat.State != "lost" {
+				t.Fatalf("seat whose Herdr server and supervisor are gone = %+v, want lost with %q", stoppedDead, want)
+			}
+			if stoppedAlive.Err == nil || stoppedAlive.Seat.State != "live" ||
+				!strings.HasPrefix(stoppedAlive.Err.Error(), "HERDR UNREACHABLE "+stopped+": ") {
+				t.Fatalf(
+					"seat on a silent socket with its supervisor alive = %+v, want live and unreachable",
+					stoppedAlive,
+				)
+			}
+			if healthy.Err != nil || healthy.Seat.State != "live" || healthy.CWD != "/jail/healthy" {
+				t.Fatalf("healthy seat lost beside a dead one: %+v", healthy)
+			}
+			if dead.Err == nil || !strings.Contains(dead.Err.Error(), "HERDR DEAD dead") {
+				t.Fatalf("dead seat diagnostic lost: %+v", dead)
+			}
+			if dead.Seat.State == "live" {
+				t.Fatalf("positively dead seat still presents as live: %+v", dead.Seat)
+			}
+			if dead.CWD != "" || dead.Seat.HerdrTerminalID != "dead-terminal" || dead.Seat.HerdrPane != "w1:p2" {
+				t.Fatalf("dead seat imported recycled pane metadata: %+v", dead)
+			}
+			if unknown.Err == nil || !strings.Contains(unknown.Err.Error(), "HERDR ERROR") ||
+				unknown.Seat.State != "live" || unknown.CWD != "" {
+				t.Fatalf("unknown ownership classified as dead or healthy: %+v", unknown)
+			}
+			for _, want := range seats {
+				stored, found, err := db.Seat(ctx, want.SeatID)
+				state, note := "live", ""
+				switch {
+				case readOnly:
+				case want.SeatID == "dead":
+					state, note = "lost", retireLostNote
+				case want.SeatID == "stopped-dead":
+					state, note = "lost", "retired by pfm scan: "+goneNote+"; resume recipe retained"
+				case want.SeatID == "stale-reserved":
+					state, note = "failed", failedBirthNote
+				}
+				if err != nil || !found || stored.State != state || stored.LostNote != note {
+					t.Fatalf(
+						"listing retire of %s: %+v found=%t err=%v, want state %q note %q",
+						want.SeatID, stored, found, err, state, note,
+					)
+				}
+			}
+		})
+	}
+}
+
+// The listing reads its seats, then one pane.list per socket, and each proof reads the seat's row and asks
+// Herdr again: a pane born in between is one the snapshot never held, a pane closed in between is one
+// Herdr no longer knows.
+func TestProvedListingReadsAgainWhenItsSnapshotIsStale(t *testing.T) {
+	const paneListed = `{"type":"pane_list","panes":[` +
+		`{"pane_id":"w1:p1","workspace_id":"w1","terminal_id":"its-terminal","cwd":"/jail/chat"}]}`
+	const paneNotListed = `{"type":"pane_list","panes":[]}`
+	for _, test := range []struct {
+		name     string
+		snapshot string // what the listing read first
+		socket   func(*testing.T) string
+		host     int // the seat's saved supervisor
+		want     string
+	}{
+		{
+			name: "a pane born after the snapshot is proved", snapshot: paneNotListed,
+			socket: func(t *testing.T) string {
+				socket, _ := herdrOwnershipSocket(t, `{"result":`+paneListed+`}`, "w1:p1")
+				return socket
+			},
+			want: "live <nil> cwd=/jail/chat terminal=its-terminal supervisor=20",
+		},
+		{
+			name: "a pane closed after the snapshot is lost", snapshot: paneListed, host: 20,
+			socket: func(t *testing.T) string {
+				socket, _ := herdrRefusalSocket(t, `{"result":`+paneNotListed+`}`, retirePaneGone)
+				return socket
+			},
+			want: "lost HERDR DEAD chat: pane closed; saved supervisor 20 has not exited cwd= terminal= supervisor=20",
+		},
+		{
+			name: "a pane answering with no shell while its supervisor runs is asked again", snapshot: paneListed, host: 20,
+			socket: func(t *testing.T) string {
+				info, asked := map[string]any{"pane_id": "w1:p1", "shell_pid": 0}, 0
+				socket, _ := herdrOwnershipSocketInfo(t, `{"result":`+paneListed+`}`, info, func() {
+					asked++
+					if asked > 1 {
+						info["shell_pid"] = 10
+					}
+				})
+				return socket
+			},
+			want: "live <nil> cwd=/jail/chat terminal=its-terminal supervisor=20",
+		},
+		{
+			name: "a pane answering for another pane while its supervisor runs is asked again", snapshot: paneListed, host: 20,
+			socket: func(t *testing.T) string {
+				info, asked := map[string]any{"pane_id": "w2:p1", "shell_pid": 10}, 0
+				socket, _ := herdrOwnershipSocketInfo(t, `{"result":`+paneListed+`}`, info, func() {
+					asked++
+					if asked > 1 {
+						info["pane_id"] = "w1:p1"
+					}
+				})
+				return socket
+			},
+			want: "live <nil> cwd=/jail/chat terminal=its-terminal supervisor=20",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")})
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			seat := fleetdb.Seat{
+				SeatID: "chat", SessionID: "chat", Engine: "cc", Backend: "herdr", State: "live",
+				HerdrSocket: test.socket(t), HerdrPane: "w1:p1", HerdrWorkspace: "w1", SeatHostPID: test.host,
+			}
+			if test.host != 0 {
+				seat.SeatHostStart = 9
+			}
+			if err := db.PutSeat(ctx, seat); err != nil {
+				t.Fatal(err)
+			}
+			proc := &fakeProcFS{processes: map[int]fakeProcess{
+				10: {stat: ProcStat{ParentPID: 1, StartTime: 3}},
+				20: {
+					cmdline: []string{"pfm", "internal", "seat-host", "chat"},
+					stat:    ProcStat{ParentPID: 10, StartTime: 9},
+				},
+			}}
+			probed := probeHerdrSeatRows(ctx, []fleetdb.Seat{seat})
+			probed[0].snapshot = json.RawMessage(test.snapshot)
+			rows := proveHerdrSeats(ctx, db, proc, probed, false)
+			if len(rows) != 1 {
+				t.Fatalf("listed %d rows, want the one seat: %+v", len(rows), rows)
+			}
+			got := fmt.Sprintf(
+				"%s %v cwd=%s terminal=%s supervisor=%d",
+				rows[0].Seat.State, rows[0].Err, rows[0].CWD, rows[0].Seat.HerdrTerminalID, rows[0].Seat.SeatHostPID,
+			)
+			if got != test.want {
+				t.Fatalf("listed as %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSettleHerdrProofJudgesAFailedProofByTheRowAfterIt(t *testing.T) {
+	ctx := context.Background()
+	db := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: filepath.Join(t.TempDir(), "pfm.db")})
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	seat := fleetdb.Seat{
+		SeatID: "s", SessionID: "s", Engine: "cx", Backend: "herdr", State: "live",
+		HerdrSocket: "/jail/herdr.sock", HerdrPane: "w1:p1", HerdrWorkspace: "w1", HerdrTerminalID: "t1",
+	}
+	stamped := seat
+	stamped.SeatHostPID, stamped.SeatHostStart = 1460, 9
+	taken := seat
+	taken.Engine = "cc"
+	refused := errors.New(
+		`persist proved seat s: update seat "s": seat no longer exists or Herdr pane is already owned`,
+	)
+	for _, test := range []struct {
+		name   string
+		stored *fleetdb.Seat // the row after the first proof; nil: deleted during it
+		first  error         // the first proof's failure; nil: it proved the seat
+		proved []string      // the seats the proof ran on, by supervisor pid
+		want   string
+	}{
+		{name: "a proved seat is proved once", stored: &seat, proved: []string{"0"}, want: "owned <nil>"},
+		{
+			name: "a failed proof of an unchanged row stays its failure", stored: &seat, first: refused,
+			proved: []string{"0"}, want: "unowned " + refused.Error(),
+		},
+		{
+			name: "a seat deleted during its proof is gone", first: refused,
+			proved: []string{"0"}, want: "unowned seat s ownership changed or disappeared",
+		},
+		{
+			name: "a seat taken by another engine during its proof is gone", stored: &taken, first: refused,
+			proved: []string{"0"}, want: "unowned seat s ownership changed or disappeared",
+		},
+		{
+			name: "a seat its birth stamped during the proof is proved again as it stands", stored: &stamped,
+			first: refused, proved: []string{"0", "1460"}, want: "owned <nil>",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// The listing proves the row as it read it; the change lands while the first proof runs.
+			if err := errors.Join(db.DeleteSeat(ctx, seat.SeatID), db.PutSeat(ctx, seat)); err != nil {
+				t.Fatal(err)
+			}
+			read, found, err := db.Seat(ctx, seat.SeatID)
+			if err != nil || !found {
+				t.Fatalf("read back seat %s: found=%t %v", seat.SeatID, found, err)
+			}
+			switch {
+			case test.stored == nil:
+				err = db.DeleteSeat(ctx, seat.SeatID)
+			case *test.stored != seat:
+				err = db.PutSeat(ctx, *test.stored)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var proved []string
+			_, owned, err := settleHerdrProof(ctx, db, read, func(on fleetdb.Seat) (fleetdb.Seat, bool, error) {
+				proved = append(proved, fmt.Sprint(on.SeatHostPID))
+				if len(proved) == 1 && test.first != nil {
+					return on, false, test.first
+				}
+				return on, true, nil
+			})
+			got := map[bool]string{true: "owned", false: "unowned"}[owned] + " " + fmt.Sprint(err)
+			if got != test.want || !slices.Equal(proved, test.proved) {
+				t.Fatalf(
+					"settled %q after proofs on supervisors %v, want %q after %v",
+					got,
+					proved,
+					test.want,
+					test.proved,
+				)
 			}
 		})
 	}

@@ -2,11 +2,15 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // engineGuardFixture is the pcm-guard fixture with no Codex or OpenCode
@@ -40,8 +44,23 @@ func engineGuardFixture(t *testing.T) pcmGuardFixture {
 		"ok.sh":      "echo y > notes.md\n",
 		"bad.py":     "open('.codex/config.toml', 'w').write('x')\n",
 		"run-bad.sh": "#!/usr/bin/env bash\necho y > .opencode/opencode.jsonc\n",
+		// Scripts reaching a sibling program through their own directory.
+		"tools/near.sh":     "python3 -I \"$(dirname \"$0\")/ok.py\" \"$1\"\n",
+		"tools/near-bad.sh": "python3 -I \"$(cd \"$(dirname -- \"${BASH_SOURCE[0]}\")\" && pwd -P)/bad.py\"\n",
+		"tools/missing.sh":  "python3 \"$(dirname \"$0\")/gone.py\"\n",
+		"tools/ok.py":       "print('ok')\n",
+		"tools/bad.py":      "open('AGENTS.md', 'w').write('x')\n",
+		"tools/ack.sh":      "cp AGENTS.md \"$D/acks/$1.md\"\n",
+		"tools/ack-fn.sh":   "f() { cp AGENTS.md \"$1\"; }\nf \"$1\"\n",
+		"tools/claim.sh":    "h=$(cat queue); mkdir $D/claims/$h && cat AGENTS.md > $D/claims/$h/owner\n",
+		// A worktree script the engine judge reads clean, so only git-guard judges its run.
+		".claude/scripts/worktree.sh": "echo list\n",
 	} {
-		if err := os.WriteFile(filepath.Join(f.project, name), []byte(body), 0o644); err != nil {
+		path := filepath.Join(f.project, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -55,7 +74,7 @@ func runEngineGuard(t *testing.T, engine string, payload map[string]any) (int, s
 		t.Fatalf("marshal payload: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := EngineGuard([]string{"--engine", engine}, bytes.NewReader(raw), &stdout, &stderr)
+	code := EngineGuardWith([]string{"--engine", engine}, bytes.NewReader(raw), &stdout, &stderr, guardGitModel)
 	return code, stdout.String(), stderr.String()
 }
 
@@ -108,6 +127,9 @@ func TestEngineGuardGit(t *testing.T) {
 		"git submodule update", "git gc", "git prune", "git -C ../proj commit -m x",
 		"git bisect start", "git sparse-checkout set src", "git init sub", "git reflog expire --all",
 		"git read-tree HEAD", "git commit-tree HEAD^{tree}", "git maintenance run", "git co main",
+		"bash .claude/scripts/worktree.sh list",
+		"git submodule init", "git submodule foreach git commit -m x", "git config edit", "git worktree",
+		"git remote rename a b",
 	}
 	allowed := []string{
 		"git status", "git log --oneline", "git diff", "git show HEAD", "git blame notes.md", "git branch",
@@ -115,6 +137,8 @@ func TestEngineGuardGit(t *testing.T) {
 		"git rev-parse HEAD", "git config --get user.name", "git grep x", "git stash list", "git stash show",
 		"git apply --check ok.diff", "git apply ok.diff", "git checkout -- notes.md",
 		"git --version", "git rev-list HEAD", "git cat-file -p HEAD", "git reflog", "git merge-base a b",
+		"git submodule status", "git submodule foreach git status", "git config get user.name", "git remote -v",
+		"git worktree list", "for r in a b; do git -C $r status; done",
 	}
 	for _, engine := range []string{"codex", "opencode"} {
 		for _, command := range denied {
@@ -224,10 +248,24 @@ func TestEngineGuardFrameworkFiles(t *testing.T) {
 			{"python3 big.py", blindDeny("python3 big.py")},
 			{"./big-run.sh", blindDeny("./big-run.sh")},
 			{"python3 new.py", blindDeny("python3 new.py")},
+			// A script an earlier part writes from a heredoc is judged from that body.
+			{"cat > new.py <<'EOF'\nprint('ok')\nEOF\npython3 new.py", ""},
+			{"cat > new.py <<'EOF'\nopen('AGENTS.md', 'w').write('x')\nEOF\npython3 new.py", fileDeny(p("AGENTS.md"))},
+			{"tee new.sh <<'EOF'\necho y > AGENTS.md\nEOF\nbash new.sh", fileDeny(p("AGENTS.md"))},
+			{"cat >> ok.sh <<'EOF'\necho y > AGENTS.md\nEOF\nbash ok.sh", fileDeny(p("AGENTS.md"))},
+			{"cat > run-new.sh <<'EOF'\n#!/bin/sh\necho y > CLAUDE.md\nEOF\n./run-new.sh", fileDeny(p("CLAUDE.md"))},
+			{"echo x | tee new.py; python3 new.py", blindDeny("python3 new.py")},
 			{
 				"rm " + filepath.Join(f.clone, "templates", "themes", "dusk", "theme.json"),
 				fileDeny(filepath.Join(f.clone, "templates", "themes", "dusk", "theme.json")),
 			},
+			{"bash tools/near.sh x", ""},
+			{"bash tools/near-bad.sh", fileDeny(p("AGENTS.md"), p("tools/AGENTS.md"))},
+			{"bash tools/missing.sh", blindDeny("python3 " + p("tools/gone.py"))},
+			{"bash tools/ack.sh chat", ""},
+			{"bash tools/ack-fn.sh chat", engineGuardUnreadable},
+			{"bash tools/claim.sh", ""},
+			{"h=$(cat queue); mkdir $D/claims/$h && cat AGENTS.md", engineGuardUnreadable},
 			{"bash", blindDeny("bash")},
 			{"python3", blindDeny("python3")},
 			{"vim", blindDeny("vim")},
@@ -256,17 +294,75 @@ func TestEngineGuardFrameworkFiles(t *testing.T) {
 }
 
 func TestEngineGuardEngineFlag(t *testing.T) {
-	for _, args := range [][]string{nil, {"--engine"}, {"--engine", "claude"}, {"--engine", "bogus"}} {
+	for _, row := range []struct {
+		args []string
+		want string
+	}{{nil, "2 \"\" pfm internal engine-guard: want --engine codex|opencode, got []\nusage: pfm internal engine-guard --engine codex|opencode\n"}, {[]string{"--engine"}, "2 \"\" pfm internal engine-guard: want --engine codex|opencode, got [\"--engine\"]\nusage: pfm internal engine-guard --engine codex|opencode\n"}, {[]string{"--engine", "claude"}, "2 \"\" pfm internal engine-guard: engine \"claude\" has no engine guard (codex or opencode)\nusage: pfm internal engine-guard --engine codex|opencode\n"}, {[]string{"--engine", "bogus"}, "2 \"\" pfm internal engine-guard: unknown engine \"bogus\" (want cc/claude, cx/codex, ox/opencode)\nusage: pfm internal engine-guard --engine codex|opencode\n"}} {
 		var stdout, stderr bytes.Buffer
-		if code := EngineGuard(args, strings.NewReader(`{}`), &stdout, &stderr); code != 2 || stdout.Len() != 0 ||
-			!strings.Contains(stderr.String(), "usage: pfm internal engine-guard --engine codex|opencode") {
-			t.Fatalf(
-				"args=%q: code=%d stdout=%q stderr=%q, want usage exit 2",
-				args,
-				code,
-				stdout.String(),
-				stderr.String(),
-			)
+		code := EngineGuard(row.args, strings.NewReader(`{}`), &stdout, &stderr)
+		if got := fmt.Sprintf("%d %q %s", code, stdout.String(), stderr.String()); got != row.want {
+			t.Errorf("args=%q: code stdout stderr = %q, want %q", row.args, got, row.want)
 		}
+	}
+}
+
+// A script the engine could not have changed runs whatever the guard cannot
+// read in it: a framework file, or a file git tracks unchanged from HEAD.
+// What such a script plainly writes, and any changed or untracked script it
+// runs, is still judged in full.
+func TestEngineGuardTrustsUnchangedScripts(t *testing.T) {
+	f := engineGuardFixture(t)
+	repo := filepath.Join(f.project, "repo")
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(repo, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(args ...string) {
+		t.Helper()
+		argv := append([]string{
+			"git", "-C", repo, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid",
+			"-c", "commit.gpgsign=false",
+		}, args...)
+		result, err := guardGitModel.Run(context.Background(), argv, deps.RunOptions{})
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("git %v: exit %d: %v: %s", args, result.ExitCode, err, result.Stderr)
+		}
+	}
+	write("gate.sh", "node --test $@\n")
+	write("changed.sh", "node --test $@\n")
+	write("calls-changed.sh", "bash changed.sh \"$1\"\n")
+	git("init", "-q")
+	git("add", ".")
+	git("commit", "-q", "-m", "probe")
+	write("changed.sh", "node --test $@ # edited\n")
+	write("untracked.sh", "node --test $@\n")
+	write(".claude/scripts/test.sh", "node --test $@\nf() { cp AGENTS.md \"$1\"; }\nf \"$1\"\n")
+	write(".claude/scripts/writes.sh", "echo y > AGENTS.md\n")
+	write(".claude/scripts/runs-ack.sh", "bash untracked-ack.sh \"$1\"\n")
+	write("untracked-ack.sh", "f() { cp AGENTS.md \"$1\"; }\nf \"$1\"\n")
+	blindDeny := func(command string) string {
+		return "engine-guard blocked `" + command + "`: " + engineGuardBlindLine
+	}
+	fileDeny := func(paths ...string) string {
+		return "engine-guard blocked a write to " + strings.Join(paths, ", ") + ". " + engineGuardFileBan
+	}
+	for _, row := range []struct{ command, want string }{
+		{"bash gate.sh x", ""},
+		{"bash changed.sh x", blindDeny("node --test $@")},
+		{"bash untracked.sh x", blindDeny("node --test $@")},
+		{"bash calls-changed.sh x", blindDeny("node --test $@")},
+		{"./.claude/scripts/test.sh x", ""},
+		{"bash .claude/scripts/writes.sh", fileDeny(filepath.Join(repo, "AGENTS.md"))},
+		{"bash .claude/scripts/runs-ack.sh x", engineGuardUnreadable},
+	} {
+		t.Run(row.command, func(t *testing.T) {
+			requireEngineGuard(t, "codex", engineGuardShellCall("codex", row.command, repo), row.want)
+		})
 	}
 }

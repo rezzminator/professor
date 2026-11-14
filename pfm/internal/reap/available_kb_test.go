@@ -1,6 +1,7 @@
 package reap
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,7 +69,11 @@ func TestAvailableKBMissingMemAvailableLineIsAnError(t *testing.T) {
 	}
 	runner := &Runner{paths: paths.Values{ProcRoot: root}}
 	got, err := runner.availableKB()
-	if err == nil || got != 0 || !strings.Contains(err.Error(), "MemAvailable") {
-		t.Fatalf("availableKB() = %d, %v, want an error naming the missing MemAvailable line", got, err)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprintf("%d %v", got, err),
+		root,
+		"{root}",
+	), "0 no MemAvailable line in {root}/meminfo"; got != want {
+		t.Fatalf("availableKB() = %q, want %q", got, want)
 	}
 }

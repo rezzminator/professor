@@ -1,0 +1,63 @@
+id = "professor.indicators"
+name = "Professor sidebar indicators"
+version = "1.0.0"
+min_herdr_version = "0.9.5"
+platforms = ["macos", "linux"]
+
+[[startup]]
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[startup]]
+command = ["/opt/bin/pfm", "internal", "herdr-places"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "pane.created"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "tab.created"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "pane.focused"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "pane.closed"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "pane.exited"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "pane.moved"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "tab.focused"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "tab.moved"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "tab.closed"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "workspace.created"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]
+
+[[events]]
+on = "workspace.focused"
+command = ["/opt/bin/pfm", "internal", "herdr-indicators"]

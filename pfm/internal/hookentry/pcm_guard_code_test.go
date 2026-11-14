@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -27,14 +26,15 @@ func (f pcmGuardFixture) script(t *testing.T, rel string) string {
 // merely names a prompt file pass, each run where its paths are protected.
 func TestPcmGuardAdmitsReadsDataAndWritesElsewhere(t *testing.T) {
 	f := pcmGuardHome(t)
-	f.script(t, ".claude/skills/tracetree/tracetree.py")
+	kit := f.script(t, ".claude/plugins/cache/professor/flights/1.0.0/skills/tracetree/tracetree.py")
 	f.script(t, "proj/tool.sh")
 	for _, command := range []string{
 		// A: the heredoc is stdin data for a script that exists.
-		`python3 $HOME/.claude/skills/tracetree/tracetree.py write /tmp/x 1 <<'HOPS'` +
+		`python3 $HOME/.claude/plugins/cache/professor/flights/1.0.0/skills/tracetree/tracetree.py write /tmp/x 1 ` +
+			`<<'HOPS'` +
 			"\nTHREAD 9: read .claude/scripts/test.sh, CLAUDE.md and templates/global/agents/x.md\n" +
 			"ANSWER\n- open('CLAUDE.md', 'w') is pcm's [templates/global/rules/x.md:4]\nHOPS",
-		`python3 -u ` + filepath.Join(f.home, ".claude", "skills", "tracetree", "tracetree.py") +
+		`python3 -u ` + kit +
 			` read <<< "templates/global/rules/x.md CLAUDE.md"`,
 		// B: a read in inline code.
 		`python3 -c "import json; print(json.load(open('templates/refresh-map.json')))"`,
@@ -86,7 +86,7 @@ func TestPcmGuardMentionsArePathElements(t *testing.T) {
 		`echo x > "$F" # see Templates`,
 		`echo x > "$F" # docs/claude.md`,
 	} {
-		pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, ""), "could not read this command")
+		pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, ""), pcmGuardCannotRead)
 	}
 	pcmGuardRequireAllow(t, pcmGuardBash(t, `echo x > "$F" # templates/themes_old`, f.clone, pcmGuardWriter))
 }
@@ -166,8 +166,10 @@ func TestPcmGuardBoundsNestedShellPrograms(t *testing.T) {
 	f := pcmGuardHome(t)
 	pcmGuardRequireDeny(t, pcmGuardBash(t, pcmGuardNestHeredoc("rm CLAUDE.md", 3), f.project, ""), pcmGuardOnlyPcm)
 	payload := pcmGuardBash(t, pcmGuardNestHeredoc("echo x > notes.md # CLAUDE.md", 10), f.project, "")
-	pcmGuardRequireDeny(t, payload, "could not read this command")
-	if _, stdout, _ := runPcmGuard(payload); strings.Contains(stdout, pcmGuardOnlyPcm) {
+	pcmGuardRequireDeny(t, payload, pcmGuardCannotRead)
+	if _, stdout, _ := runPcmGuard(
+		payload,
+	); stdout != "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"pcm-guard could not read this command, and it names a prompt file (CLAUDE.md, .claude, templates): split it into simple commands with literal paths; a prompt-file write goes to pcm: spawn Agent(subagent_type: \\\"pcm\\\") with the exact change.\"}}\n" {
 		t.Fatalf("stdout=%q, want only the unreadable line: notes.md is no prompt file", stdout)
 	}
 }

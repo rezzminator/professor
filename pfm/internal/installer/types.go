@@ -1,5 +1,3 @@
-// Package installer owns the host-level pfm command, hook, launcher, and unit
-// wiring. Its assets are embedded so one pfm binary is a complete installer.
 package installer
 
 import (
@@ -17,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/restart"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // ErrNameSyncRunning refuses a mutating install while the Linux name-sync
@@ -44,12 +43,11 @@ const (
 )
 
 const (
-	configTypeKey     = "type"
-	configCommandKey  = "command"
-	configArgsKey     = "args"
-	configEnvKey      = "env"
-	commandType       = "command"
-	legacyFleetBinary = "cc-fleet"
+	configTypeKey    = "type"
+	configCommandKey = "command"
+	configArgsKey    = "args"
+	configEnvKey     = "env"
+	commandType      = "command"
 )
 
 type CommandRunner interface {
@@ -65,8 +63,28 @@ type OutputRunner interface {
 	Output(context.Context, string, ...string) ([]byte, error)
 }
 
+// commandRun is a CommandRunner as the service-manager door's runner: its
+// answer is the error alone, so the result carries no output.
+type commandRun struct{ runner CommandRunner }
+
+func (adapter commandRun) Run(ctx context.Context, argv []string, _ deps.RunOptions) (deps.RunResult, error) {
+	return deps.RunResult{}, adapter.runner.Run(ctx, argv[0], argv[1:]...)
+}
+
+// commandOutput is an OutputRunner as the service-manager door's runner, so
+// the door reads the command's stdout as well.
+type commandOutput struct{ reader OutputRunner }
+
+func (adapter commandOutput) Run(ctx context.Context, argv []string, _ deps.RunOptions) (deps.RunResult, error) {
+	stdout, err := adapter.reader.Output(ctx, argv[0], argv[1:]...)
+	return deps.RunResult{Stdout: stdout}, err
+}
+
 type Options struct {
 	Mode Mode
+	// retired stands in for the clone's retired lists in tests; nil reads the
+	// clone (retiredLists).
+	retired *retired.Lists
 	// herdrIndicatorDeps replaces the process-table, signal and start doors in tests.
 	herdrIndicatorDeps *restart.Deps
 	// LeaveVSCodeColors permits uninstall to leave known extension-owned keys;
@@ -125,6 +143,13 @@ type Options struct {
 	// are part of the result (for example rumdl and uv). Runner remains the
 	// compatibility seam for simple command/status probes.
 	ProcessRunner deps.Runner
+	// EngineSyncRunner runs every engine-sync child (engine_sync_global.go);
+	// nil is the real process table.
+	EngineSyncRunner deps.Runner
+	// ReleaseNativeClaudeReports hands a Claude pane's Herdr state to Herdr's own
+	// Claude integration once the install step made it present (herdr_claude.go):
+	// called once per apply on a Herdr host with Home; nil skips it.
+	ReleaseNativeClaudeReports func(ctx context.Context, home string) error
 
 	MCPEnabled    map[string]bool
 	MCPPort       int
@@ -154,8 +179,7 @@ type Options struct {
 	ClaudePluginsDefault bool
 	// ClaudeEnv is claude.env: the plugin options as environment variables
 	// pfm writes into the primary seat's settings.json env (ensureClaudeEnv).
-	ClaudeEnv  map[string]string
-	Extensions map[string]pfmconfig.Extension
+	ClaudeEnv map[string]string
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches
@@ -204,14 +228,13 @@ type Options struct {
 	ThemeReleaseURL string
 	ThemeHTTPClient *http.Client
 
-	// launchGateUnprobed records that the launch-agent gate could not ask its
-	// question. It is set by Run, never by a caller.
-	launchGateUnprobed bool
-	// nameSyncGateUnprobed is the systemd twin: it records that the Linux
-	// name-sync gate's systemctl probe never ran at all (as opposed to
-	// running and reporting the service inactive). It is set by Run, never by
-	// a caller.
-	nameSyncGateUnprobed bool
+	// scheduler is the service manager the scheduled jobs run under; nil is
+	// this host's (jobScheduler). A test sets either kind.
+	scheduler scheduler
+	// schedulerGateUnprobed records that the scheduler gate could not ask its
+	// question (launchctl print or systemctl show never answered, as opposed
+	// to answering that no job runs). It is set by Run, never by a caller.
+	schedulerGateUnprobed bool
 }
 
 type Report struct {
@@ -222,8 +245,19 @@ type Report struct {
 	Failed int
 }
 
-// execCommandRunner runs a command through the observed real runner.
-type execCommandRunner struct{}
+// execCommandRunner runs a command through runner, the installer's process
+// seam; the zero value runs through the observed real runner.
+type execCommandRunner struct{ runner deps.Runner }
+
+// NewCommandRunner is the CommandRunner that starts its commands through runner; nil is the real one.
+func NewCommandRunner(runner deps.Runner) CommandRunner { return execCommandRunner{runner: runner} }
+
+func (runner execCommandRunner) process() deps.Runner {
+	if runner.runner != nil {
+		return runner.runner
+	}
+	return obs.Runner(deps.RealRunner{})
+}
 
 type commandExitError struct {
 	name string
@@ -262,26 +296,15 @@ func (installer *engine) processRunner() deps.Runner {
 }
 
 func (runner execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
-	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
-		return fmt.Errorf("run %q: %w", name, lookErr)
-	}
-	result, err := obs.Runner(deps.RealRunner{}).Run(
-		ctx, append([]string{name}, args...), deps.RunOptions{},
-	)
-	if err != nil {
-		return err
-	}
-	if result.ExitCode != 0 {
-		return commandExitError{name: name, code: result.ExitCode, text: string(result.Stderr)}
-	}
-	return nil
+	_, err := runner.Output(ctx, name, args...)
+	return err
 }
 
 func (runner execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
+	if _, lookErr := runner.process().LookPath(name); lookErr != nil {
 		return nil, fmt.Errorf("run %q: %w", name, lookErr)
 	}
-	result, err := obs.Runner(deps.RealRunner{}).Run(
+	result, err := runner.process().Run(
 		ctx, append([]string{name}, args...), deps.RunOptions{},
 	)
 	if err != nil {
@@ -294,10 +317,11 @@ func (runner execCommandRunner) Output(ctx context.Context, name string, args ..
 }
 
 // defaultProcRoot is the process table an install reads when neither
-// Options.ProcRoot nor its Env names one. The package's TestMain points it at an
-// empty jail, so a test whose fake Env omits PFM_PROC_ROOT never reads, or
-// signals, the processes of a suite running beside it.
-var defaultProcRoot = "/proc"
+// Options.ProcRoot nor its Env names one: "", gather's own kernel table. The
+// package's TestMain points it at an empty jail, so a test whose fake Env
+// omits PFM_PROC_ROOT never reads, or signals, the processes of a suite
+// running beside it.
+var defaultProcRoot = ""
 
 func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.SourceRepo != "" {
@@ -345,11 +369,11 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.Stdout == nil {
 		options.Stdout = io.Discard
 	}
-	if options.Runner == nil {
-		options.Runner = execCommandRunner{}
-	}
 	if options.ProcessRunner == nil {
 		options.ProcessRunner = obs.Runner(deps.RealRunner{})
+	}
+	if options.Runner == nil {
+		options.Runner = execCommandRunner{runner: options.ProcessRunner}
 	}
 	return options, nil
 }

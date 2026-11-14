@@ -1,6 +1,7 @@
 package testjail
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -48,25 +49,34 @@ func TestReadPSIUnreadableIsAnErrorNeverZero(t *testing.T) {
 		dir  string
 		want string
 	}{
-		{"pressure directory missing", missingDir, missingDir},
-		{"one resource file missing", pressureDir(t, map[string]string{"cpu": psiSome, "io": psiSome}), "memory"},
+		{
+			"pressure directory missing",
+			missingDir,
+			"map[] psi: open {root}/001/pressure/cpu: no such file or directory",
+		},
+		{
+			"one resource file missing",
+			pressureDir(t, map[string]string{"cpu": psiSome, "io": psiSome}),
+			"map[] psi: open {root}/002/memory: no such file or directory",
+		},
 		{
 			"a short line",
 			pressureDir(t, map[string]string{"cpu": "some avg10=0.00\n", "io": psiSome, "memory": psiSome}),
-			"malformed line",
+			"map[] psi {root}/003/cpu: malformed line \"some avg10=0.00\"",
 		},
 		{"a total that is no number", pressureDir(t, map[string]string{
 			"cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=many\n", "io": psiSome, "memory": psiSome,
-		}), "many"},
+		}), "map[] psi {root}/004/cpu: strconv.ParseInt: parsing \"many\": invalid syntax"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := readPSI(tc.dir)
-			if err == nil || got != nil {
-				t.Fatalf("readPSI = %v, %v, want an error and no values", got, err)
-			}
-			if !strings.HasPrefix(err.Error(), "psi") || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error %q does not name psi and %q", err, tc.want)
+			if got := strings.ReplaceAll(
+				fmt.Sprint(got, " ", err),
+				filepath.Dir(filepath.Dir(missingDir)),
+				"{root}",
+			); got != tc.want {
+				t.Errorf("readPSI = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -79,18 +89,12 @@ func TestSummaryPSIUnreadableIsNullWithItsReasonOnLinux(t *testing.T) {
 	p.mu.Lock()
 	summary := p.summary(0, "exit")
 	p.mu.Unlock()
-	if got, ok := summary["psi"]; !ok || got != nil {
-		t.Fatalf("psi = %#v (present %v), want null", got, ok)
-	}
-	if reason, _ := summary["psi_error"].(string); !strings.Contains(reason, missingDir) {
-		t.Fatalf("psi_error = %q, want the missing directory named", reason)
-	}
-	text := diagnose("", "exit", summary, "")
-	if want := "VM pressure while this process ran: not measured (" + summary["psi_error"].(string) + ")"; !strings.Contains(
-		text,
-		want,
-	) {
-		t.Fatalf("diagnosis lacks %q:\n%s", want, text)
+	psi, present := summary["psi"]
+	if got, want := rooted(
+		t,
+		fmt.Sprintf("%#v %t %v", psi, present, summary["psi_error"]),
+	), "<nil> true psi: open {root}/001/pressure/cpu: no such file or directory"; got != want {
+		t.Fatalf("psi and psi_error = %q, want %q", got, want)
 	}
 }
 
@@ -104,5 +108,48 @@ func TestRunDelayReadsThisProcessOnLinux(t *testing.T) {
 func TestMaxRSSIsKilobytesOnLinux(t *testing.T) {
 	if got := maxRSSKB(31800); got != 31800 {
 		t.Fatalf("maxRSSKB(31800) = %d, want it unchanged: Linux reports kilobytes", got)
+	}
+}
+
+func TestParseProcessStart(t *testing.T) {
+	const kernel = "cpu  1 2 3\nbtime 1763000000\nprocesses 9\n"
+	stat := func(comm string) string {
+		return "4242 (" + comm + ") S 1 4242 4242 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 8 0 123456 1000 200"
+	}
+	boot := time.Unix(1763000000, 0)
+	cases := []struct {
+		name, stat, kernel string
+		want               time.Time
+		err                string
+	}{
+		{"a plain command name", stat("go"), kernel, boot.Add(1234560 * time.Millisecond), ""},
+		{
+			"a command name holding spaces and parentheses",
+			stat("go (test) x"),
+			kernel,
+			boot.Add(1234560 * time.Millisecond),
+			"",
+		},
+		{"no command name", "4242 go S 1", kernel, time.Time{}, `stat "4242 go S 1": no command name in parentheses`},
+		{
+			"a short line",
+			"4242 (go) S 1 2",
+			kernel,
+			time.Time{},
+			`stat "4242 (go) S 1 2": 3 fields after the command name, want starttime at the 20th`,
+		},
+		{"no btime", stat("go"), "cpu  1 2 3\n", time.Time{}, "/proc/stat: no btime line"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseProcessStart(tc.stat, tc.kernel)
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if !got.Equal(tc.want) || gotErr != tc.err {
+				t.Fatalf("parseProcessStart = %v, %q; want %v, %q", got, gotErr, tc.want, tc.err)
+			}
+		})
 	}
 }

@@ -23,10 +23,10 @@ import (
 const chatCommand = "chat"
 
 // statusError is an ActionOutput's failure status, beside server.go's
-// statusNotFound and statusAmbiguous: the verb did not run. A chat that is
+// statusNotFound and chat.StatusAmbiguous: the verb did not run. A chat that is
 // simply not there is statusNotFound — absence and a step that could not run
 // are never the same answer.
-const statusError = "error"
+const statusError = chat.StatusError
 
 func (service *Service) chatLast(
 	ctx context.Context,
@@ -44,14 +44,14 @@ func (service *Service) chatLast(
 		return nil, LastOutput{}, err
 	}
 	result, err := service.backend.chat.Last(ctx, chat.LastRequest{Target: target})
+	if output, refused := lastReceipt(err, result, target, input.Target); refused {
+		return nil, output, nil
+	}
 	if err != nil {
 		return nil, LastOutput{}, fmt.Errorf("last: %w", err)
 	}
-	text := strings.TrimRight(result.Text, "\r\n")
-	if text == "" {
-		return nil, LastOutput{}, fmt.Errorf("last: %q returned an empty answer", target)
-	}
-	return nil, LastOutput{Target: input.Target, Text: text}, nil
+	// An answer with no text is still the chat's answer: both doors give it, the CLI an empty line.
+	return nil, LastOutput{Target: input.Target, Text: strings.TrimRight(result.Text, "\r\n")}, nil
 }
 
 func (service *Service) chatStatus(
@@ -85,10 +85,8 @@ func (service *Service) chatStatus(
 		Target: target, Summary: input.Summary, Ask: input.Ask,
 		Engine: engine, Model: input.Model,
 	})
-	if err != nil {
-		return nil, StatusOutput{}, fmt.Errorf("status: %w", err)
-	}
-	return nil, statusOutput(status), nil
+	output, err := statusAnswer(status, err, target)
+	return nil, output, err
 }
 
 // statusOutput copies the JSON contract of a status field by field: headless.Status
@@ -115,18 +113,14 @@ func (service *Service) chatNew(
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
-	callerErr := caller.err
-	if !caller.present {
-		callerErr = resolve.ErrNotInChat
-	}
-	if !caller.valid && caller.present && !errors.Is(callerErr, resolve.ErrNotRegistered) && !caller.absent {
+	if !caller.valid && caller.present && !errors.Is(caller.err, resolve.ErrNotRegistered) && !caller.absent {
 		return nil, ActionOutput{}, fmt.Errorf("new: resolve caller: %s", caller.detail)
 	}
-	if errors.Is(callerErr, resolve.ErrNotRegistered) &&
+	if errors.Is(caller.err, resolve.ErrNotRegistered) &&
 		(caller.identity.Backend != spawn.BackendHerdr || !filepath.IsAbs(caller.identity.SocketPath) || caller.identity.Pane == "" || caller.identity.HerdrWorkspace == "") {
 		return nil, ActionOutput{}, fmt.Errorf("new: resolve caller: %s", caller.detail)
 	}
-	ctx = chat.WithCaller(ctx, "mcp.new", caller.identity, callerErr)
+	ctx = service.withBirthCaller(ctx, "mcp.new", caller)
 	var self headless.Chat
 	if caller.valid {
 		self, err = service.resolvedSelf(ctx, caller)
@@ -148,6 +142,10 @@ func (service *Service) chatNew(
 		}
 		directory = filepath.Join(self.CWD, directory)
 	} else if directory == "" && caller.valid {
+		if strings.TrimSpace(self.CWD) == "" {
+			// Without --cwd the CLI would start the chat in this server's own directory.
+			return nil, ActionOutput{}, fmt.Errorf("new: caller working directory is unknown: pass an absolute cwd")
+		}
 		directory = self.CWD
 	}
 	var nameClaim chat.NameReservation
@@ -206,14 +204,19 @@ func (service *Service) chatNew(
 		}()
 	}
 	args := []string{chatCommand, "new", "--name", input.Name}
+	benchNote := ""
 	if input.Engine != "" {
 		args = append(args, "--engine", input.Engine)
 	} else if caller.valid && caller.row.Engine != "" {
 		bench, found, err := workbench.Nearest(directory)
 		if err != nil {
-			return nil, ActionOutput{}, fmt.Errorf("new: resolve workbench: %w", err)
+			benchNote = fmt.Sprintf(
+				"workbench lookup failed, so the caller's engine %s was kept: %v",
+				caller.row.Engine,
+				err,
+			)
 		}
-		if !found || bench.Err != nil || bench.Enables(caller.row.Engine) {
+		if err != nil || !found || bench.Err != nil || bench.Enables(caller.row.Engine) {
 			args = append(args, "--engine", string(caller.row.Engine))
 		}
 	}
@@ -257,8 +260,11 @@ func (service *Service) chatNew(
 		args = append(args, input.Prompt)
 	}
 	result, output, returnErr = service.cliAction(ctx, args...)
-	if returnErr == nil && output.Code == 0 && errors.Is(callerErr, resolve.ErrNotRegistered) {
+	if returnErr == nil && output.Code == 0 && errors.Is(caller.err, resolve.ErrNotRegistered) {
 		output.Message = "caller seat not registered yet; born in a new tab of its place's Herdr workspace"
+	}
+	if benchNote != "" {
+		output.Message = strings.TrimSpace(output.Message + "\n" + benchNote)
 	}
 	if nameClaim.Name != "" && returnErr == nil && output.Code == 0 {
 		if commitErr := nameClaim.Commit(); commitErr != nil {
@@ -276,7 +282,7 @@ func (service *Service) chatNew(
 // takes chat.OpenDetachedTarget, the verb layer's own door for a caller with no
 // terminal to attach: the same resolution and the same preparation `pfm chat
 // open` runs, ending in action.Executor.Open's detached mode instead of an eval
-// line. No caller is carried: the chat is placed by its own recorded host.
+// line. The request's caller is carried (withBirthCaller), so a revive is placed as `pfm chat open` places it.
 func (service *Service) chatOpen(
 	ctx context.Context,
 	request *mcp.CallToolRequest,
@@ -286,7 +292,11 @@ func (service *Service) chatOpen(
 	if err != nil {
 		return nil, callerActionFailure(err), err
 	}
-	return service.chatOpenDetached(ctx, target)
+	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
+	if err != nil {
+		return nil, callerActionFailure(err), err
+	}
+	return service.chatOpenDetached(service.withBirthCaller(ctx, "mcp.open", caller), target)
 }
 
 func (service *Service) chatOpenDetached(
@@ -309,19 +319,19 @@ func (service *Service) chatOpenDetached(
 	// matching only the indexed id answers a perfectly good name with an
 	// absence.
 	resolved, err := chat.Target(ctx, target, &effective)
+	// Absence and a fleet that could not be read are different answers: a refusal (no such chat, several) is a
+	// receipt, a lookup that could not run a tool error.
+	if refusal, ok := asRefusal(chat.TargetRefusal(err, target)); ok {
+		return nil, ActionOutput{Status: refusal.Status, Code: refusal.Code, Message: refusal.Message}, nil
+	}
 	if err != nil {
-		// Absence and a fleet that could not be read are different answers:
-		// not_found means no such chat, error means the lookup itself failed.
-		status, code := statusError, 2
-		if errors.Is(err, chat.ErrUnknownChat) {
-			status, code = statusNotFound, 1
-		}
-		output := ActionOutput{Status: status, Code: code, Message: err.Error()}
+		failed := chat.LookupFailed(err)
+		output := ActionOutput{Status: failed.Status, Code: failed.Code, Message: failed.Message}
 		return nil, output, fmt.Errorf("open: %w", err)
 	}
 	result, err := chat.OpenDetachedTarget(ctx, resolved, service.backend.warnings, &effective)
 	if err != nil {
-		output := ActionOutput{Status: statusError, Code: 1, Message: err.Error()}
+		output := ActionOutput{Status: statusError, Code: spawn.FailureCode(err), Message: err.Error()}
 		return nil, output, fmt.Errorf("open: %w", err)
 	}
 	return nil, ActionOutput{Status: "ok", Code: 0, Message: openMessage(result)}, nil
@@ -532,9 +542,9 @@ func (service *Service) cliTargetForRequest(
 	// refuses "self" can never drift apart on what counts as identity.
 	if refusal, detail := service.selfCallerRefusal(caller); refusal != "" {
 		if !isSelf {
-			return ctx, "", callerRefusal{status: refusal, message: "resolve MCP raw pane: " + detail}
+			return ctx, "", callerRefusal{status: refusal, message: "resolve MCP raw pane: " + detail, detail: detail}
 		}
-		return ctx, "", callerRefusal{status: refusal, message: "resolve MCP self: " + detail}
+		return ctx, "", callerRefusal{status: refusal, message: "resolve MCP self: " + detail, detail: detail}
 	}
 	if !caller.valid {
 		// Not refused and not valid is the stdio server's ambient case: the
@@ -615,6 +625,9 @@ func (service *Service) cliAction(ctx context.Context, args ...string) (*mcp.Cal
 	}
 	var stdout, stderr strings.Builder
 	code := service.backend.dispatch(ctx, args, &stdout, &stderr)
+	if refusal, ok := chat.ExitRefusal(code, cliRefusalMessage(stderr.String())); ok {
+		return nil, ActionOutput{Status: refusal.Status, Code: refusal.Code, Message: refusal.Message}, nil
+	}
 	if code != 0 {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {

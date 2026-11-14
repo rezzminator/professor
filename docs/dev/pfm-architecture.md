@@ -1,6 +1,6 @@
 # pfm: architecture for agent maintainers
 
-**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `github.com/rezzminator/professor/pfm`). Nothing here is built yet. Code moves through a `flights-foreman` tier in the fence, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
+**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `github.com/rezzminator/professor/pfm`). Nothing here is built yet. Code moves through a `flights:foreman` tier in the fence, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
 
 ## Contents
 
@@ -99,6 +99,7 @@ pfm/
     store/                          # the index DB (rename to indexdb: Open ruling 3)
     engine/  claude/ codex/ opencode/   # matchutil/ folded into engine/match.go
     installer/                      # installer.go split by surface; migrations/ below
+    servicemanager/                 # The one door for launchd and systemd user-service operations: Domain, ServiceTarget, Launchd.{Target,Print,Bootout,Bootstrap}, UserSystemctl. installer, restart, themesync and doctor call it; it imports none of them.
       migrations/                   # NEW. v<version>_<slug>.go per step + steps.go ordered slice
     unchanged: action agentopen agentrole archive ask codexappendix codexmeta codexprompt compose config deps
                gather headless headless/run heal index call kill
@@ -130,12 +131,12 @@ A unit calls the façade and never the primitive. Checks C4–C7 enforce the fir
 | Concern | Module | Primitive it hides | Today |
 | --- | --- | --- | --- |
 | tmux commands | `internal/tmux` (`Runner.Command`, `ListPanes`, `Capture`, `SendLiteral`, `SendKey`, `KillServer`, `RenameWindow`) | `exec.Command(deps.Executable("tmux"), "-S", …)` + `TMUX=` env strip + `-F` parsing | 9 runners (§ finding 2); consumers keep their narrow `TmuxClient` interfaces, satisfied by `*tmux.Runner` |
-| Process table | `internal/procfs` | `/proc/<pid>/{stat,environ}`, `kern.proc.pid`, `kern.procargs2` | `gather` and `resolve` each decode `stat`/`environ` on both OSes (`resolve/procfs_linux.go:22,37` vs `gather/procfs.go:113,158`); resolve's copy drops `StartTime`. |
+| Process table | `internal/procfs` | `/proc/<pid>/{stat,environ}`, `kern.proc.pid`, `kern.procargs2` | `gather/procfs.go` (`NewProcFS`, `ProcFS.PIDs`/`Cmdline`/`Environ`/`Stat`) is the one decoder; on macOS a failed environment read (`environWithheld`) tags another effective user's process foreign and a zombie gone, and names the command and user of any other refusal; `resolve.ProcTree` and `themesync` read through `gather.ProcFS`. |
 | SQLite open | `internal/sqlitedb` (`OpenWriter`, `OpenReadOnly`) | `sql.Open("sqlite", …)` + pragmas | `store/store.go:118,162` and `shared/shared.go:128,151` are near-identical; read-only DSNs use 2000 ms vs 5000 ms at `heal/heal.go:336,403`, `index/opencode.go:228`, `store/codexstate.go:255` |
 | Atomic file write | `internal/atomicfile.Write` | `CreateTemp` → `Chmod` → write → `Sync` → `Close` → `Rename` | 6 helpers that differ on `Sync`/`MkdirAll` (`usagehook/hook.go:668`, `config/config.go:1528`, `recovery/recovery.go:229`, `statusline/render.go:929`, `installer/files.go:24`, `updatecheck/updatecheck.go:194`), plus about 25 inline renames |
 | Transcript/rollout lines | `internal/jsonl.Lines` | `bufio.Reader`/`Scanner` loops with ad hoc caps | 4 idioms; caps of 64 KB default, 1 MB, 8 MB and 32 MB, plus uncapped `ReadBytes` (`index/stream.go:33`, `transcript/transcript.go:294,336`, `codexmeta/header.go:90`, `recovery/recovery.go:142`, `archive/archive.go:523`, `archive/manifest.go:78`) |
-| Filesystem locations and `PFM_*` env | `internal/paths` (exists) | `os.Getenv`, `$HOME`, `/tmp` literals | 13 `PFM_*` variables read outside `paths` across 8 files (e.g. `PFM_TEST_PROBE_SOCKETS` read in 4 places, `call/engine.go:1802`, `gather/tmuxprobe.go:576`, `statusline/render.go:534,676`) |
-| External commands | `internal/deps` (exists) | `exec.LookPath`, platform gates | sound |
+| Filesystem locations and `PFM_*` env | `internal/paths` (exists; `temp.go` is the temp-location door and holds the only `"/tmp"` literal in production Go, `installmark.go` the `PFM_INSTALL_MARK` rule) | `os.Getenv`, `$HOME`, `/tmp` literals | 13 `PFM_*` variables read outside `paths` across 8 files (e.g. `PFM_TEST_PROBE_SOCKETS` read in 4 places, `call/engine.go:1802`, `gather/tmuxprobe.go:576`, `statusline/render.go:534,676`) |
+| External commands | `internal/deps` (exists) | `exec.LookPath`, platform gates | sound: `deps.Resolve` is the one lookup, `RealRunner.LookPath` calls it, `config.Runtime.DepsOptions` is the one builder of the registry's options, and `deps.Executable` (Resolve, else the bare name) backs only `tmux`'s fallback |
 | Engine names | `internal/engine` (exists) | `"claude"` / `"codex"` literals, socket prefixes | sound (`FromSocket` is the one parser) |
 | Accounts, emoji, theme, posture | `internal/config` (exists) | `.cc/N` literals | sound per `pfm/CLAUDE.md` |
 | Chat operations | `internal/chat` (new) | argv into `package main` | every surface (CLI, MCP, picker actions, pfmd RPC) calls `chat.X(ctx, rt, req)` |
@@ -153,7 +154,7 @@ Each derived artifact names its source and the command that regenerates or verif
 | MCP bare-verb tool set and the server's routing instructions | `internal/chat/verbs.go` (`MCPTool` column) | `internal/mcpserv/verbs_parity_test.go`: registered tools == table's MCP rows, both directions |
 | `pfm internal` dispatch and usage | `internal/hooks/table.go` | `cmd/pfm/internal_entry_test.go`: every table entry has exactly one binding |
 | Claude `settings.json` + Codex hook wiring | `internal/hooks/table.go` (`Event`, `Matcher`, `Engines`) | `internal/installer/expected_hooks.go` derives from the table; installer tests pin the rendered JSON |
-| package map in `pfm/CLAUDE.md` | `// Package` doc comments | `go list -f '{{.ImportPath}} — {{.Doc}}' ./...`; C9 fails a package without one |
+| package map in `pfm/CLAUDE.md` | `// Package` doc comments on each package's front door | `go list -f '{{.ImportPath}} — {{.Doc}}' ./...`; C31 fails a package whose front door lacks one |
 | `PFM_*` list in `pfm/CLAUDE.md` | `internal/paths` constants | the doc points at `paths.go`; C16 ratchets reads outside `paths` |
 | Platforms table in `pfm/CLAUDE.md` | `deps.Registry` (`internal/deps/registry.go`) | `pfm doctor` prints the live rows; the doc keeps only the two gating rules |
 | installer migration order | `internal/installer/migrations/` files | `steps_test.go`: slice == directory listing, `Since` versions ascend, none older than the sunset window (Open ruling 6) |
@@ -162,18 +163,17 @@ Each derived artifact names its source and the command that regenerates or verif
 
 ## 6. Checks
 
-`pfm/scripts/arch-check.sh`, run by `.claude/scripts/dev.sh verify pfm`. It prints one `CHECK <id> PASS|FAIL|ERROR` line per check. A missing baseline or an enumerator that parsed nothing reports **ERROR**, never PASS (verified: with no `pfm/.arch/`, every ratchet check reports ERROR). `--measure` writes candidate baselines. The script was run against `ea312fe` and produced the counts in § Metrics.
+`pfm/scripts/arch-check.sh`, run by `.claude/scripts/dev.sh verify pfm`. It prints one `CHECK <id> PASS|FAIL|ERROR` line per check. A missing baseline or an enumerator that parsed nothing reports **ERROR**, never PASS (verified: with no `pfm/.arch/`, every ratchet check reports ERROR). `--measure` writes candidate baselines and afterwards only shrinks them; a ruled change to what a check counts (a lowered ceiling) re-seeds that one baseline once: delete `pfm/.arch/<name>.txt`, run `--measure`, and record the ruling in `pfm/.arch/exceptions.md`. The script was run against `ea312fe` and produced the counts in § Metrics.
 
 | Id | Asserts | Broken state reports |
 | --- | --- | --- |
-| C1 / C2 | no source file over 800 lines and no test file over 1,000 beyond `.arch/ceiling-{src,test}.txt` | `FAIL new: <file>` |
+| C1 / C2 | no source file over 240 lines (`CEIL_SRC`; 400 for a front door, `CEIL_FRONT`) and no test file over 1,000 (`CEIL_TEST`) beyond `.arch/ceiling-{src,test}.txt` | `FAIL <file> (new N)` or `<file> (B->N)` |
 | C3 | `cmd/pfm` non-test lines ≤ `CMD_BUDGET` (lowered as each extraction lands) | `FAIL cmd/pfm = N > budget B`; `ERROR` when no `cmd/pfm` source is listed |
 | C4 | no `exec.Command`, `sql.Open`, `os.WriteFile` or `os.Rename` in `cmd/pfm` beyond baseline | `FAIL new: <file> xN`; `ERROR` when no `cmd/pfm` source is listed |
 | C5 | no file outside `internal/tmux` and `internal/herdr` builds its own tmux or herdr invocation: resolves the binary (`deps.Executable`, `LookPath` of `"tmux"`, `"herdr"` or `pfmtmux.Binary`), spells it as the head of an argv slice or hands it to a runner beside a flag (`"tmux", "-S"`), or assembles the `-S` socket argv itself | `FAIL new: <file>` |
 | C6 | no named atomic-write helper, and no inline `os.CreateTemp` + `os.Rename`, outside `internal/atomicfile` | `FAIL new: <file>` |
 | C7 | no `sql.Open` outside `internal/sqlitedb` | `FAIL new: <file>` |
 | C8 | no negation-named directory (`*util*`, `helpers`, `common`, `misc`, `shared`) | `FAIL new: <dir>` |
-| C9 | every package has a `// Package` doc comment | `FAIL new: <dir>` |
 | C10 | `internal/mcpserv` never calls `backend.dispatch(` or `cliAction(` (argv into main), counted under `<file>`, nor a `pfmcall` function (`pfmcall.New`, a key check: send and capture go through `internal/chat`), counted under `pfmcall:<file>` | `FAIL <key> (new N)` or `<key> (B->N)` |
 | C11 | `"fleet.db"` is spelled at most once in Go source | `FAIL "fleet.db" spelled N times` |
 | C12 | every package, `*.md` and `PFM_*` name that `pfm/CLAUDE.md` cites exists — a `PFM_*` name only when production code uses it beyond declaring it | `FAIL new: <names>` |
@@ -189,6 +189,12 @@ Each derived artifact names its source and the command that regenerates or verif
 | C20 | one name for `~/.codex` — `codexRoot`/`CodexRoot`/`AccountHome` counted per file; `CodexHome` is canonical | `FAIL <file> (new N)` |
 | C21 | one test jail — `os.MkdirTemp("/tmp", …)` in tests outside `internal/testjail` counted per file; `testjail.ShortRoot` is the jail | `FAIL <file> (new N)` |
 | C27 | identity is read in one place — a getter (`Get`, `getenv`, `env`, `environ[…]`) handed `TMUX`, `TMUX_PANE`, `HERDR_SOCKET_PATH`, `HERDR_PANE_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID` or a `CHAT_SENDER_*` name, as a literal or through a constant holding one, outside `internal/resolve` and `internal/paths`, counted per file; reads go through `resolve.EnvironmentOf`, `CallerEnvironment` or `ProcessEnvironment`, whose snapshot names its subject; a write (`EnvironmentWith`, a `"TMUX="` pair) is no read; `.arch/exceptions.md` gives each baselined file its reason | `FAIL <file> (new N)` |
+| C28 | one signal door — a pid is signalled only through `internal/gather` (`signal.go`, `signal_linux.go`, `signal_darwin.go`; `pidalive.go` holds the signal-0 probe): `Door.Signal` re-reads the live process's start time, uid, argv and, when both reads have one, executable before it sends, withholds the signal from any other identity, and on Linux signals through a pidfd (no `kill(2)` fallback). Elsewhere a kill primitive (`syscall`/`unix` `Kill`, `Killpg`, `Tgkill`, `Tkill`, `PidfdSendSignal`), an `*os.Process` signalled (`.Process.Signal`/`.Kill`) or obtained (`os.FindProcess`, `os.StartProcess`, an `*os.Process` type, a variable holding `cmd.Process`) is counted per file; the baseline holds only signals to a child the file itself started, each with its reason in `.arch/exceptions.md` | `FAIL <file> (new N)` |
+| C29 | one OS door — per production Go file outside the door directories `internal/(deps\|servicemanager\|gather\|paths\|atomicfile)/` (and the fixture builders `internal/(mockengine\|hostfixture)/`, `cmd/mock-engine/`), the lines that read or compare the OS (`runtime.GOOS`, `"darwin"`/`"linux"` comparisons), read `/proc` or cgroup paths, or name a one-OS command literal (derived from the `Platforms:` lists in `internal/deps/registry.go`) are counted, an OS-tagged file counting 1; baseline `pfm/.arch/os-door.txt` | `FAIL <file> (new N)` or `<file> (B->N)`; `FAIL stale: <file>` for a baselined file that is gone; `ERROR` when the registry derives no one-OS command or no source is listed |
+| C30 | shell platform probes — non-comment lines in `scripts/*.sh`, `.claude/scripts/*.sh`, `pfm/scripts/*.sh` and `pfm/Makefile` (excluding `*_test.sh`, `test-*.sh`, `scripts/platform.sh`, `pfm/scripts/arch-check.sh`) that name a platform probe or one-OS tool (`uname`, `$OSTYPE`, `Darwin`, `sha256sum`, `shasum`, `stat -c`/`-f`, `nproc`, `getconf`, `sysctl`, `launchctl`, `systemctl`, `journalctl`, `pgrep`, `pkill`) are counted per file; baseline `pfm/.arch/shell-platform.txt` | `FAIL <file> (new N)` or `<file> (B->N)`; `FAIL stale: <file>` for a baselined file that is gone; `ERROR` when no shell source is listed |
+| C31 | every package has a front door, the file named for its package clause (`{package}.go`, `main.go` for `package main`), whose `// Package` doc comment (the comment block directly above the package clause) is the package's menu: it names every other non-test `.go` file of the package by base name. Counted per package directory: 1 for a missing front door or package doc, plus 1 per unnamed file, so a baselined package that gains an unnamed file grows; baseline `pfm/.arch/front-door.txt`. It holds the package-doc rule the retired C9 checked | `FAIL <dir> (new N)` or `<dir> (B->N)`; `ERROR` when awk cannot read the front doors, or setup `ERROR` when no package clause parses |
+| C32 | one OS door in test code — C29's rule over every `_test.go` file, `journey/` and `e2e/` included, with C29's door directories and fixture builders skipped and an OS-selected file (`_{os}_test.go`, a `//go:build` naming an OS) not counted: per file, the lines that read or compare the OS, name the live `/proc` or cgroup tree (`"/proc`, `"/sys/fs/cgroup`, `paths.SystemProcRoot`/`ProcRootOr`), or exec a one-OS command (`exec.Command("launchctl", …)`); a fake proc tree built by component name and a command scripted into a fake runner do not count. Count per file, only shrinks; each baselined entry carries its reason in `.arch/exceptions.md` | `FAIL <file> (new N)` |
+| C35 | exact assertions: `pfm/scripts/testassert` reads every test function with go/parser, follows the helpers it calls, and classes each `if` that fails the test by its condition; a test whose every value check is a substring or regexp match (`strings`/`bytes` `Contains`, `HasPrefix`, `HasSuffix`, `Index`…, a regexp `Match`/`Find`) is substring-only. One `{file} {Func}` line per substring-only test, a set that only shrinks; `testdata/` is not read; `go run ./scripts/testassert -root . -census < list` prints the whole census | `FAIL new: <file> <Func>`; `ERROR` when a file does not parse or the Go toolchain cannot run testassert |
 
 C6 was widened in the same pass: any `os.CreateTemp` outside `internal/atomicfile` is a hand-rolled writer, rename or not — the both-patterns rule had hidden three scratch-file copies in `headless/run`. Beyond the ratchet, `pfm/.golangci.yml` (dupl, goconst, gocritic, revive, staticcheck; gofumpt + gci + golines formatting) is the lint law and `scripts/clone-check.sh` (jscpd) ratchets the shell/JS/Python assets the Go tools cannot see.
 
@@ -298,7 +304,7 @@ Hops are reported as the pair source-only · orientation.
 | first-edit hops (source-only · orientation), 12 Claude transcripts with a pfm `.go` edit | median 13 · 0 · p75 28 · 11 · max 78 · 59 | ≤ 3 · ≤ 2 |
 | files re-read ≥ 2× per session | median 0 · p75 2 · max 5 | ≤ 2 |
 | zero-result searches per session | 0 | 0 |
-| source files > 800 lines / test files > 1,000 | 24 / 12 | 0 / 0 (ratchet) |
+| source files > 800 lines / test files > 1,000 (the ceiling at `ea312fe`) | 24 / 12 | 0 / 0 (ratchet; the source ceiling is 240 lines, 400 for a front door, since 2026-11-07) |
 | concrete tmux runners · atomic-write helpers · `sql.Open` sites | 9 · 6 · 5 files (7 calls) | 1 · 1 · 1 |
 | MCP argv calls into `package main` | 3 call sites carrying every stateful verb | 0 |
 | dangling pointers in `pfm/CLAUDE.md` · incomplete hand lists in it | 5 (`check/ legacy/ PLAN.md CUTOVER.md PFM_DB_SCRIPT`) + 1 self-contradiction · 3 (subcommands −7, packages −39, platforms −1) | 0 · 0 (lists replaced by `go list`, `pfm help`, `deps/registry.go`) |
@@ -361,7 +367,7 @@ Acceptance:      <observable behavior> · C3 budget lowered to <N>
 
 Each ruling lists the recommendation first.
 
-1. **Line ceiling.** 800 source / 1,000 test (24 + 12 files over today). The alternative, 600 / 800, puts 39 + 23 over.
+1. **Line ceiling.** Ruled 2026-11-07: 240 source lines, 400 for a package's front door, 1,000 test (C1, C2); `.arch/ceiling-src.txt` was re-seeded once for it.
 2. **`cmd/pfm` end-state budget.** 5,000 lines, lowered wave by wave through C3.
 3. **`store` → `indexdb`.** One mechanical rename that makes both database packages name what they hold. The recommendation is yes, late (step 8).
 4. **kill / hide / hidden.** Pick one term for "remove from the list, end if live". CLI and MCP names are wire keys; a rename needs an alias period.

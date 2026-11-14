@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/naming"
@@ -39,6 +40,10 @@ type Request struct {
 	Cache1H                              *bool
 	Model, Effort, PromptFile            string
 	Args                                 []string
+	// Envs are the adopter settings' envs (workbench.Persona.Envs).
+	Envs map[string]string
+	// Runner resolves bash for CLAUDE_CODE_SHELL; nil is the real runner.
+	Runner deps.Runner
 }
 
 type Launch struct {
@@ -136,19 +141,17 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		return Launch{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
 	}
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
-	result.Env = append(result.Env, ShellEnv(paths.OSEnv{}.Lookup)...)
+	result.Env = append(result.Env, shellEnvThrough(paths.OSEnv{}.Lookup, request.Runner)...)
 	costLedgerPlan(request, prefs.CostLedger, &result)
 	result.Argv = append(result.Argv, SessionArgs(request.SessionID, request.Resume, request.Fork)...)
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {
 		result.Argv = append(result.Argv, flagName, name)
 	}
-	result.Argv = append(result.Argv, request.Args...)
-	settings := settingsFor(request, prefs, noFlicker(request, settingsDir))
-	payload, err := json.Marshal(settings)
+	args, payload, err := settingsArgv(request.Args, settingsFor(request, prefs, noFlicker(request, settingsDir)))
 	if err != nil {
-		return Launch{}, fmt.Errorf("render --settings: %w", err)
+		return Launch{}, err
 	}
-	result.Argv = append(result.Argv, flagSettings, string(payload))
+	result.Argv = append(append(result.Argv, args...), flagSettings, payload)
 	if request.Purpose != PurposeQuery {
 		mcp := mcpConfig(request.Home, machine)
 		if len(mcp) != 0 {
@@ -176,8 +179,14 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		if prompt, _ := wantedPromptFile(request, prefs); prompt != "" {
 			result.Argv = append(result.Argv, flagPromptFile, prompt)
 		}
-		if prefs.PermissionMode == pfmconfig.PermissionBypass && request.Purpose != PurposeLauncher {
-			result.Argv = append(result.Argv, flagAllowBypass, flagBypass)
+		if request.Purpose != PurposeLauncher {
+			switch prefs.PermissionMode {
+			case pfmconfig.PermissionBypass:
+				result.Argv = append(result.Argv, flagAllowBypass, flagBypass)
+			case pfmconfig.PermissionAuto:
+				// Auto mode first; the allow flag keeps bypass one shift+tab away.
+				result.Argv = append(result.Argv, flagAllowBypass, flagPermissionMode, permissionModeAuto)
+			}
 		}
 	}
 	result.Argv = RefreshRemoteControl(
@@ -185,6 +194,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		prefs.RemoteControl && request.Purpose != PurposeQuery,
 		cmp.Or(request.RemoteControlName, request.Name),
 	)
+	result.Env = WithEnvs(request.Envs, result.Env)
 	return result, nil
 }
 
@@ -260,9 +270,6 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 	if prefs.NativeCursor {
 		env[envNativeCursor] = "1"
 	}
-	if prefs.SubagentStatuslineTrace {
-		env[EnvSubagentStatuslineTrace] = "1"
-	}
 	if fullscreen {
 		env[envNoFlicker] = "1"
 	}
@@ -278,10 +285,6 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) 
 		settings[knobStatusLine] = map[string]any{
 			typeWord: commandWord, commandWord: StatusLineCommand(request.Home), "padding": 0,
 			"refreshInterval": 2, "hideVimModeIndicator": true,
-		}
-		settings[knobSubagentStatusLine] = map[string]any{
-			typeWord:    commandWord,
-			commandWord: SubagentStatusLineCommand(request.Home),
 		}
 	}
 	return settings

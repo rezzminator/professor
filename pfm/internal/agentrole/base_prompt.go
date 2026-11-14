@@ -13,7 +13,7 @@ import (
 
 // BasePrompt returns the workbench persona or the engine's fleet prompt.
 func BasePrompt(engine pfmengine.ID, cwd, home string) (string, error) {
-	persona, err := workbench.ForLaunch(cwd, engine, workbench.Resume)
+	persona, err := workbench.ForLaunch(cwd, home, engine, workbench.Resume)
 	if err != nil {
 		return "", err
 	}

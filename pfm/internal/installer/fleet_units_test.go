@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 func TestUnitStateRunningReadsEveryState(t *testing.T) {
@@ -30,16 +32,15 @@ func TestVerifyFleetUnitsActiveNamesUnreadableState(t *testing.T) {
 		stateRunner{err: errors.New("unreadable state")},
 		[]string{mcpUnitName},
 	)
-	if err == nil || !strings.Contains(err.Error(), "fleet unit pfm-mcp.service state unreadable after start: ") {
-		t.Fatalf("verify error = %v", err)
+	want := "fleet unit pfm-mcp.service state unreadable after start:" +
+		" systemctl --user show --property=ActiveState --value pfm-mcp.service: unreadable state"
+	if err == nil || err.Error() != want {
+		t.Fatalf("verify error = %v, want %q", err, want)
 	}
 }
 
 func TestInstallReportsMCPRestartThatDoesNotComeBack(t *testing.T) {
 	t.Parallel()
-	if schedulerIsLaunchd {
-		return
-	}
 	want := "fleet unit pfm-mcp.service is failed 3s after start — journalctl --user -u pfm-mcp.service -n 20"
 	for _, laterFails := range []bool{false, true} {
 		t.Run(fmt.Sprintf("later step fails=%v", laterFails), func(t *testing.T) {
@@ -49,6 +50,7 @@ func TestInstallReportsMCPRestartThatDoesNotComeBack(t *testing.T) {
 			var output bytes.Buffer
 			settled := time.Duration(0)
 			_, err := Run(context.Background(), Options{
+				scheduler:     schedulerFor(servicemanager.KindSystemd),
 				MCPConfigPath: testConfigPath(t),
 				Mode:          ModeApply, Home: home, Runner: runner, Stdout: &output,
 				MCPEnabled: map[string]bool{"chat": true},

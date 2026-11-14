@@ -1,12 +1,16 @@
+//go:build jail
+
 package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +18,8 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -71,28 +77,20 @@ func TestCallReceiptPrintsResolverNoteOnStderr(t *testing.T) {
 		Proof:          "USER: next\n❯ ",
 		ResolutionNote: "resolved 🔖 label 'QA' → pane '%1'",
 	}, "QA", &stdout, &stderr)
-	if code != 0 || !strings.Contains(stderr.String(), "resolved 🔖 label") {
+	if code != 0 || stderr.String() != "resolved 🔖 label 'QA' → pane '%1'\n" {
 		t.Fatalf("resolver note exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 
-func TestCallAcceptsRetiredNoSigFlagWithWarning(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := runHeadlessCall([]string{"--no-sig"}, &stdout, &stderr)
-	if code != 2 || !strings.Contains(stderr.String(), "--no-sig is retired") ||
-		strings.Contains(stderr.String(), "flag provided but not defined") {
-		t.Fatalf("retired flag exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-}
-
 func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 binary is not installed")
 	}
-	tmuxRoot := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	tmuxRoot := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(tmuxRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -399,46 +397,7 @@ func TestChatCallResumeLadderPathSessionAndExcerpt(t *testing.T) {
 		}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			root := testjail.ShortRoot(t)
-			home := filepath.Join(root, "home")
-			project := filepath.Join(root, "claude", "project")
-			for _, directory := range []string{
-				home, project, filepath.Join(root, "tmux"),
-				filepath.Join(root, "codex"), filepath.Join(root, "proc"),
-			} {
-				if err := os.MkdirAll(directory, 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			claudeBinary := filepath.Join(home, ".local", "bin", "claude")
-			if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			const registryStub = "#!/bin/sh\n" +
-				"if [ \"$1\" = agents ] && [ \"$2\" = --json ]; then\n" +
-				"  printf '[]\\n'\n" +
-				"else\n  exit 2\nfi\n"
-			if err := testjail.WriteExecutable(claudeBinary, []byte(registryStub), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			transcript := filepath.Join(project, id+".jsonl")
-			line := fmt.Sprintf(
-				`{"type":"user","uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","sessionId":%q,"cwd":"/jail/project","version":"1","gitBranch":"","timestamp":"2026-08-16T00:00:00.000Z","message":{"role":"user","content":"distinctive transcript sentence for the resume ladder"}}`+"\n",
-				id,
-			)
-			if err := os.WriteFile(transcript, []byte(line), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("HOME", home)
-			t.Setenv("TMUX", "")
-			t.Setenv("PFM_HOME", home)
-			t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
-			t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
-			t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-			t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
-			t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
-			t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
-			t.Setenv("PFM_PROC_ROOT", filepath.Join(root, "proc"))
+			home, transcript := resumeLadderJail(t, id)
 			statedTestSender(t)
 			var stdout, stderr bytes.Buffer
 			code := run(
@@ -462,6 +421,133 @@ func TestChatCallResumeLadderPathSessionAndExcerpt(t *testing.T) {
 			backups, err := filepath.Glob(filepath.Join(home, ".claude-sessions", ".chat-call-backups", "*.jsonl"))
 			if err != nil || len(backups) != 1 {
 				t.Fatalf("backups=%v err=%v", backups, err)
+			}
+		})
+	}
+}
+
+// resumeLadderJail stages a jail holding one dormant Claude transcript, id,
+// whose first user turn is the resume ladder's distinctive sentence.
+func resumeLadderJail(t *testing.T, id string) (home, transcript string) {
+	t.Helper()
+	root := testjail.ShortRoot(t)
+	home = filepath.Join(root, "home")
+	project := filepath.Join(root, "claude", "project")
+	for _, directory := range []string{
+		home, project, filepath.Join(root, "tmux"),
+		filepath.Join(root, "codex"), filepath.Join(root, "proc"),
+	} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claudeBinary := filepath.Join(home, ".local", "bin", "claude")
+	if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const registryStub = "#!/bin/sh\n" +
+		"if [ \"$1\" = agents ] && [ \"$2\" = --json ]; then\n" +
+		"  printf '[]\\n'\n" +
+		"else\n  exit 2\nfi\n"
+	if err := testjail.WriteExecutable(claudeBinary, []byte(registryStub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	transcript = filepath.Join(project, id+".jsonl")
+	line := fmt.Sprintf(
+		`{"type":"user","uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","sessionId":%q,"cwd":"/jail/project","version":"1","gitBranch":"","timestamp":"2026-08-16T00:00:00.000Z","message":{"role":"user","content":"distinctive transcript sentence for the resume ladder"}}`+"\n",
+		id,
+	)
+	if err := os.WriteFile(transcript, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("TMUX", "")
+	t.Setenv("PFM_HOME", home)
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
+	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
+	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
+	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
+	t.Setenv("PFM_PROC_ROOT", filepath.Join(root, "proc"))
+	return home, transcript
+}
+
+// A dead chat the registry knows by name is answered from its row, never by
+// excerpt-matching the name: a dead Codex chat exits codeDeadChat naming how
+// to revive it, and a dead Claude chat resumes into its own session.
+func TestChatCallAnswersARegisteredDeadChatFromItsRow(t *testing.T) {
+	const claudeID = "22222222-2222-4333-8444-555555555555"
+	const codexID = "33333333-2222-4333-8444-555555555555"
+	for _, testCase := range []struct {
+		name, engine, session string
+		transcript            string
+		wantCode              int
+		wantSession           string
+		wantStderr            string
+	}{
+		{
+			name: "walk-dead-cx", engine: "cx", session: codexID, wantCode: codeDeadChat,
+			wantStderr: `"walk-dead-cx" is dead (engine cx, session ` + codexID +
+				"); revive it with: pfm chat open walk-dead-cx\n",
+		},
+		{
+			name: "walk-dead-cc", engine: "cc", session: claudeID,
+			wantSession: claudeID,
+		},
+		{
+			// a chat born named and ended before its first prompt: Claude wrote its title, no turn
+			name: "walk-dead-cc-titled", engine: "cc", session: claudeID, wantCode: codeDeadChat,
+			transcript: `{"type":"custom-title","customTitle":"walk-dead-cc-titled","sessionId":"` + claudeID + `"}` + "\n",
+			wantStderr: `"walk-dead-cc-titled" is dead (engine cc, session ` + claudeID +
+				"); revive it with: pfm chat open walk-dead-cc-titled\n",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, transcript := resumeLadderJail(t, claudeID)
+			if testCase.transcript != "" {
+				if err := os.WriteFile(transcript, []byte(testCase.transcript), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := os.ReadFile(transcript)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := fleetdb.OpenSharedState(context.Background(), jailPaths(t))
+			if err := state.PutSeat(context.Background(), fleetdb.Seat{
+				SeatID: "dead-" + testCase.engine, SessionID: testCase.session, Engine: testCase.engine,
+				Backend: "herdr", State: "lost", Name: testCase.name, LostNote: "fixture retired",
+				HerdrSocket: filepath.Join(filepath.Dir(transcript), "gone.sock"), HerdrPane: "w1:p1",
+				HerdrWorkspace: "w1",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.Close(); err != nil {
+				t.Fatal(err)
+			}
+			statedTestSender(t)
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"chat", "call", testCase.name, "registered dead message"}, &stdout, &stderr)
+			after, err := os.ReadFile(transcript)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if testCase.wantCode != 0 {
+				if code != testCase.wantCode || stdout.String() != "" || stderr.String() != testCase.wantStderr ||
+					!bytes.Equal(after, before) {
+					t.Fatalf("exit=%d want %d\nstdout=%q\nstderr=%q\nwant  =%q\ntranscript %s changed=%t",
+						code, testCase.wantCode, stdout.String(), stderr.String(), testCase.wantStderr,
+						transcript, !bytes.Equal(after, before))
+				}
+				return
+			}
+			session := regexp.MustCompile(`^called RESUME user turn \S+ \(parent \S+\) into session (\S+) `).
+				FindStringSubmatch(stdout.String())
+			if code != 0 || len(session) != 2 || session[1] != testCase.wantSession ||
+				!strings.Contains(string(after), "registered dead message") {
+				t.Fatalf("exit=%d stdout=%q stderr=%q transcript %s = %q",
+					code, stdout.String(), stderr.String(), transcript, after)
 			}
 		})
 	}
@@ -580,12 +666,13 @@ func TestChatCallResumeRefusesDaemonRegistrySession(t *testing.T) {
 }
 
 func TestChatCallResumeRefusesLiveSocketCrumbSession(t *testing.T) {
+	testjail.TmuxServer(t)
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
 	}
 	const id = "66666666-2222-4333-8444-555555555555"
 	const socket = "cc-1800000000-22-3"
-	base := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	base := paths.TmuxDirUnder(paths.TempRoot())
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -675,23 +762,25 @@ func TestChatCallRefusalsNameTheirReason(t *testing.T) {
 	if err := os.WriteFile(path, []byte("body"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	usage := "usage: pfm chat call [--force-now] [--then STEER]... [--file PATH] [--allow-unsigned] <target> <message>\n       pfm chat call [flags] --to TARGET[,TARGET...] [--to TARGET]... <message>\n       several targets are a broadcast: delivered in parallel, one report per target,\n       exit 0 only when every target took it\n       `/compact` is refused here — pfm never types a compaction\n"
+	both, noMessage, noTarget := "pfm chat call: --file and a message argument both given; pass one\n", "pfm chat call: no message given; pass <message> or --file PATH\n", "pfm chat call: no target chat given\n"
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"--file", path, "target", "inline body"}, "--file and a message argument both given"},
-		{[]string{"target", "--file", path, "inline body"}, "--file and a message argument both given"},
-		{[]string{"--file", path, "target", "--file", path}, "--file given twice"},
-		{[]string{"target"}, "no message given"},
-		{[]string{}, "no target chat given"},
-		{[]string{"--to", " , ", "body"}, "no target chat given"},
-		{[]string{"--to", "a,b"}, "no message given"},
-		{[]string{"--to", "a", "--file", path, "inline body"}, "--file and a message argument both given"},
+		{[]string{"--file", path, "target", "inline body"}, both},
+		{[]string{"target", "--file", path, "inline body"}, both},
+		{[]string{"--file", path, "target", "--file", path}, "pfm chat call: --file given twice\n"},
+		{[]string{"target"}, noMessage},
+		{[]string{}, noTarget},
+		{[]string{"--to", " , ", "body"}, noTarget},
+		{[]string{"--to", "a,b"}, noMessage},
+		{[]string{"--to", "a", "--file", path, "inline body"}, both},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := run(append([]string{"chat", "call"}, tc.args...), &stdout, &stderr)
-		if code != 2 || !strings.Contains(stderr.String(), tc.want) {
-			t.Fatalf("%q: exit=%d stderr=%q, want 2 naming %q", tc.args, code, stderr.String(), tc.want)
+		if code != 2 || stderr.String() != tc.want+usage {
+			t.Errorf("%q: exit=%d stderr = %q, want %q", tc.args, code, stderr.String(), tc.want+usage)
 		}
 	}
 }

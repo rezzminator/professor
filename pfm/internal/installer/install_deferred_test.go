@@ -11,33 +11,51 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 func TestInstallDeferredTrustFailureLandsLaterSteps(t *testing.T) {
 	home := t.TempDir()
-	account, binary, _ := stageResumeUnkillAccount(t, home)
+	account, binary, _, appServer := stageResumeUnkillAccount(t, home)
 	writeFixture(t, filepath.Join(account, "hooks.json"), `{"hooks":{}}`)
 	// The discovery answers no handler; initialization and the write reply
 	// retain the same native API exchange as the successful account fixture.
 	writeFixture(t, filepath.Join(home, "hooks-listing.jsonl"), "")
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &output,
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, ProcessRunner: appServer, Stdout: &output,
 		CodexHomes: []string{account}, CodexBinary: binary, MCPConfigPath: testConfigPath(t),
 	})
-	if err == nil || !strings.Contains(err.Error(), "(found 0)") {
-		t.Fatalf("install error=%v, want failed discovery", err)
-	}
-	for _, line := range []string{
-		"  change  trust Codex hooks " + account + "\n",
-		"  FAIL    Codex hook trust for " + account + ": ", "log default:", "zshrc",
+	pfm := filepath.Join(home, ".local", "bin", "pfm")
+	var missing []string
+	for _, hook := range [][2]string{
+		{"resume-unkill", "sessionStart/resume"},
+		{"herdr-state --engine codex start", "sessionStart/"},
+		{"herdr-state --engine codex working", "userPromptSubmit/"},
+		{"herdr-state --engine codex working", "postToolUse/"},
+		{"herdr-state --engine codex blocked", "permissionRequest/"},
+		{"herdr-state --engine codex idle", "stop/"},
+		{"herdr-state --engine codex idle", "interrupt/"},
+		{"herdr-state --engine codex end", "sessionEnd/"},
+		{"engine-guard --engine codex", "preToolUse/Bash|apply_patch"},
 	} {
-		if !strings.Contains(output.String(), line) {
-			t.Errorf("output missing %q:\n%s", line, output.String())
-		}
+		missing = append(missing, "hook \""+pfm+" internal "+hook[0]+"\" ("+hook[1]+") unavailable in "+account+
+			"/hooks.json (found 0): check hooks feature, managed policy and hooks.json")
 	}
+	failure := "Codex hook trust for " + account + ": record Codex hook trust for " + account + ": " +
+		strings.Join(missing, "\n")
+	if err == nil || err.Error() != failure {
+		t.Fatalf("install error=%v\nwant %s", err, failure)
+	}
+	wantOutputLines(t, output.String(), []string{
+		"  change  trust Codex hooks " + account,
+		"  FAIL    " + strings.SplitN(failure, "\n", 2)[0],
+		"  skip    zshrc: no source repo recorded and " + home +
+			"/.professor/pfm/internal/installer/assets/shim/pfm.zsh does not exist",
+	}, "trust Codex hooks", "  FAIL    ", "zshrc:")
 	if _, err := os.Stat(filepath.Join(managedRootForHome(home), binaryOwnershipName)); err != nil {
 		t.Fatalf("later metadata did not land: %v", err)
 	}
@@ -57,36 +75,65 @@ func TestInstallDeferredPluginFailureSurvivesLaterLedgerError(t *testing.T) {
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{"chat": true},
 		ClaudeRosterHost: true, PrimaryConfigDir: store,
 	})
-	failure := "claude plugins in " + store + ": "
-	if err == nil || !strings.Contains(err.Error(), failure) ||
-		!strings.Contains(err.Error(), "read VS Code ownership ") {
+	failure := "claude plugins in " + store + ": " + store + " resolves to the Claude store — run pfm doctor"
+	ledger := "read VS Code ownership " + filepath.Join(managedRootForHome(home), vscodeOwnershipName) +
+		": unexpected end of JSON input"
+	if err == nil || err.Error() != failure+"\n"+ledger {
 		t.Fatalf("install error=%v, want plugin and VS Code ledger failures", err)
 	}
-	if !strings.Contains(output.output.String(), "  FAIL    "+failure) {
-		t.Fatalf("plugin failure was not printed:\n%s", output.output.String())
-	}
+	wantOutputLines(t, output.output.String(), []string{"  FAIL    " + failure}, "  FAIL    ")
 }
 
+// TestInstallDeferredRestartFailureUsesFAILAndLandsLaterSteps: a fleet unit that fails after its
+// restart, an enable that exits non-zero, and a schedule timer still inactive after enable --now each
+// fail the run with a FAIL line (never a lowercase fail), and the steps after them still land.
 func TestInstallDeferredRestartFailureUsesFAILAndLandsLaterSteps(t *testing.T) {
-	if schedulerIsLaunchd {
-		return
+	const (
+		restart = "fleet unit pfm-mcp.service is failed 3s after start — journalctl --user -u pfm-mcp.service -n 20"
+		enable  = "systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-schedule.timer: exit 1"
+		timer   = "schedule timer pfm-schedule.timer is inactive after enable --now; due wakes will not run"
+	)
+	for _, tc := range []struct {
+		name   string
+		runner CommandRunner
+		mcp    map[string]bool
+		fails  []string
+	}{
+		{"failed restart", &fakeRunner{manager: true, mcpState: "failed"}, map[string]bool{"chat": true}, []string{restart}},
+		{"failed enable", &installEnableRunner{
+			fakeRunner: &fakeRunner{manager: true}, failEnable: true,
+			timerState: "inactive",
+		}, nil, []string{enable, timer}},
+		{"timer never started", &installEnableRunner{
+			fakeRunner: &fakeRunner{manager: true}, timerState: "inactive",
+			keepTimerStopped: true,
+		}, nil, []string{timer}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			_, recorder := obs.Test(t)
+			var output bytes.Buffer
+			_, err := Run(context.Background(), Options{
+				scheduler: schedulerFor(servicemanager.KindSystemd),
+				Mode:      ModeApply, Home: home, Runner: tc.runner, Stdout: &output,
+				MCPConfigPath: testConfigPath(t), MCPEnabled: tc.mcp, Sleep: func(time.Duration) {},
+			})
+			if want := strings.Join(tc.fails, "\n"); err == nil || err.Error() != want {
+				t.Fatalf("install error=%v, want %q", err, want)
+			}
+			var lines []string
+			for _, fail := range tc.fails {
+				lines = append(lines, "  FAIL    "+fail)
+			}
+			lines = append(lines, "  skip    zshrc: no source repo recorded and "+home+
+				"/.professor/pfm/internal/installer/assets/shim/pfm.zsh does not exist")
+			wantOutputLines(t, output.String(), lines, "  FAIL    ", "  fail    ", "zshrc:")
+			if _, err := os.Stat(filepath.Join(managedRootForHome(home), binaryOwnershipName)); err != nil {
+				t.Fatalf("later metadata did not land: %v", err)
+			}
+			requireInstallerFailureRecord(t, recorder, tc.fails[0])
+		})
 	}
-	home := t.TempDir()
-	_, recorder := obs.Test(t)
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{manager: true, mcpState: "failed"}, Stdout: &output,
-		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{"chat": true}, Sleep: func(time.Duration) {},
-	})
-	want := "fleet unit pfm-mcp.service is failed 3s after start — journalctl --user -u pfm-mcp.service -n 20"
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("install error=%v, want %q", err, want)
-	}
-	if !strings.Contains(output.String(), "  FAIL    "+want+"\n") || strings.Contains(output.String(), "  fail    ") ||
-		!strings.Contains(output.String(), "zshrc") {
-		t.Fatalf("restart failure or later step not reported:\n%s", output.String())
-	}
-	requireInstallerFailureRecord(t, recorder, want)
 }
 
 type installEnableRunner struct {
@@ -124,30 +171,6 @@ func (runner *installEnableRunner) Output(ctx context.Context, name string, args
 	return runner.fakeRunner.Output(ctx, name, args...)
 }
 
-func TestInstallDeferredEnableFailureLandsLaterSteps(t *testing.T) {
-	if schedulerIsLaunchd {
-		return
-	}
-	home := t.TempDir()
-	_, recorder := obs.Test(t)
-	var output bytes.Buffer
-	runner := &installEnableRunner{fakeRunner: &fakeRunner{manager: true}, failEnable: true, timerState: "inactive"}
-	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: runner, Stdout: &output, MCPConfigPath: testConfigPath(t),
-	})
-	want := "systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer pfm-schedule.timer: exit 1"
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("install error=%v, want %q", err, want)
-	}
-	if !strings.Contains(output.String(), "  FAIL    "+want+"\n") || !strings.Contains(output.String(), "zshrc") {
-		t.Fatalf("enable failure or later step not reported:\n%s", output.String())
-	}
-	if _, err := os.Stat(filepath.Join(managedRootForHome(home), binaryOwnershipName)); err != nil {
-		t.Fatalf("later metadata did not land: %v", err)
-	}
-	requireInstallerFailureRecord(t, recorder, want)
-}
-
 func requireInstallerFailureRecord(t *testing.T, recorder *obs.Recorder, want string) {
 	t.Helper()
 	for _, record := range recorder.Records() {
@@ -164,15 +187,13 @@ func requireInstallerFailureRecord(t *testing.T, recorder *obs.Recorder, want st
 }
 
 func TestInstallDeferredRerunRepairsInactiveTimerAndKeepsHealthyUnits(t *testing.T) {
-	if schedulerIsLaunchd {
-		return
-	}
 	for _, state := range []string{"inactive", "active"} {
 		t.Run(state, func(t *testing.T) {
 			home := t.TempDir()
 			runner := &installEnableRunner{fakeRunner: &fakeRunner{manager: true}, timerState: "active"}
 			var output bytes.Buffer
 			options := Options{
+				scheduler:     schedulerFor(servicemanager.KindSystemd),
 				Mode:          ModeApply,
 				Home:          home,
 				Runner:        runner,
@@ -200,26 +221,6 @@ func TestInstallDeferredRerunRepairsInactiveTimerAndKeepsHealthyUnits(t *testing
 	}
 }
 
-func TestInstallReportsScheduleTimerThatDidNotStart(t *testing.T) {
-	if schedulerIsLaunchd {
-		return // This contract is systemd's enable --now acknowledgement.
-	}
-	runner := &installEnableRunner{
-		fakeRunner: &fakeRunner{manager: true}, timerState: "inactive", keepTimerStopped: true,
-	}
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: t.TempDir(), Runner: runner, Stdout: &output, MCPConfigPath: testConfigPath(t),
-	})
-	if err == nil || !strings.Contains(err.Error(), "pfm-schedule.timer") ||
-		!strings.Contains(err.Error(), "inactive") {
-		t.Fatalf("install silently accepted an inactive schedule timer: err=%v output=%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "  FAIL    ") || !strings.Contains(output.String(), "zshrc") {
-		t.Fatalf("timer failure or subsequent steps not reported: %s", output.String())
-	}
-}
-
 func TestUninstallPreflightDamagedLoginFenceKeepsInstallation(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
@@ -237,8 +238,8 @@ func TestUninstallPreflightDamagedLoginFenceKeepsInstallation(t *testing.T) {
 	options.Mode = ModeUninstall
 	output.Reset()
 	_, err := Run(context.Background(), options)
-	if err == nil || !strings.Contains(err.Error(), "two pfm claude-config-dir begin markers") ||
-		!strings.Contains(err.Error(), "preflight uninstall plan") {
+	if err == nil || err.Error() != "preflight uninstall plan: login default: "+filepath.Join(home, ".profile")+
+		": two pfm claude-config-dir begin markers; remove one by hand" {
 		t.Fatalf("uninstall error=%v output=%s, want damaged-fence failure", err, output.String())
 	}
 	for _, name := range []string{"source-repo", binaryOwnershipName} {
@@ -246,8 +247,9 @@ func TestUninstallPreflightDamagedLoginFenceKeepsInstallation(t *testing.T) {
 			t.Errorf("preflight refusal removed installation metadata %s: %v", name, err)
 		}
 	}
-	if got := readFixture(t, settings); !strings.Contains(got, `"PFM"`) {
-		t.Fatalf("preflight refusal changed VS Code installation:\n%s", got)
+	got, err := decodeJSONCObject([]byte(readFixture(t, settings)))
+	if err != nil || got["terminal.integrated.defaultProfile.linux"] != "PFM" {
+		t.Fatalf("preflight refusal changed VS Code installation (%v):\n%v", err, got)
 	}
 }
 
@@ -297,71 +299,87 @@ func TestInstallDeferredConfigSeedDryRunAndApply(t *testing.T) {
 }
 
 func TestInstallDeferredSchedulerRefusalPrecedesSeed(t *testing.T) {
-	home := t.TempDir()
-	example, target := filepath.Join(t.TempDir(), "example.json"), filepath.Join(home, "cfg", "pfm.config.json")
-	writeFixture(t, example, `{"version":2}`)
-	_, err := Run(context.Background(), Options{
-		Mode:              ModeApply,
-		Home:              home,
-		Runner:            &fakeRunner{nameSyncActive: true, scheduleStates: []string{"inactive"}},
-		ConfigSeed:        example,
-		ConfigSeedContent: []byte(`{"version":2}`),
-		MCPConfigPath:     target,
-	})
-	want := ErrNameSyncRunning
-	if schedulerIsLaunchd {
-		want = ErrLaunchAgentRunning
+	want := map[servicemanager.Kind]error{
+		servicemanager.KindSystemd: ErrNameSyncRunning, servicemanager.KindLaunchd: ErrLaunchAgentRunning,
 	}
-	if !errors.Is(err, want) {
-		t.Fatalf("install error=%v, want name-sync refusal", err)
-	}
-	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("seed written before refusal: %v", err)
+	for _, kind := range schedulerKinds {
+		t.Run(string(kind), func(t *testing.T) {
+			home := t.TempDir()
+			example := filepath.Join(t.TempDir(), "example.json")
+			target := filepath.Join(home, "cfg", "pfm.config.json")
+			writeFixture(t, example, `{"version":2}`)
+			_, err := Run(context.Background(), Options{
+				Mode:              ModeApply,
+				Home:              home,
+				Runner:            &fakeRunner{nameSyncActive: true, scheduleStates: []string{"inactive"}},
+				ConfigSeed:        example,
+				ConfigSeedContent: []byte(`{"version":2}`),
+				MCPConfigPath:     target,
+				scheduler:         schedulerFor(kind),
+			})
+			if !errors.Is(err, want[kind]) {
+				t.Fatalf("install error=%v, want %v", err, want[kind])
+			}
+			if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("seed written before refusal: %v", err)
+			}
+		})
 	}
 }
 
 func TestInstallDeferredScheduleWaitThroughRun(t *testing.T) {
-	home := t.TempDir()
-	var output bytes.Buffer
-	var slept time.Duration
-	_, err := Run(context.Background(), Options{
-		Mode:          ModeApply,
-		Home:          home,
-		Runner:        &fakeRunner{nameSyncIdle: true, scheduleActive: true, scheduleStates: []string{"activating"}},
-		Stdout:        &output,
-		MCPConfigPath: testConfigPath(t),
-		Sleep:         func(d time.Duration) { slept += d },
-	})
-	want := ErrScheduleRunning
-	if schedulerIsLaunchd {
-		want = ErrScheduleAgentRunning
+	want := map[servicemanager.Kind]error{
+		servicemanager.KindSystemd: ErrScheduleRunning, servicemanager.KindLaunchd: ErrScheduleAgentRunning,
 	}
-	if !errors.Is(err, want) || slept != 90*time.Second ||
-		!strings.Contains(
-			output.String(),
-			"  wait    the pfm schedule is delivering; waiting up to 1m30s for it to finish\n",
-		) {
-		t.Fatalf("wait slept=%s error=%v output=%s", slept, err, output.String())
+	for _, kind := range schedulerKinds {
+		t.Run(string(kind), func(t *testing.T) {
+			var output bytes.Buffer
+			var slept time.Duration
+			_, err := Run(context.Background(), Options{
+				Mode: ModeApply,
+				Home: t.TempDir(),
+				Runner: &fakeRunner{
+					nameSyncIdle:   true,
+					scheduleActive: true,
+					scheduleStates: []string{"activating"},
+				},
+				Stdout:        &output,
+				MCPConfigPath: testConfigPath(t),
+				Sleep:         func(d time.Duration) { slept += d },
+				scheduler:     schedulerFor(kind),
+			})
+			if !errors.Is(err, want[kind]) || slept != 90*time.Second ||
+				!strings.Contains(
+					output.String(),
+					"  wait    the pfm schedule is delivering; waiting up to 1m30s for it to finish\n",
+				) {
+				t.Fatalf("wait slept=%s error=%v (want %v) output=%s", slept, err, want[kind], output.String())
+			}
+		})
 	}
 }
 
 func TestInstallDeferredUnprobedGateUsesSharedNote(t *testing.T) {
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: t.TempDir(), Runner: &fakeRunner{}, Stdout: &output, MCPConfigPath: testConfigPath(t),
-	})
-	note := nameSyncGateUnprobedNote
-	if schedulerIsLaunchd {
-		note = launchGateUnprobedNote
+	note := map[servicemanager.Kind]string{
+		servicemanager.KindSystemd: nameSyncGateUnprobedNote, servicemanager.KindLaunchd: launchGateUnprobedNote,
 	}
-	if err != nil || !strings.Contains(output.String(), "  skip    "+note+"\n") {
-		t.Fatalf("install error=%v output=%s", err, output.String())
+	for _, kind := range schedulerKinds {
+		t.Run(string(kind), func(t *testing.T) {
+			var output bytes.Buffer
+			_, err := Run(context.Background(), Options{
+				Mode: ModeApply, Home: t.TempDir(), Runner: &fakeRunner{}, Stdout: &output,
+				MCPConfigPath: testConfigPath(t), scheduler: schedulerFor(kind),
+			})
+			if err != nil || !strings.Contains(output.String(), "  skip    "+note[kind]+"\n") {
+				t.Fatalf("install error=%v, want the %q skip; output=%s", err, note[kind], output.String())
+			}
+		})
 	}
 }
 
 func TestUninstallDeferredPrunesClaudeAndRemovesCodexHookLedger(t *testing.T) {
 	home := t.TempDir()
-	account, _, _ := stageResumeUnkillAccount(t, home)
+	account, _, _ := stageCodexAccount(t, home)
 	options := Options{
 		Mode:          ModeApply,
 		Home:          home,
@@ -480,9 +498,87 @@ func TestFailedAssetStageDoesNotWireDependentRegistries(t *testing.T) {
 	if err == nil {
 		t.Fatal("staging failure was hidden")
 	}
-	for _, path := range []string{filepath.Join(home, ".claude", "commands", "reload.md"), filepath.Join(home, ".claude", "skills", "handoff", "SKILL.md")} {
+	for _, path := range []string{filepath.Join(home, ".claude", "commands", "reload.md")} {
 		if target, err := os.Readlink(path); err == nil {
 			t.Errorf("failed asset stage published dependent link %s -> %s", path, target)
 		}
+	}
+}
+
+// An operator's own "PFM" profile fails that settings file alone: the install
+// keeps it untouched, merges every other settings file, records the merged one
+// in the ledger, and lands every other step.
+func TestVSCodeProfileConflictFailsOnlyItsSettingsFile(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	merged := filepath.Join(home, "a", "settings.json")
+	writeFixture(t, merged, `{}`)
+	settings := filepath.Join(home, "b", "settings.json")
+	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/shell"}}}`
+	writeFixture(t, settings, original)
+
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
+		SourceRepo:     writeVSCodeLawFixture(t, t.TempDir()),
+		vscodePlatform: "linux", vscodeSettingsPaths: []string{merged, settings},
+	})
+	conflict := "VS Code settings " + settings + `: profile "PFM" already exists and is not PFM-owned`
+	if err == nil || !strings.Contains(err.Error(), conflict) || strings.Contains(err.Error(), "preflight") {
+		t.Fatalf("apply error=%v, want the profile conflict of its step alone", err)
+	}
+	if !strings.Contains(output.String(), "  FAIL    "+conflict+"\n") {
+		t.Fatalf("output lacks the FAIL row %q:\n%s", conflict, output.String())
+	}
+	if got := readFixture(t, settings); got != original {
+		t.Fatalf("conflicting apply changed settings.json: %q", got)
+	}
+	if got := readFixture(t, merged); !strings.Contains(got, `"PFM"`) {
+		t.Fatalf("the other settings file %s was not merged: %q", merged, got)
+	}
+	ledger := readVSCodeLedgerFixture(t, managedRootForHome(home))
+	if len(ledger.Files) != 1 || ledger.Files[0].Path != merged {
+		t.Fatalf("ledger files = %+v, want only %s", ledger.Files, merged)
+	}
+	if _, statErr := os.Lstat(filepath.Join(home, ".zshrc")); statErr != nil {
+		t.Fatalf("the shell step did not land past the VS Code conflict: %v", statErr)
+	}
+}
+
+// One broken store entry and one account that cannot be wired cost only
+// themselves: every other entry is linked into every other account.
+func TestWireClaudeStoreFailureCostsOnlyItsEntryAndAccount(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	store := ClaudeStore(home)
+	writeFixture(t, filepath.Join(store, "agents"), "a file where the agents directory belongs\n")
+	writeFixture(t, filepath.Join(home, "blocked"), "a file where account 1's parent belongs\n")
+	blocked := filepath.Join(home, "blocked", "1")
+	kept := pfmconfig.DefaultAccountDir(home, 2)
+	var output bytes.Buffer
+	runner := &engine{
+		options: Options{
+			Home: home, ConfigDir: store, Stdout: &output,
+			ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: blocked}, {ID: 2, ConfigDir: kept}},
+		},
+		apply: true,
+	}
+	err := runner.wireClaudeStore()
+	broken := "store entry " + filepath.Join(store, "agents") + " broken: a file where a directory belongs — remove " +
+		filepath.Join(store, "agents") + ", then run pfm install --yes"
+	if err == nil || !strings.Contains(err.Error(), broken) || !strings.Contains(err.Error(), blocked) {
+		t.Fatalf("wireClaudeStore = %v, want the broken entry and account 1 named", err)
+	}
+	skip := "  skip    " + filepath.Join(kept, "agents") + " left as it is: store entry " +
+		filepath.Join(store, "agents") + " failed above\n"
+	if !strings.Contains(output.String(), skip) {
+		t.Fatalf("output lacks %q:\n%s", skip, output.String())
+	}
+	for _, entry := range StoreEntries {
+		if entry.Name == "agents" {
+			continue
+		}
+		assertLink(t, filepath.Join(kept, entry.Name), filepath.Join(store, entry.Name))
 	}
 }

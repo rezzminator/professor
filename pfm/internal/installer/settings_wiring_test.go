@@ -9,10 +9,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/retired"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 )
 
 func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
@@ -59,14 +62,14 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		CodexHomes:    []string{},
 		Now:           now,
 		Runner:        runner,
+		// Herdr's own Claude integration writes its hook into the store on a
+		// Herdr host (herdr_claude_test.go); pfm's wiring is what is judged here.
+		ProcessRunner: noHerdrRunner{obs.Runner(deps.RealRunner{})},
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	wantedProbe := nameSyncStateProbe
-	if schedulerIsLaunchd {
-		wantedProbe = "launchctl print gui/" + strconv.Itoa(os.Getuid()) + "/" + launchdLabel
-	}
-	if len(runner.calls) == 0 || runner.calls[0] != wantedProbe {
+	if len(runner.calls) == 0 || runner.calls[0] != nameSyncStateProbe {
 		t.Fatalf(
 			"installer did not probe the running-service gate before touching fixtures; fake runner calls: %v",
 			runner.calls,
@@ -94,6 +97,8 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		Now:           now,
 		Stdout:        &second,
 		Runner:        &fakeRunner{},
+		ProcessRunner: noHerdrRunner{obs.Runner(deps.RealRunner{})},
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 	})
 	if err != nil || report.Changed != 0 {
 		t.Fatalf("second apply report=%#v err=%v\n%s", report, err, second.String())
@@ -106,6 +111,7 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		CodexHomes:    []string{},
 		Runner:        &fakeRunner{},
 		Now:           now,
+		scheduler:     schedulerFor(servicemanager.KindSystemd),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -151,6 +157,20 @@ func TestUninstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 	}
 }
 
+// fixtureRetiredHooks are the retired hook lists the hook readers are tested
+// on; the shipped file's lists are empty.
+var fixtureRetiredHooks = retired.Lists{
+	HookCommands: []retired.HookCommand{
+		{Name: "clear-hide", Subcommand: "internal clear-hide"},
+		{Name: "compact-nudge", Subcommand: "internal compact-nudge"},
+		{Name: "dream-agent-inject", Subcommand: "dream hook agent-inject"},
+		{Name: "dream-nudge", Subcommand: "dream hook nudge"},
+		{Name: "dream-codex-subagent-inject", Subcommand: "dream hook codex-subagent-inject"},
+	},
+	HookBinaries:  []string{"cc-fleet"},
+	HookShimHints: []retired.HookShimHint{{Name: "dream-agent-inject", Hint: "dreamer-agent-inject.sh"}},
+}
+
 func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -177,9 +197,9 @@ func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, retired := retiredHookCommandName(tc.command)
-			if !retired || got != tc.want {
-				t.Fatalf("retiredHookCommandName(%q)=(%q,%v), want (%q,true)", tc.command, got, retired, tc.want)
+			got, matched := retiredHookCommandName(fixtureRetiredHooks, tc.command)
+			if !matched || got != tc.want {
+				t.Fatalf("retiredHookCommandName(%q)=(%q,%v), want (%q,true)", tc.command, got, matched, tc.want)
 			}
 		})
 	}
@@ -188,7 +208,7 @@ func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
 		"/opt/legacy/bin/pfm-helper dream hook nudge",
 		"cc-fleet dream hook codex-subagent-injector",
 	} {
-		if name, retired := retiredHookCommandName(command); retired {
+		if name, matched := retiredHookCommandName(fixtureRetiredHooks, command); matched {
 			t.Fatalf("near-miss command %q classified as retired %q", command, name)
 		}
 	}
@@ -229,8 +249,8 @@ func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
 	writeFixture(t, hooksPath, "{broken\n")
 	expected := ExpectedHook{
 		Event:   "SessionStart",
-		Matcher: codexClearMatcher,
-		Command: filepath.Join(home, ".local", "bin", "pfm") + " internal clear-kill",
+		Matcher: "startup",
+		Command: filepath.Join(home, ".local", "bin", "pfm") + " internal resume-unkill",
 	}
 	physical := physicalSettingsPath(hooksPath)
 	encoded, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
@@ -242,32 +262,10 @@ func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
 	writeFixture(t, settingsHookOwnershipPath(managed), string(encoded))
 	installer := engine{options: Options{Mode: ModeUninstall, Home: home, Stdout: io.Discard}, managedRoot: managed}
 	err = installer.wireCodexHooks()
-	if err == nil || !strings.Contains(err.Error(), "refuse to strand owned hooks in invalid Codex hooks JSON") {
-		t.Fatalf("wireCodexHooks error=%v", err)
-	}
-}
-
-func TestCodexHookWiringWritesNoClearKillHookAcrossConfiguredHomes(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	homes := []string{filepath.Join(home, ".codex"), filepath.Join(home, ".codex-2")}
-	installer := engine{
-		options: Options{Mode: ModeApply, Home: home, CodexHomes: homes, Stdout: io.Discard},
-		apply:   true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
-	}
-	if err := installer.wireCodexHooks(); err != nil {
-		t.Fatal(err)
-	}
-	for _, codexHome := range homes {
-		hooksPath := filepath.Join(codexHome, "hooks.json")
-		if _, err := os.Stat(hooksPath); err == nil {
-			raw := readFixture(t, hooksPath)
-			if strings.Contains(raw, "internal clear-kill") {
-				t.Fatalf("%s carries the retired clear-kill hook:\n%s", hooksPath, raw)
-			}
-		} else if !os.IsNotExist(err) {
-			t.Fatalf("stat %s: %v", hooksPath, err)
-		}
+	want := "refuse to strand owned hooks in invalid Codex hooks JSON at " + hooksPath +
+		": invalid character 'b' looking for beginning of object key string"
+	if err == nil || err.Error() != want {
+		t.Fatalf("wireCodexHooks error=%v, want %q", err, want)
 	}
 }
 
@@ -275,16 +273,18 @@ func TestCodexHookWiringStripsALeftoverAcrossConfiguredHomes(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	homes := []string{filepath.Join(home, ".codex"), filepath.Join(home, ".codex-2")}
-	canonical := filepath.Join(home, ".local", "bin", "pfm") + " internal clear-kill"
+	canonical := filepath.Join(home, ".local", "bin", "pfm") + " internal compact-nudge"
 	for _, codexHome := range homes {
 		writeFixture(t, filepath.Join(codexHome, "hooks.json"), fmt.Sprintf(
-			`{"hooks":{"SessionStart":[{"matcher":%q,"hooks":[{"type":"command","command":%q}]}]}}`,
-			codexClearMatcher, canonical,
+			`{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":%q}]}]}}`,
+			canonical,
 		))
 	}
 	installer := engine{
-		options: Options{Mode: ModeApply, Home: home, CodexHomes: homes, Stdout: io.Discard},
-		apply:   true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		options: Options{
+			Mode: ModeApply, Home: home, CodexHomes: homes, Stdout: io.Discard, retired: &fixtureRetiredHooks,
+		},
+		apply: true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
 	}
 	if err := installer.wireCodexHooks(); err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestCodexHookWiringStripsALeftoverAcrossConfiguredHomes(t *testing.T) {
 	for _, codexHome := range homes {
 		raw := readFixture(t, filepath.Join(codexHome, "hooks.json"))
 		if got := hookCommandCount(t, raw, "SessionStart", canonical); got != 0 {
-			t.Fatalf("%s has %d leftover clear-kill hooks, want zero\n%s", codexHome, got, raw)
+			t.Fatalf("%s has %d leftover retired hooks, want zero\n%s", codexHome, got, raw)
 		}
 	}
 }

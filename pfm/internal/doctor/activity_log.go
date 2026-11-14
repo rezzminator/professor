@@ -10,35 +10,37 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// printActivityLogDoctor names the home's activity log and its size — the one
-// row that tells an operator where `pfm log` reads from and how much this home
-// has written — then the level in force per component (printLogLevelDoctor).
-// A file that has never been written is ABSENT (bytes=0); a file that could
-// not be stat'd is StateUnavailable with the reason, because "we failed to
-// look" is not "there is nothing there". Neither is a warning: an unwritten
-// log is a fresh home, and an unreadable one is reported, not tallied. It
-// returns the warnings the level rows count, read from env.
+// printActivityLogDoctor names the home's log root (paths.LogRoot) and its
+// activity log's current segment and size — the one row that tells an operator
+// where `pfm log` reads from — with the retention in force, then the level in
+// force per component (printLogLevelDoctor). A segment never written is ABSENT
+// (bytes=0); one that could not be stat'd is StateUnavailable with the reason,
+// because "we failed to look" is not "there is nothing there". Neither is a
+// warning: an unwritten log is a fresh home, and an unreadable one is
+// reported, not tallied. A recorded clone the log cannot live in is one
+// warning, its reason on its own row. It returns the warnings it counted.
 func printActivityLogDoctor(stdout io.Writer, runtime config.Runtime, env paths.Env) int {
-	path := runtime.Paths.LogFile
+	place := paths.LogRoot(env, runtime.Paths.Home)
+	path := place.Activity()
 	policy := runtime.Config.Log
+	retention := fmt.Sprintf("segment_mb=%d keep_mb=%d", policy.MaxMB, policy.KeepFiles*policy.MaxMB)
 	info, err := os.Stat(path)
 	switch {
 	case err == nil:
-		fmt.Fprintf(
-			stdout,
-			"doctor: log path=%s bytes=%d level=%s keep=%d max_mb=%d keep_days=%d\n",
-			path, info.Size(), logLevelLabel(policy.Level), policy.KeepFiles, policy.MaxMB, policy.KeepDays,
-		)
+		fmt.Fprintf(stdout, "doctor: log path=%s bytes=%d level=%s %s\n",
+			path, info.Size(), logLevelLabel(policy.Level), retention)
 	case os.IsNotExist(err):
-		fmt.Fprintf(
-			stdout,
-			"doctor: log path=%s bytes=0 state=absent level=%s keep=%d max_mb=%d keep_days=%d\n",
-			path, logLevelLabel(policy.Level), policy.KeepFiles, policy.MaxMB, policy.KeepDays,
-		)
+		fmt.Fprintf(stdout, "doctor: log path=%s bytes=0 state=absent level=%s %s\n",
+			path, logLevelLabel(policy.Level), retention)
 	default:
 		fmt.Fprintf(stdout, "doctor: log path=%s state=%s error=%v\n", path, StateUnavailable, err)
 	}
-	return printLogLevelDoctor(stdout, policy, runtime.Version, env)
+	warnings := 0
+	if place.Fallback != nil {
+		fmt.Fprintf(stdout, "doctor: log WARN root=%s: %v\n", place.Dir, place.Fallback)
+		warnings = 1
+	}
+	return warnings + printLogLevelDoctor(stdout, policy, runtime.Version, env)
 }
 
 // printLogLevelDoctor prints the level in force per component and where each

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -69,15 +68,17 @@ func TestMalformedCodexHooksStillRefusesToStrandOwnedHooksOnUninstall(t *testing
 	codexHome := filepath.Join(home, ".codex")
 	hooks := filepath.Join(codexHome, "hooks.json")
 
-	// pfm writes no Codex hook any more — the appendix hook is retired — so
-	// the ownership an uninstall must not strand is one an OLDER install
-	// recorded, which is exactly what this ledger says.
+	// The ledger records the resume-unkill hook an earlier install wrote.
+	resumeUnkill, err := codexResumeUnkillHook(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ledger, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
 		physicalSettingsPath(hooks): {
 			settingsHookKey{
-				Event:   "SessionStart",
-				Matcher: codexappendix.Matcher,
-				Command: codexappendix.Command(home),
+				Event:   resumeUnkill.Event,
+				Matcher: resumeUnkill.Matcher,
+				Command: resumeUnkill.Command,
 			}: 1,
 		},
 	})
@@ -94,7 +95,8 @@ func TestMalformedCodexHooksStillRefusesToStrandOwnedHooksOnUninstall(t *testing
 	if err == nil {
 		t.Fatal("uninstall silently stranded pfm-owned hooks in an unparseable Codex hooks file")
 	}
-	if !strings.Contains(err.Error(), "refuse to strand owned hooks") || !strings.Contains(err.Error(), hooks) {
+	if err.Error() != "preflight uninstall plan: refuse to strand owned hooks in invalid Codex hooks JSON at "+hooks+
+		": invalid character 'b' looking for beginning of object key string" {
 		t.Fatalf("uninstall error did not name the stranded ownership at %s: %v", hooks, err)
 	}
 }

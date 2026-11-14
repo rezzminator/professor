@@ -52,6 +52,7 @@ func TestParseReadsRecordShapesAndTallies(t *testing.T) {
 // A compressed rollout resolves by its id, from a Codex home and from a
 // --root, the plain twin winning where both sit, and digests decompressed.
 func TestACompressedRolloutResolvesByIDAndDigests(t *testing.T) {
+	t.Chdir(t.TempDir())
 	const meta = `{"timestamp":"2026-09-29T20:00:00.000Z","type":"session_meta","payload":{"id":"aaa111","cwd":"/w"}}` + "\n" +
 		`{"timestamp":"2026-09-29T20:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5"}}` + "\n"
 	write := func(dir, name string) string {
@@ -108,9 +109,33 @@ func TestCodexNullSettingsReadAsAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	head, _, _ := strings.Cut(out.Text, "\n")
-	if head != "TRANSCRIPT codex · s1 · gpt-5" || !strings.Contains(out.Text, "cwd None (shown as ./)") ||
-		!strings.Contains(out.Text, "PROMPT open None/x") {
-		t.Errorf("digest = %q", out.Text)
+	if got, want := strings.ReplaceAll(
+		out.Text,
+		filepath.Dir(path),
+		"{dir}",
+	), "TRANSCRIPT codex · s1 · gpt-5\nFILE {dir}/rollout-2026-09-29T20-00-00-s1.jsonl · 423 bytes · 3 records · cwd None (shown as ./)\nSPAN 2026-09-29 20:00:00Z → 20:00:02Z · 2s wall\nCALLS 0, 0 err, 0 without result: none\nFILTER only prompt,reply,call,note,final · results brief · text 500 · shown 1 of 1 events\nL3 20:00:02 PROMPT open None/x\nUNFINISHED — the last turn has no final reply: the run was cut off or is still running\nSKIPPED 0 records | HEADER 2: session_meta 1 · turn_context 1\n"; got != want {
+		t.Errorf("digest = %q, want %q", got, want)
+	}
+}
+
+// The engine is named by the first record that names one, however far in: the
+// records before it are digested under it, not lost to a fixed detection window.
+func TestParseFindsAnEngineNamedPastTheDetectWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "late.jsonl")
+	content := strings.Repeat(`{"foo":1}`+"\n", detectWindow+10) +
+		`{"type":"user","timestamp":"2026-09-29T20:00:00.000Z","message":{"content":"late prompt"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := DigestTranscript(context.Background(), []string{"show", path}, Env{})
+	if err != nil {
+		t.Fatalf("show %s: %v", path, err)
+	}
+	if len(out.Warnings) != 0 {
+		t.Errorf("warnings = %q, want none: a record named the engine", out.Warnings)
+	}
+	lines := strings.Split(out.Text, "\n")
+	if lines[0] != "TRANSCRIPT claude · ? · model ?" || !slices.Contains(lines, "L91 20:00:00 PROMPT late prompt") {
+		t.Errorf("digest of %s = %q, want a Claude digest with the prompt at L91", path, out.Text)
 	}
 }

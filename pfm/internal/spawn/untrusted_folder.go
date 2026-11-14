@@ -111,28 +111,32 @@ func awaitRenameModal(
 // untrustedFolderGuard is the spawn path's check that a Codex chat has a
 // thread: run after the rename and after the first prompt, the two doors whose
 // keystrokes Codex answers with codexNoThread. A screen that cannot be read is
-// an error, never "it has a thread".
+// a warning that the thread is unverified, never "it has a thread" and never a
+// failed spawn of a chat that is running; only cancellation is an error.
 func untrustedFolderGuard(
 	ctx context.Context,
 	door pfmcall.Screen,
 	request Request,
 	target pfmcall.Target,
-) error {
+) (warning string, err error) {
 	if request.Engine != pfmengine.Codex {
-		return nil
+		return "", nil
 	}
 	capture, err := door.CaptureScreen(ctx, target)
 	if err != nil {
-		return fmt.Errorf(
-			"could not read the Codex chat on socket %s to confirm it started a thread: %w",
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", fmt.Errorf("read the Codex chat on socket %s: %w", request.Socket, ctxErr)
+		}
+		return fmt.Sprintf(
+			"could not read the Codex chat on socket %s to confirm it started a thread: %v; the chat is running, unverified",
 			request.Socket,
 			err,
-		)
+		), nil
 	}
 	if !codexFolderUntrusted(capture) {
-		return nil
+		return "", nil
 	}
-	return fmt.Errorf(
+	return "", fmt.Errorf(
 		"the folder %s is untrusted, so Codex has no active thread: it "+
 			"answers %q and the first prompt only queues; trust the folder by "+
 			"running codex there yourself, then start the chat again (the "+

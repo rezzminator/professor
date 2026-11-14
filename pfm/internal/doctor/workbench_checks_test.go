@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/unix"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -55,10 +58,15 @@ func TestWorkbenchDoctorMirrors(t *testing.T) {
 				filepath.Join(dir, ".professor", "scribe.md"),
 			)
 			wantWarnings, wantFailures := 0, 0
+			_, runner := testjail.FakeEngineSyncRunner(
+				t,
+				`{"ok":true,"problems":[],"rebuildable":[],"warnings":[],"wrote":0,"unchanged":0,"deleted":0,"error":""}`,
+				0,
+			)
 			switch state {
 			case "stale":
 				stale := "STALE " + filepath.Join(dir, "AGENTS.md")
-				testjail.FakeEngineSync(
+				_, runner = testjail.FakeEngineSyncRunner(
 					t,
 					`{"ok":false,"problems":["`+stale+`"],"rebuildable":["`+stale+`"],"error":""}`,
 					1,
@@ -70,7 +78,7 @@ func TestWorkbenchDoctorMirrors(t *testing.T) {
 				) + want
 				wantWarnings = 1
 			case "broken":
-				testjail.FakeEngineSync(
+				_, runner = testjail.FakeEngineSyncRunner(
 					t,
 					`{"ok":false,"problems":[],"rebuildable":[],"error":"parse codex-build.json: EOF"}`,
 					1,
@@ -91,7 +99,7 @@ func TestWorkbenchDoctorMirrors(t *testing.T) {
 				wantFailures = 1
 			}
 			var stdout bytes.Buffer
-			warnings, failures := printWorkbenchDoctor(&stdout, root, home)
+			warnings, failures := printWorkbenchDoctor(&stdout, root, home, runner)
 			if stdout.String() != want || warnings != wantWarnings || failures != wantFailures {
 				t.Fatalf(
 					"warnings=%d failures=%d output=%q, want %d %d %q",
@@ -111,8 +119,13 @@ func TestWorkbenchDoctorWalkError(t *testing.T) {
 	// A depth-6 directory whose path leaves no room for "/.professor" under
 	// PATH_MAX fails its manifest probe (ENAMETOOLONG) for real, even in a
 	// root-run fence; a regular file named .professor is absence, not a fault.
-	const pathMax, segments, segment = 4095, 6, 255
-	base := t.TempDir()
+	// PATH_MAX is 4096 on Linux and 1024 on macOS, so the segments shrink to fit.
+	const pathMax, segments = unix.PathMax - 1, 6
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment := min(255, (pathMax-5-len(base)-len("/acme"))/segments-1)
 	for remaining := pathMax - 5 - segments*(segment+1) - len(base); remaining > 0; {
 		n := min(200, remaining-1)
 		if remaining-(n+1) == 1 {
@@ -143,7 +156,7 @@ func TestWorkbenchDoctorWalkError(t *testing.T) {
 			walkErrors[0].Error(),
 		)
 	var stdout bytes.Buffer
-	warnings, failures := printWorkbenchDoctor(&stdout, root, home)
+	warnings, failures := printWorkbenchDoctor(&stdout, root, home, nil)
 	if stdout.String() != want || warnings != 0 || failures != 1 {
 		t.Fatalf("warnings=%d failures=%d output=%q, want %q", warnings, failures, stdout.String(), want)
 	}
@@ -160,7 +173,7 @@ func TestWorkbenchDoctorOutsideAndUnreadable(t *testing.T) {
 				}
 			}
 			var stdout bytes.Buffer
-			warnings, failures := printWorkbenchDoctor(&stdout, root, home)
+			warnings, failures := printWorkbenchDoctor(&stdout, root, home, nil)
 			want := "doctor: workbench none — not inside a Professor project\n"
 			wantFailures := 0
 			if broken {
@@ -185,9 +198,12 @@ func TestWorkbenchDoctorRunWiring(t *testing.T) {
 	t.Chdir(root)
 	var stdout, stderr bytes.Buffer
 	code := runDoctor(nil, &stdout, &stderr, runtime)
-	want := fmt.Sprintf("doctor: workbench %s FAILED: %s: \"prompt\" is required\n", dir, paths.WorkbenchManifest(dir))
-	if code != 3 || !strings.Contains(stdout.String(), want) {
-		t.Fatalf("doctor code=%d missing %q: stdout=%s stderr=%s", code, want, stdout.String(), stderr.String())
+	if got, want := rooted(
+		doctorRows(stdout.String(), "doctor: workbench"),
+		root,
+	), "doctor: workbench {root}/docs/scribe FAILED: {root}/docs/scribe/.professor/workbench.json: \"prompt\" is required\n"; code != 3 ||
+		got != want {
+		t.Errorf("doctor code=%d workbench rows = %q, want %q; stderr=%s", code, got, want, stderr.String())
 	}
 }
 
@@ -197,6 +213,7 @@ func TestWorkbenchDoctorMirrorProblemSplit(t *testing.T) {
 			root, dir, home := doctorBenchFixture(t)
 			var want string
 			wantFailures := 0
+			var runner deps.Runner
 			switch scenario {
 			case "Codex rebuildable":
 				stale, orphan := "STALE "+filepath.Join(
@@ -208,7 +225,7 @@ func TestWorkbenchDoctorMirrorProblemSplit(t *testing.T) {
 					"agents",
 					"old.toml",
 				)
-				testjail.FakeEngineSync(t, `{"ok":false,"problems":["`+stale+`","`+orphan+`"],`+
+				_, runner = testjail.FakeEngineSyncRunner(t, `{"ok":false,"problems":["`+stale+`","`+orphan+`"],`+
 					`"rebuildable":["`+stale+`","`+orphan+`"],"error":""}`, 1)
 				want = fmt.Sprintf(
 					"doctor: workbench %s codex mirror STALE: %s; %s — the next launch there rebuilds it\n",
@@ -230,7 +247,7 @@ func TestWorkbenchDoctorMirrorProblemSplit(t *testing.T) {
 				conflict := "CONFLICT " + filepath.Join(dir, ".opencode", "command", "hand.md") +
 					" — exists without a generated marker; not touching it"
 				stale := "STALE " + filepath.Join(dir, ".opencode", "command", "local.md")
-				testjail.FakeEngineSync(t, `{"ok":false,"problems":["`+conflict+`","`+stale+`"],`+
+				_, runner = testjail.FakeEngineSyncRunner(t, `{"ok":false,"problems":["`+conflict+`","`+stale+`"],`+
 					`"rebuildable":["`+stale+`"],"error":""}`, 1)
 				want = fmt.Sprintf(
 					"doctor: workbench %s opencode mirror FAILED: %s — the next launch there fails; fix it, then run engine-sync opencode build %s\n",
@@ -247,7 +264,7 @@ func TestWorkbenchDoctorMirrorProblemSplit(t *testing.T) {
 				wantFailures = 1
 			}
 			var stdout bytes.Buffer
-			warnings, failures := printWorkbenchDoctor(&stdout, root, home)
+			warnings, failures := printWorkbenchDoctor(&stdout, root, home, runner)
 			if stdout.String() != want || warnings != 1 || failures != wantFailures {
 				t.Fatalf(
 					"warnings=%d failures=%d output=%q, want 1 %d %q",
@@ -266,7 +283,7 @@ func TestWorkbenchDoctorProjectWithoutBench(t *testing.T) {
 	root, home := t.TempDir(), t.TempDir()
 	writeDoctorBenchFile(t, professor.BaselinePath(root), "{}")
 	var stdout bytes.Buffer
-	warnings, failures := printWorkbenchDoctor(&stdout, root, home)
+	warnings, failures := printWorkbenchDoctor(&stdout, root, home, nil)
 	want := "doctor: workbench none under " + root + "\n"
 	if stdout.String() != want || warnings != 0 || failures != 0 {
 		t.Fatalf("warnings=%d failures=%d output=%q, want %q", warnings, failures, stdout.String(), want)

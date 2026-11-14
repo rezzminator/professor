@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"syscall"
@@ -26,15 +27,14 @@ const projectDirName = "CLAUDE_PROJECT_DIR"
 func TestClaudeSpawnStripsInheritedProjectDir(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
+	var shells strings.Builder
 	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()
 		if err != nil {
 			t.Fatalf("%v shell spawn: %v", purpose, err)
 		}
-		if want := " -u " + projectDirName + " "; !strings.Contains(shell, want) {
-			t.Fatalf("%v shell spawn %q lacks %q", purpose, shell, want)
-		}
+		fmt.Fprintf(&shells, "%v: %s\n", purpose, shell)
 		environment, err := spawn.Environment([]string{projectDirName + "=/srv/tester/.professor", "PATH=/usr/bin"})
 		if err != nil {
 			t.Fatal(err)
@@ -43,6 +43,51 @@ func TestClaudeSpawnStripsInheritedProjectDir(t *testing.T) {
 			t.Fatalf("%v spawn environment %q kept %s=%q, want it stripped",
 				purpose, environment, projectDirName, got)
 		}
+	}
+	actionGolden(t, "action_claude_spawn_purposes.txt", rooted(t, shells.String()))
+}
+
+// A Claude chat started by `pfm chat new` from a Codex tool shell inherited NO_COLOR and the pagers
+// Codex injects there and rendered monochrome; the recipe of the spawn door (the environment a
+// Herdr seat execs) drops that set, and a login shell's own NO_COLOR stays.
+func TestClaudeSpawnDropsCodexToolShell(t *testing.T) {
+	home := t.TempDir()
+	spawn := ClaudeSpawn{Purpose: PurposeInteractive, Account: 42, Home: home, Machine: configuredMachinePolicy(home)}
+	injected := []string{
+		"NO_COLOR", "PAGER", "GIT_PAGER", "GH_PAGER", "CODEX_CI", "CODEX_SESSION_ID",
+		"CODEX_TOOL_CALL_ID", "CODEX_VERSION", "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+	}
+	toolShell := []string{"PATH=/usr/bin", "CODEX_HOME=/srv/tester/.codex"}
+	for _, name := range injected {
+		toolShell = append(toolShell, name+"=1")
+	}
+	for _, test := range []struct {
+		name    string
+		environ []string
+		want    map[string]string
+	}{
+		{"codex tool shell", toolShell, map[string]string{"PATH": "/usr/bin", "CODEX_HOME": "/srv/tester/.codex"}},
+		{"login shell", []string{"PATH=/usr/bin", "NO_COLOR=1"}, map[string]string{"PATH": "/usr/bin", "NO_COLOR": "1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			environment, err := spawn.Environment(test.environ)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := lastEnvironmentValue(environment, "CLAUDE_CONFIG_DIR"); got == "" {
+				t.Fatalf("environment %q lacks the account's CLAUDE_CONFIG_DIR: the launch did not render", environment)
+			}
+			got := map[string]string{}
+			for _, entry := range environment {
+				name, value, _ := strings.Cut(entry, "=")
+				if slices.Contains(append([]string{"PATH", "CODEX_HOME"}, injected...), name) {
+					got[name] = value
+				}
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("inherited names in %q = %v, want %v", environment, got, test.want)
+			}
+		})
 	}
 }
 

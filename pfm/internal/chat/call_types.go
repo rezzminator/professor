@@ -17,6 +17,8 @@ type (
 	CallResult = pfmcall.Result
 	// CallNameResolver is call's fleet roster rung.
 	CallNameResolver = pfmcall.NameResolver
+	// Refusal is a chat function's refusal as both its doors answer it.
+	Refusal = pfmcall.Refusal
 	// CommandThenSpawner runs a call's detached then-waiter through the pfm binary.
 	CommandThenSpawner = pfmcall.CommandThenSpawner
 )
@@ -29,6 +31,21 @@ const (
 	CodeUndelivered   = pfmcall.CodeUndelivered
 	CodeCaptureFailed = pfmcall.CodeCaptureFailed
 )
+
+// The status words of an ambiguous name and of a step that could not run (pfmcall).
+const (
+	StatusAmbiguous = pfmcall.StatusAmbiguous
+	StatusError     = pfmcall.StatusError
+)
+
+// LookupFailed is a target lookup that could not look, as both doors answer it (pfmcall.LookupFailed).
+var LookupFailed = pfmcall.LookupFailed
+
+// UnknownChat refuses a name no chat answers to (pfmcall.UnknownChat).
+var UnknownChat = pfmcall.UnknownChat
+
+// ExitRefusal is the refusal an exit code of `pfm chat {verb}` stands for (pfmcall.ExitRefusal).
+var ExitRefusal = pfmcall.ExitRefusal
 
 // ErrUnsigned is call's refusal to send a message it could not sign.
 var ErrUnsigned = pfmcall.ErrUnsigned

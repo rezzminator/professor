@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -127,8 +128,10 @@ func TestDaemonStatusOmitsChatRuntimeIdentityWithoutChat(t *testing.T) {
 	handler := NewDaemonHandler(DaemonOptions{ChatRuntimeIdentity: "sha256:must-not-leak"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
-	if strings.Contains(response.Body.String(), "chatRuntimeIdentity") {
-		t.Fatalf("status without mounted chat exposed identity: %s", response.Body.String())
+	got := regexp.MustCompile(`"pid":\d+,"startTime":"[^"]+"`).
+		ReplaceAllString(response.Body.String(), `"pid":{pid},"startTime":"{time}"`)
+	if want := `{"pfmVersion":"","protocolVersion":"2025-06-18","servers":{},"pid":{pid},"startTime":"{time}","endpoint":""}` + "\n"; got != want {
+		t.Fatalf("status without mounted chat = %q, want %q", got, want)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
@@ -16,10 +17,10 @@ import (
 // agentTranscriptLines is a sub-agent transcript with the traps a real one
 // carries: a streamed assistant line repeated with the same tool_use id, a
 // tool_result that quotes tool_use text, and a torn final line mid-write —
-// plus one errored tool result and one compact boundary. Its two responses
+// plus one errored tool result and one compact boundary, run from /work/repo/pfm. Its two responses
 // bill $0.01/2.0K/35 on opus-5-5: m1 counts once across its repeated lines.
 var agentTranscriptLines = []string{
-	`{"type":"user","timestamp":"2026-09-24T10:00:00Z","message":{"role":"user","content":"go"}}`,
+	`{"type":"user","timestamp":"2026-09-24T10:00:00Z","cwd":"/work/repo/pfm","message":{"role":"user","content":"go"}}`,
 	`{"type":"assistant","timestamp":"2026-09-24T10:00:05Z","message":{"id":"m1","model":"claude-opus-5-5",` +
 		`"content":[{"type":"tool_use","id":"t1","name":"Read"}],` +
 		`"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":990}}}`,
@@ -113,137 +114,180 @@ func renderOneSubagentColumns(t *testing.T, session, task string, columns int) (
 
 func renderSubagentWith(t *testing.T, session, task string, now time.Time, columns int) (content, warned string) {
 	t.Helper()
-	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","columns":` + jsonText(columns) +
-		`,"tasks":[` + task + `]}`
-	var warn bytes.Buffer
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), "", noEnv, "", &warn)
-	if err != nil {
-		t.Fatalf("RenderSubagents: %v", err)
+	rows, warned := renderFixture(t, rowsFixture{session: session, now: now, columns: columns}, task)
+	if len(rows) != 1 {
+		t.Fatalf("want exactly one row, got %d: %q", len(rows), rows)
 	}
-	if got == "" {
-		return "", warn.String()
+	for _, raw := range rows {
+		content = stripANSICodes(raw)
 	}
-	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("want exactly one JSON line, got %d: %q", len(lines), got)
-	}
-	var row subagentRow
-	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
-		t.Fatalf("line is not the {id,content} JSON Claude Code parses: %v: %q", err, lines[0])
-	}
-	var parsed subagentTask
-	if err := json.Unmarshal([]byte(task), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	if row.ID != parsed.ID {
-		t.Fatalf("row id = %q, want %q", row.ID, parsed.ID)
-	}
-	return stripANSICodes(row.Content), warn.String()
+	return content, warned
 }
 
-func TestRenderSubagentsRowBodies(t *testing.T) {
+// fixtureTask is a task as a test writes it: what the meta file names, and its
+// status — only an agent whose status is not ended counts as running.
+type fixtureTask struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Label             string `json:"label"`
+	Model             string `json:"model"`
+	Effort            string `json:"effort"`
+	StartTime         int64  `json:"startTime"`
+	ContextWindowSize int64  `json:"contextWindowSize"`
+	Status            string `json:"status"`
+}
+
+// rowsFixture is what renderFixture renders under: zero fields take the
+// defaults (a fresh sid dir, the test prices unless noPrices, no env, 200
+// columns, subagentNow, the session cwd /work/repo).
+type rowsFixture struct {
+	session, sessionID, sidDir, home string
+	sessionModel                     string
+	sessionWindow                    int64
+	noPrices                         bool
+	env                              paths.Env
+	columns                          int
+	now                              time.Time
+}
+
+// renderFixture renders every task's row through renderAgentRows and returns
+// each raw row by task id, and the warnings.
+func renderFixture(t *testing.T, fixture rowsFixture, tasks ...string) (rows map[string]string, warned string) {
+	t.Helper()
+	if fixture.sidDir == "" {
+		fixture.sidDir = t.TempDir()
+	}
+	if fixture.env == nil {
+		fixture.env = noEnv
+	}
+	if fixture.columns == 0 {
+		fixture.columns = 200
+	}
+	if fixture.now.IsZero() {
+		fixture.now = subagentNow
+	}
+	prices := testPrices(t)
+	if fixture.noPrices {
+		prices = nil
+	}
+	data := agentRowsInput{
+		SessionID:      fixture.sessionID,
+		TranscriptPath: fixture.session,
+		Cwd:            "/work/repo",
+		Columns:        fixture.columns,
+		SessionModel:   fixture.sessionModel,
+		SessionWindow:  fixture.sessionWindow,
+	}
+	live := map[string]bool{}
+	for _, raw := range tasks {
+		var task fixtureTask
+		if err := json.Unmarshal([]byte(raw), &task); err != nil {
+			t.Fatalf("fixture task %s: %v", raw, err)
+		}
+		data.Tasks = append(data.Tasks, subagentTask{
+			ID: task.ID, Name: task.Name, Label: task.Label, Model: task.Model, Effort: task.Effort,
+			StartTime: task.StartTime, ContextWindowSize: task.ContextWindowSize,
+		})
+		switch task.Status {
+		case "completed", "failed", "killed":
+		default:
+			live[task.ID] = true
+		}
+	}
+	var warn bytes.Buffer
+	got := renderAgentRows(data, live, fixture.now, fixture.sidDir, prices, fixture.home, fixture.env,
+		newTranscriptScans("", &warn), &warn)
+	if len(got) != len(data.Tasks) {
+		t.Fatalf("renderAgentRows gave %d rows for %d tasks: %q", len(got), len(data.Tasks), got)
+	}
+	rows = map[string]string{}
+	for index, row := range got {
+		rows[data.Tasks[index].ID] = row
+	}
+	return rows, warn.String()
+}
+
+func TestRenderAgentRowsRowBodies(t *testing.T) {
+	quiet := []string{`{"type":"user","timestamp":"2026-09-24T10:02:00Z","message":{"role":"user","content":"go"}}`}
 	session := subagentSession(t, map[string][]string{
 		"a1":    agentTranscriptLines,
 		"fresh": agentTranscriptLines[:1],
-	}, map[string]string{"a1": "tracer", "fresh": "general-purpose"})
+		"g1":    quiet, "g2": quiet, "g3": quiet, "g4": quiet, "g5": quiet, "g0": quiet, "gw": quiet,
+		"same": {`{"type":"user","timestamp":"2026-09-24T10:02:00Z","cwd":"/work/repo/","message":{"content":"go"}}`},
+	}, map[string]string{
+		"a1": "tracer", "fresh": "general-purpose", "g1": "general-purpose", "g2": "general-purpose",
+		"g3": "general-purpose", "g4": "general-purpose", "g5": "general-purpose", "g0": "general-purpose",
+		"gw": "general-purpose", "same": "general-purpose",
+	})
 	task := func(fields string) string {
-		return `{"startTime":` + jsonText(subagentStart.UnixMilli()) + `,"cwd":"/work/repo/pfm",` + fields + `}`
+		return `{"startTime":` + jsonText(subagentStart.UnixMilli()) + `,` + fields + `}`
 	}
 	cases := []struct {
 		name string
 		task string
-		want string // ANSI-stripped content; "" = no line for this task
+		want string // ANSI-stripped content
 	}{
 		{
 			name: "running agent: every segment, errors and compactions included",
-			task: task(`"id":"a1","name":"scout","type":"local_agent","status":"running","label":"map the resolver",` +
-				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000,"tokenCount":312000,` +
-				`"tokenSamples":[0,125000,250000,500000,1000000]`),
-			want: "▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M Σ$0.01/2.0K/35/2│scout·tracer│opus·▰▰▰ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
+			task: task(`"id":"a1","name":"scout","label":"map the resolver",` +
+				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000`),
+			want: "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│scout·tracer│opus·▰▰▰ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
 				"⟲1│pfm│map the resolver",
 		},
 		{
-			name: "a finished agent's time stops at its transcript's last entry",
-			task: task(`"id":"a1","type":"local_agent","status":"completed","label":"x","model":"claude-sonnet-5",` +
-				`"contextWindowSize":1000000,"tokenCount":90000,"tokenSamples":[900000,90000]`),
-			want: "▱▱▱▱▱▱▱▱ 9% 90.0K/1.0M Σ$0.01/2.0K/35/2│tracer│sonnet│completed 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│x",
+			name: "the model its calls went to wins over the alias it was spawned with",
+			task: task(`"id":"a1","label":"x","model":"haiku","contextWindowSize":1000000`),
+			want: "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│tracer│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│x",
 		},
 		{
-			name: "no model turn yet: zero tools, an empty cache, and idle since its prompt",
-			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x","model":"haiku",` +
-				`"contextWindowSize":200000,"tokenCount":1`),
-			want: "▱▱▱▱▱▱▱▱ 0% 1/200.0K Σ$0.00/0/0/0│general-purpose│haiku│running 2m:0s│idle 2m0s│💾–│pfm│x",
+			name: "no model turn yet: unknown context, zero tools, an empty cache, and idle since its prompt",
+			task: task(`"id":"fresh","label":"x","model":"haiku","contextWindowSize":200000`),
+			want: "?/200.0K Σ$0.00/0/0/0│general-purpose│haiku│running 2m:0s│idle 2m0s│💾–│pfm│x",
 		},
 		{
-			name: "a non-agent task carries no transcript facts; label falls back to the description",
-			task: task(`"id":"sh","type":"local_bash","status":"running","description":"from the description",` +
-				`"contextWindowSize":200000,"tokenCount":160000`),
-			want: "▰▰▰▰▰▰▱▱ 80% 160.0K/200.0K│running 2m:0s│pfm│from the description",
-		},
-		{
-			name: "an effort that is not a string is left out; a name shows without a role; no growth line",
-			task: `{"id":"e","name":"bot","status":"running","model":"claude-haiku-4","effort":{"level":"high"},` +
-				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K/?│bot│haiku│running",
-		},
-		{
-			name: "a gpt- agent renders its tier then its version",
-			task: `{"id":"g1","name":"sol","status":"running","model":"gpt-6-sol","effort":"low",` +
-				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K/? ctx missing│sol│sol-6·▰ low│running",
-		},
-		{
-			name: "a gpt- agent's dotted version survives",
-			task: `{"id":"g2","name":"bot","status":"running","model":"gpt-5.6-terra","effort":"high",` +
-				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K/? ctx missing│bot│terra-5.6·▰▰▰ high│running",
-		},
-		{
-			name: "a bare gpt- version has no tier and renders whole",
-			task: `{"id":"g3","name":"bot","status":"running","model":"gpt-6","tokenCount":10}`,
-			want: "10/? ctx missing│bot│gpt-6│running",
-		},
-		{
-			name: "a gpt- agent on the priority tier renders its tier, not the -fast suffix",
-			task: `{"id":"g4","name":"bot","status":"running","model":"gpt-6-sol-fast[1m]","tokenCount":10}`,
-			want: "10/? ctx missing│bot│sol-6│running",
-		},
-		{
-			name: "a bare gpt- version on the priority tier renders whole, without the -fast suffix",
-			task: `{"id":"g5","name":"bot","status":"running","model":"gpt-5.5-fast","tokenCount":10}`,
-			want: "10/? ctx missing│bot│gpt-5.5│running",
-		},
-		{
-			name: "an agent in the session's own directory shows no cwd",
-			task: `{"id":"same","status":"running","cwd":"/work/repo/","model":"haiku","tokenCount":10,"label":"x"}`,
-			want: "10/?│haiku│running│x",
-		},
-		{
-			name: "a task with no tokens and no window still gets a row with unknown context",
-			task: `{"id":"a5","label":"shell","tokenCount":0}`,
-			want: "0/?│shell",
-		},
-		{
-			name: "a gateway agent with zero counters keeps its rich row",
-			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x",` +
-				`"model":"gpt-6-sol","tokenCount":0,"contextWindowSize":0`),
-			want: "0/? ctx missing Σ$0.00/0/0/0│general-purpose│sol-6│running 2m:0s│idle 2m0s│💾–│pfm│x",
-		},
-		{
-			name: "an adopted agent with missing counters and model still gets a rich row",
-			task: task(`"id":"fresh","type":"local_agent","status":"running","label":"x"`),
+			name: "no model and no window: the row still renders, context unknown",
+			task: task(`"id":"fresh","label":"x"`),
 			want: "?/? Σ$0.00/0/0/0│general-purpose│running 2m:0s│idle 2m0s│💾–│pfm│x",
 		},
 		{
-			name: "zero counters remain known but a gateway harness window is not authoritative",
-			task: `{"id":"g0","name":"bot","model":"gpt-6-sol","tokenCount":0,"contextWindowSize":200000}`,
-			want: "0/? ctx missing│bot│sol-6",
+			name: "a gpt- agent renders its tier then its version",
+			task: `{"id":"g1","name":"sol","model":"gpt-6-sol","effort":"low"}`,
+			want: "?/? ctx missing Σ$0.00/0/0/0│sol·general-purpose│sol-6·▰ low│running│💾–",
 		},
-
 		{
-			name: "a task with no id is skipped",
-			task: `{"label":"orphan","contextWindowSize":1000000,"tokenCount":5}`,
-			want: "",
+			name: "a gpt- agent's dotted version survives",
+			task: `{"id":"g2","name":"bot","model":"gpt-5.6-terra","effort":"high"}`,
+			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│terra-5.6·▰▰▰ high│running│💾–",
+		},
+		{
+			name: "a bare gpt- version has no tier and renders whole",
+			task: `{"id":"g3","name":"bot","model":"gpt-6"}`,
+			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│gpt-6│running│💾–",
+		},
+		{
+			name: "a gpt- agent on the priority tier renders its tier, not the -fast suffix",
+			task: `{"id":"g4","name":"bot","model":"gpt-6-sol-fast[1m]"}`,
+			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│sol-6│running│💾–",
+		},
+		{
+			name: "a bare gpt- version on the priority tier renders whole, without the -fast suffix",
+			task: `{"id":"g5","name":"bot","model":"gpt-5.5-fast"}`,
+			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│gpt-5.5│running│💾–",
+		},
+		{
+			name: "a gateway agent's harness window is not authoritative",
+			task: `{"id":"g0","name":"bot","model":"gpt-6-sol","contextWindowSize":200000}`,
+			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│sol-6│running│💾–",
+		},
+		{
+			name: "a gateway asset reference names its model's family",
+			task: `{"id":"gw","name":"bot","model":"gw:catalog/claude-opus-5-5[1m]"}`,
+			want: "?/? Σ$0.00/0/0/0│bot·general-purpose│opus│running│💾–",
+		},
+		{
+			name: "an agent in the session's own directory shows no cwd",
+			task: `{"id":"same","model":"haiku","label":"x"}`,
+			want: "?/? Σ$0.00/0/0/0│general-purpose│haiku│running│💾–│x",
 		},
 	}
 	for _, tc := range cases {
@@ -259,219 +303,55 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 	}
 }
 
-// An agent definition names the role it plays: the identity renders that
-// role, read from the project's definitions first — the session cwd's and its
-// parents' through the git root, never home's own — then the user's.
-func TestRenderSubagentsIdentityIsTheDefinitionsRole(t *testing.T) {
-	const task = `{"id":"a1","type":"local_agent","status":"running","model":"gpt-6-sol","effort":"high",` +
-		`"tokenCount":4200,"tokenSamples":[2100,4200]}`
-	definition := func(frontmatter string) string {
-		return "---\n" + frontmatter + "\n---\n\nbody\nrole: not-frontmatter\n"
-	}
-	cases := []struct {
-		name    string
-		project map[string]string // file name → body under <project>/.claude/agents
-		user    map[string]string // file name → body under the user agents dir
-		outer   map[string]string // path under home → body, outside the project
-		below   string            // the session cwd under <project>; "" = the project itself
-		noGit   bool              // the project is no git repository
-		meta    string            // the row's own agentType; "" = flights-foreman-sonnet
-		torn    bool              // the user's definition is a directory, unreadable
-		want    string
-		warn    string // what stderr must carry; "" = nothing
-	}{
-		{
-			name: "the user's definition names its role",
-			user: map[string]string{
-				"flights-foreman-sonnet.md": definition(
-					"name: flights-foreman-sonnet\nmodel: gpt-6-sol\nrole: flights-foreman",
-				),
-			},
-			want: "│flights-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name:    "the project's definition wins over the user's",
-			project: map[string]string{"flights-foreman-sonnet.md": definition("role: project-foreman")},
-			user:    map[string]string{"flights-foreman-sonnet.md": definition("role: flights-foreman")},
-			want:    "│project-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "a quoted role loses its quotes",
-			user: map[string]string{"flights-foreman-sonnet.md": definition(`role: "flights-foreman"`)},
-			want: "│flights-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "a definition with no role key keeps the agentType",
-			user: map[string]string{"flights-foreman-sonnet.md": definition("name: flights-foreman-sonnet")},
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "a role in the body is not a role",
-			user: map[string]string{"flights-foreman-sonnet.md": "no frontmatter\nrole: flights-foreman\n"},
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "no definition file keeps the agentType",
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-		{
-			name:    "a session below the project root reads the root's definition",
-			below:   filepath.Join("pfm", "internal"),
-			project: map[string]string{"flights-foreman-sonnet.md": definition("role: project-foreman")},
-			user:    map[string]string{"flights-foreman-sonnet.md": definition("role: flights-foreman")},
-			want:    "│project-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "a padded agentType in the meta resolves its definition",
-			meta: " flights-foreman-sonnet ",
-			user: map[string]string{"flights-foreman-sonnet.md": definition("role: flights-foreman")},
-			want: "│flights-foreman│sol-6·▰▰▰ high│",
-		},
-		{
-			name: "an unreadable definition keeps the agentType and says why",
-			torn: true,
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-			warn: "agent definition (rows show flights-foreman-sonnet)",
-		},
-		{
-			name: "a definition above the git root is no project's",
-			outer: map[string]string{
-				filepath.Join("work", ".claude", "agents", "flights-foreman-sonnet.md"): definition(
-					"role: outer-foreman",
-				),
-			},
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-		{
-			name:  "outside a git repository home's own .claude is not a project's",
-			noGit: true,
-			outer: map[string]string{
-				filepath.Join(".claude", "agents", "flights-foreman-sonnet.md"): definition("role: home-foreman"),
-			},
-			want: "│flights-foreman-sonnet│sol-6·▰▰▰ high│",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			agentType := tc.meta
-			if agentType == "" {
-				agentType = "flights-foreman-sonnet"
-			}
-			// Two rows of one type: the definition is read, and an unreadable
-			// one reported, once per render.
-			session := subagentSession(t,
-				map[string][]string{"a1": agentTranscriptLines[:1], "a2": agentTranscriptLines[:1]},
-				map[string]string{"a1": agentType, "a2": agentType})
-			home, userDir := t.TempDir(), t.TempDir()
-			if tc.torn {
-				if err := os.Mkdir(filepath.Join(userDir, "flights-foreman-sonnet.md"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			project := filepath.Join(home, "work", "proj")
-			cwd := filepath.Join(project, tc.below)
-			if err := os.MkdirAll(cwd, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if !tc.noGit {
-				if err := os.Mkdir(filepath.Join(project, ".git"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			files := map[string]string{}
-			for name, body := range tc.project {
-				files[filepath.Join(project, ".claude", "agents", name)] = body
-			}
-			for name, body := range tc.user {
-				files[filepath.Join(userDir, name)] = body
-			}
-			for rel, body := range tc.outer {
-				files[filepath.Join(home, rel)] = body
-			}
-			for path, body := range files {
-				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			payload := `{"transcript_path":` + jsonText(session) + `,"cwd":` + jsonText(cwd) +
-				`,"columns":200,"tasks":[` + task + `,` + strings.Replace(task, `"a1"`, `"a2"`, 1) + `]}`
-			var warn bytes.Buffer
-			got, err := RenderSubagents(
-				[]byte(payload),
-				subagentNow,
-				t.TempDir(),
-				testPrices(t),
-				home,
-				noEnv,
-				userDir,
-				&warn,
-			)
-			if err != nil {
-				t.Fatalf("RenderSubagents: %v", err)
-			}
-			lines := strings.Split(strings.TrimSpace(got), "\n")
-			if len(lines) != 2 {
-				t.Fatalf("rows = %q, want two", got)
-			}
-			for _, line := range lines {
-				var row subagentRow
-				if err := json.Unmarshal([]byte(line), &row); err != nil {
-					t.Fatalf("row %q: %v", line, err)
-				}
-				if content := stripANSICodes(row.Content); !strings.Contains(content, tc.want) {
-					t.Fatalf("row %s content =\n  %q\nwant it to hold\n  %q", row.ID, content, tc.want)
-				}
-			}
-			if tc.warn == "" && warn.Len() != 0 || tc.warn != "" && strings.Count(warn.String(), tc.warn) != 1 {
-				t.Fatalf("warn = %q, want %q once", warn.String(), tc.warn)
+// An agent on the session's model version shares the session's window; one on
+// another model has no window to borrow and shows "/?".
+func TestRenderAgentRowsSharesTheSessionWindowOnlyOnItsModel(t *testing.T) {
+	session := subagentSession(t, map[string][]string{"fresh": agentTranscriptLines[:1]},
+		map[string]string{"fresh": "general-purpose"})
+	for _, tc := range []struct{ model, want string }{
+		{"claude-opus-5-5", "?/1.0M Σ$0.00/0/0/0│general-purpose│opus│running 2m:0s│idle 2m0s│💾–│pfm│x"},
+		{"haiku", "?/? Σ$0.00/0/0/0│general-purpose│haiku│running 2m:0s│idle 2m0s│💾–│pfm│x"},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			rows, warned := renderFixture(t, rowsFixture{
+				session: session, sessionModel: "claude-opus-5-5[1m]", sessionWindow: 1_000_000,
+			}, `{"id":"fresh","label":"x","model":"`+tc.model+`","startTime":`+jsonText(subagentStart.UnixMilli())+`}`)
+			if got := stripANSICodes(rows["fresh"]); got != tc.want || warned != "" {
+				t.Fatalf("row =\n  %q\nwant\n  %q (warned %q)", got, tc.want, warned)
 			}
 		})
 	}
 }
 
-// An edited definition shows on the next render: nothing outlives one.
-func TestRenderSubagentsRoleIsReadAgainEachRender(t *testing.T) {
-	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines[:1]},
-		map[string]string{"a1": "flights-foreman-sonnet"})
-	userDir := t.TempDir()
-	path := filepath.Join(userDir, "flights-foreman-sonnet.md")
-	render := func() string {
-		payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","columns":200,"tasks":[` +
-			`{"id":"a1","type":"local_agent","status":"running","model":"gpt-6-sol","tokenCount":10}]}`
-		var warn bytes.Buffer
-		got, err := RenderSubagents([]byte(payload), subagentNow, t.TempDir(), testPrices(t), "", noEnv, userDir, &warn)
-		if err != nil {
-			t.Fatalf("RenderSubagents: %v", err)
-		}
-		var row subagentRow
-		if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
-			t.Fatalf("row %q: %v", got, err)
-		}
-		return stripANSICodes(row.Content)
+// A row names the agent type it was launched as, never the family its
+// definition's role key names: rr-pro and rr-pro-max must not both read rr.
+func TestRenderAgentRowsIdentityIsTheLaunchedAgentType(t *testing.T) {
+	repo := t.TempDir()
+	definition := filepath.Join(repo, ".claude", "agents", "rr-pro.md")
+	if err := os.MkdirAll(filepath.Dir(definition), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	for _, step := range []struct{ body, want string }{
-		{"---\nrole: flights-foreman\n---\n", "│flights-foreman│sol-6│"},
-		{"---\nrole: flights-lander\n---\n", "│flights-lander│sol-6│"},
-	} {
-		if err := os.WriteFile(path, []byte(step.body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if got := render(); !strings.Contains(got, step.want) {
-			t.Fatalf("content = %q, want it to hold %q", got, step.want)
-		}
+	if err := os.WriteFile(definition, []byte("---\nname: rr-pro\nrole: rr\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session := subagentSession(
+		t,
+		map[string][]string{"a1": agentTranscriptLines[:1]},
+		map[string]string{"a1": "rr-pro"},
+	)
+	got, _ := renderOneSubagent(t, session, `{"id":"a1","model":"claude-opus-5-5"}`)
+	if content := got; content != "?/? Σ$0.00/0/0/0│rr-pro│opus│running│idle 2m0s│💾–│pfm" {
+		t.Fatalf("content = %q, want the launched type rr-pro", content)
 	}
 }
 
 // An unreadable transcript is a failure to look: the row says "?" for both
 // transcript facts and the cause is reported, never rendered as zero tools.
-func TestRenderSubagentsUnreadableTranscriptIsNotZero(t *testing.T) {
+func TestRenderAgentRowsUnreadableTranscriptIsNotZero(t *testing.T) {
 	session := subagentSession(t, nil, nil)
 	got, warned := renderOneSubagent(t, session,
-		`{"id":"gone","type":"local_agent","status":"running","contextWindowSize":1000,"tokenCount":10}`)
-	if got != "▱▱▱▱▱▱▱▱ 1% 10/1.0K Σ$?/?/?/?│role ?│running│💾!" {
+		`{"id":"gone","status":"running","contextWindowSize":1000}`)
+	if got != "?/1.0K Σ$?/?/?/?│role ?│running│💾!" {
 		t.Fatalf("content = %q, want the ? markers", got)
 	}
 	for _, cause := range []string{"row gone: read sub-agent meta", "row gone: open sub-agent transcript"} {
@@ -482,18 +362,19 @@ func TestRenderSubagentsUnreadableTranscriptIsNotZero(t *testing.T) {
 }
 
 // A meta file without agentType is a failure to read the role, not "no role".
-func TestRenderSubagentsMetaWithoutRoleIsNotEmpty(t *testing.T) {
+func TestRenderAgentRowsMetaWithoutRoleIsNotEmpty(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"m": agentTranscriptLines[:1]}, map[string]string{"m": ""})
 	got, warned := renderOneSubagent(t, session,
-		`{"id":"m","type":"local_agent","status":"running","tokenCount":10}`)
-	if !strings.HasPrefix(got, "10/? Σ$0.00/0/0/0│role ?│running") ||
-		!strings.Contains(warned, "names no agentType") {
-		t.Fatalf("content = %q warn = %q, want role ? and the cause", got, warned)
+		`{"id":"m","status":"running"}`)
+	got += "\n" + strings.ReplaceAll(warned, filepath.Dir(session), "{dir}")
+	if want := "?/? Σ$0.00/0/0/0│role ?│running│idle 2m0s│💾–│pfm\n" +
+		"statusline: agent rows: row m: sub-agent meta {dir}/session/subagents/agent-m.meta.json names no agentType\n"; got != want {
+		t.Fatalf("content and warn = %q, want %q", got, want)
 	}
 }
 
-// Quiet time turns yellow past a minute and red past five, only while running.
-func TestRenderSubagentsIdleOnlyWhileRunning(t *testing.T) {
+// Quiet time turns yellow past a minute and red past five.
+func TestRenderAgentRowsIdleOnlyWhileRunning(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines}, map[string]string{"a1": "tracer"})
 	lastEntry := time.Date(2026, 9, 24, 10, 1, 30, 0, time.UTC)
 	for _, tc := range []struct {
@@ -503,106 +384,48 @@ func TestRenderSubagentsIdleOnlyWhileRunning(t *testing.T) {
 	}{
 		{"running", lastEntry.Add(59 * time.Second), ""},
 		{"running", lastEntry.Add(6 * time.Minute), "idle 6m0s"},
-		{"completed", lastEntry.Add(6 * time.Minute), ""},
 	} {
-		task := `{"id":"a1","type":"local_agent","status":` + jsonText(tc.status) + `,"tokenCount":10}`
+		task := `{"id":"a1","status":` + jsonText(tc.status) + `}`
 		got, _ := renderSubagentAt(t, session, task, tc.now)
-		if tc.wantIdle == "" && strings.Contains(got, "idle") {
+		if tc.wantIdle == "" && got != "1.0K/? Σ$0.01/2.0K/35/2│tracer│opus│running│1 error│💾5m✓2m:39s 94%│⟲1│pfm" {
 			t.Fatalf("%s at +%s rendered idle: %q", tc.status, tc.now.Sub(lastEntry), got)
 		}
-		if tc.wantIdle != "" && !strings.Contains(got, tc.wantIdle) {
+		if tc.wantIdle != "" &&
+			got != "1.0K/? Σ$0.01/2.0K/35/2│tracer│opus│running│idle 6m0s│1 error│💾5m✗2m:22s was 94%│⟲1│pfm" {
 			t.Fatalf("%s at +%s = %q, want %q", tc.status, tc.now.Sub(lastEntry), got, tc.wantIdle)
 		}
 	}
 }
 
-func TestRenderSubagentsOneLinePerTaskInOrder(t *testing.T) {
-	got, err := RenderSubagents([]byte(`{"tasks":[
-		{"id":"first","tokenCount":10,"contextWindowSize":100},
-		{"id":"unknown"},
-		{"label":"no id"},
-		{"id":"second","tokenCount":20,"contextWindowSize":100}]}`), subagentNow, t.TempDir(), testPrices(t), "", noEnv, "", &bytes.Buffer{})
-	if err != nil {
-		t.Fatalf("RenderSubagents: %v", err)
-	}
-	var ids []string
-	for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
-		var row subagentRow
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			t.Fatalf("line %q: %v", line, err)
-		}
-		ids = append(ids, row.ID)
-	}
-	if strings.Join(ids, ",") != "first,unknown,second" {
-		t.Fatalf("row ids = %v, want [first unknown second]", ids)
-	}
-}
-
-func TestRenderSubagentsRejectsMalformedInput(t *testing.T) {
-	got, err := RenderSubagents(
-		[]byte(`{"tasks":`),
-		subagentNow,
-		t.TempDir(),
-		testPrices(t),
-		"",
-		noEnv,
-		"",
-		&bytes.Buffer{},
-	)
-	if err == nil {
-		t.Fatalf("malformed payload rendered %q with no error", got)
-	}
-	if !strings.Contains(err.Error(), "parse subagent row context") {
-		t.Fatalf("error does not name what failed: %v", err)
-	}
-}
-
-// Claude Code draws the row body faint in its muted theme colour; the row
-// opens by cancelling the faint and dims nothing but its│separators.
-func TestRenderSubagentsRowIsBrightNotFaint(t *testing.T) {
+// Claude Code draws the status line in the terminal's own colours; a row dims
+// nothing but its│separators and the gauge's empty cells.
+func TestRenderAgentRowsRowDimsOnlyItsSeparators(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines}, map[string]string{"a1": "tracer"})
-	payload := `{"transcript_path":` + jsonText(session) + `,"tasks":[{"id":"a1","type":"local_agent",` +
-		`"status":"running","label":"x","model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10,` +
-		`"tokenSamples":[5,10]}]}`
-	got, err := RenderSubagents(
-		[]byte(payload),
-		subagentNow,
-		t.TempDir(),
-		testPrices(t),
-		"",
-		noEnv,
-		"",
-		&bytes.Buffer{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var row subagentRow
-	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &row); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(row.Content, rowOpen) {
-		t.Fatalf("row does not open by cancelling Claude Code's faint: %q", row.Content)
-	}
-	withoutSeparators := strings.ReplaceAll(row.Content, rowSep, " ")
-	if strings.Count(withoutSeparators, dim) != 1 { // makeBar's empty cells are the one sanctioned dim run
-		t.Fatalf("dim text outside the separators and the gauge's empty cells: %q", withoutSeparators)
+	rows, _ := renderPayload(t, session, subagentNow,
+		`{"id":"a1","label":"x","model":"claude-opus-5-5","contextWindowSize":1000}`)
+	// dim only on the separators and the gauge's empty cells
+	if got, want := strings.ReplaceAll(
+		rows["a1"],
+		rowSep,
+		"{sep}",
+	), "\x1b[1;31m▰▰▰▰▰▰▰▰\x1b[2m\x1b[0m \x1b[1;31m100%\x1b[0m \x1b[1;97m1.0K\x1b[0m\x1b[38;5;117m/1.0K\x1b[0m \x1b[38;5;245mΣ\x1b[0m\x1b[38;5;222m$0.01\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m2.0K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m35\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;87m2\x1b[0m{sep}\x1b[38;5;213mtracer\x1b[0m{sep}\x1b[38;5;51mopus\x1b[0m{sep}\x1b[38;5;118mrunning\x1b[0m{sep}\x1b[1;38;5;203m1 error\x1b[0m{sep}\x1b[38;5;118m💾5m✓3m:8s\x1b[0m \x1b[38;5;118m94%\x1b[0m{sep}\x1b[38;5;177m⟲1\x1b[0m{sep}\x1b[38;5;156mpfm\x1b[0m{sep}\x1b[97mx\x1b[0m"; got != want {
+		t.Fatalf("row = %q, want %q", got, want)
 	}
 }
 
 // A payload without a session transcript cannot name the role either: the row
 // says "role ?", never a name trailed by an empty role.
-func TestRenderSubagentsNoSessionTranscriptMarksTheRole(t *testing.T) {
+func TestRenderAgentRowsNoSessionTranscriptMarksTheRole(t *testing.T) {
 	got, warned := renderOneSubagent(t, "",
-		`{"id":"x","name":"scout","type":"local_agent","status":"running","contextWindowSize":1000,"tokenCount":10}`)
-	if !strings.Contains(got, "│scout·role ?│") || strings.Count(warned, "names no session transcript") != 1 {
-		t.Fatalf("content = %q warn = %q, want scout·role ? and the cause once", got, warned)
+		`{"id":"x","name":"scout","status":"running","contextWindowSize":1000}`)
+	if got, want := got+"\n"+warned, "?/?│?/1.0K Σ$?/?/?/?│scout·role ?│running│💾!\nstatusline: agent rows: row x: payload names no session transcript\n"; got != want {
+		t.Fatalf("content and warn = %q, want %q", got, want)
 	}
 }
 
 // A sub-agent's own transcript is all sidechain records; its cache window is
 // read from them, in the main line's shape, with the TTL its write used.
-func TestRenderSubagentsCacheWindowFromItsOwnTranscript(t *testing.T) {
+func TestRenderAgentRowsCacheWindowFromItsOwnTranscript(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"s1": {
 		`{"type":"user","isSidechain":true,"timestamp":"2026-09-24T10:01:00Z","message":{"role":"user","content":"go"}}`,
 		`{"type":"assistant","isSidechain":true,"timestamp":"2026-09-24T10:01:40Z","message":{"content":[{"type":"text","text":"ok"}],` +
@@ -610,15 +433,15 @@ func TestRenderSubagentsCacheWindowFromItsOwnTranscript(t *testing.T) {
 			`"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":10357}}}}`,
 	}}, map[string]string{"s1": "gitter"})
 	got, _ := renderOneSubagent(t, session,
-		`{"id":"s1","type":"local_agent","status":"running","contextWindowSize":1000,"tokenCount":10}`)
-	if !strings.HasSuffix(got, "│💾1h✓59m:0s 48%") {
+		`{"id":"s1","status":"running","contextWindowSize":1000}`)
+	if got != "▰▰▰▰▰▰▰▰ 2030% 20.3K/1.0K Σ$?/20.3K/0/0│gitter│running│💾1h✓59m:0s 48%" {
 		t.Fatalf("content = %q, want the agent's own 1h window from its sidechain records and 48%%", got)
 	}
 }
 
 // A clone prices.json that cannot be used leaves the rows priced from the
 // embedded copy; the cause still reaches stderr, never a silent fallback.
-func TestServeSubagentsNamesAnUnusableClonePricesFile(t *testing.T) {
+func TestLoadServedPricesNamesAnUnusableClonePricesFile(t *testing.T) {
 	home, clone := t.TempDir(), t.TempDir()
 	file := filepath.Join(clone, filepath.FromSlash(pricing.FileRel))
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
@@ -634,13 +457,16 @@ func TestServeSubagentsNamesAnUnusableClonePricesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stdout, stderr bytes.Buffer
-	machine := paths.Values{Home: home, SIDDir: t.TempDir()}
-	if code := ServeSubagents(strings.NewReader(`{"tasks":[]}`), &stdout, &stderr, machine, noEnv, ""); code != 0 {
-		t.Fatalf("ServeSubagents exit %d, want the fail-open 0", code)
+	var stderr bytes.Buffer
+	if prices := LoadServedPrices(home, "", &stderr, "pfm statusline"); prices == nil {
+		t.Fatalf("LoadServedPrices = nil, want the embedded table; stderr %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), file) {
-		t.Fatalf("stderr = %q, want the unusable clone prices file %s named", stderr.String(), file)
+	if got, want := strings.ReplaceAll(
+		stderr.String(),
+		clone,
+		"{clone}",
+	), "pfm statusline: clone prices unusable, pricing from the embedded table: prices {clone}/pfm/internal/pricing/prices.json: version must be 2, got 1\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 
@@ -697,10 +523,10 @@ var gptAgentLines = []string{
 // "∅" — not the "?" of a transcript with no request to count from, and not the
 // "!" of a transcript that could not be read. The message_start line of the
 // call still streaming reports no cache fields and must not read as 0%.
-func TestRenderSubagentsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
+func TestRenderAgentRowsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 	task := func(id string) string {
-		return `{"id":"` + id + `","type":"local_agent","status":"running","model":"gpt-6-luna[1m]",` +
-			`"contextWindowSize":1000000,"tokenCount":10}`
+		return `{"id":"` + id + `","status":"running","model":"gpt-6-luna[1m]",` +
+			`"contextWindowSize":1000000}`
 	}
 	cases := []struct {
 		name  string
@@ -736,7 +562,7 @@ func TestRenderSubagentsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 	t.Run("an unreadable transcript is still the failure marker", func(t *testing.T) {
 		session := subagentSession(t, map[string][]string{}, map[string]string{"g2": "tracer"})
 		got, _ := renderOneSubagent(t, session, task("g2"))
-		if !strings.Contains(got, "💾!") || strings.Contains(got, "∅") {
+		if got != "?/? ctx missing Σ$?/?/?/?│tracer│luna-6│running│💾!" {
 			t.Fatalf("content = %q, want 💾! and no unknown-window marker", got)
 		}
 	})
@@ -744,8 +570,8 @@ func TestRenderSubagentsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 		session := subagentSession(t,
 			map[string][]string{"g3": gptAgentLines[:6]}, map[string]string{"g3": "tracer"})
 		got, _ := renderOneSubagent(t, session,
-			`{"id":"g3","type":"local_agent","status":"running","contextWindowSize":1000000,"tokenCount":10}`)
-		if !strings.Contains(got, "│💾∅ 87%") {
+			`{"id":"g3","status":"running","contextWindowSize":1000000}`)
+		if got != "13.7K/? ctx missing Σ$?/21.3K/279/1 API-eq│tracer│luna-6│running│idle 1m10s│💾∅ 87%" {
 			t.Fatalf("content = %q, want the unknown window and 87%%", got)
 		}
 	})
@@ -754,7 +580,7 @@ func TestRenderSubagentsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 // A Claude row keeps its window and its hit exactly: the length from the cache
 // write's split, the countdown from its newest request, and a message_start
 // line that carries cache fields counts as a real call.
-func TestRenderSubagentsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
+func TestRenderAgentRowsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"c1": {
 		`{"type":"user","timestamp":"2026-09-24T10:00:00Z","message":{"role":"user","content":"go"}}`,
 		`{"type":"assistant","timestamp":"2026-09-24T10:01:00Z","message":{"id":"m1","model":"claude-opus-5-5",` +
@@ -763,43 +589,35 @@ func TestRenderSubagentsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
 			`"cache_creation":{"ephemeral_5m_input_tokens":94,"ephemeral_1h_input_tokens":0},"output_tokens":1}}}`,
 	}}, map[string]string{"c1": "tracer"})
 	got, _ := renderOneSubagent(t, session,
-		`{"id":"c1","type":"local_agent","status":"running","model":"claude-opus-5-5[1m]",`+
-			`"contextWindowSize":1000000,"tokenCount":10}`)
-	if !strings.Contains(got, "│💾5m✓3m:0s 90%") {
+		`{"id":"c1","status":"running","model":"claude-opus-5-5[1m]",`+
+			`"contextWindowSize":1000000}`)
+	if got != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.00/1.0K/1/0│tracer│opus│running│idle 1m0s│💾5m✓3m:0s 90%" {
 		t.Fatalf("content = %q, want the Claude row's 5m window and 90%%", got)
-	}
-}
-
-// TestStampTurnFailureLeavesOnlyTheTurnUnknown pins that a transcript whose
-// mtime cannot be read after its lines were (it went in between) makes the
-// agent's turn unread, never the row's activity and spend.
-func TestStampTurnFailureLeavesOnlyTheTurnUnknown(t *testing.T) {
-	activity := agentActivity{turn: agentTurn{open: true}}
-	activity.stampTurn(filepath.Join(t.TempDir(), "agent-gone.jsonl"))
-	if activity.err != nil || activity.turn.err == nil {
-		t.Fatalf("err = %v, turn.err = %v; want the row readable and the turn unknown", activity.err, activity.turn.err)
-	}
-	tree := &agentTree{
-		open: map[string]turnState{}, reads: map[string]*agentActivity{"gone": &activity}, warned: map[string]bool{},
-	}
-	if got := tree.turn("gone"); got != turnUnread {
-		t.Fatalf("turn = %v, want turnUnread", got)
 	}
 }
 
 // The gauge rounds to the nearest percent, so 69.1K of 1.0M reads 7%, not a
 // truncated 6%; a window not yet full never reads 100%.
-func TestRenderSubagentsGaugeRoundsToNearest(t *testing.T) {
-	session := subagentSession(t, map[string][]string{}, map[string]string{})
-	for tokens, want := range map[int]string{
-		69_100:    " 7% 69.1K/1.0M",
-		999_600:   " 99% 999.6K/1.0M",
-		1_000_000: " 100% 1.0M/1.0M",
-	} {
-		task := `{"id":"sh","type":"local_bash","status":"running","contextWindowSize":1000000,"tokenCount":` +
-			jsonText(tokens) + `}`
-		if got, _ := renderOneSubagent(t, session, task); !strings.Contains(got, want) {
-			t.Fatalf("tokens %d: content = %q, want %q", tokens, got, want)
-		}
+
+// An override that cannot be used never costs the table: dollars are priced by
+// the published table beside the warning naming the override.
+func TestLoadServedPricesPricesByThePublishedTableBesideABadOverride(t *testing.T) {
+	home := t.TempDir()
+	configPath := filepath.Join(home, "pfm.config.json")
+	override := pfmconfig.PricesPath(configPath)
+	if err := os.WriteFile(override, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	prices := LoadServedPrices(home, configPath, &stderr, "pfm statusline")
+	if prices == nil || len(prices.Rows) == 0 {
+		t.Fatalf("prices = %+v, want the published table's rows beside the override's error", prices)
+	}
+	if got, want := strings.ReplaceAll(
+		stderr.String(),
+		home,
+		"{home}",
+	), "pfm statusline: price override unusable, pricing from the published table: prices {home}/pfm.prices.json: unexpected EOF\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }

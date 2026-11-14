@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
@@ -92,7 +93,8 @@ func writeArmedRecord(path string, record armedRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode armed steer record: %w", err)
 	}
-	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+	// One rename: a reader never sees a torn record, which it must refuse.
+	if err := atomicfile.Write(path, append(raw, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write armed steer record: %w", err)
 	}
 	return nil

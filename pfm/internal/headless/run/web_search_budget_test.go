@@ -3,19 +3,26 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestRunUsesScriptedRunnerStartBoundary(t *testing.T) {
 	fake := &deps.FakeRunner{}
-	binary := deps.Executable("sh")
+	binary := filepath.Join(t.TempDir(), "claude")
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	fake.ScriptStart([]string{binary}, 42, nil, nil)
 	result, err := Run(context.Background(), Request{
 		Config:         pfmconfig.Config{Claude: pfmconfig.ClaudePrefs{Binary: binary}},
@@ -73,6 +80,8 @@ func (delayedWaitProcess) Kill() error { return nil }
 
 func (delayedWaitProcess) KillGroup() error { return nil }
 
+func (delayedWaitProcess) SignalGroup(syscall.Signal) error { return nil }
+
 type blockedWaitRunner struct {
 	started chan struct{}
 	waited  chan struct{}
@@ -101,8 +110,8 @@ func TestRunProcessWaitsForProcessAfterCancellation(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "wait completed") {
-			t.Fatalf("runProcess() error = %v, want the completed Wait result", err)
+		if got, want := fmt.Sprint(err), "wait completed after cancellation"; got != want {
+			t.Fatalf("runProcess() error = %q, want %q", got, want)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("runProcess() did not wait for process.Wait after cancellation")
@@ -120,8 +129,11 @@ func TestWebSearchBudgetRequiresPassedSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join(args, " "), `"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"7"`) {
-		t.Fatalf("passed web-search budget missing from args: %q", args)
+	if got, want := strings.Join(
+		args,
+		" ",
+	), "-p --output-format json --settings {\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"7\"},\"outputStyle\":\"default\"}"; got != want {
+		t.Fatalf("args = %q, want %q", got, want)
 	}
 	var environment []string
 	setEnvironment([]string{"PATH=/usr/bin"}, pfmengine.Claude, "/cfg", false, &environment)

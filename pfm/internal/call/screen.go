@@ -2,10 +2,11 @@ package call
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // Screen is the one door through which code outside this package presses keys
@@ -85,13 +86,15 @@ func (engine *Engine) captureVisible(ctx context.Context, target Target, styled 
 	case "", backendTmux:
 		screen, err := engine.tmux.Capture(ctx, target.SocketPath, target.Pane, styled, 0)
 		if err != nil {
-			var exit *exec.ExitError
-			if errors.As(err, &exit) && strings.TrimSpace(string(exit.Stderr)) != "" {
+			if gather.TmuxServerGone(err) {
+				err = fmt.Errorf("%w: %w", gather.ErrServerGone, err) // the pane's chat ended
+			}
+			if stderr, _ := pfmtmux.ExitStderr(err); strings.TrimSpace(string(stderr)) != "" {
 				return "", fmt.Errorf(
 					"capture pane %s: %w: %s",
 					target.Pane,
 					err,
-					strings.TrimSpace(string(exit.Stderr)),
+					strings.TrimSpace(string(stderr)),
 				)
 			}
 			return "", fmt.Errorf("capture pane %s: %w", target.Pane, err)

@@ -19,6 +19,10 @@ type quotaRow struct {
 // 0.75, rounded down).
 const quotaRowPercent = 86
 
+// footerPadding is Claude Code's outer footer padding, two columns left and
+// right, which the hook's COLUMNS leaves no status line row.
+const footerPadding = 2 * 2
+
 // rowColumns is the width a full-width quota row spans: 86% (rounded down) of
 // the widest sibling line, never below minColumns (the compact Claude line) or
 // the widest label, so every label stays whole; bounded by hook COLUMNS minus the
@@ -33,7 +37,7 @@ func rowColumns(runtime Runtime, minColumns int, labelWidths []int, siblingLines
 		columns = max(columns, width)
 	}
 	if runtime.Columns > 0 {
-		contentColumns := runtime.Columns - 2*2 // Claude's outer footer padding, left and right.
+		contentColumns := runtime.Columns - footerPadding
 		if contentColumns <= 0 {
 			return 0, false
 		}

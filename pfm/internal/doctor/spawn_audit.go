@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -353,6 +352,14 @@ func decodeSpawn(observation *spawnObservation) string {
 	if observation.ParseErr != nil {
 		return fmt.Sprintf("%s pid=%d: argv undecodable: %v", observation.Socket, observation.PID, observation.ParseErr)
 	}
+	// A part Parse could not read and left out (a malformed --settings) leaves
+	// the seat's policy unknown: it is audited as unread, never as a violation.
+	if len(observation.Parsed.Warnings) != 0 {
+		return fmt.Sprintf(
+			"%s pid=%d: argv undecodable: %s",
+			observation.Socket, observation.PID, strings.Join(observation.Parsed.Warnings, "; "),
+		)
+	}
 	return ""
 }
 
@@ -464,7 +471,7 @@ func liveClaudeSpawns(
 	machine config.Config,
 	clk clock.Clock,
 ) ([]spawnObservation, []string, error) {
-	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
+	client := gather.TmuxProbe{TmuxDir: resolved.TmuxDir}
 	if clk == nil {
 		clk = clock.Real
 	}

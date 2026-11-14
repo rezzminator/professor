@@ -1,3 +1,5 @@
+//go:build jail
+
 package action
 
 import (
@@ -6,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,6 +125,7 @@ func (jail *actionTmuxJail) paneID(t *testing.T, socket string) string {
 }
 
 func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
+	testjail.TmuxServer(t)
 	jail := newActionTmuxJail(t)
 	id := "66666666-6666-4666-8666-666666666666"
 	keepSocket := "cc-600-1-1"
@@ -150,7 +152,6 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 			t,
 			filepath.Join(jail.sidDir, name),
 			"/tx/"+id+".jsonl",
-			0o600,
 		)
 	}
 	var stderr bytes.Buffer
@@ -200,20 +201,8 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 		t.Fatalf("shared panes=%#v err=%v, want one sibling", sharedPanes, err)
 	}
 
-	sleepPath, err := exec.LookPath("sleep")
-	if err != nil {
-		t.Fatal(err)
-	}
 	claudePath := filepath.Join(jail.root, "bin", "claude")
-	if err := os.MkdirAll(filepath.Dir(claudePath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	// A COPY, not a symlink. tmux reports pane_current_command from the
-	// process's comm, and macOS sets that from the real executable behind a
-	// symlink — so a link named "claude" pointing at sleep runs a process named
-	// "sleep", and the engine window becomes unrecognizable. Linux happens to
-	// report the link name, which is why this passed there.
-	fakeEngine(t, sleepPath, claudePath)
+	fakeEngine(t, claudePath)
 	if output, err := jail.command(
 		"-L",
 		keepSocket,
@@ -287,26 +276,27 @@ func waitForPaneCommand(t *testing.T, jail *actionTmuxJail, socket, target, want
 	t.Fatalf("pane %s never reported current command %q within 5s; last=%q", target, want, last)
 }
 
-// fakeEngine installs a runnable executable at target that behaves like the
-// source binary but carries its own name, so tmux reports that name as the
-// pane's current command on every platform.
-func fakeEngine(t *testing.T, source, target string) {
+// fakeEngine builds a program that sleeps two minutes at target, so tmux
+// reports target's own name as the pane's current command on every platform.
+// Neither a symlink nor a copy of the system sleep can stand in: macOS names a
+// process after the executable behind a symlink, and kills a copied system
+// binary at exec (arm64e and launch constraints), so the window died at birth
+// and the failure read as a selfswitch bug.
+func fakeEngine(t *testing.T, target string) {
 	t.Helper()
-	content, err := os.ReadFile(source)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := testjail.WriteExecutable(target, content, 0o755); err != nil {
-		t.Fatal(err)
+	source := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":  "module fakeengine\n\ngo 1.21\n",
+		"main.go": "package main\n\nimport \"time\"\n\nfunc main() { time.Sleep(2 * time.Minute) }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(source, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if runtime.GOOS != "darwin" {
-		return
-	}
-	// Copying a system binary on arm64 macOS invalidates its signature and the
-	// kernel refuses to exec it. An ad-hoc signature makes the copy runnable
-	// again; without this the window dies at birth and the failure reads as a
-	// selfswitch bug.
-	if output, err := exec.Command("codesign", "--force", "--sign", "-", target).CombinedOutput(); err != nil {
-		t.Skipf("cannot ad-hoc sign the fake engine: %v: %s", err, output)
+	if err := testjail.GoBuild(source, target, "."); err != nil {
+		t.Fatalf("build the fake engine: %v", err)
 	}
 }

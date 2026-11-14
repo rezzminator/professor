@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
@@ -32,13 +33,6 @@ type engineSyncTargets struct {
 	// Capabilities are the host's capability names: engine-sync reads them on
 	// every run, including the `hook claude start` refresh pfm does not flag.
 	Capabilities []string `json:"capabilities"`
-}
-
-// oldEngineSyncTargetKeys are the only keys pfm ever wrote into the retired
-// {config}/engine-sync/targets.json: a file holding anything else is the
-// operator's.
-var oldEngineSyncTargetKeys = map[string]bool{
-	"codexHomes": true, "claudeConfigDirs": true, "sourceRepo": true, "capabilities": true,
 }
 
 type engineSyncFileState int
@@ -161,8 +155,7 @@ func (installer *engine) engineSyncFilePlan(sourceRepo string) (engineSyncFilePl
 }
 
 // wireEngineSyncConfig writes the global file (the template plus this
-// install's roster) when it is absent or pfm's, and migrates the old two
-// files out of the way in the same install.
+// install's roster) when it is absent or pfm's.
 func (installer *engine) wireEngineSyncConfig() error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
@@ -188,84 +181,6 @@ func (installer *engine) wireEngineSyncConfig() error {
 	default:
 		installer.ok(plan.path)
 	}
-	return installer.retireOldEngineSyncFiles()
-}
-
-// oldEngineSyncFiles are the retired files pfm owns and removes: the policy
-// link into a Professor clone and the targets file with only pfm's keys, in
-// every directory engine-sync refuses to start beside.
-func (installer *engine) oldEngineSyncFiles(sourceRepo string) ([]string, error) {
-	var owned []string
-	for _, dir := range enginesync.OldConfigDirs(installer.env(), installer.options.Home) {
-		config := filepath.Join(dir, "config.json")
-		ownsLink, err := installer.ownsEngineSyncPolicy(config, sourceRepo)
-		if err != nil {
-			return nil, err
-		}
-		if ownsLink {
-			owned = append(owned, config)
-		}
-		targets := filepath.Join(dir, "targets.json")
-		pfmTargets, err := pfmWrittenEngineSyncTargets(targets)
-		if err != nil {
-			return nil, err
-		}
-		if pfmTargets {
-			owned = append(owned, targets)
-		}
-	}
-	return owned, nil
-}
-
-// pfmWrittenEngineSyncTargets reports whether path is a regular file holding
-// a JSON object with only the keys pfm wrote into targets.json.
-func pfmWrittenEngineSyncTargets(path string) (bool, error) {
-	info, err := os.Lstat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("inspect old engine-sync targets %s: %w", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return false, nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return false, fmt.Errorf("read old engine-sync targets %s: %w", path, err)
-	}
-	var keys map[string]json.RawMessage
-	if json.Unmarshal(raw, &keys) != nil || len(keys) == 0 {
-		return false, nil
-	}
-	for key := range keys {
-		if !oldEngineSyncTargetKeys[key] {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// retireOldEngineSyncFiles removes the old files pfm owns; an old file that
-// is not pfm's stays, and `pfm doctor --stale` names it. An install runs it
-// after writing the global file, an uninstall before engine-sync global and
-// before it retires the global file: engine-sync refuses to start beside an
-// old file only while the global file is absent.
-func (installer *engine) retireOldEngineSyncFiles() error {
-	sourceRepo, err := installer.globalSourceRepoRoot()
-	if err != nil {
-		return fmt.Errorf("resolve the engine-sync policy source repository: %w", err)
-	}
-	owned, err := installer.oldEngineSyncFiles(sourceRepo)
-	if err != nil {
-		return err
-	}
-	for _, path := range owned {
-		if err := installer.retire(path, "engine-sync old config, moved to "+
-			enginesync.GlobalConfigPath(installer.options.Home)); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -289,13 +204,13 @@ func (installer *engine) retireEngineSyncFile() error {
 }
 
 // engineSyncPreviewSkip is the reason a dry run does not preview `engine-sync
-// global`, "" when it does. engine-sync reads {home}/.claude/engine-sync.json
-// and, while it is absent, refuses to start beside an old config file, so a preview of an install
-// that would write that file or retire an old one has no real home to run
-// against (a dry run writes nothing, and a scratch home of links is refused by
-// engine-sync's own symlink-parent rule): the preview is skipped by name and
-// the apply, which writes the file and retires the old files first, runs the
-// real call. A dry run that changes neither previews against the real home.
+// global`, "" when it does. engine-sync reads {home}/.claude/engine-sync.json,
+// so a preview of an install that would write that file has no real home to
+// run against (a dry run writes nothing, and a scratch home of links is refused
+// by engine-sync's own symlink-parent rule): the preview is skipped by name and
+// the apply, which writes the file first, runs the real call. A rule link the
+// pass retires skips it the same way. A dry run that changes neither previews
+// against the real home.
 func (installer *engine) engineSyncPreviewSkip(sourceRepo string) (string, error) {
 	if installer.apply {
 		return "", nil
@@ -310,11 +225,17 @@ func (installer *engine) engineSyncPreviewSkip(sourceRepo string) (string, error
 			changes = append(changes, "write "+plan.path)
 		}
 	}
-	old, err := installer.oldEngineSyncFiles(sourceRepo)
-	if err != nil {
-		return "", err
+	// A rule link this pass retires (a renamed rule's dead link) is still on
+	// disk in a dry run, where engine-sync's rule walk refuses it.
+	rules := filepath.Join(installer.options.ConfigDir, globalRulesRegistry) + string(filepath.Separator)
+	var retiredRules []string
+	for path := range installer.removedPaths {
+		if strings.HasPrefix(path, rules) {
+			retiredRules = append(retiredRules, path)
+		}
 	}
-	for _, path := range old {
+	sort.Strings(retiredRules)
+	for _, path := range retiredRules {
 		changes = append(changes, "retire "+path)
 	}
 	if len(changes) == 0 {

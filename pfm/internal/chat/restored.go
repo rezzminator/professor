@@ -60,7 +60,7 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 	choice, err := placeChat(ctx, "restored", spawn.BackendAuto, "", false, &effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restored backend: %v\n", err)
-		return 1
+		return spawn.FailureCode(err)
 	}
 	if choice.Backend != spawn.BackendHerdr {
 		// The open births where this placement said, without asking again.
@@ -238,15 +238,15 @@ func restoreNative(
 		return fmt.Errorf("rebind restored seat: %w", err)
 	}
 	if current.Name != "" {
+		// A pane with no agent yet is named by pane and tab; seat-host registers the agent after launch.
 		if err := renameNativeOwned(ctx, db, current, current.Name); err != nil {
-			var refusal *herdr.Refusal
-			if !errors.As(err, &refusal) || refusal.Code != "agent_not_found" ||
-				!strings.HasPrefix(refusal.Request, "agent.rename ") {
-				return fmt.Errorf("restore name: %w", err)
-			}
-			// The pane label is acknowledged; seat-host registers the agent after launch.
-			fmt.Fprintf(stderr, "pfm chat open: restored pane named; agent not registered yet: %v\n", err)
+			return fmt.Errorf("restore name: %w", err)
 		}
+	} else if err := herdr.LabelPaneTab(
+		ctx, current.HerdrSocket, current.HerdrPane, spawn.BirthTabLabel("", run.CWD), false,
+	); err != nil && !errors.Is(err, herdr.ErrTabNotSole) {
+		// The chat opens either way: its tab keeps its label until the chat is named.
+		fmt.Fprintf(stderr, "pfm chat open: Herdr tab of pane %s keeps its label: %v\n", current.HerdrPane, err)
 	}
 	if current.LostNote != "" {
 		if err := notifyNativeLoss(ctx, current, current.LostNote); err != nil {
@@ -319,9 +319,20 @@ func resumeNativeRun(
 	if seat.SessionID == "" {
 		return reload.RefreshRecipeRemoteControl(run, engineID, machine, seat.Name, stderr), nil
 	}
+	recorded := run.Args
 	if engineID == pfmengine.Claude {
-		if _, err := claudelaunch.Parse(append([]string{run.Binary}, run.Args...)); err != nil {
-			return run, fmt.Errorf("parse restored recipe: %w", err)
+		parsed, err := claudelaunch.Parse(append([]string{run.Binary}, run.Args...))
+		for _, warning := range parsed.Warnings {
+			fmt.Fprintf(stderr, "pfm WARN: chat %q: restored recipe %s\n", seat.Name, warning)
+		}
+		if err != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm WARN: chat %q: restored recipe unparsable (%v); resuming with default launch args\n",
+				seat.Name,
+				err,
+			)
+			recorded = nil
 		}
 	}
 	remove := make(map[string]bool)
@@ -339,6 +350,7 @@ func resumeNativeRun(
 			remove[knob.Target] = knob.Name != restoredKnobFork
 		}
 	}
+	arity[claudelaunch.PermissionModeFlag] = true // the one permissionMode flag that takes a value
 	if engineID != pfmengine.Claude {
 		remove = map[string]bool{"--prompt": true, "--session": true, "--continue": false}
 	}
@@ -356,15 +368,13 @@ func resumeNativeRun(
 	case pfmengine.OpenCode:
 		arity = map[string]bool{"--model": true}
 	}
-	args := make([]string, 0, len(run.Args)+2)
-	for i := 0; i < len(run.Args); i++ {
-		word := run.Args[i]
+	args := make([]string, 0, len(recorded)+2)
+	for i := 0; i < len(recorded); i++ {
+		word := recorded[i]
 		key, _, inline := strings.Cut(word, "=")
 		if takesValue, ok := remove[key]; ok {
-			if takesValue && !inline {
-				if i+1 >= len(run.Args) || strings.HasPrefix(run.Args[i+1], "-") {
-					return run, fmt.Errorf("restored recipe %s requires a value", key)
-				}
+			// A removed flag missing its value has nothing more to strip.
+			if takesValue && !inline && i+1 < len(recorded) && !strings.HasPrefix(recorded[i+1], "-") {
 				i++
 			}
 			continue
@@ -375,24 +385,40 @@ func resumeNativeRun(
 		if !strings.HasPrefix(word, "-") {
 			continue
 		}
-		args = append(args, word)
-		if !inline && i+1 < len(run.Args) && !strings.HasPrefix(run.Args[i+1], "-") {
+		if !inline && i+1 < len(recorded) && !strings.HasPrefix(recorded[i+1], "-") {
 			takesValue, known := arity[key]
 			if !known {
-				return run, errors.New("restored recipe has an ambiguous unregistered flag value")
+				// The next word may be its value or the birth prompt: drop both, never resend a prompt.
+				fmt.Fprintf(
+					stderr,
+					"pfm WARN: chat %q: restored recipe flag %s has an ambiguous value; dropped\n",
+					seat.Name,
+					key,
+				)
+				i++
+				continue
 			}
+			args = append(args, word)
 			if takesValue {
 				i++
-				args = append(args, run.Args[i])
+				args = append(args, recorded[i])
 			}
+			continue
 		}
+		args = append(args, word)
 	}
 	switch engineID {
 	case pfmengine.Claude:
-		var err error
-		args, err = claudelaunch.RefreshThemePin(args)
-		if err != nil {
-			return run, fmt.Errorf("refresh restored theme: %w", err)
+		// A pin that cannot be refreshed costs only the theme: the chat resumes as recorded.
+		if refreshed, err := claudelaunch.RefreshThemePin(args); err != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm WARN: chat %q: restored theme pin not refreshed (%v); resuming with the recorded settings\n",
+				seat.Name,
+				err,
+			)
+		} else {
+			args = refreshed
 		}
 		args = append(args, claudelaunch.SessionArgs("", seat.SessionID, false)...)
 	case pfmengine.Codex:
@@ -460,56 +486,9 @@ func prepareRestoredSeat(
 	if account == 0 {
 		account = runtime.Config.PrimaryAccountFor(engineID, 1)
 	}
-	var recipe *fleetdb.SeatRun
-	switch engineID {
-	case pfmengine.Claude:
-		spawnPlan := action.ClaudeSpawn{
-			Purpose: action.PurposeResume,
-			Home:    runtime.Paths.Home,
-			Account: account,
-			Cache1H: &row.C1H,
-			Resume:  id,
-			Machine: runtime.Config,
-		}
-		run, err := spawnPlan.SeatRun(row.CWD)
-		if err != nil {
-			return fleetdb.Seat{}, err
-		}
-		recipe = &run
-	case pfmengine.Codex:
-		plan, err := action.PlanCodex(
-			action.HeadlessRequest{
-				Engine:          engineID,
-				ResumeSessionID: id,
-				Name:            row.Name,
-				CWD:             row.CWD,
-				Home:            runtime.Paths.Home,
-				PrimaryAccount:  account,
-				Config:          runtime.Config,
-			},
-		)
-		if err != nil {
-			return fleetdb.Seat{}, err
-		}
-		recipe = plan.SeatRun
-	case pfmengine.OpenCode:
-		row.Kind = compose.ResumeKindFor(row.Kind)
-		plan, err := action.Synthesize(
-			action.Request{
-				Row:            row,
-				Home:           runtime.Paths.Home,
-				PrimaryAccount: account,
-				Config:         runtime.Config,
-				FreshSocket:    "restored",
-			},
-		)
-		if err != nil {
-			return fleetdb.Seat{}, err
-		}
-		recipe = plan.SeatRun
-	}
-	if recipe == nil {
-		return fleetdb.Seat{}, errors.New("restored engine has no structured resume recipe")
+	recipe, err := restoredRecipe(row, id, account, runtime, stderr)
+	if err != nil {
+		return fleetdb.Seat{}, err
 	}
 	prepared, err := spawn.PrepareHerdr(
 		ctx,
@@ -527,7 +506,7 @@ func prepareRestoredSeat(
 // restore command, not an arbitrary pane named by inherited environment values.
 func restoredCallerAuthority(ctx context.Context, values paths.Values, socket, pane string) error {
 	proc := gather.NewProcFS(values.ProcRoot)
-	info, err := gather.HerdrKeep(proc).Read(ctx, socket, pane)
+	info, err := herdr.ReadPaneProcesses(ctx, socket, pane)
 	if err != nil {
 		return fmt.Errorf("read restored caller shell: %w", err)
 	}
@@ -621,7 +600,13 @@ func resumeTail(
 ) (string, error) {
 	tail, _, err := reload.ContinuedSession(ctx, id, stderr)
 	if err != nil {
-		return "", err
+		fmt.Fprintf(
+			stderr,
+			"pfm WARN: chat %s: newest segment unknown (%v); resuming it, which may be an older segment\n",
+			id,
+			err,
+		)
+		tail = id
 	}
 	if tail == id && rows == nil {
 		return tail, nil

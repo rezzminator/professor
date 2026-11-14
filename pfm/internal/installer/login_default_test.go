@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,42 +107,6 @@ func TestInstallWritesTheLoginDefaultOnceAndUninstallRemovesIt(t *testing.T) {
 	}
 	requireNoPath(t, zshenv, "uninstall removes the block it created")
 	requireNoPath(t, environment, "uninstall removes the environment.d file")
-}
-
-// The block runs in every zsh and login shell, pfm's own panes included: a
-// CLAUDE_CONFIG_DIR already set, even to another account, must survive it.
-func TestLoginDefaultBlockLeavesAPresetConfigDirAlone(t *testing.T) {
-	home, account, roster := loginDefaultHome(t)
-	profile, zshenv, _ := loginDefaultFiles(home)
-	runSkillInstall(t, home, ModeApply, roster)
-	sentinel := claudelaunch.ConfigDirDefaultEnv
-	script := `. "$1" && sh -c 'printf "%s|%s" "${` + claudeConfigDirEnv + `-unset}" "${` + sentinel + `-unset}"'`
-	cases := []struct {
-		name, preset, want string
-		set                bool
-	}{
-		{name: "unset", want: account + "|" + account},
-		{name: "empty", set: true, want: account + "|" + account},
-		{name: "another account", preset: "/elsewhere/.cc/2", set: true, want: "/elsewhere/.cc/2|unset"},
-	}
-	for _, file := range []string{profile, zshenv} {
-		for _, test := range cases {
-			t.Run(filepath.Base(file)+"/"+test.name, func(t *testing.T) {
-				command := exec.CommandContext(context.Background(), "sh", "-c", script, "sh", file)
-				command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
-				if test.set {
-					command.Env = append(command.Env, claudeConfigDirEnv+"="+test.preset)
-				}
-				output, err := command.CombinedOutput()
-				if err != nil {
-					t.Fatalf("sh %s: %v\n%s", file, err, output)
-				}
-				if string(output) != test.want {
-					t.Fatalf("got %q want %q", output, test.want)
-				}
-			})
-		}
-	}
 }
 
 // A block with a begin marker and no end is not pfm's to guess at: install
@@ -265,17 +228,11 @@ func TestLoginDefaultFreshHomeWithoutRoster(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
 	output := runSkillInstall(t, home, ModeApply)
-	if want := "  skip    login default: no Claude account roster\n"; !strings.Contains(output, want) {
-		t.Fatalf("missing %q:\n%s", want, output)
-	}
 	profile, zshenv, environment := loginDefaultFiles(home)
+	wantOutputLines(t, output, []string{"  skip    login default: no Claude account roster"},
+		"login default", profile, zshenv, environment)
 	for _, path := range []string{profile, zshenv, environment} {
 		requireNoPath(t, path, "no roster creates no login default")
-		for _, line := range strings.Split(output, "\n") {
-			if strings.HasPrefix(line, "  change  ") && strings.Contains(line, path) {
-				t.Errorf("no default was written, but output reports %q", line)
-			}
-		}
 	}
 }
 

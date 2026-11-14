@@ -7,6 +7,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // openActivityLog is the process entry of the activity log: it names the verb
@@ -23,13 +24,13 @@ func openActivityLog(args []string, runtime commandRuntime, stderr io.Writer) fu
 		Components: machine.Components,
 		KeepFiles:  machine.KeepFiles,
 		MaxMB:      machine.MaxMB,
-		KeepDays:   machine.KeepDays,
 		Stderr:     stderr,
 	})
 	return finish
 }
 
-// runLog is `pfm log`: the filter over this home's activity file.
+// runLog is `pfm log`: the filter over this home's activity log, in its log root.
 func runLog(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	return obs.ReadActivity(context.Background(), args, stdout, stderr, runtime.Paths.LogFile, clock.Real)
+	place := paths.LogRoot(paths.OSEnv{}, runtime.Paths.Home)
+	return obs.ReadActivity(context.Background(), args, stdout, stderr, place.Activity(), clock.Real)
 }

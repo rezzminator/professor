@@ -204,24 +204,29 @@ func TestCopySourceTreeLeavesSubmodulesOut(t *testing.T) {
 }
 
 func TestCopySourceTreeRejectsExternalSymlinks(t *testing.T) {
-	t.Parallel()
-	for name, linkTarget := range map[string]string{
-		"absolute": filepath.Join(string(filepath.Separator), "outside"),
-		"escape":   "../outside",
+	// The fence's own repository layout is metadata the error carries, never the subject: pinned here, so
+	// the expected text holds in any checkout (t.Setenv: no t.Parallel).
+	t.Setenv(pfmpaths.EnvDevRepoWorkTree, "/worktree")
+	t.Setenv(pfmpaths.EnvDevRepoGitDir, "/pfm-git-common/worktrees/unit-net")
+	for _, tc := range []struct{ name, linkTarget, want string }{
+		{"absolute", filepath.Join(string(filepath.Separator), "outside"), "source fixture symlink link points outside source fixture: /outside; fenced metadata not applicable (worktree=\"/worktree\" git-dir=\"/pfm-git-common/worktrees/unit-net\")"},
+		{"escape", "../outside", "source fixture symlink link points outside source fixture: ../outside; fenced metadata not applicable (worktree=\"/worktree\" git-dir=\"/pfm-git-common/worktrees/unit-net\")"},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			source := filepath.Join(t.TempDir(), "source")
 			if err := os.MkdirAll(source, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Symlink(linkTarget, filepath.Join(source, "link")); err != nil {
+			if err := os.Symlink(tc.linkTarget, filepath.Join(source, "link")); err != nil {
 				t.Fatal(err)
 			}
 			runGitFixture(t, source, "init", "-q")
 			runGitFixture(t, source, "add", "-A")
-			err := copySourceTree(source, filepath.Join(t.TempDir(), "target"))
-			if err == nil || !strings.Contains(err.Error(), "points outside source fixture") {
-				t.Fatalf("copy source tree error = %v, want outside-source refusal", err)
+			target := filepath.Join(t.TempDir(), "target")
+			err := copySourceTree(source, target)
+			if got := strings.NewReplacer(source, "{source}", target, "{target}").
+				Replace(fmt.Sprint(err)); got != tc.want {
+				t.Fatalf("copy source tree error = %q, want %q", got, tc.want)
 			}
 		})
 	}

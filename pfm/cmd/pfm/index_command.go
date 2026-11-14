@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -47,14 +48,14 @@ func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime, c
 	counters, err := indexer.Run(context.Background(), fleetindex.Options{Full: *full})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm index: %v\n", err)
-		return 1
+		if exitCode = 1; !errors.As(err, new(*fleetindex.PartialError)) {
+			return 1
+		}
 	}
-	if *full {
-		// The counters below say the reparse ran; this row is what makes the
-		// NEXT run able to tell "fully indexed at T" from "never fully
-		// indexed". A dropped write leaves the command claiming a completed
-		// full index it cannot prove, so it is reported and exits non-zero —
-		// the counters still print, because the scan itself did happen.
+	if *full && exitCode == 0 {
+		// This row lets the NEXT run tell "fully indexed at T" from "never fully
+		// indexed"; a dropped write, or a run that lost an engine, must not claim it,
+		// so the failed write is reported and exits non-zero (the counters still print).
 		if err := database.SetMeta(
 			context.Background(),
 			"last_full_index_at",

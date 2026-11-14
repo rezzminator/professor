@@ -1,6 +1,7 @@
 package costledger
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -209,5 +210,23 @@ func TestAnchorsTakeTheExitFromTheClockFieldsWhenTheStampsAreOlder(t *testing.T)
 	if len(got) != 2 || !got[0].At.Equal(at("2026-10-09T18:22:32.729Z")) ||
 		!got[1].At.Equal(at("2026-10-09T19:00:00.000Z")) {
 		t.Fatalf("States = %v, want exits 18:22:32.729Z and 19:00:00.000Z", got)
+	}
+}
+
+// A checkpoint whose open index names no state is a damaged bookmark, not a damaged anchor set: the
+// states are kept, and the index is read back from their Untils so the next stamp closes only the
+// state still open.
+func TestAnchorsKeepTheStatesOfACheckpointWithADamagedOpenIndex(t *testing.T) {
+	var anchors Anchors
+	raw := `{"states":[{"USD":1,"At":"2026-10-09T18:00:00Z","Until":"2026-10-09T19:00:00Z"},` +
+		`{"USD":2,"At":"2026-10-09T20:00:00Z","Until":"0001-01-01T00:00:00Z"}],"stamp":"","stamped":false,"open":9}`
+	if err := json.Unmarshal([]byte(raw), &anchors); err != nil {
+		t.Fatalf("decode checkpoint: %v", err)
+	}
+	anchors.Stamp("2026-10-09T21:00:00Z")
+	got := anchors.States()
+	if len(got) != 2 || !got[0].Until.Equal(at("2026-10-09T19:00:00Z")) ||
+		!got[1].Until.Equal(at("2026-10-09T21:00:00Z")) {
+		t.Fatalf("States = %+v, want Untils 19:00Z kept and 21:00Z closed", got)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,28 +14,30 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/launchnotice"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func TestExecCommandsQueriesAndViewsWithoutRecording(t *testing.T) {
-	commands, argvPath, values, accountDir := testExecCommands(t)
+	commands, runner, values, accountDir := testExecCommands(t)
 	ctx := context.Background()
 	if output, err := commands.QueryAgents(ctx, accountDir); err != nil || string(output) != "[]\n" {
 		t.Fatalf("query output=%q error=%v", output, err)
 	}
-	query := assertAgentLaunch(t, argvPath, "agents", "--json")
+	query := assertAgentLaunch(t, runner, "agents", "--json")
 	if len(query.Hooks) != 0 || query.MCPConfig != "" || query.Autonomy {
 		t.Fatalf("query carried session-only settings: %+v", query)
 	}
 	if err := commands.View(ctx, accountDir, "/project"); err != nil {
 		t.Fatal(err)
 	}
-	view := assertAgentLaunch(t, argvPath, "agents", "--cwd", "/project")
+	view := assertAgentLaunch(t, runner, "agents", "--cwd", "/project")
 	if len(view.Hooks) != 0 || view.MCPConfig != "" || view.Autonomy {
 		t.Fatalf("view carried session-only settings: %+v", view)
 	}
@@ -46,36 +47,63 @@ func TestExecCommandsQueriesAndViewsWithoutRecording(t *testing.T) {
 }
 
 func TestExecCommandsResumeWorkbench(t *testing.T) {
-	for _, invalid := range []bool{false, true} {
-		t.Run(fmt.Sprintf("invalid=%v", invalid), func(t *testing.T) {
-			commands, argvPath, values, accountDir := testExecCommands(t)
+	for _, test := range []struct {
+		name, manifest string
+		wantPersona    bool
+		wantEffort     string
+		// wantWarning is what the resume tells its stderr, dir and manifest
+		// substituted for {dir} and {manifest}.
+		wantWarning string
+	}{
+		{
+			name: "valid", manifest: `{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`,
+			wantPersona: true, wantEffort: "xhigh",
+		},
+		{
+			name: "unknown effort", manifest: `{"prompt":"scribe.md","effort":"turbo","model":"sonnet"}`,
+			wantPersona: true,
+			wantWarning: `pfm: workbench {dir}: unknown Claude effort "turbo" (want low, medium, high, xhigh or max); ` +
+				"launching the persona on the default effort\n",
+		},
+		{
+			name: "invalid manifest", manifest: `{"prompt":""}`,
+			wantWarning: `pfm: workbench persona not applied ({manifest}: "prompt" is required); launching without it` + "\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			commands, runner, values, accountDir := testExecCommands(t)
+			var stderr bytes.Buffer
+			commands.Stderr = &stderr
 			dir := filepath.Join(values.Home, "acme", "docs", "scribe")
 			prompt := filepath.Join(dir, ".professor", "scribe.md")
-			manifest := `{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`
-			if invalid {
-				manifest = `{"prompt":""}`
+			files := map[string]string{
+				filepath.Join(values.Home, "acme", ".professor", "baseline.json"): "{}",
+				prompt: "You are scribe.",
 			}
-			for path, body := range map[string]string{filepath.Join(values.Home, "acme", ".professor", "baseline.json"): "{}", paths.WorkbenchManifest(dir): manifest, prompt: "You are scribe."} {
+			files[paths.WorkbenchManifest(dir)] = test.manifest
+			for path, body := range files {
 				if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
 			const id = "44444444-4444-4444-8444-444444444444"
-			err := commands.Resume(context.Background(), accountDir, dir, id, true)
-			if invalid {
-				want := "resume agent session: " + paths.WorkbenchManifest(dir) + `: "prompt" is required`
-				if err == nil || err.Error() != want {
-					t.Fatalf("resume error = %v, want %s", err, want)
-				}
-				return
+			if err := commands.Resume(context.Background(), accountDir, dir, id, true); err != nil {
+				t.Fatalf("resume refused: %v", err)
 			}
-			if err != nil {
-				t.Fatal(err)
+			wantWarning := strings.NewReplacer("{dir}", dir, "{manifest}", paths.WorkbenchManifest(dir)).
+				Replace(test.wantWarning)
+			if stderr.String() != wantWarning {
+				t.Fatalf("resume stderr = %q, want %q", stderr.String(), wantWarning)
 			}
-			parsed := assertAgentLaunch(t, argvPath, "--resume", id)
-			if parsed.Resume != id || parsed.PromptFile != prompt || parsed.Effort != "xhigh" ||
-				parsed.Model != "sonnet" {
-				t.Fatalf("persona = %+v", parsed)
+			parsed := assertAgentLaunch(t, runner, "--resume", id)
+			wantPrompt, wantModel := "", ""
+			if test.wantPersona {
+				wantPrompt, wantModel = prompt, "sonnet"
+			}
+			if parsed.Resume != id || parsed.PromptFile != wantPrompt || parsed.Effort != test.wantEffort ||
+				parsed.Model != wantModel {
+				t.Fatalf("persona = %+v, want prompt %q effort %q model %q",
+					parsed, wantPrompt, test.wantEffort, wantModel)
 			}
 		})
 	}
@@ -88,7 +116,7 @@ func TestExecCommandsResumeRecordsDirectLaunch(t *testing.T) {
 			name = "config key"
 		}
 		t.Run(name, func(t *testing.T) {
-			commands, argvPath, values, accountDir := testExecCommands(t)
+			commands, runner, values, accountDir := testExecCommands(t)
 			if configKey {
 				configPath := filepath.Join(values.Home, "pfm.config.json")
 				content := []byte(`{"version":2,"state":{"db":"` + values.StateDB + `"}}`)
@@ -104,7 +132,7 @@ func TestExecCommandsResumeRecordsDirectLaunch(t *testing.T) {
 			if err := commands.Resume(ctx, accountDir, t.TempDir(), id, true); err != nil {
 				t.Fatal(err)
 			}
-			assertAgentLaunch(t, argvPath, "--resume", id)
+			assertAgentLaunch(t, runner, "--resume", id)
 			launches, err := fleetdb.OpenLaunches(ctx, values)
 			if err != nil {
 				t.Fatal(err)
@@ -178,24 +206,20 @@ func TestExecCommandsResumeWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.
 	}
 }
 
-func testExecCommands(t *testing.T) (ExecCommands, string, paths.Values, string) {
+func testExecCommands(t *testing.T) (ExecCommands, *deps.FakeRunner, paths.Values, string) {
 	t.Helper()
 	root := t.TempDir()
 	accountDir := filepath.Join(root, "account", "2")
 	if err := os.MkdirAll(accountDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	argvPath := filepath.Join(root, "argv")
 	binary := filepath.Join(root, "claude")
-	if err := testjail.WriteExecutable(
-		binary,
-		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AGENTOPEN_ARGV\"\n"+
-			"printf '%s\\n' \"${CACHE_LIVE_CONTROL_MAIN_TTL-unset}\" > \"$AGENTOPEN_ARGV.ttl\"\nprintf '[]\\n'\n"),
-		0o700,
-	); err != nil {
+	if err := testjail.WriteExecutableNeverRun(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("AGENTOPEN_ARGV", argvPath)
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath(binary, binary, nil)
+	runner.ScriptStartOutput(nil, deps.StartOutput{Stdout: "[]\n"})
 	t.Setenv(paths.EnvHome, root)
 	t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
 	values, err := paths.Resolve()
@@ -206,41 +230,45 @@ func testExecCommands(t *testing.T) (ExecCommands, string, paths.Values, string)
 		Claude:   config.ClaudePrefs{Binary: binary},
 		Accounts: []config.Account{{ID: 2, ConfigDir: accountDir}},
 	}
-	return ExecCommands{Home: root, Machine: machine}, argvPath, values, accountDir
+	return ExecCommands{Home: root, Machine: machine, Runner: runner}, runner, values, accountDir
 }
 
-func assertAgentLaunch(t *testing.T, argvPath string, leading ...string) claudelaunch.Parsed {
+// assertAgentLaunch parses the argv of the last Claude child the runner started, checks the leading
+// arguments appear in it and returns what it parsed.
+func assertAgentLaunch(t *testing.T, runner *deps.FakeRunner, leading ...string) claudelaunch.Parsed {
 	t.Helper()
-	content, err := os.ReadFile(argvPath)
-	if err != nil {
-		t.Fatal(err)
+	starts := runner.Starts()
+	if len(starts) == 0 {
+		t.Fatal("no Claude child was started")
 	}
-	argv := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+	last := starts[len(starts)-1]
+	argv := last.Argv[1:]
+	content := strings.Join(argv, "\n") + "\n"
 	parsed, err := claudelaunch.Parse(append([]string{"claude"}, argv...))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, value := range leading {
-		if !strings.Contains(string(content), value+"\n") {
+		if !strings.Contains(content, value+"\n") {
 			t.Fatalf("argv=%q lacks %q", argv, value)
 		}
 	}
-	ttl, err := os.ReadFile(argvPath + ".ttl")
-	if err != nil {
-		t.Fatal(err)
+	ttl := "unset"
+	for _, entry := range last.Opts.Env {
+		if value, found := strings.CutPrefix(entry, "CACHE_LIVE_CONTROL_MAIN_TTL="); found {
+			ttl = value
+		}
 	}
 	if parsed.Settings["outputStyle"] != "default" ||
-		strings.TrimSpace(string(ttl)) != "1h" && parsed.Resume != "" {
+		strings.TrimSpace(ttl) != "1h" && parsed.Resume != "" {
 		t.Fatalf("rendered argv=%q parsed=%+v process CACHE_LIVE_CONTROL_MAIN_TTL=%q", argv, parsed, ttl)
 	}
 	return parsed
 }
 
-// fakeAgentopenTmuxBinary plays tmux: list-panes answers one pane, in gather's
+// fakeAgentopenTmux plays tmux: list-panes answers one pane, in gather's
 // pane format, running a fixed pid.
-func fakeAgentopenTmuxBinary(t *testing.T, pid int) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
+func fakeAgentopenTmux(pid int) *deps.FakeRunner {
 	fields := []string{
 		"cc-1",
 		"@1",
@@ -248,18 +276,14 @@ func fakeAgentopenTmuxBinary(t *testing.T, pid int) string {
 		"title",
 		"/dev/pts/7",
 		strconv.Itoa(pid),
-		"%%1", // printf format: tmux prints %1
+		"%1",
 		"1",
 		"/work",
 		"claude",
 		"0",
 		"0",
 	}
-	script := "#!/bin/sh\nprintf '" + strings.Join(fields, "\\037") + "\\n'\nexit 0\n"
-	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
+	return testjail.TmuxRunner(deps.RunResult{Stdout: []byte(strings.Join(fields, "\x1f") + "\n")})
 }
 
 // TestRealTmuxRecordsEveryInvocation proves RealTmux.command crosses the
@@ -271,8 +295,8 @@ func TestRealTmuxRecordsEveryInvocation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "cc-1-1-1"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	tmux := RealTmux{Binary: fakeAgentopenTmuxBinary(t, 4242), Dir: dir}
-	socket, err := tmux.SocketForPID(ctx, 4242)
+	tmux := RealTmux{Binary: "tmux", Dir: dir}
+	socket, err := tmux.SocketForPID(pfmtmux.WithClientRunner(ctx, fakeAgentopenTmux(4242)), 4242)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,5 +334,19 @@ func TestSocketForPIDErrorsWhenTmuxCouldNotRun(t *testing.T) {
 	}
 	if socket != "" {
 		t.Fatalf("SocketForPID() socket = %q, want empty on a tmux-could-not-run error", socket)
+	}
+}
+
+// A tmux-resident chat is never attached inside a Herdr pane: the refusal
+// comes before tmux runs at all.
+func TestRealTmuxAttachRefusesInHerdr(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	t.Setenv("HERDR_PANE_ID", "w1:p2")
+	tmux := RealTmux{Binary: "tmux", Dir: t.TempDir()}
+	err := tmux.Attach(pfmtmux.WithClientRunner(ctx, fakeAgentopenTmux(4242)), "cc-1-1-1")
+	want := "host refused at agent open: this terminal is Herdr pane w1:p2, where a tmux client is never attached; " +
+		"open the chat from a plain terminal"
+	if err == nil || err.Error() != want || len(recorder.Records()) != 0 {
+		t.Fatalf("attach = %v, tmux records %s; want %q and no tmux run", err, recorder.Raw(), want)
 	}
 }

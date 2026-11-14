@@ -1,4 +1,4 @@
-# HOL AI Plugin Scanner config, auto-discovered by .github/workflows/release.yml.
+# HOL AI Plugin Scanner config, auto-discovered by the scan job in .github/workflows/ci.yml.
 #
 # Each path is named exactly, never globbed, so a secret-shaped string in any
 # other file still fails the scan. None of these files holds a real key.
@@ -6,13 +6,15 @@
 ignore_paths = [
   # Test files that plant fake, credential-shaped strings on purpose: each test
   # proves the code under test scrubs, refuses or never prints a credential.
-  "infra/fence/lanes/tests/cred-scan_test.sh",
   "pfm/internal/obs/recover_test.go",
   "pfm/internal/obs/scrub_test.go",
   # HARDCODED_SECRET's generic token and api-key assignment rules matching
   # environment-variable NAMES, not values: its constants name
   # ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY.
   "pfm/internal/claudelaunch/knobs.go",
+  # The same rule on the fake Claude engine's constant naming ANTHROPIC_API_KEY;
+  # the key it sends is the launch's own setting, read at run time.
+  "pfm/internal/mockengine/claude_api.go",
   # Display-token interpolation in a theme fixture, not an authentication token.
   "pfm/internal/themesync/herdr_test.go",
   # Research quotes available sandbox modes; it does not configure a default.

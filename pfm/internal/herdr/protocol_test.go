@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ func TestCheckProtocol(t *testing.T) {
 	for _, scenario := range []struct {
 		name, result, want string
 		mismatch           bool
+		version            string // "0.9.5" when empty
 	}{
 		{name: "supported", result: `{"type":"pong","version":"0.9.5","protocol":22}`},
 		{name: "mismatch", result: `{"type":"pong","version":"0.9.5","protocol":23}`, mismatch: true, want: "herdr protocol 23 DIVERGES from supported 22 — herdr seats disabled"},
@@ -23,7 +25,7 @@ func TestCheckProtocol(t *testing.T) {
 		{name: "string protocol", result: `{"type":"pong","version":"0.9.5","protocol":"22"}`, want: "malformed ping result:"},
 		{name: "negative protocol", result: `{"type":"pong","version":"0.9.5","protocol":-1}`, want: "malformed ping result:"},
 		{name: "overflow", result: `{"type":"pong","version":"0.9.5","protocol":4294967296}`, want: "malformed ping result:"},
-		{name: "missing version", result: `{"type":"pong","protocol":22}`, want: "malformed ping result:"},
+		{name: "missing version", result: `{"type":"pong","protocol":22}`, version: "unknown"},
 		{name: "dead socket", want: "dial for ping"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -45,7 +47,11 @@ func TestCheckProtocol(t *testing.T) {
 			status, err := ProbeProtocol(context.Background(), socket)
 			guardError := CheckProtocol(context.Background(), socket)
 			if scenario.want == "" {
-				if err != nil || guardError != nil || status.Version != "0.9.5" ||
+				version := scenario.version
+				if version == "" {
+					version = "0.9.5"
+				}
+				if err != nil || guardError != nil || status.Version != version ||
 					status.Protocol != SupportedProtocol {
 					t.Fatalf("status=%+v probe=%v guard=%v", status, err, guardError)
 				}
@@ -60,5 +66,60 @@ func TestCheckProtocol(t *testing.T) {
 				t.Fatalf("mismatch type=%T, want %v", err, scenario.mismatch)
 			}
 		})
+	}
+}
+
+func TestServerStoppingReadsOnlyAShutdownRefusal(t *testing.T) {
+	refusing := func(code string) string {
+		return serve(t, func(string) string { return `{"id":"x","error":{"code":"` + code + `","message":"no"}}` })
+	}
+	for _, tc := range []struct {
+		name   string
+		socket string
+		want   bool
+	}{
+		{"a server shutting down", refusing("server_unavailable"), true},
+		{"another refusal", refusing("pane_not_found"), false},
+		{"no server at all", filepath.Join(t.TempDir(), "absent.sock"), false},
+	} {
+		err := Send(context.Background(), tc.socket, []byte("x"))
+		if err == nil || ServerStopping(err) != tc.want {
+			t.Errorf("%s: Send = %v, ServerStopping = %t, want an error and %t",
+				tc.name, err, ServerStopping(err), tc.want)
+		}
+	}
+}
+
+func TestSocketFileGoneReadsOnlyAMissingSocketFile(t *testing.T) {
+	stale := filepath.Join(t.TempDir(), "stale.sock")
+	listener, err := net.Listen("unix", stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	refusing := serve(t, func(string) string { return `{"id":"x","error":{"code":"pane_not_found","message":"no"}}` })
+	for _, tc := range []struct {
+		name   string
+		socket string
+		want   bool
+	}{
+		{"no socket file", filepath.Join(t.TempDir(), "absent.sock"), true},
+		{"no socket directory", filepath.Join(t.TempDir(), "gone", "herdr-api.sock"), true},
+		{"a socket file nothing listens on", stale, false},
+		{"a server that refuses the request", refusing, false},
+	} {
+		err := Send(context.Background(), tc.socket, []byte("x"))
+		if err == nil || SocketFileGone(err) != tc.want {
+			t.Errorf(
+				"%s: Send = %v, SocketFileGone = %t, want an error and %t",
+				tc.name,
+				err,
+				SocketFileGone(err),
+				tc.want,
+			)
+		}
 	}
 }

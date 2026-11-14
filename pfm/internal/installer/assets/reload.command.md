@@ -8,7 +8,7 @@ description: 'USER-ONLY — the user types /reload; never run this without the u
 Run this ONCE via the Bash tool — and make it your LAST action, the chat is about to exit:
 
 ```
-~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--then "<prompt>"]
+~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then "<prompt>"]
 ```
 
 **Every setting has a flag. There are no positional arguments.** Whatever words the request
@@ -49,7 +49,7 @@ without typing), confirms Claude Code's "background work is running" exit dialog
 the chat still has not exited after 20s it takes back whatever it put on the screen — the dialog
 or the typed `/exit` — leaves the chat running, and says so in its log: `reload-<socket>.log` for a
 tmux chat, `reload-herdr-<seat>.log` for a native Herdr chat (beside its `reload-herdr-<seat>.pid`
-schedule record; ending the chat removes both). In-flight sub-agents, background shells, and
+schedule record; ending the chat removes the record and keeps the log). In-flight sub-agents, background shells, and
 session crons die with the reboot.
 
 ## Cache-only reboot — `/reload --cache 1h|5m`

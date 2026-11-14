@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -425,187 +426,16 @@ func TestStatePathsFromPrecedence(t *testing.T) {
 	}
 }
 
-// legacyConfigHome builds a jailed home whose default load finds no clone
-// config, with XDG_CONFIG_HOME pointed into it; withMarker records a clone
-// that has no pfm.config.json.
-func legacyConfigHome(t *testing.T, withMarker bool) (home, legacyDir, target string) {
-	t.Helper()
-	home = t.TempDir()
-	t.Setenv(paths.EnvHome, home)
-	t.Setenv(paths.EnvConfig, "")
-	xdg := filepath.Join(home, "xdg")
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	legacyDir = filepath.Join(xdg, "pfm")
-	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	target = "no clone config"
-	if withMarker {
-		clone := filepath.Join(home, "clone")
-		if err := os.MkdirAll(clone, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
-			t.Fatal(err)
-		}
-		target = filepath.Join(clone, FileName)
-	}
-	return home, legacyDir, target
-}
-
-func TestLoadRuntimeRefusesDefaultsWhileLegacyConfigWaits(t *testing.T) {
-	for _, marker := range []bool{false, true} {
-		for _, name := range []string{FileName, LegacyFileName} {
-			t.Run(fmt.Sprintf("marker=%v/%s", marker, name), func(t *testing.T) {
-				_, legacyDir, target := legacyConfigHome(t, marker)
-				legacy := filepath.Join(legacyDir, name)
-				if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				_, err := LoadRuntime("")
-				if !errors.Is(err, ErrNotMigrated) {
-					t.Fatalf("LoadRuntime(\"\") = %v, want ErrNotMigrated", err)
-				}
-				if !strings.HasPrefix(err.Error(), "config not migrated: run pfm doctor for the fix") {
-					t.Fatalf("error %q does not begin with the remedy", err)
-				}
-				want := fmt.Sprintf(
-					"config not migrated: run pfm doctor for the fix (%s present, %s absent)",
-					legacy,
-					target,
-				)
-				if err.Error() != want {
-					t.Fatalf("error=%q, want %q", err, want)
-				}
-				runtime, err := LoadDiagnosticRuntime("")
-				if err != nil {
-					t.Fatalf("LoadDiagnosticRuntime(\"\") = %v", err)
-				}
-				if !errors.Is(runtime.ConfigError, ErrNotMigrated) || len(runtime.Config.Accounts) == 0 {
-					t.Fatalf("diagnostic runtime = %+v, want defaults carrying ErrNotMigrated", runtime)
-				}
-				if _, err := LoadInstallRuntime(""); err != nil {
-					t.Fatalf("LoadInstallRuntime(\"\") = %v, want the installer to load", err)
-				}
-			})
-		}
-	}
-}
-
-func TestLoadRuntimeNothingToMigrateRunsOnDefaults(t *testing.T) {
-	legacyConfigHome(t, false)
-	runtime, err := LoadRuntime("")
-	if err != nil {
-		t.Fatalf("LoadRuntime(\"\") = %v", err)
-	}
-	if runtime.Config.Exists || len(runtime.Config.Accounts) == 0 {
-		t.Fatalf("Config = %+v, want defaults", runtime.Config)
-	}
-}
-
-func TestLoadRuntimeExplicitConfigIgnoresLegacyFiles(t *testing.T) {
-	home, legacyDir, _ := legacyConfigHome(t, false)
-	if err := os.WriteFile(filepath.Join(legacyDir, FileName), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	named := filepath.Join(home, "named", FileName)
-	if _, err := LoadRuntime(named); err != nil {
-		t.Fatalf("LoadRuntime(--config) = %v", err)
-	}
-	t.Setenv(paths.EnvConfig, named)
-	if _, err := LoadRuntime(""); err != nil {
-		t.Fatalf("LoadRuntime under PFM_CONFIG = %v", err)
-	}
-}
-
-func TestLegacyConfigWaiting(t *testing.T) {
-	for _, name := range []string{FileName, LegacyFileName} {
-		for _, targetState := range []string{"present", "absent", "empty"} {
-			t.Run(name+"/target="+targetState, func(t *testing.T) {
-				root := t.TempDir()
-				legacyDir := filepath.Join(root, "legacy")
-				if err := os.MkdirAll(legacyDir, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				legacy := filepath.Join(legacyDir, name)
-				if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				target := filepath.Join(root, "clone", FileName)
-				switch targetState {
-				case "present":
-					if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
-						t.Fatal(err)
-					}
-				case "empty":
-					target = ""
-				}
-				got, err := LegacyConfigWaiting(legacyDir, target)
-				if err != nil {
-					t.Fatalf("LegacyConfigWaiting = %v", err)
-				}
-				want := legacy
-				if targetState == "present" {
-					want = ""
-				}
-				if got != want {
-					t.Fatalf("LegacyConfigWaiting = %q, want %q", got, want)
-				}
-			})
-		}
-	}
-	t.Run("no legacy file", func(t *testing.T) {
-		got, err := LegacyConfigWaiting(t.TempDir(), "")
-		if err != nil || got != "" {
-			t.Fatalf("LegacyConfigWaiting = %q, %v; want empty, nil", got, err)
-		}
-	})
-	t.Run("lstat error", func(t *testing.T) {
-		notDir := filepath.Join(t.TempDir(), "file")
-		if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		got, err := LegacyConfigWaiting(notDir, "")
-		if err == nil || got != "" {
-			t.Fatalf("LegacyConfigWaiting under a file = %q, %v; want an error", got, err)
-		}
-		if !strings.Contains(err.Error(), "inspect legacy config "+filepath.Join(notDir, FileName)) {
-			t.Fatalf("error %q does not name the legacy path", err)
-		}
-	})
-}
-
-func TestLoadInstallRuntimeMissingNamedLegacyConfigIsExplicit(t *testing.T) {
-	_, legacyDir, _ := legacyConfigHome(t, true)
-	for _, name := range []string{FileName, LegacyFileName} {
-		t.Run(name, func(t *testing.T) {
-			runtime, err := LoadInstallRuntime(filepath.Join(legacyDir, name))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !runtime.ConfigExplicit || runtime.Config.Exists {
-				t.Fatalf(
-					"explicit=%v exists=%v, want explicit missing config",
-					runtime.ConfigExplicit,
-					runtime.Config.Exists,
-				)
-			}
-		})
-	}
-}
-
 func TestLoadRuntimeUnusableMarker(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
 		load               func(string) (Runtime, error)
+		want               string
 		refuse, diagnostic bool
 	}{
-		{name: "ordinary", load: LoadRuntime, refuse: true},
+		{name: "ordinary", load: LoadRuntime, refuse: true, want: "no config path: inspect recorded source repository {home}/missing-clone: recorded source repository is unusable: stat {home}/missing-clone: no such file or directory — run pfm install from the clone, or set PFM_CONFIG"},
 		{name: "install", load: LoadInstallRuntime},
-		{name: "diagnostic", load: LoadDiagnosticRuntime, diagnostic: true},
+		{name: "diagnostic", load: LoadDiagnosticRuntime, diagnostic: true, want: "no config path: inspect recorded source repository {home}/missing-clone: recorded source repository is unusable: stat {home}/missing-clone: no such file or directory — run pfm install from the clone, or set PFM_CONFIG"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -621,18 +451,26 @@ func TestLoadRuntimeUnusableMarker(t *testing.T) {
 			}
 			got, err := tc.load("")
 			if tc.refuse {
-				if !errors.Is(err, paths.ErrSourceRepoUnusable) || !strings.Contains(err.Error(), missing) ||
-					!strings.Contains(err.Error(), "run pfm install from the clone") {
-					t.Fatalf("ordinary marker load = %v, want the recorded clone and remedy", err)
+				if got := strings.ReplaceAll(
+					fmt.Sprint(err),
+					home,
+					"{home}",
+				); !errors.Is(err, paths.ErrSourceRepoUnusable) ||
+					got != tc.want {
+					t.Fatalf("ordinary marker load = %q, want %q", got, tc.want)
 				}
 				return
 			}
 			if err != nil || got.Config.Path != "" || got.Config.Exists {
 				t.Fatalf("runtime marker load: path=%q exists=%v err=%v", got.Config.Path, got.Config.Exists, err)
 			}
-			if tc.diagnostic && (!errors.Is(got.ConfigError, paths.ErrSourceRepoUnusable) ||
-				!strings.Contains(got.ConfigError.Error(), missing)) {
-				t.Fatalf("diagnostic marker error = %v, want the recorded clone", got.ConfigError)
+			if diag := strings.ReplaceAll(
+				fmt.Sprint(got.ConfigError),
+				home,
+				"{home}",
+			); tc.diagnostic &&
+				(!errors.Is(got.ConfigError, paths.ErrSourceRepoUnusable) || diag != tc.want) {
+				t.Fatalf("diagnostic marker error = %q, want %q", diag, tc.want)
 			}
 		})
 	}
@@ -797,13 +635,62 @@ func TestStatePathsFromPinnedConfig(t *testing.T) {
 	}
 }
 
-func TestLoadRuntimeWhitespaceOverrideStillRefusesLegacy(t *testing.T) {
-	_, legacyDir, _ := legacyConfigHome(t, false)
-	if err := os.WriteFile(filepath.Join(legacyDir, FileName), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
+// Every engine's dependency row probes the binary the runtime is configured
+// to launch, OpenCode included: a doctor or install preflight that probed the
+// default name would vouch for a binary pfm never runs.
+func TestDepsOptionsProbesEveryConfiguredEngineBinary(t *testing.T) {
+	var runtime Runtime
+	runtime.Paths.Home = "/jail/home"
+	runtime.Config.Claude.Binary = "/opt/example/claude-pinned"
+	runtime.Config.Codex.Binary = "/opt/example/codex-pinned"
+	runtime.Config.OpenCode.Binary = "/opt/example/opencode-pinned"
+	got := map[pfmengine.ID]string{}
+	for _, entry := range deps.Registry(runtime.DepsOptions()) {
+		if entry.Engine != "" {
+			got[entry.Engine] = entry.Command
+		}
 	}
-	t.Setenv(paths.EnvConfig, "  ")
-	if _, err := LoadRuntime(""); !errors.Is(err, ErrNotMigrated) {
-		t.Fatalf("blank override load=%v, want ErrNotMigrated", err)
+	want := map[pfmengine.ID]string{
+		pfmengine.Claude:   "/opt/example/claude-pinned",
+		pfmengine.Codex:    "/opt/example/codex-pinned",
+		pfmengine.OpenCode: "/opt/example/opencode-pinned",
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("engine row commands = %v, want %v", got, want)
+	}
+}
+
+// A missing version reads as the current one (source default, so doctor shows
+// it); only a version this build does not know is refused.
+func TestLoadVersionMissingReadsCurrentAndWrongIsRefused(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	for _, tc := range []struct {
+		name   string
+		json   string
+		want   string
+		input  int
+		source Source
+	}{
+		{name: "missing", json: `{"theme":"tokyo-night"}`, input: Version, source: SourceDefault},
+		{name: "wrong", json: `{"version":99}`, want: "version must be 1 or 2, got 99"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load(path, home, nil)
+			if tc.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("Load error = %v, want %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil || got.InputVersion != tc.input || got.Source(keyVersion) != tc.source ||
+				got.Theme != "tokyo-night" {
+				t.Fatalf("Load(%s) = input %d source %q theme %q err %v, want input %d source %q theme tokyo-night",
+					path, got.InputVersion, got.Source(keyVersion), got.Theme, err, tc.input, tc.source)
+			}
+		})
 	}
 }

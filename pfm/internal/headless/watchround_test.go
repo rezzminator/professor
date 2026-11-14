@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path"
 	"strings"
 	"testing"
@@ -148,28 +149,141 @@ func TestFleetWatchRefusesAMalformedPatternBeforeTheFirstPoll(t *testing.T) {
 	}
 }
 
+// A failed lookup or inspect of a seat never read ends only its own target at
+// once. Once read, the seat's verdict is held: a failure that heals within
+// UnreadablePolls polls loses nothing, and one that lasts that long ends only
+// its own target, with the cause and how long it lasted.
+func TestFleetWatchAnErrorEndsOnlyItsTarget(t *testing.T) {
+	scanFailed := errors.New("scan failed:\n\tdisk\t  gone")
+	inspectFailed := fakeStep{err: errors.New("read transcript:\nno such file")}
+	healedLegacy := []string{"EXIT good", "EXIT bad"}
+	healedTransitions := []string{"SEEN bad working", "SEEN good working", "EXIT good", "EXIT bad"}
+	for _, testCase := range []struct {
+		name            string
+		setup           func(*fakeSeats)
+		wantLegacy      []string
+		wantTransitions []string
+		failed          bool
+	}{
+		{
+			"resolve", func(seats *fakeSeats) {
+				seats.resolveErr["bad"] = scanFailed
+			},
+			[]string{"ERROR bad scan failed: disk gone", "EXIT good"},
+			[]string{"ERROR bad scan failed: disk gone", "SEEN good working", "EXIT good"},
+			true,
+		},
+		{
+			"inspect", func(seats *fakeSeats) {
+				seats.steps["bad"] = []fakeStep{inspectFailed}
+			},
+			[]string{"ERROR bad read transcript: no such file", "EXIT good"},
+			[]string{"ERROR bad read transcript: no such file", "SEEN good working", "EXIT good"},
+			true,
+		},
+		{"resolve after a read heals within UnreadablePolls", func(seats *fakeSeats) {
+			seats.steps["bad"] = []fakeStep{working("x"), working("x"), gone()}
+			seats.resolveErrAt["bad"] = map[int]error{2: scanFailed, 3: scanFailed}
+		}, healedLegacy, healedTransitions, false},
+		{"inspect after a read heals within UnreadablePolls", func(seats *fakeSeats) {
+			seats.steps["bad"] = []fakeStep{working("x"), inspectFailed, inspectFailed, working("x"), gone()}
+		}, healedLegacy, healedTransitions, false},
+		{
+			"resolve after a read fails UnreadablePolls in a row", func(seats *fakeSeats) {
+				seats.steps["bad"] = []fakeStep{working("x")}
+				seats.resolveErrAt["bad"] = map[int]error{2: scanFailed, 3: scanFailed, 4: scanFailed}
+			},
+			[]string{"EXIT good", "ERROR bad scan failed: disk gone (3 polls in a row)"},
+			[]string{
+				"SEEN bad working", "SEEN good working", "EXIT good",
+				"ERROR bad scan failed: disk gone (3 polls in a row)",
+			},
+			true,
+		},
+		{
+			"an ambiguous name after a read is refused at once", func(seats *fakeSeats) {
+				seats.steps["bad"] = []fakeStep{working("x")}
+				seats.resolveErrAt["bad"] = map[int]error{2: &AmbiguousTargetError{Detail: "bad names 2 chats"}}
+			},
+			[]string{"ERROR bad bad names 2 chats", "EXIT good"},
+			[]string{"SEEN bad working", "SEEN good working", "ERROR bad bad names 2 chats", "EXIT good"},
+			true,
+		},
+		{
+			"inspect after a read fails UnreadablePolls in a row", func(seats *fakeSeats) {
+				seats.steps["bad"] = []fakeStep{working("x"), inspectFailed}
+			},
+			[]string{"EXIT good", "ERROR bad read transcript: no such file (3 polls in a row)"},
+			[]string{
+				"SEEN bad working", "SEEN good working", "EXIT good",
+				"ERROR bad read transcript: no such file (3 polls in a row)",
+			},
+			true,
+		},
+	} {
+		for _, transitions := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/transitions=%v", testCase.name, transitions), func(t *testing.T) {
+				seats := newFakeSeats(map[string][]fakeStep{
+					"good": {working("x"), working("x"), gone()},
+				})
+				testCase.setup(seats)
+				hooks := 0
+				lines, result, err := runFleet(t, namedFleet(seats, "bad", "good"), WatchOptions{
+					Transitions: transitions,
+					OnIdle:      func(Status) error { hooks++; return nil },
+					OnExit:      func(Status) error { hooks++; return nil },
+				})
+				if err != nil {
+					t.Fatalf("Watch() error = %v", err)
+				}
+				want, wantHooks := testCase.wantLegacy, 2
+				if transitions {
+					want = testCase.wantTransitions
+				}
+				if testCase.failed {
+					wantHooks = 1 // EXIT good only: an ERROR runs no hook
+				}
+				assertLines(t, lines, want)
+				if (result.Errors["bad"] != nil) != testCase.failed || result.Errors["good"] != nil {
+					t.Fatalf("Errors = %v, want bad failed=%v and good clean", result.Errors, testCase.failed)
+				}
+				if hooks != wantHooks {
+					t.Fatalf("hooks fired %d times, want %d", hooks, wantHooks)
+				}
+			})
+		}
+	}
+}
+
+// A failed listing holds every glob and adopted seat: two failed polls heal
+// on the next listing, and only UnreadablePolls in a row end them all.
 func TestFleetWatchAFailedListingErrorsEveryGlobAndAdoptedSeat(t *testing.T) {
 	seats := newFakeSeats(map[string][]fakeStep{"a1": {working("x")}})
+	poll := 0
 	lines, result, err := runFleet(t, func(context.CancelFunc) FleetWatcher {
 		return FleetWatcher{
 			Targets: []string{"a*", "b*"},
-			List: func() func(context.Context) ([]Chat, error) {
-				poll := 0
-				return func(context.Context) ([]Chat, error) {
-					poll++
-					if poll == 2 {
-						return nil, errors.New("scan\nfailed")
-					}
-					return []Chat{liveChat("a1")}, nil
+			List: func(context.Context) ([]Chat, error) {
+				poll++
+				if poll == 2 || poll == 3 || poll >= 5 {
+					return nil, errors.New("scan\nfailed")
 				}
-			}(),
+				return []Chat{liveChat("a1")}, nil
+			},
 			Inspect: seats.inspect,
 		}
 	}, WatchOptions{})
 	if err != nil {
 		t.Fatalf("Watch() error = %v, want nil: every target ended", err)
 	}
-	assertLines(t, lines, []string{"ERROR a* scan failed", "ERROR b* scan failed", "ERROR a1 scan failed"})
+	if poll != 7 {
+		t.Fatalf("listings = %d, want 7: the failures of polls 2-3 healed at poll 4, polls 5-7 ended the watch", poll)
+	}
+	assertLines(t, lines, []string{
+		"ERROR a* scan failed (3 polls in a row)",
+		"ERROR b* scan failed (3 polls in a row)",
+		"ERROR a1 scan failed (3 polls in a row)",
+	})
 	if len(result.Errors) != 3 || result.Errors["a1"] == nil || result.Errors["b*"] == nil {
 		t.Fatalf("Errors = %v", result.Errors)
 	}

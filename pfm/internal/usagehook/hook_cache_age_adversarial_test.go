@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 func adversarialSeat(t *testing.T, account int) (root, configDir, cacheDir string) {
@@ -146,68 +148,52 @@ func TestEvaluateRejectsAFutureFetchedAt(t *testing.T) {
 	}
 }
 
-// 5h expired while 7d is live must still warn, and must warn ON the 7d
-// number — the expired window contributes only its fallback.
-func TestEvaluateStillWarnsOnTheLiveSevenDayWhenFiveHourExpired(t *testing.T) {
-	root, configDir, cacheDir := adversarialSeat(t, 5)
-	now := time.Now().Truncate(time.Second)
-	if err := WriteCacheRecord(CachePath(cacheDir, 5), CacheRecord{
-		Usage: Usage{
-			FiveHour: Window{Utilization: usageFloatPtr(99), ResetsAt: now.Add(-time.Minute).Format(time.RFC3339)},
-			SevenDay: Window{
-				Utilization: usageFloatPtr(91),
-				ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
-			},
-		},
-		ConfigDir: configDir, FetchedAt: &now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	message, err := Evaluate(context.Background(), Options{
-		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
-		AccountDirs: map[string]int{configDir: 5}, CacheDir: cacheDir,
-		Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(message, "⚠ usage limit approaching") || !strings.Contains(message, "7d 91%") {
-		t.Fatalf("live 7d lost its warning when 5h expired: %q", message)
-	}
-	if strings.Contains(message, "5h 99%") {
-		t.Fatalf("expired 5h reported its stale reading: %q", message)
-	}
-}
-
-// an empty or unparsable resets_at is UNKNOWN, not expired — the reading
-// must still count toward the warning.
-func TestEvaluateTreatsUnparsableResetsAtAsUnknownNotExpired(t *testing.T) {
-	for _, resets := range []string{"", "not-a-timestamp", "2026-13-45T99:99:99Z"} {
-		t.Run("resets_at="+resets, func(t *testing.T) {
-			root, configDir, cacheDir := adversarialSeat(t, 6)
-			now := time.Now().Truncate(time.Second)
-			if err := WriteCacheRecord(CachePath(cacheDir, 6), CacheRecord{
+// Evaluate renders each cached window state: a passed reset says so instead of a stale number, a live one keeps
+// its reading, an unparsable reset counts as live, and a warned seat whose usage fell gets the recovery banner.
+func TestEvaluateRendersEachCachedWindowState(t *testing.T) {
+	now := time.Date(2026, 11, 13, 9, 30, 0, 0, time.UTC)
+	at := func(offset time.Duration) string { return now.Add(offset).Format(time.RFC3339) }
+	for _, row := range []struct {
+		name   string
+		five   Window
+		seven  float64
+		warned bool
+		want   string
+	}{
+		{"live 7d warns when 5h expired", Window{Utilization: usageFloatPtr(99), ResetsAt: at(-time.Minute)}, 91, false, "⚠ usage limit approaching — account 5: 5h — (reset passed) · 7d 91% (resets Tue 09:30). Plan around it: wrap up soon or /reload to another account before the cap hits.\n | <nil>"},
+		{"empty reset is live", Window{Utilization: usageFloatPtr(97)}, 12, false, "🔴 USAGE LIMIT IMMINENT — account 5: 5h 97% (resets ?) · 7d 12% (resets Tue 09:30). The 5-hour window is nearly exhausted: finish the in-flight step, then /reload to another account (or pause until the reset).\n | <nil>"},
+		{"garbled reset is live", Window{Utilization: usageFloatPtr(97), ResetsAt: "not-a-timestamp"}, 12, false, "🔴 USAGE LIMIT IMMINENT — account 5: 5h 97% (resets ?) · 7d 12% (resets Tue 09:30). The 5-hour window is nearly exhausted: finish the in-flight step, then /reload to another account (or pause until the reset).\n | <nil>"},
+		{"impossible reset is live", Window{Utilization: usageFloatPtr(97), ResetsAt: "2026-13-45T99:99:99Z"}, 12, false, "🔴 USAGE LIMIT IMMINENT — account 5: 5h 97% (resets ?) · 7d 12% (resets Tue 09:30). The 5-hour window is nearly exhausted: finish the in-flight step, then /reload to another account (or pause until the reset).\n | <nil>"},
+		{"passed reset stays silent", Window{Utilization: usageFloatPtr(98), ResetsAt: at(-time.Minute)}, 12, false, " | <nil>"},
+		{"live reset warns", Window{Utilization: usageFloatPtr(98), ResetsAt: at(time.Hour)}, 12, false, "🔴 USAGE LIMIT IMMINENT — account 5: 5h 98% (resets 10:30) · 7d 12% (resets Tue 09:30). The 5-hour window is nearly exhausted: finish the in-flight step, then /reload to another account (or pause until the reset).\n | <nil>"},
+		{"warn line says reset passed", Window{Utilization: usageFloatPtr(97), ResetsAt: at(-90 * time.Minute)}, 88, false, "⚠ usage limit approaching — account 5: 5h — (reset passed) · 7d 88% (resets Tue 09:30). Plan around it: wrap up soon or /reload to another account before the cap hits.\n | <nil>"},
+		{"recovery says reset passed", Window{Utilization: usageFloatPtr(97), ResetsAt: at(-90 * time.Minute)}, 12, true, "✅ usage recovered — account 5 is back to 5h — (reset passed · awaiting refetch) · 7d 12%. Any earlier limit warning in this conversation is STALE — ignore it and work normally.\n | <nil>"},
+		{"recovery keeps a live reading", Window{Utilization: usageFloatPtr(5), ResetsAt: at(2 * time.Hour)}, 12, true, "✅ usage recovered — account 5 is back to 5h 5% · 7d 12%. Any earlier limit warning in this conversation is STALE — ignore it and work normally.\n | <nil>"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			root, configDir, cacheDir := adversarialSeat(t, 5)
+			if row.warned {
+				if err := atomicfile.Write(filepath.Join(cacheDir, "warned-5"), []byte(configDir), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := WriteCacheRecord(CachePath(cacheDir, 5), CacheRecord{
 				Usage: Usage{
-					FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: resets},
-					SevenDay: Window{
-						Utilization: usageFloatPtr(12),
-						ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
-					},
+					FiveHour: row.five,
+					SevenDay: Window{Utilization: usageFloatPtr(row.seven), ResetsAt: at(96 * time.Hour)},
 				},
-				ConfigDir: configDir, FetchedAt: &now,
+				ConfigDir: configDir,
+				FetchedAt: &now,
 			}); err != nil {
 				t.Fatal(err)
 			}
 			message, err := Evaluate(context.Background(), Options{
 				Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
-				AccountDirs: map[string]int{configDir: 6}, CacheDir: cacheDir,
+				AccountDirs: map[string]int{configDir: 5}, CacheDir: cacheDir,
 				Warn: 80, Critical: 95, TTL: 24 * time.Hour, Log: io.Discard,
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(message, "USAGE LIMIT IMMINENT") {
-				t.Fatalf("unknown reset was treated as expired and silenced the warning: %q", message)
+			if got := strings.ReplaceAll(fmt.Sprint(message, " | ", err), root, "{root}"); got != row.want {
+				t.Errorf("message | err = %q, want %q", got, row.want)
 			}
 		})
 	}
@@ -362,19 +348,39 @@ func TestReadCacheRecordKeepsLegacyMetadataWithItsBytes(t *testing.T) {
 	}
 }
 
-// The error-preserving statusline selector keeps real readings with unknown
-// resets, while the legacy hook selector continues to require a future reset.
+// The error-preserving selector keeps real readings with unknown resets, an
+// empty one quietly and a malformed one beside its decode error, while the
+// legacy selector continues to require a future reset.
 func TestFableWindowAtKeepsUnknownResetWithoutChangingLegacySelector(t *testing.T) {
 	now := time.Now().UTC()
-	percent := 0.0
-	limit := ScopedLimit{Kind: "weekly_scoped", Percent: &percent}
-	limit.Scope.Model.DisplayName = "Fable"
-	usage := Usage{Limits: []ScopedLimit{limit}}
-	window, ok, err := usage.FableWindowAt(now)
-	if err != nil || !ok || window.Utilization == nil || *window.Utilization != 0 || window.ResetsAt != "" {
-		t.Fatalf("unknown-reset selector lost reading: window=%+v ok=%v err=%v", window, ok, err)
-	}
-	if _, legacy := usage.fableWindow(now); legacy {
-		t.Fatal("legacy selector unexpectedly accepted unknown reset")
+	for _, test := range []struct {
+		name, reset, wantErr string
+	}{
+		{name: "empty", reset: ""},
+		{
+			name: "malformed", reset: "soon",
+			wantErr: `decode cached Fable reset "soon": parsing time "soon" as "2006-01-02T15:04:05Z07:00": ` +
+				`cannot parse "soon" as "2006"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			percent := 0.0
+			limit := ScopedLimit{Kind: "weekly_scoped", Percent: &percent, ResetsAt: test.reset}
+			limit.Scope.Model.DisplayName = "Fable"
+			usage := Usage{Limits: []ScopedLimit{limit}}
+			window, ok, err := usage.FableWindowAt(now)
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if gotErr != test.wantErr || !ok || window.Utilization == nil || *window.Utilization != 0 ||
+				window.ResetsAt != test.reset {
+				t.Fatalf("unknown-reset selector: window=%+v ok=%v err=%q, want the reading at %q beside %q",
+					window, ok, gotErr, test.reset, test.wantErr)
+			}
+			if _, legacy := usage.fableWindow(now); legacy {
+				t.Fatal("legacy selector unexpectedly accepted unknown reset")
+			}
+		})
 	}
 }

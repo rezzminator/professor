@@ -26,31 +26,20 @@ func renderedList(t *testing.T, rows []compose.Row) string {
 	return ansi.Strip(model.View().Content)
 }
 
-// A chat named GROUP:NAME has already declared its group. It gets the panel
-// immediately — one member is a group — rather than sitting flat until a
-// second member arrives and re-lays out the list under the reader.
-func TestLoneColonPrefixedChatStillGetsItsGroupPanel(t *testing.T) {
-	view := renderedList(t, []compose.Row{
-		groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "P:BUILDER", "alpha"),
-	})
-	if !strings.Contains(view, "P (1)") {
-		t.Fatalf("a lone P:BUILDER got no group header:\n%s", view)
+func TestColonNamesFoldIntoOneGroupPanel(t *testing.T) {
+	var views []string
+	for _, rows := range [][]compose.Row{
+		{groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "P:BUILDER", "alpha")},
+		{
+			groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "P:BUILDER", "alpha"),
+			groupRow(compose.LiveClaude, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "P:TESTER", "alpha"),
+		},
+		{groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "BUILDER", "alpha")},
+		{groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ":BUILDER", "alpha")},
+	} {
+		views = append(views, renderedList(t, rows))
 	}
-}
-
-// The behaviour that already worked must keep working, and the count must
-// follow the membership rather than being pinned at one.
-func TestTwoMembersStillShareOneGroupPanel(t *testing.T) {
-	view := renderedList(t, []compose.Row{
-		groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "P:BUILDER", "alpha"),
-		groupRow(compose.LiveClaude, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "P:TESTER", "alpha"),
-	})
-	if !strings.Contains(view, "P (2)") {
-		t.Fatalf("two members did not fold into one panel:\n%s", view)
-	}
-	if strings.Count(view, "P (") != 1 {
-		t.Fatalf("the group header was printed more than once:\n%s", view)
-	}
+	golden(t, "ui_name_groups.txt", strings.Join(views, "\n"))
 }
 
 // A resumable namesake must join its live group panel, not render flat next
@@ -84,26 +73,6 @@ func TestResumableNamesakeJoinsLiveGroupPanel(t *testing.T) {
 		if !ok || group.name != "SOLO" || group.count != 2 {
 			t.Fatalf("model.nameGroups[%d] = %#v ok=%v, want SOLO count=2", index, group, ok)
 		}
-	}
-}
-
-// A chat with no colon is not a group of one.
-func TestPlainNameGetsNoGroupPanel(t *testing.T) {
-	view := renderedList(t, []compose.Row{
-		groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "BUILDER", "alpha"),
-	})
-	if strings.Contains(view, "BUILDER (") {
-		t.Fatalf("a colon-less name was grouped:\n%s", view)
-	}
-}
-
-// A name that is nothing but a colon prefix — ":x" — declares no group.
-func TestEmptyPrefixIsNotAGroup(t *testing.T) {
-	view := renderedList(t, []compose.Row{
-		groupRow(compose.LiveCodex, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ":BUILDER", "alpha"),
-	})
-	if strings.Contains(view, " (1)") {
-		t.Fatalf("an empty prefix opened a group panel:\n%s", view)
 	}
 }
 

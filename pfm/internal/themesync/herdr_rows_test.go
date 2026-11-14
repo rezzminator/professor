@@ -1,6 +1,7 @@
 package themesync
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -50,7 +51,7 @@ func TestHerdrRowsStyledRewritesOnlyIndicatorEntriesInTheSidebarTables(t *testin
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := herdrRowsStyled(tc.in, testHues)
+			got, _, err := herdrRowsStyled(tc.in, testHues)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +98,7 @@ func TestHerdrRowsStyledLeavesEverythingElseByteForByte(t *testing.T) {
 	}
 	for _, tc := range untouched {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := herdrRowsStyled(tc.in, testHues)
+			got, _, err := herdrRowsStyled(tc.in, testHues)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,30 +118,37 @@ func TestHerdrRowsStyledKeepsTheRestOfAMixedFile(t *testing.T) {
 		styled(
 			"pfm_done",
 		) + "]\n]\nx = \"$pfm_working\"\n\n[keys]\nnew_tab = [\"$pfm_working\"]\n"
-	got, err := herdrRowsStyled(in, testHues)
+	got, _, err := herdrRowsStyled(in, testHues)
 	if err != nil || got != want {
 		t.Fatalf("styled = %q, %v\nwant\n%q", got, err, want)
 	}
 }
 
-func TestHerdrRowsStyledErrorsNameWhatIsWrong(t *testing.T) {
-	if _, err := herdrRowsStyled(
-		"[ui.sidebar.agents]\nrows = [[\"$pfm_working\"]]\n",
-		map[string]string{},
-	); err == nil ||
-		!strings.Contains(err.Error(), "$pfm_working") {
-		t.Fatalf("missing hue err = %v, want it to name $pfm_working", err)
+// A row naming a token the applied theme has no hue for stays as it is and is
+// named; the rows beside it are still styled.
+func TestHerdrRowsStyledLeavesAHuelessRowBareAndStylesTheRest(t *testing.T) {
+	hues := map[string]string{"pfm_done": testHues["pfm_done"]}
+	got, notes, err := herdrRowsStyled("[ui.sidebar.agents]\nrows = [[\"$pfm_working\", \"$pfm_done\"]]\n", hues)
+	want := "[ui.sidebar.agents]\nrows = [[\"$pfm_working\", " + styled("pfm_done") + "]]\n"
+	wantNotes := []string{
+		"herdr sidebar row names $pfm_working but the applied theme carries no hue for it (left unstyled)",
 	}
-	for name, in := range map[string]string{
-		"string":         "[ui.sidebar.agents]\nok = 1\nrows = [[\"$pfm_working]]\n",
-		"multi-line":     "[ui.sidebar.agents]\nnote = \"\"\"\nrows\n",
-		"inline table":   "[ui.sidebar.agents]\nrows = [{ token = \"$pfm_working\"\n",
-		"literal string": "[ui.sidebar.agents]\nrows = [['$pfm_working]]\n",
+	if err != nil || got != want || strings.Join(notes, "|") != strings.Join(wantNotes, "|") {
+		t.Fatalf("styled = %q, %q, %v\nwant %q, %q", got, notes, err, want, wantNotes)
+	}
+}
+
+func TestHerdrRowsStyledErrorsNameWhatIsWrong(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"string":         {"[ui.sidebar.agents]\nok = 1\nrows = [[\"$pfm_working]]\n", "themesync: herdr config: string opened at line 3 never closes"},
+		"multi-line":     {"[ui.sidebar.agents]\nnote = \"\"\"\nrows\n", "themesync: herdr config: multi-line string opened at line 2 never closes"},
+		"inline table":   {"[ui.sidebar.agents]\nrows = [{ token = \"$pfm_working\"\n", "themesync: herdr config: inline table opened at line 2 never closes"},
+		"literal string": {"[ui.sidebar.agents]\nrows = [['$pfm_working]]\n", "themesync: herdr config: string opened at line 2 never closes"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := herdrRowsStyled(in, testHues)
-			if err == nil || !strings.Contains(err.Error(), "line 2") && !strings.Contains(err.Error(), "line 3") {
-				t.Fatalf("err = %v, want it to name the line that never closes", err)
+			_, _, err := herdrRowsStyled(tc.in, testHues)
+			if got := fmt.Sprint(err); got != tc.want {
+				t.Fatalf("err = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -161,7 +169,7 @@ func TestHerdrRowsBareTurnsStyledEntriesBackAndKeepsTheRest(t *testing.T) {
 	if err != nil || got != want {
 		t.Fatalf("bare = %q, %v\nwant\n%q", got, err, want)
 	}
-	again, err := herdrRowsStyled(got, testHues)
+	again, _, err := herdrRowsStyled(got, testHues)
 	if err != nil {
 		t.Fatal(err)
 	}

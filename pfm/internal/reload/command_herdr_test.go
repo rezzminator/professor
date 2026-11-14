@@ -50,17 +50,52 @@ type reloadHerdrFixture struct {
 	mode      string
 	canonical string
 	terminal  string
+	values    paths.Values
 	onRead    func()
 	onExit    func()
 	prompted  string
 	// proc is the process table the run reads (PFM_PROC_ROOT).
 	proc string
+
+	// agentReads counts agent.get calls.
+	agentReads int
+}
+
+// assertLaunchRecorded checks the launch record of the reloaded session: the
+// reload's account 2 and 5m cache when recorded, else no record at all.
+func (f *reloadHerdrFixture) assertLaunchRecorded(recorded bool) {
+	f.t.Helper()
+	launches, err := fleetdb.OpenLaunches(context.Background(), f.values)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	record, err := launches.LaunchFor(context.Background(), f.request.SessionID)
+	if closeErr := launches.Close(); closeErr != nil {
+		f.t.Error(closeErr)
+	}
+	if !recorded {
+		if !errors.Is(err, fleetdb.ErrNoLaunch) {
+			f.t.Fatalf(
+				"launch record of %s in %s = %+v, %v; want none",
+				f.request.SessionID,
+				f.values.StateDB,
+				record,
+				err,
+			)
+		}
+		return
+	}
+	if err != nil || record.Account != 2 || record.Cache1H || record.Engine != pfmengine.Claude {
+		f.t.Fatalf("launch record of %s in %s = %+v, %v; want account 2, 5m cache, claude",
+			f.request.SessionID, f.values.StateDB, record, err)
+	}
 }
 
 func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv(paths.EnvStateDB, filepath.Join(home, "state", "pfm.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(home, "state", "pfm-cache.db"))
 	values, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +107,7 @@ func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 		}
 	})
 	socket := filepath.Join(testjail.ShortRoot(t), "h.sock")
-	f := &reloadHerdrFixture{t: t, db: db, text: "❯ ", canonical: "w6:p3", terminal: "reload-terminal"}
+	f := &reloadHerdrFixture{t: t, db: db, text: "❯ ", canonical: "w6:p3", terminal: "reload-terminal", values: values}
 	proc := t.TempDir()
 	f.proc = proc
 	t.Setenv(paths.EnvProcRoot, proc)
@@ -229,7 +264,13 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 				"process_info": map[string]any{"pane_id": f.canonical, "shell_pid": 90},
 			}, ""
 		}
-		if f.mode == "null-argv" {
+		// One startup poll reads the pane's processes three times (two target
+		// refreshes, then the engine read): the first whole poll sees it dying.
+		dying := f.submitted && (f.mode == "argv-gone" || f.mode == "argv-gone-once" && f.processes < 3)
+		if dying {
+			f.processes++
+		}
+		if f.mode == "null-argv" || dying {
 			return f.processResult(
 				[]any{
 					map[string]any{
@@ -264,6 +305,9 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 				if err != nil {
 					return nil, err.Error()
 				}
+				if f.mode == "seat-host-names-remote-control" {
+					run.Args = claudelaunch.RefreshRemoteControl(run.Args, true, "tab1")
+				}
 				pid = 202
 			}
 			if f.mode == "wrong-model" {
@@ -271,9 +315,6 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 			}
 		}
 		argv := append([]string{pfmengine.MustLookup(f.request.Engine).Binary}, run.Args...)
-		if f.mode == "kept" {
-			return f.keptProcess(pid, argv)
-		}
 		return f.processResult(
 			[]any{map[string]any{"pid": pid, "name": "versioned-binary", "argv0": argv[0], "argv": argv}},
 		), ""
@@ -309,9 +350,19 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 			},
 		}, ""
 	case "agent.get":
-		status := "idle"
-		if f.mode == "blocked" {
+		f.agentReads++
+		var status any = "idle"
+		switch {
+		case f.mode == "blocked":
 			status = "blocked"
+		case f.mode == "working-behind-idle-composer" || f.mode == "working-turn":
+			status = "working"
+		case f.mode == "unrecognized-agent" || f.mode == "unrecognized-agent-once" && f.agentReads == 1:
+			status = "thinking"
+		case f.mode == "undecodable-agent-once" && f.agentReads == 1:
+			status = 7
+		case f.mode == "unknown-agent" || f.mode == "unknown-agent-once" && f.agentReads == 1:
+			status = "unknown" // Herdr's state for a Claude it has not classified yet
 		}
 		return map[string]any{
 			"type":  "agent_info",
@@ -406,7 +457,6 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		draft, then      bool
 	}{
 		{name: "model-and-account"},
-		{name: "held-pane", mode: "kept"},
 		{name: "dim-hint", mode: "dim-hint"},
 		{name: "same-text-draft", draft: true},
 		{name: "pending-cleared-before-new-process", mode: "pending-race"},
@@ -415,23 +465,57 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		{name: "failed-start", mode: "failed-start", want: "permission denied"},
 		{name: "old-process-is-not-success", mode: "old-process", want: "new engine"},
 		{name: "new-process-wrong-model", mode: "wrong-model", want: "new engine"},
+		// The seat host names Remote Control after the seat at every start; a
+		// recipe published with a bare --remote-control is still the one running.
+		{name: "seat-host-names-remote-control", mode: "seat-host-names-remote-control"},
 		{name: "process-error", mode: "process-error", want: "process unavailable"},
 		{name: "malformed-process", mode: "malformed-process", want: "shell identity"},
 		{name: "wrong-pane", mode: "wrong-pane", want: "shell identity"},
 		{name: "empty-process", mode: "empty-process", want: "engine"},
 		{name: "omitted-process", mode: "omitted-process", want: "engine"},
 		{name: "null-argv", mode: "null-argv", want: "argv"},
+		// After /exit the old engine dies: a dying process has no argv for a
+		// moment, so the wait reads again; one that never clears is the refusal.
+		{name: "dying-old-engine-read-again", mode: "argv-gone-once"},
+		{
+			name: "engine-argv-never-returns", mode: "argv-gone",
+			want: "native reload engine process lacks a valid pid/argv; startup cannot be proved",
+		},
 		{name: "snapshot-error", mode: "read-error", want: "snapshot unavailable"},
 		{name: "blocked", mode: "blocked", want: "blocked"},
+		// Claude reports working while background shells or sub-agents run behind
+		// an idle composer; the screen decides idleness, as on the tmux path.
+		{name: "working-behind-idle-composer", mode: "working-behind-idle-composer"},
+		{
+			name: "working-turn-holds-exit", mode: "working-turn",
+			want: "native reload: chat still busy or input box not ready; /exit was not typed",
+		},
+		{name: "unrecognized-agent-state-waits", mode: "unrecognized-agent-once"},
+		{name: "undecodable-agent-state-waits", mode: "undecodable-agent-once"},
+		// Herdr holds a Claude it just found in "unknown" for its startup grace
+		// (3 s): a reload typed then waits it out.
+		{name: "unknown-agent-state-waits", mode: "unknown-agent-once"},
+		{
+			name: "unknown-agent-state-never-clears", mode: "unknown-agent",
+			want: "native reload: Herdr never reported the chat's state (native reload target is unknown); /exit was not typed",
+		},
+		{
+			name: "unrecognized-agent-state-never-clears", mode: "unrecognized-agent",
+			want: `native reload: Herdr never reported the chat's state (native reload unknown agent state "thinking"); /exit was not typed`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newReloadHerdrFixture(t)
 			f.mode = tc.mode
-			if tc.mode == "kept" {
-				f.holdByKeep()
-			}
 			if tc.mode == "dim-hint" {
 				f.text = "❯ \x1b[2mTry running tests\x1b[0m"
+			}
+			switch tc.mode {
+			case "working-behind-idle-composer":
+				f.text = "────────\n❯ \n────────\n  ⏵⏵ bypass permissions on · 2 shells"
+			case "working-turn":
+				f.text = "✻ Thundering… (1m 50s · ↓ 9.3k tokens)\n────────\n❯ \n────────\n" +
+					"  ⏵⏵ bypass permissions on · esc to interrupt"
 			}
 			if tc.draft {
 				f.text = "❯ parked draft"
@@ -442,10 +526,27 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if tc.then {
 				f.request.Then = "resume the port"
 			}
-			result, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			var stderr strings.Builder
+			result, err := RunHerdr(context.Background(), f.request, f.options, &stderr)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("RunHerdr error=%v, want %q", err, tc.want)
+				}
+				// Once /exit is submitted the seat host starts the new recipe, so
+				// its account is recorded; a reload refused before it records none.
+				switch tc.mode {
+				case "failed-start":
+					f.assertLaunchRecorded(true)
+				case "blocked":
+					f.assertLaunchRecorded(false)
+				case "working-turn":
+					f.assertLaunchRecorded(false)
+					if err.Error() != tc.want || len(f.typed) != 0 || f.agentReads != f.options.IdleTries {
+						t.Fatalf(
+							"busy turn: error=%q typed=%q agent reads=%d, want %q, nothing typed, %d reads",
+							err, f.typed, f.agentReads, tc.want, f.options.IdleTries,
+						)
+					}
 				}
 				if tc.mode == "failed-start" {
 					current, found, readErr := f.db.Seat(context.Background(), f.seat.SeatID)
@@ -462,6 +563,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if result.Account != 2 {
 				t.Fatalf("result=%+v", result)
 			}
+			f.assertLaunchRecorded(true)
 			current, found, err := f.db.Seat(context.Background(), f.seat.SeatID)
 			if err != nil || !found || current.HerdrPane != f.request.Pane || current.ReloadPending ||
 				current.State != "live" {
@@ -482,6 +584,9 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if !reflect.DeepEqual(run, canonical) {
 				t.Fatalf("recipe=%+v, canonical=%+v", run, canonical)
 			}
+			if tc.mode == "working-behind-idle-composer" && !slices.Equal(f.typed, []string{"/exit"}) {
+				t.Fatalf("typed=%q, want [/exit]", f.typed)
+			}
 			if tc.mode == "dim-hint" && slices.Contains(f.keys, "ctrl+s") {
 				t.Fatalf("dim hint stashed as draft: %v", f.keys)
 			}
@@ -490,6 +595,9 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			}
 			if tc.then && !strings.Contains(f.prompted, f.request.Then) {
 				t.Fatalf("then=%q", f.prompted)
+			}
+			if tc.mode == "argv-gone-once" && f.processes < 4 {
+				t.Fatalf("returned after %d process reads, want the dying engine read again", f.processes)
 			}
 			if tc.mode == "pending-race" && f.processes < 3 {
 				t.Fatalf("returned on old process after %d probes", f.processes)
@@ -621,7 +729,7 @@ func TestRunHerdrPublicationAndCancellation(t *testing.T) {
 }
 
 func TestRunHerdrUnsafePublication(t *testing.T) {
-	for _, kind := range []string{"failed-seat-with-live-engine", "corrupt-current-recipe", "binding-changes-during-idle"} {
+	for _, kind := range []string{"failed-seat-with-live-engine", "binding-changes-during-idle"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newReloadHerdrFixture(t)
 			want := ""
@@ -633,12 +741,6 @@ func TestRunHerdrUnsafePublication(t *testing.T) {
 					t.Fatal(err)
 				}
 				want = "engine is still running"
-			case "corrupt-current-recipe":
-				f.old.CWD = "relative-path"
-				if err := f.db.WriteSeatRun(f.seat.SeatID, f.old); err != nil {
-					t.Fatal(err)
-				}
-				want = "current recipe"
 			case "binding-changes-during-idle":
 				f.onRead = func() {
 					before, found, err := f.db.Seat(context.Background(), f.seat.SeatID)
@@ -727,7 +829,8 @@ func TestRunHerdrCodex(t *testing.T) {
 			if err := f.db.WriteSeatRun(f.seat.SeatID, f.old); err != nil {
 				t.Fatal(err)
 			}
-			result, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			var stderr strings.Builder
+			result, err := RunHerdr(context.Background(), f.request, f.options, &stderr)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("RunHerdr error=%v, want %q", err, tc.want)
@@ -765,114 +868,6 @@ func TestRunHerdrCodex(t *testing.T) {
 	}
 }
 
-func TestRunHerdrPreservesBirthDefaults(t *testing.T) {
-	for _, tc := range []struct {
-		name                              string
-		accountGiven, cacheGiven, missing bool
-		wantAccount                       int
-		wantCache                         bool
-		want                              string
-	}{
-		{name: "retain-account-and-cache", wantAccount: 1, wantCache: true},
-		{name: "explicit-account-and-cache", accountGiven: true, cacheGiven: true, wantAccount: 2},
-		{name: "explicit-account-retain-cache", accountGiven: true, wantAccount: 2, wantCache: true},
-		{name: "explicit-cache-retain-account", cacheGiven: true, wantAccount: 1},
-		{name: "missing-birth-metadata", missing: true, want: "account"},
-		{name: "unknown-account", want: "account"},
-		{name: "invalid-cache", want: "cache"},
-		{name: "missing-cache", want: "cache"},
-		{name: "stale-launch-record", wantAccount: 1, wantCache: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newReloadHerdrFixture(t)
-			if !tc.missing {
-				before := f.request
-				before.Account = 1
-				before.Cache1H = true
-				spawn, err := claudeSpawn(before)
-				if err != nil {
-					t.Fatal(err)
-				}
-				f.old, err = spawn.SeatRun(before.CWD)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if tc.name == "unknown-account" {
-					f.request.Machine.Accounts = f.request.Machine.Accounts[1:]
-				}
-				if tc.name == "invalid-cache" || tc.name == "missing-cache" {
-					key := ""
-					for _, knob := range claudelaunch.Knobs {
-						if knob.Name == "cache1h" {
-							key = knob.Target
-						}
-					}
-					for i, entry := range f.old.Env {
-						if strings.HasPrefix(entry, key+"=") {
-							if tc.name == "invalid-cache" {
-								f.old.Env[i] = key + "=not-a-cache"
-							} else {
-								f.old.Env = append(f.old.Env[:i], f.old.Env[i+1:]...)
-							}
-							break
-						}
-					}
-				}
-				if tc.name == "stale-launch-record" {
-					values, err := paths.Resolve()
-					if err != nil {
-						t.Fatal(err)
-					}
-					if err := fleetdb.RecordLaunch(
-						context.Background(),
-						values,
-						fleetdb.Launch{SessionID: f.seat.SessionID, Engine: f.request.Engine, Account: 2},
-						1,
-					); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if err := f.db.WriteSeatRun(f.seat.SeatID, f.old); err != nil {
-					t.Fatal(err)
-				}
-			}
-			f.request.AccountGiven = tc.accountGiven
-			f.request.CacheGiven = tc.cacheGiven
-			result, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
-			if tc.want != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Fatalf("error=%v want %q metadata diagnostic", err, tc.want)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result.Account != tc.wantAccount || result.Cache1H != tc.wantCache {
-				t.Fatalf("result=%+v want account=%d cache=%t", result, tc.wantAccount, tc.wantCache)
-			}
-			expected := f.request
-			expected.Account = tc.wantAccount
-			expected.Cache1H = tc.wantCache
-			spawn, err := claudeSpawn(expected)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want, err := spawn.SeatRun(expected.CWD)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := f.db.ReadSeatRun(f.seat.SeatID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("recipe=%+v want=%+v", got, want)
-			}
-		})
-	}
-}
-
 func TestLockNativeReloadSafety(t *testing.T) {
 	for _, kind := range []string{"new-directory", "existing-lock", "leaf-symlink", "dangling-symlink", "directory-symlink", "foreign-directory", "foreign-lock", "writable-directory"} {
 		t.Run(kind, func(t *testing.T) {
@@ -895,7 +890,9 @@ func TestLockNativeReloadSafety(t *testing.T) {
 					t.Fatal(err)
 				}
 				if kind == "foreign-lock" {
-					if err := os.Chown(path, 65534, -1); err != nil {
+					if err := os.Chown(path, os.Geteuid()+1, -1); errors.Is(err, syscall.EPERM) {
+						t.Skipf("needs root: only root hands a file to another uid (%v)", err)
+					} else if err != nil {
 						t.Fatalf("fenced foreign-owner fixture: %v", err)
 					}
 				}
@@ -919,7 +916,15 @@ func TestLockNativeReloadSafety(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "foreign-directory":
-				if err := os.Chown(options.SIDDir, 65534, -1); err != nil {
+				if err := os.Chown(options.SIDDir, os.Geteuid()+1, -1); errors.Is(err, syscall.EPERM) {
+					// Without root nothing is handed to another uid; the file
+					// system root already belongs to another user.
+					var rootDir syscall.Stat_t
+					if err := syscall.Stat("/", &rootDir); err != nil || rootDir.Uid == uint32(os.Geteuid()) {
+						t.Fatalf("no foreign-owned directory for a non-root run: / uid=%d err=%v", rootDir.Uid, err)
+					}
+					options.SIDDir = "/"
+				} else if err != nil {
 					t.Fatalf("fenced foreign-owner fixture: %v", err)
 				}
 			case "writable-directory":

@@ -144,8 +144,9 @@ func TestWriteMCPFileRefusesASymlinkedDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := writeMCPFile(home, []byte(`{}`))
-	if err == nil || !strings.Contains(err.Error(), "is not a real directory") {
-		t.Fatalf("err = %v, want a refused symlinked directory", err)
+	want := dir + " is not a real directory — run pfm doctor"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
 	}
 	entries, err := os.ReadDir(elsewhere)
 	if err != nil || len(entries) != 0 {

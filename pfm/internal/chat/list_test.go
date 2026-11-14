@@ -5,19 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
-	"os/exec"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestListNeverListsThePickerPlaceholders pins which rows ls drops: only
@@ -117,21 +114,38 @@ func TestRowsPresenceAddressesEachRowsTmuxServerAndNamesItsFailure(t *testing.T)
 		{Kind: compose.ResumeClaude, Name: "resumable"},
 		{Kind: compose.LiveClaude, Name: "escaping", Socket: "../cc-2", SessionName: "sess-2"},
 		{Kind: compose.LiveClaude, Name: "unset", Socket: "cc-3", SessionName: "sess-3"},
+		// Its tmux server ended between the scan and this read; the other's refuses the read.
+		{Kind: compose.LiveClaude, Name: "ended", Socket: "cc-4", SessionName: "sess-4"},
+		{Kind: compose.LiveClaude, Name: "refused", Socket: "cc-5", SessionName: "sess-5"},
 	}
+	refusal := errors.New("tmux show-options -qv -t sess-5 @pfm_herdr: exit status 1: " +
+		"error connecting to " + filepath.Join(tmuxDir, "cc-5") + " (Permission denied)")
 	var ran []string
+	var warn strings.Builder
 	probe := herdr.Probe{
 		Getenv:   func(string) string { return "/bin/herdr" },
 		LookPath: func(string) (string, error) { return "", errors.New("unused") },
 		Tmux: func(_ context.Context, socketPath string, args ...string) (string, error) {
 			ran = append(ran, socketPath+" "+strings.Join(args, " "))
-			if filepath.Base(socketPath) == "cc-1" && args[0] == "show-options" {
+			switch filepath.Base(socketPath) + " " + args[0] {
+			case "cc-1 show-options":
 				return string(stored), nil
+			case "cc-4 show-options":
+				return "", fmt.Errorf(
+					"tmux show-options -qv -t sess-4 @pfm_herdr: %w: %s",
+					gather.ErrServerGone,
+					socketPath,
+				)
+			case "cc-5 show-options":
+				return "", refusal
 			}
 			return "", nil
 		},
 		Call: func(_ context.Context, socket string, _ ...[]byte) ([]json.RawMessage, error) {
 			return nil, errors.New("dial " + socket + ": refused")
 		},
+		ServerGone: realHerdrProbe(nil, values, "").ServerGone,
+		Warn:       &warn,
 	}
 	got := rowsPresence(context.Background(), probe, values, rows)
 	if len(got) != len(rows) {
@@ -149,11 +163,24 @@ func TestRowsPresenceAddressesEachRowsTmuxServerAndNamesItsFailure(t *testing.T)
 	if got[3] != herdr.PresenceNotInHerdr {
 		t.Errorf("row whose session holds no %s = %q, want %q", herdr.StoredOption, got[3], herdr.PresenceNotInHerdr)
 	}
+	if got[4] != herdr.PresenceNotInHerdr {
+		t.Errorf("row whose tmux server ended during the listing = %q, want %q", got[4], herdr.PresenceNotInHerdr)
+	}
+	if want := "herdr error: read @pfm_herdr of sess-5: " + refusal.Error(); got[5] != want {
+		t.Errorf("row whose tmux read was refused = %q, want %q", got[5], want)
+	}
+	refusedWarning := fmt.Sprintf("pfm chat ls: herdr presence of {SocketPath:%s Session:sess-5 Pane: Name:refused "+
+		"PanePIDs:[] Err:<nil>}: read @pfm_herdr of sess-5: %v\n", filepath.Join(tmuxDir, "cc-5"), refusal)
+	if !strings.Contains(warn.String(), refusedWarning) || strings.Contains(warn.String(), "Name:ended") {
+		t.Errorf("warnings = %q, want %q and no line for the ended chat", warn.String(), refusedWarning)
+	}
 	wantRan := []string{
 		filepath.Join(tmuxDir, "cc-1") + " show-options -qv -t sess-1 @pfm_herdr",
 		filepath.Join(tmuxDir, "cc-1") + " list-clients -t sess-1 -F #{client_pid}",
 		filepath.Join(tmuxDir, "cc-3") + " show-options -qv -t sess-3 @pfm_herdr",
 		filepath.Join(tmuxDir, "cc-3") + " list-clients -t sess-3 -F #{client_pid}",
+		filepath.Join(tmuxDir, "cc-4") + " show-options -qv -t sess-4 @pfm_herdr",
+		filepath.Join(tmuxDir, "cc-5") + " show-options -qv -t sess-5 @pfm_herdr",
 	}
 	if strings.Join(ran, "|") != strings.Join(wantRan, "|") {
 		t.Errorf("tmux commands = %q, want %q", ran, wantRan)
@@ -171,53 +198,6 @@ func TestPresenceOfNeverReadsAnUnreadRowAsAbsence(t *testing.T) {
 		if got := result.PresenceOf(index); !strings.HasPrefix(got, "herdr error: ") {
 			t.Errorf("PresenceOf(%d) = %q, want a herdr error for a row never read", index, got)
 		}
-	}
-}
-
-// TestPresenceTmuxReadGivesUpOnAFrozenServer pins the presence read's bound: a
-// chat server that accepts its socket and never answers (stopped or wedged)
-// fails the read within gather.ProbeTimeout, as the fleet scan's own probe
-// does, so one frozen server never hangs `pfm chat ls` or the MCP ls.
-func TestPresenceTmuxReadGivesUpOnAFrozenServer(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	socketPath := filepath.Join(testjail.ShortRoot(t), "cc-1")
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	held := make(chan net.Conn, 16)
-	t.Cleanup(func() {
-		_ = listener.Close()
-		for len(held) > 0 {
-			_ = (<-held).Close()
-		}
-	})
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			held <- conn // held open, never answered
-		}
-	}()
-	done := make(chan error, 1)
-	go func() {
-		_, err := runTmux(context.Background(), socketPath, "show-options", "-qv", "-t", "cc-1", herdr.StoredOption)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), gather.ProbeTimeout.String()) {
-			t.Fatalf("read of a frozen server = %v, want an error naming the %s bound", err, gather.ProbeTimeout)
-		}
-	case <-time.After(gather.ProbeTimeout + 5*time.Second):
-		t.Fatalf(
-			"read of a frozen server still waiting after %s: chat ls would hang",
-			gather.ProbeTimeout+5*time.Second,
-		)
 	}
 }
 
@@ -284,8 +264,9 @@ func TestHooklessLaunchReadsTheEnginesSettingsAsTheSpawnAuditDoes(t *testing.T) 
 		},
 		{
 			name: "an unparsable payload is unverified and warned", pids: []int{10},
-			argv:     map[int][]string{10: {"/opt/claude", "--settings", "{not json"}},
-			wantWarn: "pid 10:",
+			argv: map[int][]string{10: {"/opt/claude", "--settings", "{not json"}},
+			wantWarn: "pfm chat ls: herdr hookless read of seat w1: parse launch of pid 10: --settings: " +
+				"invalid character 'n' looking for beginning of object key string; left to Claude as written\n",
 		},
 	}
 	for _, test := range cases {

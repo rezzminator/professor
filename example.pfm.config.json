@@ -31,12 +31,12 @@
       "forward-compaction",
       "auto-effort",
       "tool-visibility-controller",
-      "engine-sync"
+      "engine-sync",
+      "flights"
     ],
     "env": {},
     "costLedger": true,
-    "gptAgents": false,
-    "subagentStatuslineTrace": false
+    "gptAgents": false
   },
   "codex": {
     "yolo": true,
@@ -62,8 +62,7 @@
     "http": {
       "port": 18377
     },
-    "thirdParty": {},
-    "authToken": null
+    "thirdParty": {}
   },
   "ask": {
     "claude": {
@@ -82,9 +81,8 @@
   "log": {
     "level": null,
     "components": {},
-    "keepFiles": 5,
-    "maxMB": 8,
-    "keepDays": 30
+    "keepFiles": 10,
+    "maxMB": 8
   },
   "doctor": {
     "ignoreWarnings": [],

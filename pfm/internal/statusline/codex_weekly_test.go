@@ -214,7 +214,7 @@ func TestClaudeCodexWeeklyUnavailableAndStale(t *testing.T) {
 		{name: "primary invalid percent", body: `{"primary":{"usedPercent":101,"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
 		{name: "primary missing percent", body: `{"primary":{"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
 		{name: "primary null percent", body: `{"primary":{"usedPercent":null,"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
-		{name: "primary invalid reset", body: `{"primary":{"usedPercent":42,"windowDurationMins":10080}}`, want: "codex-7d: error", warn: true},
+		{name: "primary unknown reset keeps the reading", body: `{"primary":{"usedPercent":42,"windowDurationMins":10080}}`, want: "codex-7d-used:42%"},
 		{name: "primary stale", body: `{"primary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1787122800},"secondary":null}`, age: 2 * time.Hour, want: "codex-7d-used:42% ↻3d7h stale 2h0m", refreshes: 1},
 		{name: "stale", body: `{"secondary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1787122800}}`, age: 2 * time.Hour, want: "codex-7d-used:42% ↻3d7h stale 2h0m", refreshes: 1},
 	} {
@@ -387,7 +387,7 @@ func TestClaudeCodexWeeklyLabelFitsShortSiblings(t *testing.T) {
 					weeklyCache(t, runtime, test.body, test.age)
 				}
 				line := weeklyRowAt(runtime, green+"界"+reset, "tiny")
-				if got := ansi.Strip(line); !strings.HasSuffix(got, test.want) {
+				if got := ansi.Strip(line); got != test.want {
 					t.Fatalf("short siblings must not clip weekly text when it fits: got %q, want %q", got, test.want)
 				}
 			})

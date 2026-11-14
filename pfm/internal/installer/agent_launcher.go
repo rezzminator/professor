@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/agentlauncher"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
@@ -99,7 +101,7 @@ func launcherFix(home, label, path string) string {
 	if _, err := os.Lstat(filepath.Join(stateDir, themesync.StateFileName)); err == nil {
 		return "run pfm theme off"
 	}
-	return "run launchctl bootout gui/$(id -u)/" + label + ", then remove " + path
+	return "run launchctl bootout " + servicemanager.ShellTarget(label) + ", then remove " + path
 }
 
 // LaunchAgentLauncherDrift lists every pfm launch agent under home whose
@@ -109,7 +111,7 @@ func launcherFix(home, label, path string) string {
 func LaunchAgentLauncherDrift(home string) (agents int, findings []LauncherFinding) {
 	want := agentlauncher.Program(home)
 	for _, label := range pfmLaunchAgentLabels {
-		path := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+		path := filepath.Join(paths.LaunchAgentsDir(home), label+".plist")
 		fix := launcherFix(home, label, path)
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {

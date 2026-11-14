@@ -1,6 +1,7 @@
 package agentrole
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,14 @@ func TestRefreshSeatPromptReadsComposedClaudePrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(channel)
-	if err != nil || !strings.Contains(string(raw), "FLEET") {
+	if err != nil || string(raw) != `<!-- pfm agent-role: reader -->
+FLEET
+
+
+---
+
+ROLE
+` {
 		t.Fatalf("seat prompt = %q, %v", raw, err)
 	}
 	if err := os.Remove(prompt); err != nil {
@@ -188,84 +196,34 @@ func TestStripFrontmatterThreeShapes(t *testing.T) {
 	}
 }
 
-// Test 5 — an unknown role must render THREE distinguishable directory
-// states: a rung that does not exist, a rung that exists with no roles
-// registered, and a rung that lists roles. A search that found nothing
-// anywhere must still say so explicitly rather than printing a bare empty
-// list. This is the repo's absence-vs-error law at a visible surface.
+// An unknown role's error tells a missing rung, an empty one and one listing its roles apart.
 func TestUnknownRoleReportsDistinctDirectoryStates(t *testing.T) {
-	// pinRepoBoundary anchors roleLadderRoot(repo) at repo itself via a
-	// .codex/agents marker, WITHOUT creating repo/.claude/agents — so the
-	// cc-side rung can independently be "not found", "empty", or "listing"
-	// while roleLadderRoot still resolves deterministically to repo.
-	pinRepoBoundary := func(t *testing.T, repo string) {
-		t.Helper()
-		mustMkdir(t, filepath.Join(repo, ".codex", "agents"))
+	for _, row := range []struct {
+		name  string
+		roles []string
+		empty bool
+		want  string
+	}{
+		{"neither rung exists anywhere", nil, false, "agent role: no cc role \"ghost\" found\n  searched {repo}/.claude/agents: directory not found\n  searched {home}/.claude/agents: directory not found\navailable roles: none found"},
+		{"repo rung exists with no roles registered", nil, true, "agent role: no cc role \"ghost\" found\n  searched {repo}/.claude/agents: directory exists, no roles registered\n  searched {home}/.claude/agents: directory not found\navailable roles: none found"},
+		{"repo rung lists the roles it has", []string{"alpha", "beta"}, false, "agent role: no cc role \"ghost\" found\n  searched {repo}/.claude/agents: alpha, beta\n  searched {home}/.claude/agents: directory not found\navailable roles: alpha, beta"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			repo, home := t.TempDir(), t.TempDir()
+			// A .codex/agents marker pins roleLadderRoot(repo) at repo without creating repo/.claude/agents.
+			mustMkdir(t, filepath.Join(repo, ".codex", "agents"))
+			if row.empty {
+				mustMkdir(t, filepath.Join(repo, ".claude", "agents"))
+			}
+			for _, role := range row.roles {
+				mustWrite(t, filepath.Join(repo, ".claude", "agents", role+".md"), "---\n---\n"+role+" body\n")
+			}
+			_, _, err := Resolve(pfmengine.Claude, "ghost", repo, home)
+			if got := strings.NewReplacer(repo, "{repo}", home, "{home}").Replace(fmt.Sprint(err)); got != row.want {
+				t.Fatalf("Resolve() error = %q, want %q", got, row.want)
+			}
+		})
 	}
-
-	t.Run("neither rung exists anywhere", func(t *testing.T) {
-		repo := t.TempDir()
-		home := t.TempDir()
-		pinRepoBoundary(t, repo)
-
-		_, _, err := Resolve(pfmengine.Claude, "ghost", repo, home)
-		if err == nil {
-			t.Fatal("Resolve() returned nil error for an unregistered role")
-		}
-		msg := err.Error()
-		repoDir := filepath.Join(repo, ".claude", "agents")
-		homeDir := filepath.Join(home, ".claude", "agents")
-		if !strings.Contains(msg, repoDir+": directory not found") {
-			t.Fatalf("error = %q, want %q marked as directory not found", msg, repoDir)
-		}
-		if !strings.Contains(msg, homeDir+": directory not found") {
-			t.Fatalf("error = %q, want %q marked as directory not found", msg, homeDir)
-		}
-		if !strings.Contains(msg, "available roles: none found") {
-			t.Fatalf("error = %q, want an EXPLICIT \"none found\" rather than a bare empty list", msg)
-		}
-	})
-
-	t.Run("repo rung exists with no roles registered", func(t *testing.T) {
-		repo := t.TempDir()
-		home := t.TempDir()
-		pinRepoBoundary(t, repo)
-		mustMkdir(t, filepath.Join(repo, ".claude", "agents"))
-
-		_, _, err := Resolve(pfmengine.Claude, "ghost", repo, home)
-		if err == nil {
-			t.Fatal("Resolve() returned nil error for an unregistered role")
-		}
-		msg := err.Error()
-		repoDir := filepath.Join(repo, ".claude", "agents")
-		if !strings.Contains(msg, repoDir+": directory exists, no roles registered") {
-			t.Fatalf("error = %q, want %q marked exists-but-empty, distinct from \"not found\"", msg, repoDir)
-		}
-		if strings.Contains(msg, repoDir+": directory not found") {
-			t.Fatalf("error = %q, an existing empty directory must not render as \"not found\"", msg)
-		}
-	})
-
-	t.Run("repo rung lists the roles it has", func(t *testing.T) {
-		repo := t.TempDir()
-		home := t.TempDir()
-		pinRepoBoundary(t, repo)
-		mustWrite(t, filepath.Join(repo, ".claude", "agents", "alpha.md"), "---\n---\nalpha body\n")
-		mustWrite(t, filepath.Join(repo, ".claude", "agents", "beta.md"), "---\n---\nbeta body\n")
-
-		_, _, err := Resolve(pfmengine.Claude, "ghost", repo, home)
-		if err == nil {
-			t.Fatal("Resolve() returned nil error for an unregistered role")
-		}
-		msg := err.Error()
-		repoDir := filepath.Join(repo, ".claude", "agents")
-		if !strings.Contains(msg, repoDir+": alpha, beta") {
-			t.Fatalf("error = %q, want the repo rung to list its registered roles", msg)
-		}
-		if !strings.Contains(msg, "available roles: alpha, beta") {
-			t.Fatalf("error = %q, want a combined available-roles summary", msg)
-		}
-	})
 }
 
 // Test 6 — ladder dedupe. When roleLadderRoot(cwd) resolves to the same directory
@@ -284,14 +242,12 @@ func TestLadderDedupeSameDirectoryListedOnce(t *testing.T) {
 	home := t.TempDir()
 
 	_, _, err := Resolve(pfmengine.Claude, "ghost", home, home)
-	if err == nil {
-		t.Fatal("Resolve() returned nil error for an unregistered role")
-	}
-	msg := err.Error()
-	dir := filepath.Join(home, ".claude", "agents")
-	needle := "searched " + dir + ":"
-	if count := strings.Count(msg, needle); count != 1 {
-		t.Fatalf("error = %q, directory %q appears %d times, want exactly 1", msg, dir, count)
+	if got, want := strings.ReplaceAll(
+		fmt.Sprint(err),
+		home,
+		"{home}",
+	), "agent role: no cc role \"ghost\" found\n  searched {home}/.claude/agents: directory not found\navailable roles: none found"; got != want {
+		t.Fatalf("Resolve() error = %q, want %q", got, want)
 	}
 }
 
@@ -333,63 +289,27 @@ func TestUnreadableDirectoryIsAnError(t *testing.T) {
 	}
 }
 
-// Test 8 — an empty constitution is an error, both shapes: a .md empty
-// after its frontmatter, and a .toml whose developer_instructions is missing
-// or blank. Neither may return ("", nil).
 func TestEmptyConstitutionIsAnError(t *testing.T) {
-	t.Run("markdown empty after frontmatter", func(t *testing.T) {
-		repo := t.TempDir()
-		home := t.TempDir()
-		mustWrite(t, filepath.Join(repo, ".claude", "agents", "hollow.md"),
-			"---\nname: hollow\n---\n\n   \n")
-
-		got, _, err := Resolve(pfmengine.Claude, "hollow", repo, home)
-		if err == nil {
-			t.Fatalf("Resolve() = %q, nil error; want an error for an empty constitution", got)
-		}
-		if got != "" {
-			t.Fatalf("Resolve() = (%q, %v); want (\"\", err)", got, err)
-		}
-		if !strings.Contains(err.Error(), "empty after its frontmatter") {
-			t.Fatalf("error = %q, want it to name the empty-after-frontmatter case", err.Error())
-		}
-	})
-
-	t.Run("toml missing developer_instructions", func(t *testing.T) {
-		repo := t.TempDir()
-		home := t.TempDir()
-		mustWrite(t, filepath.Join(repo, ".codex", "agents", "hollow.toml"),
-			"name = \"hollow\"\ndescription = \"nothing\"\n")
-
-		got, _, err := Resolve(pfmengine.Codex, "hollow", repo, home)
-		if err == nil {
-			t.Fatalf("Resolve() = %q, nil error; want an error for a missing key", got)
-		}
-		if got != "" {
-			t.Fatalf("Resolve() = (%q, %v); want (\"\", err)", got, err)
-		}
-		if !strings.Contains(err.Error(), "empty or missing developer_instructions") {
-			t.Fatalf("error = %q, want it to name the missing key", err.Error())
-		}
-	})
-
-	t.Run("toml blank developer_instructions", func(t *testing.T) {
-		repo := t.TempDir()
-		home := t.TempDir()
-		mustWrite(t, filepath.Join(repo, ".codex", "agents", "blank.toml"),
-			"name = \"blank\"\ndeveloper_instructions = \"   \"\n")
-
-		got, _, err := Resolve(pfmengine.Codex, "blank", repo, home)
-		if err == nil {
-			t.Fatalf("Resolve() = %q, nil error; want an error for a blank key", got)
-		}
-		if got != "" {
-			t.Fatalf("Resolve() = (%q, %v); want (\"\", err)", got, err)
-		}
-		if !strings.Contains(err.Error(), "empty or missing developer_instructions") {
-			t.Fatalf("error = %q, want it to name the blank key", err.Error())
-		}
-	})
+	for _, row := range []struct {
+		name   string
+		engine pfmengine.ID
+		file   string
+		body   string
+		want   string
+	}{
+		{"markdown empty after frontmatter", pfmengine.Claude, ".claude/agents/hollow.md", "---\nname: hollow\n---\n\n   \n", " | agent role: {repo}/.claude/agents/hollow.md is empty after its frontmatter — no constitution to launch a seat with"},
+		{"toml missing developer_instructions", pfmengine.Codex, ".codex/agents/hollow.toml", "name = \"hollow\"\ndescription = \"nothing\"\n", " | agent role: {repo}/.codex/agents/hollow.toml has an empty or missing developer_instructions key"},
+		{"toml blank developer_instructions", pfmengine.Codex, ".codex/agents/hollow.toml", "name = \"blank\"\ndeveloper_instructions = \"   \"\n", " | agent role: {repo}/.codex/agents/hollow.toml has an empty or missing developer_instructions key"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			repo, home := t.TempDir(), t.TempDir()
+			mustWrite(t, filepath.Join(repo, row.file), row.body)
+			got, _, err := Resolve(row.engine, "hollow", repo, home)
+			if got := got + " | " + strings.ReplaceAll(fmt.Sprint(err), repo, "{repo}"); got != row.want {
+				t.Fatalf("Resolve() = %q, want %q", got, row.want)
+			}
+		})
+	}
 }
 
 // Test 9 — no cross-engine fallback. A role that exists ONLY as
@@ -402,21 +322,13 @@ func TestNoCrossEngineFallback(t *testing.T) {
 		"---\nname: reviewer\n---\ncc-only constitution body\n")
 
 	got, _, err := Resolve(pfmengine.Codex, "reviewer", repo, home)
-	if err == nil {
-		t.Fatalf("Resolve() = %q, nil error; a cc-only role must not resolve on a cx seat", got)
-	}
-	if got != "" {
-		t.Fatalf("Resolve() returned text %q for a cc-only role on a cx seat; want empty", got)
-	}
-	if strings.Contains(got, "cc-only constitution body") {
-		t.Fatal("the .claude source body leaked into a cx resolution")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "run: engine-sync codex build "+repo) {
-		t.Fatalf("error = %q, want it to name the compile fix %q", msg, "run: engine-sync codex build "+repo)
-	}
-	if !strings.Contains(msg, "reviewer") {
-		t.Fatalf("error = %q, want it to name the role", msg)
+	if got := got + " | " + strings.NewReplacer(repo, "{repo}", home, "{home}").
+		Replace(fmt.Sprint(err)); got != " | agent role \"reviewer\": found {repo}/.claude/agents/reviewer.md but no compiled {repo}/.codex/agents/reviewer.toml — this seat is cx (codex) and reads the compiled artifact, never the .claude source; run: engine-sync codex build {repo}" {
+		t.Fatalf(
+			"Resolve() = %q, want %q",
+			got,
+			" | agent role \"reviewer\": found {repo}/.claude/agents/reviewer.md but no compiled {repo}/.codex/agents/reviewer.toml — this seat is cx (codex) and reads the compiled artifact, never the .claude source; run: engine-sync codex build {repo}",
+		)
 	}
 }
 

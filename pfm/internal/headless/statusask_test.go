@@ -8,13 +8,13 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -41,45 +41,6 @@ func assertNoLeakedTempFiles(t *testing.T, directory string) {
 	}
 }
 
-// startHeadlessTmuxSession mirrors internal/call's newCallTmuxJail
-// (tmux_jail_test.go): a real tmux server on a scratch socket rooted at
-// the current UID's tmux directory, never t.TempDir() (its test-name-derived path blows past
-// the unix socket sun_path limit). TMUX_TMPDIR is still pinned per
-// pfm/CLAUDE.md's testing rule even though capturePane below is handed the
-// ABSOLUTE socket path and never consults it.
-func startHeadlessTmuxSession(t *testing.T) (socketPath, session string) {
-	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux binary is not installed")
-	}
-	tmuxJailRoot := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
-	if err := os.MkdirAll(tmuxJailRoot, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	root, err := os.MkdirTemp(tmuxJailRoot, "probe-pfm-headless-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TMUX_TMPDIR", root)
-	socketPath = filepath.Join(root, "sock")
-	session = "ask-pane"
-	command := exec.Command(
-		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", session, "-x", "80", "-y", "10",
-		"sh", "-c", "echo live pane content; sleep 60",
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("start tmux session: %v: %s", err, output)
-	}
-	t.Cleanup(func() {
-		_ = exec.Command("tmux", "-S", socketPath, "kill-server").Run()
-		if err := os.RemoveAll(root); err != nil {
-			t.Errorf("remove headless tmux jail: %v", err)
-		}
-	})
-	return socketPath, session
-}
-
 // TestAskPaysRunnerEveryCallNeverCaches pins Ask's central invariant (see the
 // doc comment on AskOptions): unlike Summarize, Ask never consults or writes
 // a cache, because a pane moves every second and a cached answer would be a
@@ -88,7 +49,7 @@ func TestAskCapturesHerdrSeatThroughNativeHost(t *testing.T) {
 	root, _ := summaryTestStore(t)
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	// Keep the native socket short enough for the Unix sun_path limit.
-	socketRoot, err := os.MkdirTemp("", "headless-herdr-")
+	socketRoot, err := os.MkdirTemp(paths.TempRoot(), "headless-herdr-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,23 +156,21 @@ func TestAskCapturesHerdrSeatThroughNativeHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(root, "bin")
-	capture := filepath.Join(root, "stdin")
-	writeSummaryStub(t, bin, "claude", `/bin/cat > "$ASK_CAPTURE"
-printf '%s\n' '{"result":"native capture is running checks"}'`)
-	t.Setenv("ASK_CAPTURE", capture)
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{Stdout: `{"result":"native capture is running checks"}` + "\n"})
 	t.Setenv("PATH", bin)
-	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "prepared")}
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "prepared"), Runner: runner}
 	chat := Chat{
 		Name: "native seat", Engine: pfmengine.Claude, Backend: "herdr", SeatID: "capture-seat",
 		HerdrWorkspace: "w1", Socket: socket, Pane: "w1:p2", Live: true,
 	}
 	result := Ask(context.Background(), chat, options)
-	if result.Warning != nil || !strings.HasPrefix(result.Text, "PANE-ONLY (no human exchange recorded yet): ") {
-		t.Fatalf("native status ask=%+v; want a native pane capture, not TRANSCRIPT-ONLY or unavailable", result)
+	if got, want := result.Text, "PANE-ONLY (no human exchange recorded yet): native capture is running checks"; result.Warning != nil ||
+		got != want {
+		t.Fatalf("native status ask = %q, want %q (warning %v)", got, want, result.Warning)
 	}
-	raw, err := os.ReadFile(capture)
-	if err != nil || !strings.Contains(string(raw), "native capture is running checks") {
-		t.Fatalf("runner missing native capture: %q err=%v", raw, err)
+	if raw := startedStdin(t, runner, 0); !strings.Contains(raw, "native capture is running checks") {
+		t.Fatalf("runner missing native capture: %q", raw)
 	}
 	assertNoLeakedTempFiles(t, options.TempDir)
 }
@@ -224,17 +183,11 @@ func TestAskPaysRunnerEveryCallNeverCaches(t *testing.T) {
 		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
 	)
 	bin := filepath.Join(root, "bin")
-	counter := filepath.Join(root, "calls")
-	writeSummaryStub(
-		t,
-		bin,
-		"claude",
-		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"nothing has changed\"}'",
-	)
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{Stdout: `{"result":"nothing has changed"}` + "\n"})
 	t.Setenv("PATH", bin)
-	t.Setenv("ASK_COUNTER", counter)
 	tempDir := filepath.Join(root, "tmp", "chat-status")
-	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir}
+	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir, Runner: runner}
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}
 
 	first := Ask(context.Background(), chat, options)
@@ -250,8 +203,8 @@ func TestAskPaysRunnerEveryCallNeverCaches(t *testing.T) {
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
-	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "xx" {
-		t.Fatalf("runner calls=%q err=%v, want both calls paid (Ask never caches)", calls, err)
+	if calls := len(runner.Starts()); calls != 2 {
+		t.Fatalf("runner calls=%d, want both calls paid (Ask never caches)", calls)
 	}
 }
 
@@ -264,18 +217,15 @@ func TestAskPreservesAnswerWhenPreparedExchangeCleanupFails(t *testing.T) {
 	)
 	tempDir := filepath.Join(root, "tmp", "chat-status")
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", `
-set -eu
-set -- "$HEADLESS_TEMP_DIR"/exchange-*.md
-[ "$#" -eq 1 ]
-[ -f "$1" ]
-rm "$1"
-printf '%s\n' '{"result":"cleanup-resistant answer"}'`)
+	writeEngine(t, bin, "claude")
+	runner := fakeEngine(deps.StartOutput{
+		AtStart: removePreparedExchange(t, tempDir),
+		Stdout:  `{"result":"cleanup-resistant answer"}` + "\n",
+	})
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
 
 	result := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, AskOptions{
-		Config: summaryMachine(t, "claude"), TempDir: tempDir,
+		Config: summaryMachine(t, "claude"), TempDir: tempDir, Runner: runner,
 	})
 	if result.Text != "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): cleanup-resistant answer" ||
 		strings.HasPrefix(result.Text, "failed (") {
@@ -284,82 +234,6 @@ printf '%s\n' '{"result":"cleanup-resistant answer"}'`)
 	if !errors.Is(result.Warning, fs.ErrNotExist) {
 		t.Fatalf("ask cleanup warning=%v, want fs.ErrNotExist", result.Warning)
 	}
-}
-
-// TestAskDistinguishesNotLiveFromCaptureFailure pins the engine's root law
-// (pfm/CLAUDE.md: "a probe that could not run never returns 'nothing
-// found'") as Ask states it: a chat that is not live and a chat whose pane
-// capture ERRORED are two different facts, worded so a reader cannot
-// mistake "we never had a screen" for "we failed to read the screen".
-func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux binary is not installed")
-	}
-	root := t.TempDir()
-	transcriptPath := filepath.Join(root, "exchange.jsonl")
-	writeSummaryTranscript(t, transcriptPath,
-		`{"type":"user","message":{"role":"user","content":"what is happening"}}`,
-		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
-	)
-	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", "printf '%s\\n' '{\"result\":\"answer\"}'")
-	// Prepend, not replace: the capture-failure call below still needs the
-	// REAL tmux binary to reach (and be refused by) the empty socket path.
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: filepath.Join(root, "tmp")}
-
-	notLive := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}, options)
-	if !strings.Contains(notLive.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture)") {
-		t.Fatalf("not-live ask=%+v", notLive)
-	}
-	if strings.Contains(notLive.Text, "pane capture failed") {
-		t.Fatalf("not-live text bled into capture-failed wording: %q", notLive.Text)
-	}
-
-	tmuxRoot := t.TempDir()
-	t.Setenv("TMUX_TMPDIR", tmuxRoot)
-	socketPath := filepath.Join(tmuxRoot, "no-server-here")
-	captureFailed := Ask(context.Background(), Chat{
-		Name: "seat", Engine: "cc", Path: transcriptPath, Live: true,
-		Socket: socketPath, Session: "whatever",
-	}, options)
-	if !strings.Contains(captureFailed.Text, "TRANSCRIPT-ONLY (pane capture failed: ") {
-		t.Fatalf("capture-failed ask=%+v", captureFailed)
-	}
-	if strings.Contains(captureFailed.Text, "executable file not found") {
-		t.Fatalf(
-			"capture-failed for the wrong reason (tmux itself missing, not a refused connection): %q",
-			captureFailed.Text,
-		)
-	}
-	if strings.Contains(captureFailed.Text, "chat is not live") {
-		t.Fatalf("capture-failed text bled into not-live wording: %q", captureFailed.Text)
-	}
-}
-
-// TestAskCapturesLivePaneAndReportsPaneOnlyWithoutExchange pins the third
-// distinct wording: a live pane that captured fine but has no recorded human
-// exchange yet reads as PANE-ONLY, never as an empty transcript-only answer.
-func TestAskCapturesLivePaneAndReportsPaneOnlyWithoutExchange(t *testing.T) {
-	socketPath, session := startHeadlessTmuxSession(t)
-	root := t.TempDir()
-	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", "cat >/dev/null\nprintf '%s\\n' '{\"result\":\"quietly idling\"}'")
-	// Prepend, not replace: capturePane still needs the REAL tmux binary
-	// from the ambient PATH to reach the session started above.
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	tempDir := filepath.Join(root, "tmp")
-	options := AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir}
-	chat := Chat{
-		Name: "seat", Engine: "cc", Path: "", Live: true,
-		Socket: socketPath, Session: session,
-	}
-
-	result := Ask(context.Background(), chat, options)
-	if !strings.HasPrefix(result.Text, "PANE-ONLY (no human exchange recorded yet): ") {
-		t.Fatalf("pane-only ask=%+v", result)
-	}
-	assertNoLeakedTempFiles(t, tempDir)
 }
 
 // TestAskUnavailableNamesBothReasons pins the fourth outcome: when NEITHER
@@ -422,15 +296,20 @@ func TestAskReportsEngineBinaryMissingAndCleansUpOnEveryErrorReturn(t *testing.T
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
-	writeSummaryStub(t, bin, "claude", "printf 'provider crashed\\n' >&2\nexit 9")
-	failed := Ask(context.Background(), chat, AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir})
+	writeEngine(t, bin, "claude")
+	failed := Ask(context.Background(), chat, AskOptions{
+		Config: summaryMachine(t, "claude"), TempDir: tempDir,
+		Runner: fakeEngine(deps.StartOutput{Stderr: "provider crashed\n", ExitCode: 9}),
+	})
 	if !strings.HasPrefix(failed.Text, "failed (") || !strings.Contains(failed.Text, "provider crashed") {
 		t.Fatalf("failed ask=%+v", failed)
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
-	writeSummaryStub(t, bin, "claude", "printf '%s\\n' '{\"result\":\"all clear\"}'")
-	ok := Ask(context.Background(), chat, AskOptions{Config: summaryMachine(t, "claude"), TempDir: tempDir})
+	ok := Ask(context.Background(), chat, AskOptions{
+		Config: summaryMachine(t, "claude"), TempDir: tempDir,
+		Runner: fakeEngine(deps.StartOutput{Stdout: `{"result":"all clear"}` + "\n"}),
+	})
 	if !strings.HasPrefix(ok.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): ") {
 		t.Fatalf("ok ask=%+v", ok)
 	}

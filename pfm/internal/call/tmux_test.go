@@ -2,22 +2,13 @@ package call
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
-
-// fakeTmuxBinary plays tmux: exits 0 and prints nothing.
-func fakeTmuxBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return binary
-}
 
 // requireTmuxRecord asserts the one comp=tmux record a façade call writes:
 // subcmd, target when given, exit 0 and dur_ms.
@@ -53,7 +44,8 @@ func requireTmuxRecord(t *testing.T, recorder *obs.Recorder, index int, subcmd, 
 // paste-buffer) and the pasted text never reaches the file.
 func TestTmuxCallerRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	tmux := TmuxCaller{Binary: fakeTmuxBinary(t)}
+	ctx = pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{}))
+	tmux := TmuxCaller{Binary: "tmux"}
 	if err := tmux.SendPaste(ctx, "/sockets/cc-1", "%5", "PLANTED message body"); err != nil {
 		t.Fatal(err)
 	}

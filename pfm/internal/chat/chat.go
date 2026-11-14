@@ -29,6 +29,7 @@
 //   - loss_note.go reads a seat's durable loss note from its transcript.
 //   - fleetshare.go shares one fleet scan between watches; seatprint.go fingerprints a seat for a watch.
 //   - herdr_indicators.go, herdr_indicators_probe.go and herdr_indicator_config.go paint Herdr tab indicators;
+//     herdr_indicators_probe_inputs.go renders and diffs the probe's input lines;
 //     herdr_indicators_run.go builds one painter run over a store it holds open across its ticks.
 //   - herdr_name.go and herdr_name_sync.go name Herdr tabs; herdr_places.go lists the Herdr places.
 package chat

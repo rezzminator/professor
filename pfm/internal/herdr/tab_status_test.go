@@ -423,7 +423,7 @@ func TestTabStatusRenameBeforeFirstPaintAndWithoutEvent(t *testing.T) {
 	}
 	name := "Renamed" // The first source row already carries the /rename.
 	polls := 0
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 		polls++
 		d := tabObservation("idle")
 		d.AgentStatus = "idle"
@@ -607,7 +607,8 @@ func TestTabStatusShutdownRestoresOnlyCurrentOwner(t *testing.T) {
 func TestTabRestorePastItsBudgetIsRepaintedByTheReplacement(t *testing.T) {
 	f := newTabStatusFixture()
 	stale, _ := newTabPainter(t, f.call)
-	if _, err := stale.paintTabs(context.Background(), []TabDecoration{tabObservation("blocked")}, 0); err != nil {
+	blocked := []TabDecoration{tabObservation("blocked")}
+	if _, err := stale.paintTabs(context.Background(), blocked, 0, true); err != nil {
 		t.Fatal(err)
 	}
 	expired, cancel := context.WithTimeout(context.Background(), 0)
@@ -624,7 +625,7 @@ func TestTabRestorePastItsBudgetIsRepaintedByTheReplacement(t *testing.T) {
 	idle.AgentStatus = "idle"
 	replacement, stderr := newTabPainter(t, f.call)
 	replacement.lockDir = stale.lockDir
-	if _, err := replacement.paintTabs(context.Background(), []TabDecoration{idle}, 0); err != nil {
+	if _, err := replacement.paintTabs(context.Background(), []TabDecoration{idle}, 0, true); err != nil {
 		t.Fatalf("replacement paint: %v (%s)", err, stderr)
 	}
 	if f.label != "⚪ Chat" {
@@ -740,7 +741,7 @@ func TestTabFailureNeverStopsOtherTabs(t *testing.T) {
 	bridge.Identity = "/fixture/tmux/cc-1:cc-1:s1"
 	painter, stderr := newTabPainter(t, f.call)
 	for range 2 {
-		wrote, err := painter.paintTabs(context.Background(), []TabDecoration{unproved, retained, bridge}, 0)
+		wrote, err := painter.paintTabs(context.Background(), []TabDecoration{unproved, retained, bridge}, 0, true)
 		if err != nil {
 			t.Fatalf("ownership refusals stopped the paint: wrote=%t err=%v", wrote, err)
 		}
@@ -766,7 +767,7 @@ func TestTabFailureNeverStopsOtherTabs(t *testing.T) {
 	painter, stderr = newTabPainter(t, refuseFirst)
 	broken := tabObservation("blocked")
 	broken.Tab = "w1:t7"
-	_, err := painter.paintTabs(context.Background(), []TabDecoration{broken, bridge}, 0)
+	_, err := painter.paintTabs(context.Background(), []TabDecoration{broken, bridge}, 0, true)
 	if err == nil || !strings.Contains(err.Error(), "pane read refused") ||
 		!strings.Contains(stderr.String(), "pane read refused") || strings.Join(failing.renames, ",") != "🔴 Chat" {
 		t.Fatalf("read failure: err=%v renames=%v log=%s", err, failing.renames, stderr)
@@ -792,7 +793,7 @@ func TestRetainedTabActsOnlyOnOwnRecord(t *testing.T) {
 			if tc.owner != "" {
 				live := tabObservation("blocked")
 				live.Identity = tc.owner
-				if _, err := painter.paintTabs(context.Background(), []TabDecoration{live}, 0); err != nil {
+				if _, err := painter.paintTabs(context.Background(), []TabDecoration{live}, 0, true); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -807,7 +808,7 @@ func TestRetainedTabActsOnlyOnOwnRecord(t *testing.T) {
 					reads++
 				}
 			}
-			if _, err := painter.paintTabs(context.Background(), []TabDecoration{retained}, 0); err != nil {
+			if _, err := painter.paintTabs(context.Background(), []TabDecoration{retained}, 0, true); err != nil {
 				t.Fatalf("retained refusal stopped the paint: %v", err)
 			}
 			if f.label != tc.want {
@@ -903,7 +904,7 @@ func TestTabPainterAnimatesBlockedAndStopsWhenNoTabAnimates(t *testing.T) {
 	painter, stepping := tabPainterFixture(t, f)
 	painter.cadence.idleRefresh = time.Nanosecond // every tick re-reads the tabs
 	polls := 0
-	painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+	painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 		polls++
 		if polls > len(blockedFrames) {
 			return nil, nil
@@ -946,7 +947,7 @@ func TestTabLabelOnAnyFrameIsPfmsOwn(t *testing.T) {
 		painter, stepping := tabPainterFixture(t, f)
 		painter.cadence.idleRefresh = time.Nanosecond // every tick re-reads the tabs
 		polls := 0
-		painter.tabs = func(context.Context, string) ([]TabDecoration, error) {
+		painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 			polls++
 			if polls > 2 {
 				return nil, nil

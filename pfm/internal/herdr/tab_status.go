@@ -51,8 +51,8 @@ type TabDecoration struct {
 	Retained bool
 }
 
-// TabProvider enumerates the chats displayed on one Herdr endpoint.
-type TabProvider func(context.Context, string) ([]TabDecoration, error)
+// TabProvider enumerates the chats on one Herdr endpoint; a read not fresh may reuse what its TabProbe saw unchanged.
+type TabProvider func(ctx context.Context, socket string, fresh bool) ([]TabDecoration, error)
 
 // TabProbe says, without the TabProvider's fleet scan, whether the inputs
 // behind its last enumeration on one Herdr endpoint changed since; an error

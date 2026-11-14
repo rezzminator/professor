@@ -40,7 +40,7 @@
 #                /etc/ld.so.*, /etc/localtime, /etc/nsswitch.conf, /etc/passwd, the go tool's work
 #                directory holding the binary, each ancestor directory of an allowed root (the path itself
 #                only), and each row of pfm/.arch/unit-proof-allow.txt (`{glob}⇥{r|rw|absent}⇥{reason}`, an absent row only while the path does not exist, `*`
-#                crossing `/`, a leading `{checkout}` or `{out}` standing for that root); a socket on a loopback address or a unix path under a run-made directory
+#                crossing `/`, a leading `{checkout}` or `{out}` standing for that root, a leading `{above}` for each directory above the checkout); a socket on a loopback address or a unix path under a run-made directory
 #   residue      every other path (kind read or write); every exec after the binary's own (kind exec);
 #                every other socket address (kind socket); each tripwire.log line (kind tripwire)
 #   a relative path without a directory descriptor resolves against the package directory, where go
@@ -112,7 +112,13 @@ def load_allow(path, checkout, out):
             parts = text.split('\t')
             if len(parts) != 3 or parts[1] not in ('r', 'rw', 'absent') or not parts[2].strip():
                 raise ValueError('allow row without a reason or mode, %s:%d: %s' % (path, number, text))
-            rows.append((parts[0].replace('{checkout}', checkout).replace('{out}', out), parts[1]))
+            glob = parts[0].replace('{checkout}', checkout).replace('{out}', out)
+            if glob.startswith('{above}'):
+                # one row per directory above the checkout, the filesystem root last: a walk up from it
+                # passes them all, however deep the checkout sits (/worktree in the fence, a runner's work tree)
+                rows.extend((a.rstrip('/') + glob[len('{above}'):], parts[1]) for a in ancestors(checkout))
+            else:
+                rows.append((glob, parts[1]))
     return rows
 
 ESCAPE = re.compile(r'\\(x[0-9a-fA-F]{2}|[0-7]{1,3}|.)')

@@ -189,6 +189,13 @@ pid=$!
 set +m
 for _ in $(seq 100); do grep -q '^run view' "$S/gh.log" && break; sleep 0.2; done # POLL-STEP: the first status poll
 kill -INT "$pid"
+# POLL-STEP: run.sh ends on the INT; one that ignores it (INT ignored on entry: no trap can catch it) polls a
+# hung run forever, so 20 s on its process group is KILLed and named
+for _ in $(seq 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+if kill -0 "$pid" 2>/dev/null; then
+  kill -KILL -- "-$pid" 2>/dev/null
+  echo "ci-run_test: run.sh still running 20 s after its INT (was INT ignored on its entry?) — KILLed" >>"$S/int.out"
+fi
 wait "$pid"
 rc=$?
 [ "$rc" = 130 ] && grep -qx 'run cancel 4242 --repo acme/widget' "$S/gh.log" &&

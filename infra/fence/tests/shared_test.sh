@@ -322,7 +322,8 @@ if [[ ! -d "$dead" ]] && grep -q '^docker exec pfm-fence-old-key ' "$REC" && gre
 # Detection is Docker facts, never the host name; explicit profile avoids the probe.
 for facts in 'Docker Desktop|10|8267812044|desktop' 'Docker Desktop|24|126701535232|desktop' 'Ubuntu Linux|23|126701535232|native' 'Ubuntu Linux|8|126701535232|desktop' 'Debian Linux|23|5368709120|desktop'; do
   want="${facts##*|}"; STUB_INFO="${facts%|*}"
-  if got="$(PFM_FENCE_PROFILE=auto fence_config_init && printf '%s' "$PFM_FENCE_PROFILE")" && [[ "$got" == "$want" ]]; then ok "Docker facts select $want"; else bad "Docker facts select $want" "$got"; fi
+  # a plain assignment, not a prefix: Bash 5.3 restores a function's prefix variable on return, export or not
+  if got="$(PFM_FENCE_PROFILE=auto; fence_config_init && printf '%s' "$PFM_FENCE_PROFILE")" && [[ "$got" == "$want" ]]; then ok "Docker facts select $want"; else bad "Docker facts select $want" "$got"; fi
 done
 out="$(PFM_FENCE_PROFILE=native STUB_INFO=broken fence_config_init 2>&1)"; rc=$?
 [[ $rc == 0 ]] && ok "explicit profile wins over unreadable Docker facts" || bad "explicit profile precedence" "$out"

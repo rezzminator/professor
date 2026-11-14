@@ -71,7 +71,10 @@ shtest_as_root() {
   [ "$(id -u)" = 0 ] && return 0
   if sudo -n true 2>/dev/null; then
     rm -rf -- "$T"
-    exec sudo -n --preserve-env env "PATH=$PATH" HOME=/root bash "$@"
+    # The whole environment travels as env's arguments: sudo-rs ignores a bare --preserve-env.
+    local -a vars
+    mapfile -d '' vars < <(env -0)
+    exec sudo -n env -- "${vars[@]}" "PATH=$PATH" HOME=/root bash "$@"
   fi
   echo "$SHTEST_TAG: FAILED — this suite needs root (the fence's user); not root and no passwordless sudo" >&2
   exit 1

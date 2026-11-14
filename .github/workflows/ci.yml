@@ -137,6 +137,9 @@ jobs:
         env:
           PFM_DEV_FENCE: "1"
           PFM_FENCE_PROFILE: native
+          # The fence image's ENV: every build static, never linking the runner's libc
+          # (pfm.unit-proof judges that read a reach); the race step turns cgo on itself.
+          CGO_ENABLED: "0"
           PFM_GATE_ONLY: ${{ matrix.only }}
           PFM_GATE_SKIP: ${{ matrix.skip }}
           # The fence's per-step bound derives from its own gate budget; a

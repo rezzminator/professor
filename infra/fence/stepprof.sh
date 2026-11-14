@@ -192,6 +192,9 @@ trap '"'"'__sp_rc=$?; if [[ ${FUNCNAME[0]-} != stepprof_* ]]; then { printf "ERR
   stepprof_us deadline_us "$start"
   stepprof_fmt deadline $((deadline_us + bound_us)) 6
   ( # the step: sources the env file first so the ERR trap covers a shell function's own body
+    # Bash 5.3 starts this background subshell with SIGINT and SIGQUIT ignored, as no earlier Bash did; the step
+    # gets the caller's dispositions back (an ignore the caller inherited stays: Bash cannot reset that one)
+    trap - INT QUIT
     export BASH_ENV=$env_file PFM_TEST_DEADLINE_EPOCH=$deadline
     # shellcheck disable=SC1090 # the env file is generated above, per step
     source "$env_file"

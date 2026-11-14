@@ -12,6 +12,8 @@
 /.git	absent	project-root discovery (gitroot, workbench, hookentry's git and epic doors) walks up from a test's temp directory and stats .git in every ancestor, the filesystem root last: the walk has no seam that stops it at the temp directory
 /tmp/.git	absent	the same upward walk, at the system temp directory that holds every run-made directory
 /.professor*	absent	the upward walk for .professor/baseline.json (professor project root, workbench persona) reaching the filesystem root
+{above}/.git	absent	the upward .git walk past the checkout: project-root discovery from the package directory goes on through every directory above the checkout, the filesystem root last
+{above}/.professor*	absent	the same upward walk for .professor/baseline.json, past the checkout through every directory above it
 /tmp/.professor*	absent	the same upward baseline walk, at the system temp directory
 /fakegit.json	absent	ancestor walk of the fakegit state lookup above the temp dir (no seam bounds it)
 /tmp/fakegit.json	absent	ancestor walk of the fakegit state lookup above the temp dir (no seam bounds it)
@@ -20,13 +22,14 @@
 {checkout}/*.git	r	project-root and git-dir discovery stats .git in every ancestor of the package directory or a checkout-relative cwd; no seam bounds the walk
 {checkout}/*.professor/baseline.json	r	the same upward walk for .professor/baseline.json (professor project root, workbench persona) from the package directory
 */.git/worktrees/*/commondir	r	git-dir resolution of a flight worktree reads the commondir pointer beside its gitfile
-{checkout}/pfm/internal/*example.pfm.config.json	absent	config discovery probes the example config relative to the package directory and its ancestors
-/work*	absent	invented fixture cwd /work/**: the project-root walk, cwd existence checks and transcript lookups stat a host path that exists on no host; the assertions read the literal
-/jail*	absent	invented fixture root /jail/** (same reason as /work*)
-/fixture*	absent	invented fixture root /fixture/** (same reason as /work*)
-/opt/pfm*	absent	invented install root /opt/pfm/** of the restart tests (same reason as /work*)
+{checkout}/pfm/*example.pfm.config.json	absent	config discovery probes the example config relative to the package directory and its ancestors
+/work	absent	invented fixture cwd /work/**: the project-root walk, cwd existence checks and transcript lookups stat a host path that exists on no host; the assertions read the literal
+/work/*	absent	invented fixture cwd /work/**: the project-root walk, cwd existence checks and transcript lookups stat a host path that exists on no host; the assertions read the literal
+/jail*	absent	invented fixture root /jail/** (same reason as /work)
+/fixture*	absent	invented fixture root /fixture/** (same reason as /work)
+/opt/pfm*	absent	invented install root /opt/pfm/** of the restart tests (same reason as /work)
 /opt	r	the stat of the invented install root
-/accounts*	absent	invented account root /accounts/** (same reason as /work*)
+/accounts*	absent	invented account root /accounts/** (same reason as /work)
 /h	absent	invented home /h of the themesync tests
 /h/*	absent	invented home /h/** of the themesync tests
 /elsewhere*	absent	invented foreign path of the installer and codexappendix tests
@@ -50,12 +53,19 @@
 /CLAUDE.md	absent	the upward walk for a CLAUDE.md orientation file reaching the filesystem root
 /tmp/CLAUDE.md	absent	the same upward walk at the system temp directory
 /engine-sync/internal/cli/main.go	r	the engine-sync source the fence mounts at /engine-sync, whose cli.Version the enginesync version test reads (TestMinimumVersionDoesNotExceedEngineSyncSource); off the fence it reads the checkout's plugins/engine-sync, and this path is absent
+{checkout}/plugins/engine-sync/internal/cli/main.go	r	the same version test off the fence (a runner, a host): /engine-sync is absent, so it reads the checkout's plugins/engine-sync submodule, whose files the checkout's own file list does not hold
 /dev/tty	rw	the chat end test's helper owns a pty session the test created and opens its controlling terminal, /dev/tty, to prove the session leader (internal/chat/kill_server_linux_test.go); there it is the test's own pty, never the operator's terminal
 /bin/zsh	r	the installer validates the account login shell by a stat before it wires the Herdr shell (installer/herdr_shell.go validateHerdrShell); the herdr shell tests name the system zsh as the fixture shell, and no runner seam answers a stat
 /bin	r	the hookentry launch tests and the testjail path tests name the system /bin/echo as a fixture real binary; the launcher stats it and no runner seam answers a stat
 /bin/echo	r	the same fixture binary
 /usr/bin	r	the same fixture binary resolved through its /usr/bin directory
 /usr/bin/echo	r	the same fixture binary
+/usr	r	the same fixture binary: resolving /usr/bin/echo stats /usr first (in the fence /usr is an ancestor of GOROOT; on a runner it is not)
+/usr/lib	r	the same fixture binary resolved where /usr/bin/echo links into uutils coreutils (Ubuntu 26.04, the runner image): each directory of the link target is stat-ed
+/usr/lib/cargo	r	the same uutils link target
+/usr/lib/cargo/bin	r	the same uutils link target
+/usr/lib/cargo/bin/coreutils	r	the same uutils link target
+/usr/lib/cargo/bin/coreutils/echo	r	the same uutils link target, the fixture binary itself
 /a	absent	testjail path-scrub tests name /a and /b as invented PATH entries
 /b	absent	the same invented PATH entries
 /checks.sh	absent	the pcm guard resolves the string literal /checks.sh of a python command it scans as a path, whatever the surrounding expression builds

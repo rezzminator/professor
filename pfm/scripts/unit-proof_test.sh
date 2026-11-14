@@ -19,7 +19,7 @@ eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected: $2" "actual:  
 CO=$T/co
 mkdir -p "$CO/pfm/internal/x" "$CO/pfm/.arch" "$T/goroot" "$T/gowork/b001"
 printf 'package x\n' > "$CO/pfm/internal/x/x.go"
-printf '/.dockerenv\tr\tthe fence container marker\n{checkout}/pfm/internal/z\tr\ta directory the allow row names\n{checkout}/pfm/internal/gone*\tabsent\ta probe that finds nothing\n' > "$CO/pfm/.arch/unit-proof-allow.txt"
+printf '/.dockerenv\tr\tthe fence container marker\n{checkout}/pfm/internal/z\tr\ta directory the allow row names\n{checkout}/pfm/internal/gone*\tabsent\ta probe that finds nothing\n{above}/.wk*\tabsent\ta walk up past the checkout\n' > "$CO/pfm/.arch/unit-proof-allow.txt"
 # The system temp root the zones name: the fixture's records under it are the run's own scratch.
 SYSTMP=/tmp
 make_out() {
@@ -105,7 +105,8 @@ eq 'filter: a row samples the record that made it' \
 
 # An fd strace prints bare (its path past PATH_MAX) is named by the open that returned it, in any
 # thread's file; a relative chdir names nothing; only a testjail-made directory under the system temp
-# directory is the run's; an `absent` allow row holds only while its path does not exist.
+# directory is the run's; an `absent` allow row holds only while its path does not exist; an `{above}` row holds
+# in every directory above the checkout, the root included, never inside it.
 mkdir -p "$T/trace/chain"
 printf 'x\n' > "$CO/pfm/internal/gone2"
 cat > "$T/trace/chain/t.400" <<EOF
@@ -118,6 +119,9 @@ mkdirat(AT_FDCWD, "$SYSTMP/tmux-1000", 0700) = 0
 connect(7, {sa_family=AF_UNIX, sun_path="$SYSTMP/tmux-1000/default"}, 26) = 0
 newfstatat(AT_FDCWD, "$CO/pfm/internal/gone1", 0x1, 0) = -1 ENOENT (No such file or directory)
 openat(AT_FDCWD, "$CO/pfm/internal/gone2", O_RDONLY) = 3</gone2>
+newfstatat(AT_FDCWD, "$T/.wk", 0x1, 0) = -1 ENOENT (No such file or directory)
+newfstatat(AT_FDCWD, "/.wk", 0x1, 0) = -1 ENOENT (No such file or directory)
+newfstatat(AT_FDCWD, "$CO/pfm/.wk", 0x1, 0) = -1 ENOENT (No such file or directory)
 EOF
 cat > "$T/trace/chain/t.401" <<'EOF'
 openat(319, "eeee", O_RDONLY|O_DIRECTORY) = 320
@@ -128,8 +132,8 @@ EOF
 make_out "$T/chainout"
 bash "$SUT" --filter "$T/chainout" internal/chain "$T/trace/chain" "$BIN" > "$T/chain.out" 2>&1
 rc=$?
-eq 'filter: a bare fd is named by its open in any thread; a relative chdir is no reach; a foreign temp directory and an existing absent-row path are' \
-  "0|$(printf '%s\n' "read	/srv/dddd	1" "read	{checkout}/pfm/internal/gone2	1" "socket	$SYSTMP/tmux-1000/default	1" "write	/srv/dddd/x	1" "write	$SYSTMP/tmux-1000	1")" \
+eq 'filter: a bare fd is named by its open in any thread; a relative chdir is no reach; a foreign temp directory, an existing absent-row path and an {above} path inside the checkout are' \
+  "0|$(printf '%s\n' "read	/srv/dddd	1" "read	{checkout}/pfm/.wk	1" "read	{checkout}/pfm/internal/gone2	1" "socket	$SYSTMP/tmux-1000/default	1" "write	/srv/dddd/x	1" "write	$SYSTMP/tmux-1000	1")" \
   "$rc|$(cut -f1-3 "$T/chainout/reach/internal%chain.tsv")"
 
 mkdir -p "$T/trace/bad"

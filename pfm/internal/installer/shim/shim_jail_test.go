@@ -789,7 +789,9 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 			got := ""
 			for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
 				content, _ := os.ReadFile(log)
-				got = string(content)
+				// The shell counts whole clock seconds, so an instant command that
+				// straddles a second boundary reports 1: both readings are correct.
+				got = strings.ReplaceAll(string(content), "[--seconds][1]", "[--seconds][0]")
 				if got == test.want || time.Now().After(deadline) {
 					break
 				}

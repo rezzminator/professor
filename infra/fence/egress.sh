@@ -216,7 +216,9 @@ run() {
   limit="$(python3 -c 'import sys; print(max(1, int(float(sys.argv[1]) * 20)))' "$EGRESS_LISTEN_WAIT_S")"
   ready=0
   for ((i=0; i<limit; i++)); do
-    if grep -q 'listening on' "$log"; then ready=1; break; fi
+    # -s: the recorder's fork creates the log, so until it has, a poll reads "not listening yet"
+    # and prints no grep error into the run's output.
+    if grep -qs 'listening on' "$log"; then ready=1; break; fi
     if ! kill -0 "$pid" 2>/dev/null; then break; fi
     sleep 0.05
   done

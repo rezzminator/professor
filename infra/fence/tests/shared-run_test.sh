@@ -229,6 +229,16 @@ if [ -n "$DAEMON" ] && mkdir -p /var/fence && mount -t tmpfs tmpfs /var/fence; t
     for ((i = 0; i < $2; i++)); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done
     return 1
   }
+  wait_removed() { # wait_removed <tenths> <path>…: 0 once none of the paths is left
+    local i p left
+    for ((i = 0; i < $1; i++)); do
+      left=''
+      for p in "${@:2}"; do [ ! -e "$p" ] || left="$p"; done
+      [ -n "$left" ] || return 0
+      sleep 0.1
+    done
+    return 1
+  }
   # idle: a live run holds it past PFM_FENCE_IDLE_S; once none is live it closes and exits 0
   mkdir -p /var/fence/live /var/fence/runs
   sleep 30 & held=$!
@@ -249,7 +259,8 @@ if [ -n "$DAEMON" ] && mkdir -p /var/fence && mount -t tmpfs tmpfs /var/fence; t
   sleep 31 & orphan=$!
   echo 999999 > /var/fence/live/d-dead; echo "$orphan" > /var/fence/runs/d-dead/ns.pid
   PFM_FENCE_IDLE_S=600 bash -c "$DAEMON" & dmn=$!
-  if wait_gone "$orphan" 50 && [ ! -e /var/fence/live/d-dead ] && [ ! -e /var/fence/runs/d-dead ]; then
+  # The daemon kills the run, then removes its records: the removal is waited for, never read at the kill.
+  if wait_gone "$orphan" 50 && wait_removed 50 /var/fence/live/d-dead /var/fence/runs/d-dead; then
     ok "a run whose supervisor died is killed and its records removed"
   else bad "the dead supervisor's run" "orphan alive=$(kill -0 "$orphan" 2>/dev/null && echo yes || echo no)" "$(ls -R /var/fence)"; kill "$orphan" 2>/dev/null; fi
   wait "$orphan" 2>/dev/null

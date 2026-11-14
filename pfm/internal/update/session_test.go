@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // upstreamCommit changes one store template and commits it, as a later
@@ -258,7 +259,7 @@ func TestUpdatedRowListsTheOldestCommitsFirstPastTheCap(t *testing.T) {
 	golden(
 		t,
 		"updated_row_cap.txt",
-		regexp.MustCompile(`/tmp/[^\s"':]*`).
+		testjail.TempPath(`/[^\s"':]*`).
 			ReplaceAllString(regexp.MustCompile(`\b[0-9a-f]{7,40}\b`).ReplaceAllString(report, "{sha}"), "{tmp}"),
 	)
 }

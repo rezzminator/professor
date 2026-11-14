@@ -109,7 +109,7 @@ internal/gather/herdrprobe_jail_test.go 1
 internal/gather/labels_jail_test.go 1
 internal/gather/pidalive_jail_test.go 1
 internal/gather/procfs_darwin_jail_test.go 2
-internal/gather/procfs_jail_test.go 1
+internal/gather/procfs_jail_test.go 2
 internal/gather/procfs_native_linux_jail_test.go 1
 internal/gather/rename_second_writer_jail_test.go 5
 internal/gather/signal_darwin_jail_test.go 1
@@ -167,7 +167,7 @@ internal/mcpserv/herdr_jail_test.go 1
 internal/mcpserv/metadata_identity_jail_test.go 9
 internal/mcpserv/server_jail_test.go 3
 internal/mcpserv/server_stress_jail_test.go 1
-internal/mcpserv/stdio_jail_test.go 1
+internal/mcpserv/stdio_jail_test.go 2
 internal/mockengine/agents_jail_test.go 1
 internal/mockengine/claude_background_job_jail_test.go 1
 internal/mockengine/claude_jail_test.go 5
@@ -214,7 +214,8 @@ internal/spawn/tmux_launch_jail_test.go 2
 internal/spawn/tmux_titles_jail_test.go 5
 internal/sqlitedb/memory_jail_test.go 2
 internal/sqlitedb/sqlitedb_jail_test.go 5
-internal/stale/stale_jail_test.go 1
+internal/stale/stale_jail_test.go 2
+internal/stats/stats_darwin_jail_test.go 1
 internal/statusline/cache_window_jail_test.go 1
 internal/statusline/model_segment_jail_test.go 1
 internal/statusline/peripheral_jail_test.go 1

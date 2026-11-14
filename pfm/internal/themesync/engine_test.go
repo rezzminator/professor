@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
@@ -311,16 +311,13 @@ func row(t *testing.T, report Report, surface string) SurfaceResult {
 	return SurfaceResult{}
 }
 
-// tempPath matches a test's temporary directory inside a row's detail, which
-// wantVerdict compares as {tmp}.
-var tempPath = regexp.MustCompile(`/tmp/[^\s"':]*?/\d{3}\b`)
-
 // wantVerdict asserts a surface row's verdict and its whole detail, every
-// temporary directory in it written {tmp}.
+// test's temporary directory in it (up to its numbered t.TempDir) written {tmp}.
 func wantVerdict(t *testing.T, report Report, surface string, want Verdict, detail string) {
 	t.Helper()
 	got := row(t, report, surface)
-	if gotDetail := tempPath.ReplaceAllString(got.Detail, "{tmp}"); got.Verdict != want || gotDetail != detail {
+	gotDetail := testjail.TempPath(`/[^\s"':]*?/\d{3}\b`).ReplaceAllString(got.Detail, "{tmp}")
+	if got.Verdict != want || gotDetail != detail {
 		t.Errorf("%s row = %s %q, want %s %q", surface, got.Verdict, gotDetail, want, detail)
 	}
 }

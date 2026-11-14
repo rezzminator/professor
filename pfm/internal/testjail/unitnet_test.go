@@ -15,7 +15,7 @@ import (
 // door a unit test could still reach unscripted: a home file, a real tool, a tmux socket, a live
 // seat. Each read fails, or finds nothing, on a path that names the variable it came through.
 func TestUnitNetFailsEveryDoorNamingItsVariable(t *testing.T) {
-	dir := t.TempDir()
+	dir := ShortRoot(t)
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "11111111-2222-3333-4444-555555555555")
 	if err := pointUnitNetDirs(dir, func(name, value string) error { t.Setenv(name, value); return nil }); err != nil {
@@ -76,5 +76,21 @@ func TestUnitNetFailsEveryDoorNamingItsVariable(t *testing.T) {
 			entries,
 			err,
 		)
+	}
+}
+
+func TestUnitNetTMPDIRMovesIntoTheNetOnlyAboveMacOSSocketBudget(t *testing.T) {
+	for _, tc := range []struct {
+		bytes int
+		want  string
+	}{
+		{108, "/r/u1"},
+		{105, "/r/u1"},
+		{104, "/r"},
+		{103, "/r"},
+	} {
+		if got := unitNetTMPDIR("/r", "/r/u1", tc.bytes); got != tc.want {
+			t.Errorf("unitNetTMPDIR(/r, /r/u1, %d) = %q, want %q", tc.bytes, got, tc.want)
+		}
 	}
 }

@@ -65,6 +65,9 @@ func Resolve(name string) (string, error) {
 		if gateErr := platformGate(name); gateErr != nil {
 			return "", gateErr
 		}
+		if command, served := unitNetServedCommand(name); served {
+			return command, nil
+		}
 		return "", err
 	}
 	if cached, ok := resolveCached(name); ok {

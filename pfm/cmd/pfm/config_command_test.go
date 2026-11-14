@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,14 +52,46 @@ func golden(t *testing.T, file, got string) {
 	want, err := os.ReadFile(filepath.Join("testdata", file))
 	if err != nil || string(want) != got {
 		t.Fatalf(
-			"testdata/%s: %v\nwant:\n%s\nactual:\n%s\nGOLDEN cmd/pfm/testdata/%s = %q",
+			"testdata/%s: %v · %s\nwant:\n%s\nactual:\n%s\nGOLDEN cmd/pfm/testdata/%s = %q",
 			file,
 			err,
+			goldenFirstDifference(string(want), got),
 			want,
 			got,
 			file,
 			got,
 		)
+	}
+}
+
+// goldenFirstDifference names the first line a golden and the output disagree on, so the failure's
+// first line carries it where only that line survives (a CI log's per-test excerpt).
+func goldenFirstDifference(want, got string) string {
+	wantLines, gotLines := strings.Split(want, "\n"), strings.Split(got, "\n")
+	for index := 0; index < len(wantLines) || index < len(gotLines); index++ {
+		var wantLine, gotLine string
+		if index < len(wantLines) {
+			wantLine = wantLines[index]
+		}
+		if index < len(gotLines) {
+			gotLine = gotLines[index]
+		}
+		if index >= len(wantLines) || index >= len(gotLines) || wantLine != gotLine {
+			return fmt.Sprintf("line %d: actual %q, want %q", index+1, gotLine, wantLine)
+		}
+	}
+	return "no line differs"
+}
+
+func TestGoldenFirstDifferenceNamesTheFirstLineThatDiffers(t *testing.T) {
+	for _, row := range []struct{ want, got, diff string }{
+		{"a\nb\n", "a\nb\n", "no line differs"},
+		{"a\nb\nc\n", "a\nB\nc\n", `line 2: actual "B", want "b"`},
+		{"a\nb\n", "a\n", `line 2: actual "", want "b"`},
+	} {
+		if got := goldenFirstDifference(row.want, row.got); got != row.diff {
+			t.Errorf("goldenFirstDifference(%q, %q) = %q, want %q", row.want, row.got, got, row.diff)
+		}
 	}
 }
 

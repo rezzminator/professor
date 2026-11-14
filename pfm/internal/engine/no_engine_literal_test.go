@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep"
 )
 
 func TestNoEngineLiteralOutsideEnginePackage(t *testing.T) {
@@ -47,7 +49,7 @@ func TestNoEngineLiteralOutsideEnginePackage(t *testing.T) {
 		}
 		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
-			if rel == "internal/engine" {
+			if rel == "internal/engine" || sourcesweep.SkipDir(rel) {
 				return filepath.SkipDir
 			}
 			return nil

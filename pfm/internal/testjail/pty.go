@@ -48,3 +48,16 @@ func PTYCommand(argv ...string) (*exec.Cmd, error) {
 	scriptArgv := ptyScriptArgv(scriptBinary, argv)
 	return exec.Command(scriptArgv[0], scriptArgv[1:]...), nil
 }
+
+// bsdScriptEOFEcho is what BSD script(1) leaves in the pty's output when its
+// own stdin ends: it writes the EOF character into the pty, whose line
+// discipline echoes it under ECHOCTL as "^D" and two backspaces. util-linux
+// script writes nothing, so the text never appears on Linux.
+const bsdScriptEOFEcho = "^D\b\b"
+
+// PTYOutput is a PTYCommand's output as the command under test wrote it, with
+// BSD script(1)'s echoed end-of-input removed, so one expected value holds on
+// Linux and macOS.
+func PTYOutput(output []byte) string {
+	return strings.ReplaceAll(string(output), bsdScriptEOFEcho, "")
+}

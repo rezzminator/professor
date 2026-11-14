@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
@@ -114,4 +115,14 @@ func runInFence() int {
 func refuseHost(format string, args ...any) int {
 	warnSetup("REFUSED — pfm tests run only in the fence (dev.sh iso test pfm); "+format, args...)
 	return 1
+}
+
+// childCoverageLine is the summary line a coverage build of a test binary (go test -cover, dev.sh iso
+// cover) prints after every run, its re-exec children's included.
+var childCoverageLine = regexp.MustCompile(`(?m)^coverage: [^\n]*\n`)
+
+// ChildOutput is a re-exec of the test binary's output as an uninstrumented build prints it: a test
+// comparing its child's whole output reads it through here, so a coverage run asserts the same text.
+func ChildOutput(output []byte) string {
+	return childCoverageLine.ReplaceAllString(string(output), "")
 }

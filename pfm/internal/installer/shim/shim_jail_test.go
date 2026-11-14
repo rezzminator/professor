@@ -258,8 +258,8 @@ func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("owned terminal: %v: %s", err, output)
 		}
-		if len(output) != 0 {
-			t.Fatalf("an owned terminal kept running past _pfm_own_terminal: %q", output)
+		if got := testjail.PTYOutput(output); got != "" {
+			t.Fatalf("an owned terminal kept running past _pfm_own_terminal: %q", got)
 		}
 	})
 
@@ -477,7 +477,7 @@ printf 'PICKER-LAUNCHED\n'
 	if err != nil {
 		t.Fatalf("run auto-open shell on a pty: %v: %s", err, output)
 	}
-	got := string(output)
+	got := testjail.PTYOutput(output)
 	// The pty turns the shim's newline into CR LF.
 	want := "pfm: cleared a chat environment (CLAUDECODE=1) this terminal inherited from its app —" +
 		" relaunch the app outside any chat to stop it\r\n"

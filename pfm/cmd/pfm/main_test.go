@@ -674,6 +674,10 @@ func rooted(s, root string) string { return strings.ReplaceAll(s, root, "{root}"
 
 // scrub normalises what varies per run: the temp root, session ids, socket names and clock stamps.
 func scrub(s, root string) string {
+	// The host goes first: a macOS host name can hold a UUID the {uuid} rule would rewrite.
+	if host, err := os.Hostname(); err == nil {
+		s = strings.ReplaceAll(s, "host "+host+" ", "host {host} ")
+	}
 	for _, r := range []struct{ pattern, token string }{
 		{`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`, "{uuid}"},
 		{`\b(cc|cx|oc)-\d+-\d+-\d+\b`, "{socket}"},
@@ -682,9 +686,6 @@ func scrub(s, root string) string {
 		{`\b[0-9a-f]{32}\b`, "{hash}"},
 	} {
 		s = regexp.MustCompile(r.pattern).ReplaceAllString(s, r.token)
-	}
-	if host, err := os.Hostname(); err == nil {
-		s = strings.ReplaceAll(s, "host "+host+" ", "host {host} ")
 	}
 	if root == "" {
 		return s

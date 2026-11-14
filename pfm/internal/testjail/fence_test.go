@@ -107,3 +107,17 @@ func TestGuardRunsOnlyAnArmedUnitBinaryOffTheFence(t *testing.T) {
 		}
 	}
 }
+
+func TestChildOutputDropsOnlyTheCoverageSummary(t *testing.T) {
+	for _, tc := range []struct{ name, output, want string }{
+		{"uninstrumented", "--- FAIL: TestX (0.00s)\nFAIL\n", "--- FAIL: TestX (0.00s)\nFAIL\n"},
+		{"coverage build", "--- FAIL: TestX (0.00s)\nFAIL\ncoverage: 4.1% of statements in ./...\n", "--- FAIL: TestX (0.00s)\nFAIL\n"},
+		{"passing coverage build", "PASS\ncoverage: [no statements]\n", "PASS\n"},
+		{"a word mid-line", "    x_test.go:9: coverage: 4.1% of statements\n", "    x_test.go:9: coverage: 4.1% of statements\n"},
+		{"empty", "", ""},
+	} {
+		if got := ChildOutput([]byte(tc.output)); got != tc.want {
+			t.Errorf("%s: ChildOutput(%q) = %q, want %q", tc.name, tc.output, got, tc.want)
+		}
+	}
+}

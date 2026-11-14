@@ -18,10 +18,12 @@ CO=$T/co
 mkdir -p "$CO/pfm/internal/x" "$CO/pfm/.arch" "$T/goroot" "$T/gowork/b001"
 printf 'package x\n' > "$CO/pfm/internal/x/x.go"
 printf '/.dockerenv\tr\tthe fence container marker\n{checkout}/pfm/internal/z\tr\ta directory the allow row names\n{checkout}/pfm/internal/gone*\tabsent\ta probe that finds nothing\n' > "$CO/pfm/.arch/unit-proof-allow.txt"
+# The system temp root the zones name: the fixture's records under it are the run's own scratch.
+SYSTMP=/tmp
 make_out() {
   mkdir -p "$1/profile"
   printf 'pfm/internal/x/x.go\0pfm/.arch/unit-proof-allow.txt\0' > "$1/files.z"
-  printf 'checkout\t%s\ngoroot\t%s\nsystmp\t/tmp\nfiles\t%s\n' "$CO" "$T/goroot" "$1/files.z" > "$1/zones.tsv"
+  printf 'checkout\t%s\ngoroot\t%s\nsystmp\t%s\nfiles\t%s\n' "$CO" "$T/goroot" "$SYSTMP" "$1/files.z" > "$1/zones.tsv"
   printf 'linux\n' > "$1/goos"
 }
 OUT=$T/out
@@ -31,12 +33,12 @@ TR=$T/trace/x
 mkdir -p "$TR"
 cat > "$TR/t.100" <<EOF
 execve("$BIN", ["$BIN", "-test.v"], 0x1 /* 3 vars */) = 0
-openat(AT_FDCWD</tmp>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+openat(AT_FDCWD<$SYSTMP>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
 openat(AT_FDCWD, "$T/gowork/b001/importcfg", O_RDONLY|O_CLOEXEC) = 3
-mkdirat(AT_FDCWD</w/pfm/internal/x>, "/tmp/j41", 0700) = 0
-openat(AT_FDCWD, "/tmp/j41/u7/XDG_STATE_HOME/a", O_WRONLY|O_CREAT, 0600) = 5</tmp/j41/u7/XDG_STATE_HOME/a>
-openat(AT_FDCWD, "/tmp/cc-sid/9", O_RDONLY) = 4</tmp/cc-sid/9>
-openat(AT_FDCWD, "/tmp/j41/u7/T", O_RDONLY|O_DIRECTORY|O_CLOEXEC) = 11</tmp/j41/u7/T>
+mkdirat(AT_FDCWD</w/pfm/internal/x>, "$SYSTMP/j41", 0700) = 0
+openat(AT_FDCWD, "$SYSTMP/j41/u7/XDG_STATE_HOME/a", O_WRONLY|O_CREAT, 0600) = 5<$SYSTMP/j41/u7/XDG_STATE_HOME/a>
+openat(AT_FDCWD, "$SYSTMP/cc-sid/9", O_RDONLY) = 4<$SYSTMP/cc-sid/9>
+openat(AT_FDCWD, "$SYSTMP/j41/u7/T", O_RDONLY|O_DIRECTORY|O_CLOEXEC) = 11<$SYSTMP/j41/u7/T>
 unlinkat(11, "dddddddddddd", AT_REMOVEDIR) = 0
 openat(AT_FDCWD, "$CO/pfm/internal/x/x.go", O_RDONLY|O_CLOEXEC) = 7
 openat(AT_FDCWD, "$CO/pfm.config.json", O_RDONLY|O_CLOEXEC) = 6
@@ -47,13 +49,13 @@ openat(AT_FDCWD<$CO/pfm/internal/x>, "[vsyscall]", O_RDONLY|O_CLOEXEC) = -1 ENOE
 openat(AT_FDCWD<$CO/pfm/internal/z>, "", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
 openat(AT_FDCWD<$CO/pfm/internal/x>, "[other]", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
 newfstatat(AT_FDCWD, "/.dockerenv", 0x1, 0) = 0
-connect(7, {sa_family=AF_UNIX, sun_path="/tmp/tmux-1000/default"}, 26) = 0
+connect(7, {sa_family=AF_UNIX, sun_path="$SYSTMP/tmux-1000/default"}, 26) = 0
 connect(8, {sa_family=AF_INET, sin_port=htons(8080), sin_addr=inet_addr("127.0.0.1")}, 16) = 0
 utimensat(AT_FDCWD</w>, "/proc/self/fd/5", NULL, 0) = 0
 openat(AT_FDCWD, "/dev/ptmx", O_RDWR|O_CLOEXEC) = 9</dev/pts/ptmx>
 openat(AT_FDCWD, "/dev/pts/0", O_RDWR|O_NOCTTY|O_CLOEXEC) = 10</dev/pts/0>
 openat(AT_FDCWD, "/dev/tty", O_RDWR|O_CLOEXEC) = -1 ENXIO (No such device or address)
-chdir("/tmp/j41/u7/T/001") = 0
+chdir("$SYSTMP/j41/u7/T/001") = 0
 mkdirat(AT_FDCWD, "dddd", 0700) = 0
 newfstatat(AT_FDCWD, "../../dddd", 0x1, AT_SYMLINK_NOFOLLOW) = 0
 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x1) = 101
@@ -75,10 +77,10 @@ eq 'filter: each record is allowed or one reach row of its kind; a started progr
   "$(printf '%s\n' \
     "exec	herdr integration install claude	2" \
     "read	/root/.cc/3/.credentials.json	1" \
-    "read	/tmp/cc-sid/9	1" \
+    "read	$SYSTMP/cc-sid/9	1" \
     "read	{checkout}/pfm.config.json	1" \
     "read	{checkout}/pfm/internal/x/[other]	1" \
-    "socket	/tmp/tmux-1000/default	1" \
+    "socket	$SYSTMP/tmux-1000/default	1" \
     "write	/dev/tty	1")" \
   "$(cut -f1-3 "$OUT/reach/internal%x.tsv")"
 
@@ -105,13 +107,13 @@ eq 'filter: a row samples the record that made it' \
 mkdir -p "$T/trace/chain"
 printf 'x\n' > "$CO/pfm/internal/gone2"
 cat > "$T/trace/chain/t.400" <<EOF
-mkdirat(AT_FDCWD, "/tmp/j42", 0700) = 0
-openat(AT_FDCWD, "/tmp/j42", O_RDONLY|O_DIRECTORY) = 3</tmp/j42>
-openat(3</tmp/j42>, "dddd", O_RDONLY|O_DIRECTORY) = 319
+mkdirat(AT_FDCWD, "$SYSTMP/j42", 0700) = 0
+openat(AT_FDCWD, "$SYSTMP/j42", O_RDONLY|O_DIRECTORY) = 3<$SYSTMP/j42>
+openat(3<$SYSTMP/j42>, "dddd", O_RDONLY|O_DIRECTORY) = 319
 openat(5</srv>, "dddd", O_RDONLY|O_DIRECTORY) = 330
 chdir("dddd") = 0
-mkdirat(AT_FDCWD, "/tmp/tmux-1000", 0700) = 0
-connect(7, {sa_family=AF_UNIX, sun_path="/tmp/tmux-1000/default"}, 26) = 0
+mkdirat(AT_FDCWD, "$SYSTMP/tmux-1000", 0700) = 0
+connect(7, {sa_family=AF_UNIX, sun_path="$SYSTMP/tmux-1000/default"}, 26) = 0
 newfstatat(AT_FDCWD, "$CO/pfm/internal/gone1", 0x1, 0) = -1 ENOENT (No such file or directory)
 openat(AT_FDCWD, "$CO/pfm/internal/gone2", O_RDONLY) = 3</gone2>
 EOF
@@ -125,7 +127,7 @@ make_out "$T/chainout"
 bash "$SUT" --filter "$T/chainout" internal/chain "$T/trace/chain" "$BIN" > "$T/chain.out" 2>&1
 rc=$?
 eq 'filter: a bare fd is named by its open in any thread; a relative chdir is no reach; a foreign temp directory and an existing absent-row path are' \
-  "0|$(printf '%s\n' "read	/srv/dddd	1" "read	{checkout}/pfm/internal/gone2	1" "socket	/tmp/tmux-1000/default	1" "write	/srv/dddd/x	1" "write	/tmp/tmux-1000	1")" \
+  "0|$(printf '%s\n' "read	/srv/dddd	1" "read	{checkout}/pfm/internal/gone2	1" "socket	$SYSTMP/tmux-1000/default	1" "write	/srv/dddd/x	1" "write	$SYSTMP/tmux-1000	1")" \
   "$rc|$(cut -f1-3 "$T/chainout/reach/internal%chain.tsv")"
 
 mkdir -p "$T/trace/bad"
@@ -167,6 +169,9 @@ eq 'verdict FAIL: exit 1 and the line counts tests and reach rows by kind' \
   "1|UNIT-PROOF FAIL · tests 1 pass 1 fail 1 skip · reach 8 rows (1 exec · 4 read · 1 write · 1 socket · 1 tripwire) · syscalls traced · $OUT" \
   "$rc|$(tail -n 1 "$T/verdict.out")"
 eq 'verdict FAIL: the reach rows print first' 'exec herdr integration install claude ×2 (internal/x)' "$(head -n 1 "$T/verdict.out")"
+eq 'verdict FAIL: each failing test prints by package and name with its first output line, before the summary' \
+  "$(printf '%s\n' '--- FAIL internal/x TestStarts' '    x_test.go:5: UNIT-NET REFUSED start: /usr/bin/git status — fix it')" \
+  "$(sed -n '/^--- FAIL/,$p' "$T/verdict.out" | sed '$d')"
 eq 'verdict: causes.tsv names each failing or skipping top-level test, subtests rolled up, then totals' \
   "$(printf '%s\n' \
     "skip:git is not installed	internal/x	TestSkips	x_test.go:9: git is not installed" \

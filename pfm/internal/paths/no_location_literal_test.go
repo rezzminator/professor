@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep"
 )
 
 // A filesystem location is a literal only here, in its door. Production code
@@ -146,7 +148,7 @@ func TestNoLocationLiteralOutsidePaths(t *testing.T) {
 		}
 		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
-			if rel == "internal/paths" || entry.Name() == "testdata" {
+			if rel == "internal/paths" || entry.Name() == "testdata" || sourcesweep.SkipDir(rel) {
 				return filepath.SkipDir
 			}
 			return nil

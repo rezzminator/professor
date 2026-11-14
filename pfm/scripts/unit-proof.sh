@@ -52,7 +52,9 @@
 # `cause⇥count` totals — cause is the first `UNIT-NET REFUSED {door}: {name}` as `{door}:{name}`, else
 # `tripwire:{name}`, else `net-dir:{NAME}` for a path under `/u{digits}/{NAME}/`, else `skip:{message}`,
 # else `unclassified`, its evidence the output line it came from (else the test's first failure line).
-# stdout: on FAIL the first 40 reach rows, then the verdict, always the last line:
+# stdout: on FAIL the first 40 reach rows, then the first 60 failing tests, each `--- FAIL {package}
+# {test}` (a package that failed with no failing test: `(package)`) over up to 3 of its output lines;
+# then the verdict, always the last line:
 #   UNIT-PROOF {PASS|FAIL|ERROR} · tests {p} pass {f} fail {s} skip · reach {n} rows ({e} exec · {r} read ·
 #   {w} write · {k} socket · {t} tripwire) · syscalls {traced|not traced ({os})} · {out}
 # Exit 0 PASS: no failing test, no reach row, no skip naming a missing tool. 1 FAIL: any of those.
@@ -649,6 +651,18 @@ def verdict_mode(out, goos, traced):
             print('%s %s ×%s (%s)' % (row[1], row[2], row[3], row[0]))
         if len(reach) > 40:
             print('… %d more reach rows in %s/reach.tsv' % (len(reach) - 40, out))
+        # Each failing test by package and name with its first output lines, so a log whose out
+        # directory is gone (a CI runner's) still names them.
+        failed = [key for key, action in sorted(status.items()) if action == 'fail']
+        failed += [(pkg, '(package)') for pkg, action in sorted(pkgfail.items())
+                   if action == 'fail' and not any(k[0] == pkg for k in failed)]
+        for pkg, test in failed[:60]:
+            print('--- FAIL %s %s' % (pkg, test))
+            body = [l.rstrip('\n') for l in outputs.get((pkg, test), []) if not FRAME.match(l) and l.strip()]
+            for line in body[:3]:
+                print('    %s' % line.strip()[:300])
+        if len(failed) > 60:
+            print('… %d more failing tests in %s/causes.tsv' % (len(failed) - 60, out))
     if word == 'ERROR':
         print('UNIT-PROOF ERROR %s' % errors[0])
     print('UNIT-PROOF %s · tests %d pass %d fail %d skip · reach %d rows (%d exec · %d read · %d write · %d socket · %d tripwire) · syscalls %s · %s' % (

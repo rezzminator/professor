@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type fakeTmuxTitleRenudger struct {
@@ -88,7 +89,7 @@ func TestTmuxTitleRenudgeMissingDirectoryIsSuccess(t *testing.T) {
 }
 
 func TestTmuxTitleRenudgePreservesSocketValueAndIgnoresNonSockets(t *testing.T) {
-	tmuxDir := t.TempDir()
+	tmuxDir := testjail.ShortRoot(t)
 	listenOnTestSocket(t, tmuxDir, "cc-live")
 	if err := os.WriteFile(filepath.Join(tmuxDir, "not-a-socket"), []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
@@ -109,7 +110,7 @@ func TestTmuxTitleRenudgePreservesSocketValueAndIgnoresNonSockets(t *testing.T) 
 }
 
 func TestTmuxTitleRenudgeAllHostOwnedReturnsThree(t *testing.T) {
-	tmuxDir := t.TempDir()
+	tmuxDir := testjail.ShortRoot(t)
 	listenOnTestSocket(t, tmuxDir, "cc-host")
 	fake := newFakeTmuxTitleRenudger()
 	fake.options["cc-host"] = map[string]string{"set-titles": "off"}
@@ -122,7 +123,7 @@ func TestTmuxTitleRenudgeAllHostOwnedReturnsThree(t *testing.T) {
 }
 
 func TestTmuxTitleRenudgeSkipsStaleSocket(t *testing.T) {
-	tmuxDir := t.TempDir()
+	tmuxDir := testjail.ShortRoot(t)
 	listenOnTestSocket(t, tmuxDir, "cc-stale-before-read")
 	listenOnTestSocket(t, tmuxDir, "cc-stale-before-nudge")
 	fake := newFakeTmuxTitleRenudger()
@@ -137,7 +138,7 @@ func TestTmuxTitleRenudgeSkipsStaleSocket(t *testing.T) {
 }
 
 func TestTmuxTitleRenudgeReportsRealFailureWithSocketContext(t *testing.T) {
-	tmuxDir := t.TempDir()
+	tmuxDir := testjail.ShortRoot(t)
 	listenOnTestSocket(t, tmuxDir, "cx-broken")
 	fake := newFakeTmuxTitleRenudger()
 	fake.readErrs["cx-broken"] = errors.New("permission denied")
@@ -150,7 +151,7 @@ func TestTmuxTitleRenudgeReportsRealFailureWithSocketContext(t *testing.T) {
 }
 
 func TestTmuxTitleRenudgeReportsNudgeFailureWithSocketContext(t *testing.T) {
-	tmuxDir := t.TempDir()
+	tmuxDir := testjail.ShortRoot(t)
 	listenOnTestSocket(t, tmuxDir, "cc-broken")
 	fake := newFakeTmuxTitleRenudger()
 	fake.options["cc-broken"] = map[string]string{"set-titles": "on"}

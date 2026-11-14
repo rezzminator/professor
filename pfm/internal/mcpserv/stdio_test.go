@@ -27,7 +27,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -191,55 +190,6 @@ func stdioTestRunInspect(t *testing.T, service *Service, address string, inspect
 		t.Fatal("RunStdio did not return after test client closed")
 	}
 	return output
-}
-
-func TestRunStdioUsesHealthyDaemonProxy(t *testing.T) {
-	var daemonWarnings, localWarnings bytes.Buffer
-	daemon := stdioTestService("daemon", &daemonWarnings)
-	server := httptest.NewServer(proxyTestDaemon(daemon))
-	defer server.Close()
-
-	local := stdioTestService("local", &localWarnings)
-	testjail.Fleet(t)
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	local.backend.paths = resolved
-	address := proxyTestAddress(server)
-	markerPath := filepath.Join(local.backend.paths.Home, ".local", "state", "pfm", "mcp-proxy-compatible")
-	inspect := func() {
-		markerTarget, err := filepath.EvalSymlinks(markerPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		links, err := gather.NewProcFS("").FDLinks(os.Getpid())
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, link := range links {
-			if link.Target == markerTarget {
-				return
-			}
-		}
-		t.Fatalf("healthy daemon proxy does not hold marker %s", markerPath)
-	}
-	if marker := stdioTestRunInspect(t, local, address, inspect).Message; marker != "daemon" {
-		t.Fatalf("healthy daemon marker = %q, want proxy daemon marker", marker)
-	}
-	links, err := gather.NewProcFS("").FDLinks(os.Getpid())
-	if err != nil {
-		t.Fatal(err)
-	}
-	markerTarget, err := filepath.EvalSymlinks(markerPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, link := range links {
-		if link.Target == markerTarget {
-			t.Fatalf("proxy marker descriptor %d remained open after proxy returned", link.FD)
-		}
-	}
 }
 
 func TestRunStdioFallsBackWhenDaemonRuntimeDiffers(t *testing.T) {

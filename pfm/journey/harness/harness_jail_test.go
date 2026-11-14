@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // childEnv names, in a re-exec of this test binary, the one test whose body runs there for real.
@@ -35,7 +36,7 @@ func inChild(t *testing.T, body func(t *testing.T)) (out string, failed, parent 
 	if _, exited := err.(*exec.ExitError); err != nil && !exited {
 		t.Fatalf("re-exec %s: %v", t.Name(), err)
 	}
-	return string(output), err != nil, true
+	return testjail.ChildOutput(output), err != nil, true
 }
 
 // lineAfter is the text of the first output line holding marker, from marker on.

@@ -102,7 +102,8 @@ func writeSummaryStub(t *testing.T, directory, name, body string) {
 // capture ERRORED are two different facts, worded so a reader cannot
 // mistake "we never had a screen" for "we failed to read the screen".
 func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
+	tmuxBinary, err := exec.LookPath("tmux")
+	if err != nil {
 		t.Skip("tmux binary is not installed")
 	}
 	root := t.TempDir()
@@ -129,11 +130,11 @@ func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
 		Name: "seat", Engine: "cc", Path: transcriptPath, Live: true,
 		Socket: socketPath, Session: "whatever",
 	}, options)
-	if got, want := notLive.Text+" | "+strings.ReplaceAll(
-		captureFailed.Text,
-		tmuxRoot,
-		"{tmux}",
-	), "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): answer | TRANSCRIPT-ONLY (pane capture failed: capture pane: exec: \"/usr/bin/tmux\": a test process runs no real tmux: script a deps.FakeRunner through tmux.WithClientRunner(ctx, …), or call testjail.TmuxServer(t) for a real server): answer"; got != want {
+	// The host's tmux path differs by OS (/usr/bin, /opt/homebrew/bin).
+	if got, want := notLive.Text+" | "+strings.NewReplacer(
+		tmuxRoot, "{tmux}",
+		tmuxBinary, "{tmux-binary}",
+	).Replace(captureFailed.Text), "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): answer | TRANSCRIPT-ONLY (pane capture failed: capture pane: exec: \"{tmux-binary}\": a test process runs no real tmux: script a deps.FakeRunner through tmux.WithClientRunner(ctx, …), or call testjail.TmuxServer(t) for a real server): answer"; got != want {
 		t.Fatalf("not live | capture failed = %q, want %q", got, want)
 	}
 }

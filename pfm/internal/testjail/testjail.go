@@ -6,11 +6,11 @@
 // executable.go: WriteExecutable, the one writer of a file a test runs; WriteExecutableNeverRun, of one
 // the code under test only resolves or reads; the fake logged-out engines.
 // enginesync.go, enginesync_runner.go: the engine-sync fakes, run and in process.
-// fence.go: runsHere, the guard Run asks first; tier_unit.go and tier_machine.go, the build-tag pair
-// telling a unit binary from one built with the jail (or e2e, journey) tag.
+// fence.go: runsHere, the guard Run asks first; ChildOutput, a re-exec's output; tier_unit.go and
+// tier_machine.go, the build-tag pair telling a unit binary from a jail (or e2e, journey) one.
 // unitnet.go: the unit net an armed unit binary runs inside, and its one switch.
 // jail_dir.go: RunInJail, Run starting a package's tests in the jail directory.
-// place.go: Place, the root an invented absolute fixture path takes in the jail directory.
+// place.go: Place, an invented fixture path's root in the jail directory; TempPath, a path under Run's temp root.
 // profile.go: the step profiler of every package process; profile_place.go names the process and holds
 // ModuleRoot; profile_run.go, profile_run_summary.go: the run directory a plain go test records into.
 package testjail

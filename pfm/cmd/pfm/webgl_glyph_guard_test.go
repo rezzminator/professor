@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep"
 )
 
 // VS Code's integrated terminal (xterm.js, @xterm/addon-webgl ≥ 0.20) draws
@@ -76,7 +78,7 @@ func TestNoWebGLCustomGlyphsInRenderedOutput(t *testing.T) {
 		}
 		rel, _ := filepath.Rel(root, path)
 		if d.IsDir() {
-			if d.Name() == "testdata" || strings.HasPrefix(d.Name(), ".") && rel != "." {
+			if d.Name() == "testdata" || sourcesweep.SkipDir(filepath.ToSlash(rel)) {
 				return filepath.SkipDir
 			}
 			return nil

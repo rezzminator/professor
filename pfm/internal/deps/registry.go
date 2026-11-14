@@ -199,7 +199,7 @@ var fixedCommands = []Entry{
 	// keeps every account's OAuth credential on macOS, so it must never
 	// resolve to something a $PATH entry shadowed.
 	{
-		Name:        "security",
+		Name:        KeychainCommand,
 		Command:     "/usr/bin/security",
 		Purpose:     "Darwin login-keychain OAuth credential reads",
 		Required:    true,
@@ -219,6 +219,10 @@ var fixedCommands = []Entry{
 		InstallHint: "run pfm install to provision rumdl, or: uv tool install rumdl",
 	},
 }
+
+// KeychainCommand names the registry row of the macOS keychain's command: usagehook's credential
+// read resolves it, and testjail serves it as an empty keychain in an armed unit binary.
+const KeychainCommand = "security"
 
 // Registry is the one complete dependency table. Configured engine names and
 // configured engine paths are materialized here rather than copied into

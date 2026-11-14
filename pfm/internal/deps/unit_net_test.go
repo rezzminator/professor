@@ -101,3 +101,24 @@ func TestUnitNetRefusesEveryStartAndLookup(t *testing.T) {
 		t.Errorf("served runner Run calls = %v, want exactly %q", calls, standIn+" version")
 	}
 }
+
+// TestUnitNetResolvesAServedRegistryCommand: armed, Resolve of a registry row's name answers the
+// row's command path once ServeUnitNet serves it, and refuses the same name while nothing serves it.
+func TestUnitNetResolvesAServedRegistryCommand(t *testing.T) {
+	armUnitNetForTest(t)
+	resetResolveCache(t)
+	command := filepath.Join(t.TempDir(), "keychain-tool")
+	saved := fixedCommands
+	fixedCommands = append(append([]Entry(nil), saved...), Entry{Name: "keychain-tool", Command: command})
+	t.Cleanup(func() { fixedCommands = saved })
+	wantRefused := "UNIT-NET REFUSED lookup: keychain-tool (" + exec.ErrNotFound.Error() + ") — a unit test starts" +
+		" no process: fake it at the caller's runner seam (deps.FakeRunner), or move the test to a _jail_test.go file"
+	if path, err := Resolve("keychain-tool"); err == nil || err.Error() != wantRefused || path != "" {
+		t.Errorf("Resolve(keychain-tool) unserved = (%q, %v), want (\"\", %q)", path, err, wantRefused)
+	}
+	ServeUnitNet(command, &FakeRunner{})
+	t.Cleanup(func() { unitNetServed.Delete(command) })
+	if path, err := Resolve("keychain-tool"); err != nil || path != command {
+		t.Errorf("Resolve(keychain-tool) served = (%q, %v), want (%q, nil)", path, err, command)
+	}
+}

@@ -91,7 +91,8 @@ func Gather(
 		return gather.Snapshot{}, fmt.Errorf("prepare Codex pane binding resolver: %w", err)
 	}
 	gatherer, err := gather.New(gather.Dependencies{
-		Tmux: tmuxClient,
+		Paths: &env.Paths,
+		Tmux:  tmuxClient,
 		CodexName: func(rolloutPath string) naming.CodexName {
 			return codexNamesByPath[filepath.Clean(rolloutPath)]
 		},

@@ -3,6 +3,7 @@ package testjail
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -23,4 +24,11 @@ func Place(path string) string {
 		placed += "/"
 	}
 	return placed
+}
+
+// TempPath matches a path under the temp root Run set (TMPDIR, canonical: macOS's /tmp reads
+// /private/tmp), followed by tail, the rest of the path a test's output normaliser writes as one
+// token. A pattern on the literal /tmp/ would leave macOS's /private in front of the token.
+func TempPath(tail string) *regexp.Regexp {
+	return regexp.MustCompile(regexp.QuoteMeta(paths.TempRoot()) + tail)
 }

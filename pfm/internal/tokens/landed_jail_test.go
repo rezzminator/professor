@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -24,6 +25,15 @@ func TestMeasureLandedCountsCodeAndExcludesEachClass(t *testing.T) {
 	}
 }
 
+// gitDiscoveryStop is where git says its repository search ended, which
+// depends on the host's mounts, not on the code: "(or any parent up to mount
+// point /)" plus a filesystem-boundary line where the temp directory is its own
+// mount, "(or any of the parent directories): .git" where the search reaches /.
+var gitDiscoveryStop = regexp.MustCompile(
+	`\(or any parent up to mount point [^)]*\)\nStopping at filesystem boundary \(GIT_DISCOVERY_ACROSS_FILESYSTEM not set\)\.` +
+		`|\(or any of the parent directories\): \.git`,
+)
+
 // TestMeasureLandedNamesTheFailedCommand: a git failure is an error naming
 // the command, never 0 lines.
 func TestMeasureLandedNamesTheFailedCommand(t *testing.T) {
@@ -32,8 +42,11 @@ func TestMeasureLandedNamesTheFailedCommand(t *testing.T) {
 	_, badBase := measureLanded(context.Background(), deps.RealRunner{}, dir, "no-such-base")
 	outside := t.TempDir()
 	_, notRepo := measureLanded(context.Background(), deps.RealRunner{}, outside, "HEAD")
-	got := strings.NewReplacer(top, "{top}", outside, "{outside}").Replace(fmt.Sprint(badBase, " | ", notRepo))
-	if want := "git -C {top} diff --numstat -z no-such-base: exit 128: fatal: ambiguous argument 'no-such-base': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]' | git -C {outside} rev-parse --show-toplevel: exit 128: fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set)."; got != want {
+	got := gitDiscoveryStop.ReplaceAllString(
+		strings.NewReplacer(top, "{top}", outside, "{outside}").Replace(fmt.Sprint(badBase, " | ", notRepo)),
+		"{discovery stop}",
+	)
+	if want := "git -C {top} diff --numstat -z no-such-base: exit 128: fatal: ambiguous argument 'no-such-base': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]' | git -C {outside} rev-parse --show-toplevel: exit 128: fatal: not a git repository {discovery stop}"; got != want {
 		t.Errorf("bad base | outside a repository = %q, want %q", got, want)
 	}
 }

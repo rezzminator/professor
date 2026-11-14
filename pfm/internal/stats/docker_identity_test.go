@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestDockerInspectorReadsIdentityFromJailedSocket(t *testing.T) {
 	_, recorder := obs.Test(t)
-	socket := filepath.Join(t.TempDir(), "probe-docker.sock")
+	socket := filepath.Join(testjail.ShortRoot(t), "probe-docker.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +76,7 @@ func TestDockerInspectorReadsIdentityFromJailedSocket(t *testing.T) {
 // NewSampler itself builds, not just newDockerInspector called directly.
 func TestNewSamplerWithDockerSocketWiresResolveDockerIdentities(t *testing.T) {
 	t.Parallel()
-	socket := filepath.Join(t.TempDir(), "probe-docker.sock")
+	socket := filepath.Join(testjail.ShortRoot(t), "probe-docker.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

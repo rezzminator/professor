@@ -287,7 +287,7 @@ func TestStageAccountLinksErrors(t *testing.T) {
 			command.Env = envWithout(marker, marker+"="+failure)
 			output, err := command.CombinedOutput()
 			got := regexp.MustCompile(`/\S*/TestStageAccountLinksErrors\d+/\d+|\(\d+\.\d+s\)`).
-				ReplaceAllString(string(output), "{tmp}")
+				ReplaceAllString(ChildOutput(output), "{tmp}")
 			if err == nil || got != want {
 				t.Fatalf("StageAccountLinks output = %q, want %q (err %v)", got, want, err)
 			}

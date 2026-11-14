@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // herdrFake is a Herdr socket that answers one request per connection (the
@@ -41,7 +44,19 @@ func (fake *herdrFake) total() int {
 // with the "error:" prefix an error response whose code follows.
 func serveHerdr(t *testing.T, table map[string]string) *herdrFake {
 	t.Helper()
-	fake := &herdrFake{path: filepath.Join(t.TempDir(), "h.sock"), counts: map[string]int{}}
+	// A one-letter directory under the test's temp root keeps the socket path inside macOS's 104 bytes,
+	// which t.TempDir's test-named directory overruns; testjail.ShortRoot is out of reach here (testjail
+	// imports config, which imports herdr).
+	dir, err := os.MkdirTemp(paths.TempRoot(), "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove herdr fake socket directory %s: %v", dir, err)
+		}
+	})
+	fake := &herdrFake{path: filepath.Join(dir, "h.sock"), counts: map[string]int{}}
 	listener, err := net.Listen("unix", fake.path)
 	if err != nil {
 		t.Fatal(err)

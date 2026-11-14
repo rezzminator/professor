@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep"
 )
 
 // A test that never set up its jail must not resolve to the operator's own
@@ -85,14 +87,17 @@ func TestNoTestReachesForThePlainHOMEVariable(t *testing.T) {
 			// A directory we cannot read is a hole in the sweep, never a pass.
 			return err
 		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
-			return nil
-		}
 		relative, relErr := filepath.Rel(moduleRoot, path)
 		if relErr != nil {
 			return relErr
 		}
 		relative = filepath.ToSlash(relative)
+		if entry.IsDir() && sourcesweep.SkipDir(relative) {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
 		if _, ok := allowed[relative]; ok {
 			return nil
 		}

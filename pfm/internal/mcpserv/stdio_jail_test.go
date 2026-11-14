@@ -3,14 +3,20 @@
 package mcpserv
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // With no daemon, the in-process server resolves a Codex caller by its
@@ -35,5 +41,54 @@ func TestRunStdioResolvesCodexCallerInProcess(t *testing.T) {
 	}
 	if !strings.Contains(warnings.String(), "daemon absent at "+address) {
 		t.Fatalf("warnings = %q, want the absent-daemon fallback", warnings.String())
+	}
+}
+
+func TestRunStdioUsesHealthyDaemonProxy(t *testing.T) {
+	var daemonWarnings, localWarnings bytes.Buffer
+	daemon := stdioTestService("daemon", &daemonWarnings)
+	server := httptest.NewServer(proxyTestDaemon(daemon))
+	defer server.Close()
+
+	local := stdioTestService("local", &localWarnings)
+	testjail.Fleet(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.backend.paths = resolved
+	address := proxyTestAddress(server)
+	markerPath := filepath.Join(local.backend.paths.Home, ".local", "state", "pfm", "mcp-proxy-compatible")
+	inspect := func() {
+		markerTarget, err := filepath.EvalSymlinks(markerPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		links, err := gather.NewProcFS("").FDLinks(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, link := range links {
+			if link.Target == markerTarget {
+				return
+			}
+		}
+		t.Fatalf("healthy daemon proxy does not hold marker %s", markerPath)
+	}
+	if marker := stdioTestRunInspect(t, local, address, inspect).Message; marker != "daemon" {
+		t.Fatalf("healthy daemon marker = %q, want proxy daemon marker", marker)
+	}
+	links, err := gather.NewProcFS("").FDLinks(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	markerTarget, err := filepath.EvalSymlinks(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range links {
+		if link.Target == markerTarget {
+			t.Fatalf("proxy marker descriptor %d remained open after proxy returned", link.FD)
+		}
 	}
 }

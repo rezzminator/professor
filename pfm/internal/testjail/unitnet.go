@@ -1,10 +1,12 @@
 package testjail
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -84,7 +86,47 @@ func armUnitProcess(armed bool) error {
 	}
 	time.Local = time.UTC
 	deps.ArmUnitNet()
+	serveUnitNetKeychain()
 	return nil
+}
+
+// unitNetKeychainMissing is what security answers for an item the keychain lacks:
+// errSecItemNotFound's exit status and its stderr line.
+var unitNetKeychainMissing = deps.RunResult{
+	ExitCode: 44,
+	Stderr:   []byte("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n"),
+}
+
+// unitNetKeychain is the keychain every armed unit binary reads: empty. A credential read finds no
+// item, as on a host never logged in, and never the host's own login keychain.
+type unitNetKeychain struct{}
+
+// serveUnitNetKeychain serves the registry's keychain command from unitNetKeychain for the whole
+// armed binary (deps.ServeUnitNet), so its lookup resolves and every run answers in process.
+func serveUnitNetKeychain() {
+	registry := deps.Registry()
+	for index := range registry {
+		if registry[index].Name == deps.KeychainCommand && registry[index].Command != "" {
+			deps.ServeUnitNet(registry[index].Command, unitNetKeychain{})
+		}
+	}
+}
+
+func (unitNetKeychain) Run(_ context.Context, argv []string, _ deps.RunOptions) (deps.RunResult, error) {
+	if len(argv) > 1 && argv[1] == "find-generic-password" {
+		return unitNetKeychainMissing, nil
+	}
+	err := fmt.Errorf("testjail: the unit net's keychain plays only find-generic-password, not %q: "+
+		"fake it at the caller's runner seam", argv)
+	return deps.RunResult{ExitCode: 1}, err
+}
+
+func (unitNetKeychain) Start(_ context.Context, argv []string, _ deps.StartOptions) (deps.Process, error) {
+	return nil, fmt.Errorf("testjail: the unit net's keychain plays Run only, not Start of %q", argv)
+}
+
+func (unitNetKeychain) LookPath(name string) (string, error) {
+	return "", fmt.Errorf("testjail: the unit net's keychain looks up no tool (%s): %w", name, exec.ErrNotFound)
 }
 
 // ambientIdentity is the live seat a test process could inherit from the shell that started it: a
@@ -121,10 +163,25 @@ func pointUnitNetDirs(dir string, setenv func(name, value string) error) error {
 	return clearAmbientIdentity(setenv)
 }
 
-// unitNet lays the net under root for an armed unit binary: TMPDIR becomes a directory of the
-// binary's own (a one-letter prefix, as unix socket paths under it keep macOS's 104 bytes) and
-// pointUnitNetDirs's directories live in it. It returns the root the rest of Run builds under and the
-// net's removal; any other binary keeps root and removes nothing.
+// unitNetSocketPathBytes is this platform's unix socket path budget, sun_path's length: 108 on Linux,
+// 104 on macOS.
+const unitNetSocketPathBytes = len(syscall.RawSockaddrUnix{}.Path)
+
+// unitNetTMPDIR is the TMPDIR an armed unit binary's tests run under: the net's own dir where a socket
+// path holds more than macOS's 104 bytes, else root as Run set it. The net's directory spends a dozen of
+// the bytes, and macOS's 104 are exactly the budget the longest test names under t.TempDir need (Run
+// sets TMPDIR to the canonical temp root, no wrapper, for that reason).
+func unitNetTMPDIR(root, dir string, socketPathBytes int) string {
+	if socketPathBytes > 104 {
+		return dir
+	}
+	return root
+}
+
+// unitNet lays the net under root for an armed unit binary: pointUnitNetDirs's directories live in a
+// directory of the binary's own (a one-letter prefix), which TMPDIR becomes where unitNetTMPDIR says.
+// It returns the root the rest of Run builds under and the net's removal; any other binary keeps root
+// and removes nothing.
 func unitNet(root string) (string, func(), error) {
 	if !unitBinary || !unitNetArmed {
 		return root, func() {}, nil
@@ -138,8 +195,9 @@ func unitNet(root string) (string, func(), error) {
 			warnSetup("remove the unit net %s: %v", dir, err)
 		}
 	}
-	if err := os.Setenv("TMPDIR", dir); err != nil {
-		return dir, remove, fmt.Errorf("set TMPDIR to %s: %w", dir, err)
+	tmp := unitNetTMPDIR(root, dir, unitNetSocketPathBytes)
+	if err := os.Setenv("TMPDIR", tmp); err != nil {
+		return dir, remove, fmt.Errorf("set TMPDIR to %s: %w", tmp, err)
 	}
 	return dir, remove, pointUnitNetDirs(dir, os.Setenv)
 }

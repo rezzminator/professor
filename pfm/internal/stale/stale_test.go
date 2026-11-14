@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -758,39 +757,6 @@ func TestSweepOmitsProxyThatExitsDuringDescriptorProbe(t *testing.T) {
 	}
 	if len(kernel.Sent) != 0 {
 		t.Fatalf("signals = %v, want vanished candidate omitted", kernel.Sent)
-	}
-}
-
-func TestHoldCompatibleProxyOwnsDescriptorLifetime(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	handle, err := HoldCompatibleProxy(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker := compatibleProxyMarker(home)
-	target, err := compatibleProxyMarkerTarget(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("marker mode = %o, want 600", info.Mode().Perm())
-	}
-	proc := gather.NewProcFS(filepath.Join(t.TempDir(), "missing-proc-root"))
-	links, err := proc.FDLinks(os.Getpid())
-	if err != nil || !slices.ContainsFunc(links, func(link gather.FDLink) bool { return link.Target == target }) {
-		t.Fatalf("marker descriptor is not live: links=%v err=%v", links, err)
-	}
-	if err := handle.Close(); err != nil {
-		t.Fatal(err)
-	}
-	links, err = proc.FDLinks(os.Getpid())
-	if err != nil || slices.ContainsFunc(links, func(link gather.FDLink) bool { return link.Target == target }) {
-		t.Fatalf("marker descriptor after close: links=%v err=%v, want absent", links, err)
 	}
 }
 

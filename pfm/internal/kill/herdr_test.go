@@ -69,7 +69,7 @@ func newKillHerdr(t *testing.T) *killHerdr {
 		pane:        "w1:p1",
 		terminal:    "kill-terminal",
 		proc:        proc,
-		socket:      filepath.Join(t.TempDir(), "s"),
+		socket:      filepath.Join(testjail.ShortRoot(t), "s"),
 		frame:       idleFrame,
 		processType: "pane_process_info",
 		processes:   []any{map[string]any{"pid": 7, "name": pfmengine.MustLookup(pfmengine.Claude).Binary}},

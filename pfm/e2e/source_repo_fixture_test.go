@@ -204,7 +204,10 @@ func TestCopySourceTreeLeavesSubmodulesOut(t *testing.T) {
 }
 
 func TestCopySourceTreeRejectsExternalSymlinks(t *testing.T) {
-	t.Parallel()
+	// The fence's own repository layout is metadata the error carries, never the subject: pinned here, so
+	// the expected text holds in any checkout (t.Setenv: no t.Parallel).
+	t.Setenv(pfmpaths.EnvDevRepoWorkTree, "/worktree")
+	t.Setenv(pfmpaths.EnvDevRepoGitDir, "/pfm-git-common/worktrees/unit-net")
 	for _, tc := range []struct{ name, linkTarget, want string }{
 		{"absolute", filepath.Join(string(filepath.Separator), "outside"), "source fixture symlink link points outside source fixture: /outside; fenced metadata not applicable (worktree=\"/worktree\" git-dir=\"/pfm-git-common/worktrees/unit-net\")"},
 		{"escape", "../outside", "source fixture symlink link points outside source fixture: ../outside; fenced metadata not applicable (worktree=\"/worktree\" git-dir=\"/pfm-git-common/worktrees/unit-net\")"},

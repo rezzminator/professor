@@ -15,6 +15,7 @@ import (
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const ownLauncherHelper = "PFM_UI_OWN_LAUNCHER_HELPER"
@@ -31,7 +32,8 @@ func TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage(t *testing.T)
 		command := exec.Command(os.Args[0], "-test.run=^"+name+"$", "-test.v")
 		command.Env = append(os.Environ(), ownLauncherHelper+"=1")
 		output, err := command.CombinedOutput()
-		if err != nil || string(output) != `=== RUN   TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage
+		if err != nil ||
+			testjail.ChildOutput(output) != `=== RUN   TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage
 --- PASS: TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage (0.00s)
 PASS
 ` {

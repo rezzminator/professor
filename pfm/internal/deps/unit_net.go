@@ -24,10 +24,29 @@ func ArmUnitNet() { unitNetArmed.Store(true) }
 var unitNetServed sync.Map
 
 // ServeUnitNet makes RealRunner answer every start of path from runner, in process, in an armed
-// unit binary instead of refusing it; unarmed, the registration is inert. Only testjail calls it,
-// for a stand-in it writes for the whole binary (the default engine-sync); a test fakes anything
-// else at its caller's runner seam.
+// unit binary instead of refusing it, and Resolve of a registry row whose command is path answer
+// path; unarmed, the registration is inert. Only testjail calls it, for a stand-in it writes for the
+// whole binary (the default engine-sync) or a host tool every unit test must see empty (the macOS
+// keychain); a test fakes anything else at its caller's runner seam.
 func ServeUnitNet(path string, runner Runner) { unitNetServed.Store(path, runner) }
+
+// unitNetServedCommand is the command path of name's registry row when ServeUnitNet serves it in an
+// armed binary: Resolve answers it instead of refusing the lookup.
+func unitNetServedCommand(name string) (string, bool) {
+	if !unitNetArmed.Load() {
+		return "", false
+	}
+	for index := range fixedCommands {
+		entry := &fixedCommands[index]
+		if entry.Name != name || entry.Command == "" {
+			continue
+		}
+		if _, served := unitNetServed.Load(entry.Command); served {
+			return entry.Command, true
+		}
+	}
+	return "", false
+}
 
 // unitNetServedRunner is the runner ServeUnitNet registered for argv0 in an armed binary.
 func unitNetServedRunner(argv0 string) (Runner, bool) {

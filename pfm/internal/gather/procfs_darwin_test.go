@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // With ps and lsof unreachable, every probe built on them says it could not
@@ -22,15 +24,15 @@ func TestDarwinProcFSProbesWithoutTheirBinaryCannotLook(t *testing.T) {
 	}{
 		{
 			"RSSKB", func() error { _, err := proc.RSSKB(pid); return err },
-			`sample resident memory: resolve ps: exec: "ps": executable file not found in $PATH`,
+			"sample resident memory: resolve ps: " + testjail.NotOnPath("ps"),
 		},
 		{
 			"FDLinks", func() error { _, err := proc.FDLinks(pid); return err },
-			fmt.Sprintf(`list open files for pid %d: resolve lsof: exec: "lsof": executable file not found in $PATH`, pid),
+			fmt.Sprintf("list open files for pid %d: resolve lsof: %s", pid, testjail.NotOnPath("lsof")),
 		},
 		{
 			"Image", func() error { _, err := proc.Image(pid); return err },
-			fmt.Sprintf(`read the executable of pid %d: resolve lsof: exec: "lsof": executable file not found in $PATH`, pid),
+			fmt.Sprintf("read the executable of pid %d: resolve lsof: %s", pid, testjail.NotOnPath("lsof")),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

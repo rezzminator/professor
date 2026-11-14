@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep"
 )
 
 // Readers and the two documented headless argv owners may name only the
@@ -117,7 +119,7 @@ func TestNoLaunchLiteralOutsideRegistry(t *testing.T) {
 		}
 		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
-			if rel == "internal/claudelaunch" {
+			if rel == "internal/claudelaunch" || sourcesweep.SkipDir(rel) {
 				return filepath.SkipDir
 			}
 			return nil

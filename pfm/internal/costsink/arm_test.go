@@ -24,7 +24,7 @@ func TestArmRefusesWhatItCannotServe(t *testing.T) {
 	}{
 		{"no pid", ArmOptions{Self: binary, Home: home}, "cost sink: arm needs a pid and the pfm binary, got pid 0 self \"/x/pfm\""},
 		{"no binary", ArmOptions{PID: os.Getpid(), Home: home}, "cost sink: arm needs a pid and the pfm binary, got pid {pid} self \"\""},
-		{"a pid that is not running", ArmOptions{Self: binary, PID: 1 << 30, Home: home}, "cost sink: read the start time of pid 1073741824: open /proc/1073741824/stat: no such file or directory"},
+		{"a pid that is not running", ArmOptions{Self: binary, PID: 1 << 30, Home: home}, "cost sink: read the start time of pid 1073741824: " + armDeadPIDStatError},
 		{"a binary that cannot start", ArmOptions{Self: filepath.Join(home, "missing"), PID: os.Getpid(), Home: home}, "cost sink: start {home}/missing internal cost-sink: file does not exist"},
 	} {
 		// A binary that is not there is refused by the runner's Start; every other row is refused before it.

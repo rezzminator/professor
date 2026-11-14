@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build jail && darwin
 
 package stats
 

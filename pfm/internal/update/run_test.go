@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -45,7 +44,7 @@ func TestUpdateStopsBeforeSelfUpdate(t *testing.T) {
 			}
 			var stdout, stderr bytes.Buffer
 			code := Run(tc.args, &stdout, &stderr, runtimes...)
-			got := regexp.MustCompile(`/tmp/[^\s"':]*`).
+			got := testjail.TempPath(`/[^\s"':]*`).
 				ReplaceAllString(strings.NewReplacer(repo, "{repo}", path, "{config}").Replace(stderr.String()), "{tmp}")
 			if code != 5 || got != tc.diagnostic {
 				t.Fatalf("stderr = %q, want %q (exit %d)", got, tc.diagnostic, code)

@@ -49,9 +49,9 @@ func reloadTyped(c *harness.Ctx, s State) State {
 	return s
 }
 
-// reloadScheduled opens the row the fake Claude draws for pfm's block of a typed /reload, the reload's own
-// confirmation in parentheses after it.
-const reloadScheduled = "⎿ Blocked by hook: reload scheduled — this chat reboots when the current turn ends ("
+// reloadScheduled opens the row the fake Claude draws for pfm's block of a typed /reload with no settings, the
+// restart line and the reload's own confirmation on the lines after it.
+const reloadScheduled = "⎿ Blocked by hook: ↻ Reloading — same account, model and effort"
 
 // reloadStashed: the owner types a draft and parks it with Ctrl-S, Claude's stash, leaving the composer empty,
 // then types /reload (reloadTypedDrawn): the reload never presses Ctrl-S on the empty composer, which would

@@ -380,7 +380,7 @@ func TestRealRunnerKillGroupStopsDescendants(t *testing.T) {
 }
 
 // TestRealRunnerRunReportsZeroExitCodeOnSuccess is the regression for a bug
-// this batch hit through internal/kill's viewport.go: RunResult.ExitCode
+// where RunResult.ExitCode
 // answered -1 (ExitCode(nil)'s "never reached one" sentinel) even for a
 // command that ran and exited 0, so a caller checking ExitCode != 0 for
 // failure misread every successful run as a failure.

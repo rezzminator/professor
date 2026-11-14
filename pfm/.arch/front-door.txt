@@ -27,11 +27,11 @@ internal/headless 7
 internal/headless/run 9
 internal/heal 1
 internal/herdr 18
-internal/hookentry 47
+internal/hookentry 46
 internal/hostcheck 10
 internal/hostfixture 9
 internal/installer 90
-internal/kill 11
+internal/kill 10
 internal/mcpserv 18
 internal/naming 5
 internal/obs 18

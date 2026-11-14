@@ -66,8 +66,8 @@ func promptBack(term *harness.Terminal, what string) {
 // account with no sentinel and with Remote Control on, unnamed as the chat is. He renames it from a second
 // terminal to a name past tmux's 24-rune window clip: the window holds the clipped spelling, read after
 // read, and the terminal title is Claude's own title with its glyph cut, never pfm's window name beside it
-// (the fake Claude sets no title: tmux's default, the machine's host name, stands in for it). He types /exit: the terminal, which the chat owned,
-// closes, and nothing of the chat is left.
+// (the fake Claude sets no title: tmux's default, the machine's host name, stands in for it). He types /exit: nothing of the chat is left, and the
+// terminal is back at its prompt.
 func pickerChat(c *harness.Ctx, s State) State {
 	project := c.Unique("picker")
 	s.Term, s.Project = "plain-picker", filepath.Join(s.Home, "work", project)
@@ -129,7 +129,7 @@ func pickerChat(c *harness.Ctx, s State) State {
 		}
 	}
 	socket := plainSocket(c, s)
-	// plainGone's "terminal closed" reads the terminal's shell in the process table: see it there first.
+	// plainGone's "shell kept" reads the terminal's shell in the process table: see it there first.
 	if _, found := processes(c)[term.Pid()]; !found {
 		c.Failf("terminal %s's shell %d is missing from the process table before /exit", term.Name(), term.Pid())
 	}

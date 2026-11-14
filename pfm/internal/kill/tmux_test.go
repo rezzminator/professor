@@ -2,7 +2,6 @@ package kill
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -83,19 +82,4 @@ func TestTmuxKillerRecordsEveryInvocation(t *testing.T) {
 		t.Fatalf("records = %d, want 2: %s", len(recorder.Records()), recorder.Raw())
 	}
 	_ = context.Background
-}
-
-func TestParseClientsSkipsOnlyTheUnreadableLine(t *testing.T) {
-	clients, skipped := parseClients("101 /dev/pts/1\nnot-a-pid\n\n102 client-102\n103\n")
-	wantClients := []Client{{PID: 101, Name: "/dev/pts/1"}, {PID: 102, Name: "client-102"}}
-	if !reflect.DeepEqual(clients, wantClients) {
-		t.Fatalf("clients = %v, want %v", clients, wantClients)
-	}
-	want := []string{
-		`client pid "not-a-pid" unreadable: strconv.Atoi: parsing "not-a-pid": invalid syntax`,
-		"client 103: tmux listed it with no name to detach it by",
-	}
-	if !reflect.DeepEqual(skipped, want) {
-		t.Fatalf("skipped = %#v, want %#v", skipped, want)
-	}
 }

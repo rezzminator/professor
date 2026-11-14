@@ -44,7 +44,6 @@ func HookTemplates(home string) []Hook {
 		{Event: "SessionEnd", Command: binary + " internal clear-kill", Name: "clear-kill"},
 		{Event: "SessionStart", Matcher: "clear", Command: binary + " internal clear-name", Name: "clear-name-start"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal clear-name", Name: "clear-name-prompt"},
-		{Event: "SessionEnd", Command: binary + " internal exit-close", Name: "exit-close"},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal git-guard", Name: "git-guard"},
 		{Event: hookEventPreToolUse, Matcher: "Bash", Command: binary + " internal store-guard", Name: "store-guard"},
 		// orchestrator-wait judges only the agent types its door names

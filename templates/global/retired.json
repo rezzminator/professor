@@ -208,7 +208,12 @@
   ],
   "storeEntries": [],
   "stateDirs": [],
-  "hookCommands": [],
+  "hookCommands": [
+    {
+      "name": "exit-close",
+      "subcommand": "internal exit-close"
+    }
+  ],
   "hookBinaries": [],
   "hookShimHints": [],
   "claudePlugins": {},

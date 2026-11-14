@@ -55,10 +55,9 @@ func plainReloadTyped(c *harness.Ctx, s State) State {
 	return s
 }
 
-// plainEnd: the owner types /exit in the plain chat; the box leaves the screen and the terminal, which
-// the chat owned, closes. No live row, live seat, engine or tmux process of the chat is left. pfm
-// detaches the terminal's tmux client before it hangs up the shell, so the client restores the screen
-// on every OS: macOS revokes the terminal once its shell ends.
+// plainEnd: the owner types /exit in the plain chat; the box leaves the screen and the terminal's shell,
+// which the chat never owned, draws its prompt again. No live row, live seat, engine or tmux process of
+// the chat is left.
 func plainEnd(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := plainSocket(c, s)
@@ -109,8 +108,8 @@ func plainResumeFromCLI(c *harness.Ctx, s State) State {
 
 // plainExitDuringReload: in the resumed chat the owner types /reload, then /exit while pfm's reload
 // run still waits for the chat's turn to end; the owner's exit wins. The box leaves the screen and the
-// terminal closes; no reload run, live row, live seat, engine or tmux process of the chat is left, so
-// nothing was respawned.
+// terminal is back at its prompt; no reload run, live row, live seat, engine or tmux process of the chat
+// is left, so nothing was respawned.
 func plainExitDuringReload(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := plainSocket(c, s)
@@ -224,21 +223,33 @@ func plainSocket(c *harness.Ctx, s State) string {
 }
 
 // plainGone waits for the chat to leave every list and process: no live row or seat of its session,
-// no engine, no tmux process on socket, and the terminal's shell gone with it.
+// no engine and no tmux process on socket, while the terminal's shell, which a chat never closes,
+// stays and draws its prompt again.
 func plainGone(c *harness.Ctx, s State, term *harness.Terminal, socket string) {
-	c.Poll("chat "+s.Chat.Session+" and tmux socket "+socket+" gone", stepBound, func() (bool, string) {
-		rows, _ := liveChats(c, "")
-		seats := seatsWhere(c, "state = 'live' and session_id = '"+s.Chat.Session+"'")
-		var left []string
-		for pid, p := range processes(c) {
-			if p.Session == s.Chat.Session || strings.Contains(p.Args, socket) || pid == term.Pid() {
-				left = append(left, fmt.Sprintf("%d %s", pid, p.Args))
+	c.Poll("chat "+s.Chat.Session+" and tmux socket "+socket+" gone, the terminal's shell kept", stepBound,
+		func() (bool, string) {
+			rows, _ := liveChats(c, "")
+			seats := seatsWhere(c, "state = 'live' and session_id = '"+s.Chat.Session+"'")
+			table := processes(c)
+			var left []string
+			for pid, p := range table {
+				if p.Session == s.Chat.Session || strings.Contains(p.Args, socket) {
+					left = append(left, fmt.Sprintf("%d %s", pid, p.Args))
+				}
 			}
-		}
-		_, listed := rows[s.Chat.Session]
-		return !listed && len(seats) == 0 && len(left) == 0,
-			fmt.Sprintf("listed %t, seats %v, processes %v", listed, seats, left)
-	})
+			_, listed := rows[s.Chat.Session]
+			_, shell := table[term.Pid()]
+			return !listed && len(seats) == 0 && len(left) == 0 && shell,
+				fmt.Sprintf(
+					"listed %t, seats %v, processes %v, shell %d live %t",
+					listed,
+					seats,
+					left,
+					term.Pid(),
+					shell,
+				)
+		})
+	promptBack(term, "the terminal's prompt after its chat ended")
 }
 
 // stopPlainChat ends what the branch started with the owner's own command: `pfm chat end` for its

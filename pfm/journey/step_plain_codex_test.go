@@ -104,7 +104,8 @@ func codexPrompts(c *harness.Ctx, thread string) []string {
 }
 
 // plainCodexEnd: the owner types /exit in the Codex chat; its composer leaves the screen and the
-// terminal, which the chat owned, closes. No live row, engine or tmux process of the chat is left.
+// terminal's shell, which the chat never owned, draws its prompt again. No live row, engine or tmux
+// process of the chat is left.
 func plainCodexEnd(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := attached(c, term)

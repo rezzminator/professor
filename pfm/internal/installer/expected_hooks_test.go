@@ -162,7 +162,7 @@ func TestClaudeHookTemplatesIncludesPcmGuard(t *testing.T) {
 	}
 }
 
-func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
+func TestClaudeHookTemplatesIncludesExitIntercept(t *testing.T) {
 	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	templates := claudeHookTemplates(home)
@@ -170,30 +170,18 @@ func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
 	if got := commandByName(templates, "exit-intercept"); got != home+"/.local/bin/pfm internal exit-intercept" {
 		t.Fatalf("exit-intercept command=%q", got)
 	}
-	if got := commandByName(templates, "exit-close"); got != home+"/.local/bin/pfm internal exit-close" {
-		t.Fatalf("exit-close command=%q", got)
-	}
 
-	foundIntercept, foundClose := false, false
+	foundIntercept := false
 	for _, template := range templates {
-		switch template.Name {
-		case "exit-intercept":
+		if template.Name == "exit-intercept" {
 			foundIntercept = true
 			if template.Event != "UserPromptSubmit" || template.Matcher != "" {
 				t.Fatalf("exit-intercept template=%#v, want UserPromptSubmit with an empty matcher", template)
-			}
-		case "exit-close":
-			foundClose = true
-			if template.Event != "SessionEnd" || template.Matcher != "" {
-				t.Fatalf("exit-close template=%#v, want SessionEnd with an empty matcher", template)
 			}
 		}
 	}
 	if !foundIntercept {
 		t.Fatal("claudeHookTemplates dropped the exit-intercept hook")
-	}
-	if !foundClose {
-		t.Fatal("claudeHookTemplates dropped the exit-close hook")
 	}
 }
 

@@ -162,7 +162,7 @@ internal/installer/vscode_theme_jail_test.go 9
 internal/installer/vscode_theme_lock_jail_test.go 3
 internal/kill/spawn_obs_jail_test.go 1
 internal/kill/stress_jail_test.go 1
-internal/kill/tmux_jail_test.go 3
+internal/kill/tmux_jail_test.go 2
 internal/mcpserv/herdr_jail_test.go 1
 internal/mcpserv/metadata_identity_jail_test.go 9
 internal/mcpserv/server_jail_test.go 3

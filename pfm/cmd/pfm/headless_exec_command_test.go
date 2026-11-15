@@ -177,8 +177,8 @@ func TestHeadlessExecPFMSettingsFile(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	argv := startedArgs(t, runner, 0)
-	want := `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},` +
-		`"outputStyle":"default","theme":"t"}`
+	want := `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},` +
+		`"outputStyle":"default","showThinkingSummaries":true,"theme":"t"}`
 	if !strings.Contains(argv, want) {
 		t.Fatalf("argv = %s", argv)
 	}
@@ -206,7 +206,7 @@ func TestHeadlessExecClaudeIgnoresConfiguredLaunchValues(t *testing.T) {
 	}
 	if !strings.HasSuffix(
 		got,
-		"--settings\n{\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\"},\"outputStyle\":\"default\"}\n",
+		"--settings\n{\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\"},\"outputStyle\":\"default\",\"showThinkingSummaries\":true}\n",
 	) {
 		t.Fatalf("configured launch values reached child: %q", got)
 	}

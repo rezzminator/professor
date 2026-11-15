@@ -132,7 +132,7 @@ func TestWebSearchBudgetRequiresPassedSettings(t *testing.T) {
 	if got, want := strings.Join(
 		args,
 		" ",
-	), "-p --output-format json --settings {\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"7\"},\"outputStyle\":\"default\"}"; got != want {
+	), "-p --output-format json --settings {\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"7\"},\"outputStyle\":\"default\",\"showThinkingSummaries\":true}"; got != want {
 		t.Fatalf("args = %q, want %q", got, want)
 	}
 	var environment []string

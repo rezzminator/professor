@@ -267,7 +267,7 @@ func runRun(
 		Prompt:        prompt,
 		PromptChannel: promptChannel,
 		Model:         persona.ModelOr(*model),
-		Effort:        persona.EffortOr(*effort), Envs: persona.Envs,
+		Effort:        persona.EffortOr(*effort), Envs: persona.Envs, ClaudeSettings: persona.ClaudeSettings,
 		Home:           resolved.Home,
 		PrimaryAccount: selectedAccount,
 		Cache1H:        cache1H,

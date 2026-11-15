@@ -45,7 +45,7 @@ claude-haiku-4-5
 --max-turns
 1
 --settings
-{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default"}
+{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default","showThinkingSummaries":true}
 ` {
 		t.Fatalf("ACK argv = %q", argv)
 	}

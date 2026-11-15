@@ -109,13 +109,13 @@ type Request struct {
 	// PromptChannel is already composed for the selected engine: a per-seat
 	// system-prompt file path for Claude, or the complete developer
 	// instructions value for Codex. Empty preserves an ordinary reload.
-	PromptChannel string
-	Envs          map[string]string // the adopter settings' envs (workbench.Persona.Envs)
-	// Home and Machine are the Claude respawn's whole policy: the account's
-	// config dir, its autonomy posture and its system-prompt choice all come
-	// from them through action.ClaudeSpawn. A reload used to synthesize its
-	// own launch line here, and a rebooted chat silently lost the fleet's
-	// configured system prompt because this constructor never knew about one.
+	PromptChannel  string
+	Envs           map[string]string // the adopter settings' envs (workbench.Persona.Envs)
+	ClaudeSettings map[string]any    // the adopter settings' claude.settings (workbench.Persona.ClaudeSettings)
+	// Home and Machine are the Claude respawn's whole policy: the account's config dir, its autonomy
+	// posture and its system-prompt choice all come from them through action.ClaudeSpawn. A reload used
+	// to synthesize its own launch line here, and a rebooted chat silently lost the fleet's configured
+	// system prompt because this constructor never knew about one.
 	Home    string
 	Machine pfmconfig.Config
 	fresh   bool

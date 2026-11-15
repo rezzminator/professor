@@ -126,7 +126,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.SettingsEnv["CLAUDE_CODE_NO_FLICKER"] != "1" {
 					t.Error("no-flicker missing")
 				}
-			case "agentTeams":
+			case "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":
 				if parsed.SettingsEnv["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] != "0" {
 					t.Error("agent teams missing")
 				}
@@ -145,6 +145,10 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 			case "cleanupPeriodDays":
 				if parsed.Settings["cleanupPeriodDays"] != float64(36500) {
 					t.Error("cleanup missing")
+				}
+			case "showThinkingSummaries":
+				if parsed.Settings["showThinkingSummaries"] != true {
+					t.Errorf("showThinkingSummaries=%#v, want true", parsed.Settings["showThinkingSummaries"])
 				}
 			case "hooks":
 				var got, want []string

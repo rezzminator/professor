@@ -48,7 +48,7 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 		"argv carries --system-prompt-file and registry payload",
 		"lean prompt armed in the --settings payload and registry hooks",
 		"no --system-prompt-file prompt material", "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
-		"lean prompt missing from the --settings payload", "missing --settings outputStyle default",
+		"lean prompt missing from the --settings payload", "missing --settings ",
 	}},
 	"internal/engine/builtin.go": {"descriptor reads session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/gather/agents.go": {

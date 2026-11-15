@@ -117,6 +117,7 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 		Account: account, Cache1H: &cache1H, Resume: id,
 		Home: commands.Home, Machine: commands.Machine, Runner: commands.Runner,
 		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model, Envs: persona.Envs,
+		ClaudeSettings: persona.ClaudeSettings,
 	}
 	command, err := spawn.Command(ctx)
 	if err != nil {

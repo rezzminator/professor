@@ -320,6 +320,7 @@ func LaunchWith(
 				Effort:     persona.Effort,
 				Model:      persona.Model,
 				Envs:       persona.Envs,
+				Settings:   persona.ClaudeSettings,
 			},
 			workingDir,
 			stdout,

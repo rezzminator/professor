@@ -26,7 +26,6 @@ const (
 	knobMCP                        = "mcp"
 	knobHooks                      = "hooks"
 	knobStatusLine                 = "statusLine"
-	knobOutputStyle                = "outputStyle"
 	knobConfigDir                  = "configDir"
 	knobModel                      = "model"
 	knobEffort                     = "effort"
@@ -67,7 +66,6 @@ const (
 	envConcurrentSubagents         = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
 	envWebSearches                 = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
 	envTmuxTruecolor               = "CLAUDE_CODE_TMUX_TRUECOLOR"
-	envAgentTeams                  = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 	envFunctionHooks               = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
 	flagSettings                   = "--settings"
 	flagMCPConfig                  = "--mcp-config"
@@ -214,7 +212,7 @@ var Knobs = func() []Knob {
 		EnvCostLedgerPID, WireWrapperEnv, EnvCostLedgerPID, SourceConstant, "{pid}",
 		"Name the process the armed sink serves, so a second pass of the same process reuses it.",
 	})
-	return append(
+	rows = append(
 		rows,
 		Knob{
 			knobBinary, WireFlag, knobBinary, SourceConfig,
@@ -322,14 +320,6 @@ var Knobs = func() []Knob {
 			"Keep a fullscreen seat's renderer past Claude's boot canary.",
 		},
 		Knob{
-			"agentTeams",
-			WireSettings,
-			"env." + envAgentTeams,
-			SourceConstant,
-			"0",
-			"Keep experimental agent teams off.",
-		},
-		Knob{
 			"functionHooks",
 			WireSettings,
 			"env." + envFunctionHooks,
@@ -337,14 +327,10 @@ var Knobs = func() []Knob {
 			"1",
 			"Enable function hooks for pfm's Claude plugins.",
 		},
-		Knob{
-			knobOutputStyle,
-			WireSettings,
-			knobOutputStyle,
-			SourceConstant,
-			defaultWord,
-			"Use the managed output style.",
-		},
+	)
+	rows = append(rows, defaultKnobs()...)
+	return append(
+		rows,
 		Knob{
 			knobTheme,
 			WireSettings,

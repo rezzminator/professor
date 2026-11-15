@@ -10,14 +10,20 @@ import (
 // settingsEnvKey is the --settings key holding the launch's environment variables.
 const settingsEnvKey = "env"
 
-// settingsArgv folds every --settings the caller typed (a file or inline JSON) into pfm's own settings
-// and returns the caller's other words with the one --settings value Claude reads. Claude takes a single
-// --settings, the last one winning: appended behind `claude --settings ~/mine.json`, pfm's own would
-// silently discard the caller's file. So the caller's keys win over pfm's, except env, merged variable by
-// variable (the caller's value winning), and hooks, where each event runs pfm's hooks then the caller's.
+// settingsArgv folds the project's claude.settings, then every --settings the caller typed (a file or
+// inline JSON), into pfm's own settings and returns the caller's other words with the one --settings
+// value Claude reads. Claude takes a single --settings, the last one winning: appended behind
+// `claude --settings ~/mine.json`, pfm's own would silently discard the caller's file. So the project's
+// keys win over pfm's and the caller's over both, except env, merged variable by variable (the later
+// value winning), and hooks, where each event runs pfm's hooks, then the project's, then the caller's.
 // A caller's settings that cannot be read, are not a JSON object or hold a hooks or env that is not one
 // refuse the launch, naming them.
-func settingsArgv(args []string, settings map[string]any) (rest []string, payload string, err error) {
+func settingsArgv(args []string, project, settings map[string]any) (rest []string, payload string, err error) {
+	project, err = cloneOwnerSettings(project)
+	if err != nil {
+		return nil, "", err
+	}
+	mergeOwnerSettings(settings, project)
 	rest = make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
 		word := args[index]
@@ -57,19 +63,42 @@ func ownerSettings(value string) (map[string]any, error) {
 		}
 		body, source = read, value
 	}
+	return DecodeOwnerSettings(body, flagSettings+" "+source)
+}
+
+// DecodeOwnerSettings is body as settings to lay over pfm's own: a JSON object whose hooks and env,
+// when present, are objects, since any other shape would replace pfm's hooks or variables whole.
+// source names the body in the error.
+func DecodeOwnerSettings(body []byte, source string) (map[string]any, error) {
 	var owner map[string]any
 	if err := json.Unmarshal(body, &owner); err != nil || owner == nil {
-		return nil, fmt.Errorf("%s %s: not a JSON object (%v)", flagSettings, source, err)
+		return nil, fmt.Errorf("%s: not a JSON object (%v)", source, err)
 	}
-	// hooks and env merge into pfm's own: any other shape would replace pfm's hooks or variables whole.
 	for _, key := range []string{knobHooks, settingsEnvKey} {
 		if value, present := owner[key]; present {
 			if _, object := value.(map[string]any); !object {
-				return nil, fmt.Errorf("%s %s: %q is not a JSON object", flagSettings, source, key)
+				return nil, fmt.Errorf("%s: %q is not a JSON object", source, key)
 			}
 		}
 	}
 	return owner, nil
+}
+
+// cloneOwnerSettings is a deep copy of settings, so a launch merging into it never writes into
+// the persona it came from.
+func cloneOwnerSettings(settings map[string]any) (map[string]any, error) {
+	if len(settings) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(settings)
+	if err != nil {
+		return nil, fmt.Errorf("copy the project's claude.settings: %w", err)
+	}
+	var clone map[string]any
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		return nil, fmt.Errorf("copy the project's claude.settings: %w", err)
+	}
+	return clone, nil
 }
 
 // mergeOwnerSettings lays owner over settings as settingsArgv describes.

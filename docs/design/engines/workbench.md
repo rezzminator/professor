@@ -77,8 +77,9 @@ A `pfm.settings.json` at a project's managed root (the directory holding `.profe
 
 - **`harnessPrompt`:** optional. `{"harnessPrompt": {"extend": "path"}}` sends the fleet prompt, a blank line, then the project's file; `{"harnessPrompt": {"replace": "path"}}` sends the file alone.
 - **`envs`:** `{NAME: value}` set on each such chat. A file holding only `envs` is valid.
+- **`claude`:** optional, one key: `{"claude": {"settings": {…any Claude settings…}}}`. `readRootSettings` decodes it through `claudelaunch.DecodeOwnerSettings`: it must be a JSON object, its `hooks` and `env`, when present, objects; `null` counts as absent; any other key under `claude` is a fault. It is carried as `workbench.Persona.ClaudeSettings` into `claudelaunch.Request.Settings` at every Claude launch door that carries the file's envs (new chats, resume and agent open, the launcher wrapper including Herdr seats, reload, a restored chat via `pfm chat open`, `pfm chat new`, the picker) and merges between pfm's computed keys and the caller's own `--settings` ([claude-launch.md](claude-launch.md#knobs)). Codex and OpenCode ignore it; `pfm headless exec` does not read it.
 - **Precedence:** a nested workbench's prompt wins over the root file's `harnessPrompt`; the `envs` still apply. A restored chat (`pfm chat open`, `pfm/internal/chat/restored_recipe.go`) and a reload carry the `envs`.
-- **Refused names:** `PFM_*`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` (`settingsEnvReserved`).
+- **Refused names:** `PFM_*`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` (`settingsEnvReserved`), in `envs` and in `claude.settings.env` alike: Claude applies its settings `env` to its own process and every hook it runs.
 - **Faults:** a faulty file never blocks a launch; the chat opens without the whole file and a warning names the fault.
 
 ## Mirrors

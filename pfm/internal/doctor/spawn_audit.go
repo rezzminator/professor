@@ -106,11 +106,14 @@ func classifySpawn(
 			missing = "lean prompt missing from the --settings payload"
 		}
 	}
-	if missing == "" && (parsed.Settings == nil || parsed.Settings["outputStyle"] != "default") {
-		missing = "missing --settings outputStyle default"
+	// A project's or caller's own settings may change a default's value, never drop it.
+	for _, key := range claudelaunch.DefaultSettingKeys() {
+		if _, present := parsed.Settings[key]; missing == "" && !present {
+			missing = "missing --settings " + key + " from the launch defaults"
+		}
 	}
-	if missing == "" && !sameSpawnHooks(parsed.Hooks, claudelaunch.HookTemplates(home)) {
-		missing = "hook set differs from the registry"
+	if missing == "" && !carriesSpawnHooks(parsed.Hooks, claudelaunch.HookTemplates(home)) {
+		missing = "registry hooks missing"
 	}
 	if missing == "" {
 		switch promptPolicyName(prefs.SystemPrompt) {
@@ -129,10 +132,9 @@ func classifySpawn(
 	return spawnViolation, missing + " — some spawn site bypassed the door"
 }
 
-func sameSpawnHooks(actual, expected []claudelaunch.Hook) bool {
-	if len(actual) != len(expected) {
-		return false
-	}
+// carriesSpawnHooks reports whether actual holds every expected hook as often as expected does: a
+// project's or caller's own settings add hooks after the registry's, never in place of them.
+func carriesSpawnHooks(actual, expected []claudelaunch.Hook) bool {
 	type key struct {
 		event, matcher, command string
 		async                   bool
@@ -145,7 +147,7 @@ func sameSpawnHooks(actual, expected []claudelaunch.Hook) bool {
 		counts[key{hook.Event, hook.Matcher, hook.Command, hook.Async}]--
 	}
 	for _, count := range counts {
-		if count != 0 {
+		if count > 0 {
 			return false
 		}
 	}

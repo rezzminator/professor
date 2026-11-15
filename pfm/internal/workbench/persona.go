@@ -3,7 +3,6 @@ package workbench
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -28,20 +28,21 @@ const (
 	Resume
 )
 
-// Persona carries a validated workbench and the prompt read for this launch.
-// Envs are the managed root's settings envs, set on the launch whatever prompt
-// it carries; Warnings name a settings file the launch goes on without.
+// Persona carries a validated workbench and the prompt read for this launch. Envs are the managed root's settings
+// envs, set on the launch whatever prompt it carries, and ClaudeSettings its claude.settings, laid over a Claude
+// launch's own --settings; Warnings name a settings file the launch goes on without.
 type Persona struct {
 	Bench                       Bench
 	Prompt, Body, Effort, Model string
 	Envs                        map[string]string
+	ClaudeSettings              map[string]any
 	Warnings                    []string
 }
 
 // ForLaunch refuses invalid manifests and disabled new engines before launch.
-// The managed root's settings file (paths.SettingsFile) supplies the prompt
-// where no workbench owns cwd, and its envs everywhere; a faulty settings file
-// is a warning, never a refusal. A refusal still returns the envs and warnings.
+// The managed root's settings file (paths.SettingsFile) supplies the prompt where no workbench owns cwd, and
+// its envs and Claude settings everywhere; a faulty settings file is a warning, never a refusal. A refusal
+// still returns the envs, Claude settings and warnings.
 func ForLaunch(cwd, home string, engine pfmengine.ID, mode Mode) (Persona, error) {
 	start, root, found, err := launchRoot(cwd)
 	if err != nil || !found {
@@ -51,7 +52,7 @@ func ForLaunch(cwd, home string, engine pfmengine.ID, mode Mode) (Persona, error
 	// A nested workbench's prompt wins, so the settings prompt is resolved
 	// only where no workbench owns cwd.
 	settings := settingsPersona(root, home, engine, err == nil && !found)
-	base := Persona{Envs: settings.Envs, Warnings: settings.Warnings}
+	base := Persona{Envs: settings.Envs, ClaudeSettings: settings.ClaudeSettings, Warnings: settings.Warnings}
 	if err != nil {
 		return base, err
 	}
@@ -78,15 +79,9 @@ func ForLaunch(cwd, home string, engine pfmengine.ID, mode Mode) (Persona, error
 		obs.Logger(context.Background()).Error("workbench launch", "path", bench.Prompt, obs.FieldErr, wrapped)
 		return base, wrapped
 	}
-	return Persona{
-		Bench:    bench,
-		Prompt:   bench.Prompt,
-		Body:     string(body),
-		Effort:   bench.Effort,
-		Model:    bench.Model,
-		Envs:     settings.Envs,
-		Warnings: settings.Warnings,
-	}, nil
+	base.Bench, base.Prompt, base.Body = bench, bench.Prompt, string(body)
+	base.Effort, base.Model = bench.Effort, bench.Model
+	return base, nil
 }
 
 // launchRoot is the managed root above cwd, in a linked worktree the
@@ -117,15 +112,6 @@ func launchRoot(cwd string) (start, root string, found bool, err error) {
 	return start, root, true, nil
 }
 
-// settingsFile is the settings file's one shape: no other key exists.
-type settingsFile struct {
-	HarnessPrompt *struct {
-		Extend  string `json:"extend"`
-		Replace string `json:"replace"`
-	} `json:"harnessPrompt"`
-	Envs json.RawMessage `json:"envs"`
-}
-
 // settingsPersona is root's settings file as a persona; a fault is logged and
 // named in Warnings, and the launch goes on without the file.
 func settingsPersona(root, home string, engine pfmengine.ID, withPrompt bool) Persona {
@@ -135,13 +121,6 @@ func settingsPersona(root, home string, engine pfmengine.ID, withPrompt bool) Pe
 		return Persona{Warnings: []string{err.Error() + "; launching without the settings"}}
 	}
 	return persona
-}
-
-// settingsEnvReserved reports a name pfm assigns on some launch door,
-// several of them by inheritance (cx, the Herdr seat), where an adopter value
-// would land ahead of pfm's.
-func settingsEnvReserved(name string) bool {
-	return strings.HasPrefix(name, "PFM_") || name == "CODEX_HOME" || name == "CLAUDE_CONFIG_DIR"
 }
 
 // readRootSettings reads root's settings file; withPrompt false checks the
@@ -183,6 +162,19 @@ func readRootSettings(root, home string, engine pfmengine.ID, withPrompt bool) (
 			}
 		}
 		persona.Envs = envs
+	}
+	if raw := file.Claude.Settings; len(raw) != 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		if persona.ClaudeSettings, err = claudelaunch.DecodeOwnerSettings(raw, "claude.settings"); err != nil {
+			return fault(err)
+		}
+		// Claude applies settings env to its own process and every hook it runs: a reserved name
+		// would redirect pfm's hooks as an envs entry would.
+		env, _ := persona.ClaudeSettings["env"].(map[string]any)
+		for _, name := range slices.Sorted(maps.Keys(env)) {
+			if settingsEnvReserved(name) {
+				return fault(fmt.Errorf("claude.settings.env.%s is set by pfm itself on launch", name))
+			}
+		}
 	}
 	if file.HarnessPrompt == nil {
 		return persona, nil

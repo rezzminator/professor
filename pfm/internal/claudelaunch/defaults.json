@@ -1,0 +1,18 @@
+{
+  "settings": {
+    "env": {
+      "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0"
+    },
+    "outputStyle": "default",
+    "showThinkingSummaries": true
+  },
+  "registry": {
+    "leftArrowOpensAgents": false
+  },
+  "reasons": {
+    "settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "Keep experimental agent teams off.",
+    "settings.outputStyle": "Use the managed output style.",
+    "settings.showThinkingSummaries": "Show the model's thinking summaries.",
+    "registry.leftArrowOpensAgents": "Keep ← on an empty prompt from opening the agents view."
+  }
+}

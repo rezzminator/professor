@@ -41,7 +41,8 @@ type Request struct {
 	Model, Effort, PromptFile            string
 	Args                                 []string
 	// Envs are the adopter settings' envs (workbench.Persona.Envs).
-	Envs map[string]string
+	Envs     map[string]string
+	Settings map[string]any // the adopter settings' claude.settings (workbench.Persona.ClaudeSettings)
 	// Runner resolves bash for CLAUDE_CODE_SHELL; nil is the real runner.
 	Runner deps.Runner
 }
@@ -147,7 +148,8 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {
 		result.Argv = append(result.Argv, flagName, name)
 	}
-	args, payload, err := settingsArgv(request.Args, settingsFor(request, prefs, noFlicker(request, settingsDir)))
+	settings := settingsFor(request, prefs, noFlicker(request, settingsDir))
+	args, payload, err := settingsArgv(request.Args, request.Settings, settings)
 	if err != nil {
 		return Launch{}, err
 	}
@@ -248,14 +250,12 @@ func helperModel(prefs pfmconfig.ClaudePrefs) string {
 }
 
 func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) map[string]any {
-	settings := map[string]any{knobOutputStyle: defaultWord, knobCleanupPeriodDays: prefs.CleanupPeriodDays}
-	env := map[string]string{
-		envWebSearches:             strconv.FormatInt(prefs.WebSearchesPerSession, 10),
-		envAutoCompactWindow:       strconv.FormatInt(prefs.AutoCompactWindow, 10),
-		envAnthropicSmallFastModel: helperModel(prefs),
-		envAgentTeams:              "0",
-		envFunctionHooks:           "1",
-	}
+	settings, env := defaultSettings()
+	settings[knobCleanupPeriodDays] = prefs.CleanupPeriodDays
+	env[envWebSearches] = strconv.FormatInt(prefs.WebSearchesPerSession, 10)
+	env[envAutoCompactWindow] = strconv.FormatInt(prefs.AutoCompactWindow, 10)
+	env[envAnthropicSmallFastModel] = helperModel(prefs)
+	env[envFunctionHooks] = "1"
 	depth := prefs.MaxSubagentSpawnDepth
 	if depth < 1 {
 		depth = pfmconfig.DefaultSubagentSpawnDepth

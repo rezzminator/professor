@@ -50,7 +50,7 @@ func TestForLaunch(t *testing.T) {
 			"settings envs only",
 			[]pfmengine.ID{pfmengine.Claude, pfmengine.Codex},
 			[]Mode{New},
-			`{"envs":{"TEAM_MODE":"strict","ENGINE_SYNC_DISABLE":"codex"}}`,
+			`{"envs":{"TEAM_MODE":"strict","ENGINE_SYNC_DISABLE":"codex"},"claude":{"settings":{"showThinkingSummaries":false}}}`,
 		},
 		{
 			"settings both keys",
@@ -69,13 +69,13 @@ func TestForLaunch(t *testing.T) {
 			"nested workbench beside settings",
 			[]pfmengine.ID{pfmengine.Claude},
 			[]Mode{New},
-			`{"harnessPrompt":{"replace":"team.md"},"envs":{"TEAM_MODE":"strict"}}`,
+			`{"harnessPrompt":{"replace":"team.md"},"envs":{"TEAM_MODE":"strict"},"claude":{"settings":{"outputStyle":"x"}}}`,
 		},
 		{
 			"nested workbench beside a settings prompt it never reads",
 			[]pfmengine.ID{pfmengine.Claude},
 			[]Mode{New},
-			`{"harnessPrompt":{"extend":"gone.md"},"envs":{"TEAM_MODE":"strict"}}`,
+			`{"harnessPrompt":{"extend":"gone.md"},"envs":{"TEAM_MODE":"strict"},"claude":{"settings":{"outputStyle":"x"}}}`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -116,7 +116,10 @@ func TestForLaunch(t *testing.T) {
 				want = Persona{Prompt: filepath.Join(root, "team.md"), Body: "Team rules.\n"}
 			case "settings envs only":
 				cwd = filepath.Join(root, "src")
-				want = Persona{Envs: map[string]string{"TEAM_MODE": "strict", "ENGINE_SYNC_DISABLE": "codex"}}
+				want = Persona{
+					Envs:           map[string]string{"TEAM_MODE": "strict", "ENGINE_SYNC_DISABLE": "codex"},
+					ClaudeSettings: map[string]any{"showThinkingSummaries": false},
+				}
 			case "settings both keys":
 				cwd = filepath.Join(root, "src")
 				want = Persona{Warnings: []string{
@@ -137,6 +140,7 @@ func TestForLaunch(t *testing.T) {
 				want = Persona{
 					Bench: LoadBench(dir, root), Prompt: filepath.Join(dir, ".professor", "scribe.md"),
 					Body: "You are scribe.", Effort: "xhigh", Envs: map[string]string{"TEAM_MODE": "strict"},
+					ClaudeSettings: map[string]any{"outputStyle": "x"},
 				}
 			}
 			for _, engine := range test.engines {
@@ -181,8 +185,13 @@ func TestForLaunch(t *testing.T) {
 // names the fault; a valid file beside it proves the read ran.
 func TestSettingsFaults(t *testing.T) {
 	for _, test := range []struct{ name, settings, want string }{
-		{"valid", `{"harnessPrompt":{"replace":"team.md"},"envs":{"TEAM_MODE":"strict"}}`, ""},
+		{"valid", `{"harnessPrompt":{"replace":"team.md"},"envs":{"TEAM_MODE":"strict"},"claude":{"settings":{"env":{"X":"1"}}}}`, ""},
 		{"null envs", `{"envs":null}`, ""},
+		{"null claude settings", `{"claude":{"settings":null}}`, ""},
+		{"claude settings not an object", `{"claude":{"settings":["x"]}}`, `claude.settings: not a JSON object (json: cannot unmarshal array into Go value of type map[string]interface {})`},
+		{"claude settings hooks not an object", `{"claude":{"settings":{"hooks":[]}}}`, `claude.settings: "hooks" is not a JSON object`},
+		{"claude settings env reserved", `{"claude":{"settings":{"env":{"CLAUDE_CONFIG_DIR":"/x"}}}}`, `claude.settings.env.CLAUDE_CONFIG_DIR is set by pfm itself on launch`},
+		{"unknown claude key", `{"claude":{"permissions":{}}}`, `not valid: json: unknown field "permissions"`},
 		{"trailing value", `{"envs":{}} {}`, `not valid: trailing JSON value`},
 		{"neither prompt key", `{"harnessPrompt":{},"envs":{"TEAM_MODE":"strict"}}`, `harnessPrompt needs "extend" or "replace"`},
 		{"lower-case env name", `{"envs":{"team_mode":"strict"}}`, `envs name "team_mode" must be upper snake: A-Z, 0-9 and _, starting with a letter`},
@@ -220,12 +229,13 @@ func TestSettingsFaults(t *testing.T) {
 			home := t.TempDir()
 			got, err := ForLaunch(filepath.Join(root, "src"), home, pfmengine.Claude, New)
 			want := Persona{
-				Prompt: filepath.Join(root, "team.md"),
-				Body:   "Team rules.\n",
-				Envs:   map[string]string{"TEAM_MODE": "strict"},
+				Prompt:         filepath.Join(root, "team.md"),
+				Body:           "Team rules.\n",
+				Envs:           map[string]string{"TEAM_MODE": "strict"},
+				ClaudeSettings: map[string]any{"env": map[string]any{"X": "1"}},
 			}
 			switch test.name {
-			case "null envs":
+			case "null envs", "null claude settings":
 				want = Persona{}
 			case "valid":
 			default:

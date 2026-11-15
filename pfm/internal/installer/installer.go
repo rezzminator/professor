@@ -4,6 +4,8 @@
 // herdr_claude.go: Herdr's own Claude integration, once per Claude settings store.
 // claude_plugins_unwire.go: uninstall takes back what install wrote into the Claude settings and plugin records.
 // log_root.go: install moves the logs pfm wrote before the log root into it, once.
+// claude_registry_defaults.go: install sets the launch defaults' registry values in each account's .claude.json.
+// claude_registry_keys.go: byte-preserving splices of one top-level key in a .claude.json.
 package installer
 
 import (
@@ -277,6 +279,7 @@ func (installer *engine) install(ctx context.Context) error {
 	}
 	installer.deferFailure(installer.ensureClaudeEnv(false))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
+	installer.deferFailure(installer.wireClaudeRegistryDefaults())
 	installer.deferFailure(installer.wireCodexHooks())
 	installer.retireStateDirs()
 	installer.expireStateBackups()

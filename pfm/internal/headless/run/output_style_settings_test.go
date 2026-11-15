@@ -17,9 +17,9 @@ func TestArgumentsUsesOnlyPassedClaudeSettings(t *testing.T) {
 		settings map[string]any
 		want     string
 	}{
-		{"nothing passed", nil, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}`},
-		{"passed values", map[string]any{"theme": "t", "maxSubagentSpawnDepth": 4}, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},"outputStyle":"default","theme":"t"}`},
-		{"lean prompt", map[string]any{"systemPrompt": "lean"}, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default"}`},
+		{"nothing passed", nil, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"},"outputStyle":"default","showThinkingSummaries":true}`},
+		{"passed values", map[string]any{"theme": "t", "maxSubagentSpawnDepth": 4}, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},"outputStyle":"default","showThinkingSummaries":true,"theme":"t"}`},
+		{"lean prompt", map[string]any{"systemPrompt": "lean"}, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default","showThinkingSummaries":true}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			args, err := arguments(Request{Engine: pfmengine.Claude, Config: machine, Settings: test.settings})
@@ -78,7 +78,7 @@ func TestArgumentsCarriesDefaultOutputStyle(t *testing.T) {
 // silently-discarded --settings bug: arguments() used to append LaunchArgs
 // AFTER request.Args, so a caller-supplied --settings (a headless caller
 // passing its own file through request.Args) lost to the fleet's own
-// --settings {"outputStyle":"default"} appended behind it. The caller's value
+// --settings {"outputStyle":"default","showThinkingSummaries":true} appended behind it. The caller's value
 // must now survive and the fleet's default payload must not appear at all.
 func TestArgumentsKeepsACallerSuppliedSettingsFlag(t *testing.T) {
 	args, err := arguments(Request{

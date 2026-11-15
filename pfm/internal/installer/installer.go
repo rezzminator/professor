@@ -6,6 +6,7 @@
 // log_root.go: install moves the logs pfm wrote before the log root into it, once.
 // claude_registry_defaults.go: install sets the launch defaults' registry values in each account's .claude.json.
 // claude_registry_keys.go: byte-preserving splices of one top-level key in a .claude.json.
+// install_config_seed.go: the config a first install seeds, less the new keys an older pfm refuses.
 package installer
 
 import (

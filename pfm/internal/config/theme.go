@@ -12,7 +12,7 @@ import (
 // enforces in decodeClaudePrefs, in the same error voice (the caller wraps
 // the returned error in "config %s: %w" with result.Path, so the final
 // message reads identically to a validation done inline); absent leaves
-// prefs.Theme at its zero value. Unlike NativeCursor/Cache1H's inherited
+// prefs.Theme at its zero value. Unlike Cache1H's inherited
 // bool, EffectiveClaude copies Theme the way it copies Binary — only when an
 // account's resolved value is non-empty (config.go:1320) — so no false-zero
 // seeding is needed here: an account whose claude block never mentioned

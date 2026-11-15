@@ -23,6 +23,7 @@ Where pfm keeps its own configuration and state. Nothing here belongs to one eng
 
 - **Path:** `{clone}/pfm.config.json`, where `{clone}` is the recorded source repo (`~/.local/share/pfm/install/source-repo`). The `--config PATH` flag and the `PFM_CONFIG` environment variable override it; the fence sets `PFM_CONFIG` because its worktree mount is read-only.
 - **Ignored by git:** `/pfm.config.json` in the repo's `.gitignore`.
+- **Project scope:** the same file name at a managed root, `{root}/pfm.config.json`, is tracked in the adopter and sparse: only `envs`, `harnessPrompt` and `claude.settings` count there, layered per key shipped defaults < machine file < project file < a caller's flags ([workbench.md](workbench.md#project-pfmconfigjson)). When the root's file is the machine file (the Professor clone root) it is read once as the machine file. A leftover `pfm.settings.json` is not read; launch and `pfm doctor` warn to move its keys.
 - **Written by pfm** only at the resolved path: `pfm config init`, `pfm mcp {server} enable|disable`, and the installer's log-default insertion.
 - Harvester owns its separate XDG configuration; `HARVESTER_CONFIG` overrides its default path. `pfm config init` and `pfm config show` do not manage Harvester settings.
 - **Created by `pfm install`** from `example.pfm.config.json` when absent; an existing file is never overwritten. Keys a newer pfm adds are reported by `pfm doctor` as `missing key … (default …)`, not written silently.

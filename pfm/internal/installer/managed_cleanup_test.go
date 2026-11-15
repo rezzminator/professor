@@ -20,7 +20,7 @@ func TestInstallManagedCleanup(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "managed")
 			path := filepath.Join(dir, "pfm.json")
-			options := Options{ManagedSettingsDir: dir, CleanupPeriodDays: 36500, RequireManagedCleanup: true}
+			options := Options{ManagedSettingsDir: dir, RequireManagedCleanup: true}
 			apply := true
 			switch scenario {
 			case "wrong":
@@ -133,7 +133,6 @@ func TestInstallManagedCleanupCachedSudo(t *testing.T) {
 		options: Options{
 			ManagedSettingsDir:    dir,
 			RequireManagedCleanup: true,
-			CleanupPeriodDays:     36500,
 			Runner:                runner,
 			Stdout:                &output,
 			writeManaged:          func(string, []byte) error { return os.ErrPermission },
@@ -219,7 +218,7 @@ func TestInstallManagedCleanupWriteError(t *testing.T) {
 	installer := &engine{
 		apply: true,
 		options: Options{
-			ManagedSettingsDir: dir, RequireManagedCleanup: true, CleanupPeriodDays: 36500,
+			ManagedSettingsDir: dir, RequireManagedCleanup: true,
 			Runner: runner, Stdout: &output,
 			writeManaged: func(string, []byte) error { return syscall.ENOSPC },
 		},
@@ -245,7 +244,6 @@ func TestInstallManagedCleanupTemporaryDirectoryFailure(t *testing.T) {
 		options: Options{
 			ManagedSettingsDir:    filepath.Join(dir, "managed"),
 			RequireManagedCleanup: true,
-			CleanupPeriodDays:     36500,
 			Stdout:                &output,
 			writeManaged:          func(string, []byte) error { return os.ErrPermission },
 		},
@@ -274,7 +272,6 @@ func TestInstallManagedCleanupInRun(t *testing.T) {
 				MCPConfigPath:         testConfigPath(t),
 				ManagedSettingsDir:    dir,
 				RequireManagedCleanup: true,
-				CleanupPeriodDays:     36500,
 				Runner:                &fakeRunner{manager: true, nameSyncIdle: true, failSudo: true},
 				Stdout:                &output,
 			}
@@ -412,7 +409,7 @@ func TestInstallManagedCleanupPrependPlugins(t *testing.T) {
 			installer := &engine{
 				apply: true,
 				options: Options{
-					ManagedSettingsDir: dir, CleanupPeriodDays: 36500, RequireManagedCleanup: true, Stdout: &output,
+					ManagedSettingsDir: dir, RequireManagedCleanup: true, Stdout: &output,
 				},
 			}
 			if err := installer.installManagedCleanup(context.Background()); err != nil {

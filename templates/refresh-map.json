@@ -199,7 +199,7 @@
     "project/epics/TEMPLATE.md": {
       "curated": true
     },
-    "project/pfm.settings.json": {
+    "project/pfm.config.json": {
       "curated": true
     },
     "project/rules/git-writes-through-gitter.md": {

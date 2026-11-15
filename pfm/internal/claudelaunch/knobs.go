@@ -4,7 +4,6 @@ import (
 	"slices"
 	"strings"
 
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -256,76 +255,12 @@ var Knobs = func() []Knob {
 			"Request Remote Control for every interactive session; Claude enforces eligibility.",
 		},
 		Knob{
-			knobNativeCursor,
-			WireSettings,
-			"env." + envNativeCursor,
-			SourceConfig,
-			false,
-			"Enable Claude's native cursor when configured.",
-		},
-		Knob{
-			knobMaxSubagentSpawnDepth,
-			WireSettings,
-			"env." + envSpawnDepth,
-			SourceConfig,
-			8,
-			"Lift the agent nesting limit.",
-		},
-		Knob{
-			knobMaxConcurrentSubagents,
-			WireSettings,
-			"env." + envConcurrentSubagents,
-			SourceConfig,
-			nil,
-			"Set the agent concurrency limit when configured.",
-		},
-		Knob{
-			knobWebSearchesPerSession,
-			WireSettings,
-			"env." + envWebSearches,
-			SourceConfig,
-			int64(9007199254740991),
-			"Set the web search ceiling.",
-		},
-		Knob{
-			knobAutoCompactWindow,
-			WireSettings,
-			"env." + envAutoCompactWindow,
-			SourceConfig,
-			int64(100000),
-			"Set the auto-compact window the compaction plugin reads.",
-		},
-		Knob{
-			knobHelperModel,
-			WireSettings,
-			"env." + envAnthropicSmallFastModel,
-			SourceConfig,
-			pfmconfig.DefaultHelperModel,
-			"Run Claude Code's helper calls (page summaries, web search, titles) on a small model, Haiku 5.5 unless configured.",
-		},
-		Knob{
-			knobTmuxTruecolor,
-			WireSettings,
-			"env." + envTmuxTruecolor,
-			SourceConfig,
-			true,
-			"Preserve color under tmux.",
-		},
-		Knob{
 			knobNoFlicker,
 			WireSettings,
 			"env." + envNoFlicker,
 			SourceAccount,
 			nil,
 			"Keep a fullscreen seat's renderer past Claude's boot canary.",
-		},
-		Knob{
-			"functionHooks",
-			WireSettings,
-			"env." + envFunctionHooks,
-			SourceConstant,
-			"1",
-			"Enable function hooks for pfm's Claude plugins.",
 		},
 	)
 	rows = append(rows, defaultKnobs()...)
@@ -338,14 +273,6 @@ var Knobs = func() []Knob {
 			SourceConfig,
 			nil,
 			"Carry the selected Claude theme unless theme sync owns it.",
-		},
-		Knob{
-			knobCleanupPeriodDays,
-			WireSettings,
-			knobCleanupPeriodDays,
-			SourceConfig,
-			36500,
-			"Keep managed transcripts.",
 		},
 		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "24 registrations", "Attach the fleet hook set."},
 		Knob{knobStatusLine, WireSettings, knobStatusLine, SourceConstant, "pfm-statusline", "Show fleet status."},

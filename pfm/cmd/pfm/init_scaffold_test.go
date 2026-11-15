@@ -43,7 +43,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	for _, relative := range []string{
 		".claude/settings.json",
 		".rumdl.toml",
-		"pfm.settings.json",
+		"pfm.config.json",
 		".claude/commands/dev.md",
 		".claude/agents/gitter.md",
 		".claude/scripts/worktree.sh",
@@ -339,9 +339,9 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		content string
 		mode    os.FileMode
 	}{
-		"VERSION":                             {content: "0.65.0\n", mode: 0o600},
-		"templates/project/settings.json":     {content: "{}\n", mode: 0o600},
-		"templates/project/pfm.settings.json": {content: "{}\n", mode: 0o600},
+		"VERSION":                           {content: "0.65.0\n", mode: 0o600},
+		"templates/project/settings.json":   {content: "{}\n", mode: 0o600},
+		"templates/project/pfm.config.json": {content: "{}\n", mode: 0o600},
 		"templates/project/rumdl-policy.toml": {
 			content: "# fixture rumdl policy\n[global]\n",
 			mode:    0o600,

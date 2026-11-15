@@ -266,7 +266,7 @@ func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
 			prefs:   config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction},
 			started: 50,
 			verdict: spawnPredatesLayer,
-			reason:  "missing --settings outputStyle from the launch defaults (born 50s before the current spawn door)",
+			reason:  "missing --settings cleanupPeriodDays from the launch defaults (born 50s before the current spawn door)",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

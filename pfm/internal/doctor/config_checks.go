@@ -189,7 +189,11 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 			)
 		}
 	}
-	return 0, 0
+	for _, warning := range runtime.Config.RetiredKeyWarnings() {
+		fmt.Fprintf(stdout, "doctor: config: %s (%s)\n", warning, path)
+		warnings++
+	}
+	return warnings, 0
 }
 
 // printDuplicateSeatLogins reads the user-scope Claude registries that the

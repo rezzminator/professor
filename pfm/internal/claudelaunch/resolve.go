@@ -147,23 +147,6 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 		return prefs.SystemPrompt
 	case knobRemoteControl:
 		return strconv.FormatBool(prefs.RemoteControl)
-	case knobNativeCursor:
-		return strconv.FormatBool(prefs.NativeCursor)
-	case knobMaxSubagentSpawnDepth:
-		return strconv.Itoa(prefs.MaxSubagentSpawnDepth)
-	case knobMaxConcurrentSubagents:
-		if prefs.MaxConcurrentSubagents == 0 {
-			return unsetWord
-		}
-		return strconv.Itoa(prefs.MaxConcurrentSubagents)
-	case knobWebSearchesPerSession:
-		return strconv.FormatInt(prefs.WebSearchesPerSession, 10)
-	case knobAutoCompactWindow:
-		return strconv.FormatInt(prefs.AutoCompactWindow, 10)
-	case knobHelperModel:
-		return helperModel(prefs)
-	case knobTmuxTruecolor:
-		return strconv.FormatBool(prefs.TmuxTruecolor)
 	case knobCostLedger:
 		return strconv.FormatBool(prefs.CostLedger)
 	case knobTheme:
@@ -171,8 +154,6 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 			return unsetWord
 		}
 		return prefs.Theme
-	case knobCleanupPeriodDays:
-		return strconv.Itoa(prefs.CleanupPeriodDays)
 	case knobPermissionMode:
 		return prefs.PermissionMode
 	case knobMCP:

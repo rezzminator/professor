@@ -14,8 +14,8 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // ClaudeInstructionsFile is the orientation file at a repository root.
@@ -28,7 +28,7 @@ var initTemplatePaths = []struct {
 }{
 	{source: "project/settings.json", target: ".claude/settings.json"},
 	{source: "project/rumdl-policy.toml", target: ".rumdl.toml"},
-	{source: "project/pfm.settings.json", target: paths.SettingsFile},
+	{source: "project/pfm.config.json", target: pfmconfig.FileName},
 	{source: "project/commands", target: ".claude/commands", skip: "per-project"},
 	{source: "project/agents", target: ".claude/agents"},
 	{source: "project/scripts", target: ".claude/scripts"},

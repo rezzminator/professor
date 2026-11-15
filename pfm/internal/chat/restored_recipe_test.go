@@ -10,7 +10,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -38,7 +37,7 @@ func TestRestoredRecipeCarriesTheRootSettingsEnvs(t *testing.T) {
 			root := t.TempDir()
 			for path, body := range map[string]string{
 				filepath.Join(root, ".professor", "baseline.json"): "{}",
-				paths.Settings(root): `{"envs":{"TEAM_MODE":"strict"}}`,
+				config.PathIn(root): `{"envs":{"TEAM_MODE":"strict"}}`,
 			} {
 				if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
 					t.Fatal(err)
@@ -53,7 +52,7 @@ func TestRestoredRecipeCarriesTheRootSettingsEnvs(t *testing.T) {
 					kind,
 					recipe,
 					err,
-					paths.Settings(root),
+					config.PathIn(root),
 				)
 			}
 		})

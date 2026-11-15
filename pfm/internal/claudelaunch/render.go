@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"uuid"
 
@@ -40,9 +39,9 @@ type Request struct {
 	Cache1H                              *bool
 	Model, Effort, PromptFile            string
 	Args                                 []string
-	// Envs are the adopter settings' envs (workbench.Persona.Envs).
+	// Envs are the layered envs, machine then project (workbench.Persona.Envs).
 	Envs     map[string]string
-	Settings map[string]any // the adopter settings' claude.settings (workbench.Persona.ClaudeSettings)
+	Settings map[string]any // the layered claude.settings, machine then project (workbench.Persona.ClaudeSettings)
 	// Runner resolves bash for CLAUDE_CODE_SHELL; nil is the real runner.
 	Runner deps.Runner
 }
@@ -149,7 +148,13 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		result.Argv = append(result.Argv, flagName, name)
 	}
 	settings := settingsFor(request, prefs, noFlicker(request, settingsDir))
-	args, payload, err := settingsArgv(request.Args, request.Settings, settings)
+	// request.Settings is the persona's machine-then-project layer; a launch no persona read carries the
+	// machine file's claude.settings alone.
+	layered := request.Settings
+	if layered == nil {
+		layered = prefs.Settings
+	}
+	args, payload, err := settingsArgv(request.Args, layered, settings)
 	if err != nil {
 		return Launch{}, err
 	}
@@ -239,37 +244,8 @@ func promptCacheTTL(cache1h bool) string {
 	return cacheTTL5M
 }
 
-// helperModel is the model of Claude Code's helper calls: the configured one,
-// else Haiku 5.5. Never empty, so an unset value cannot reach Claude Code as an
-// empty model name.
-func helperModel(prefs pfmconfig.ClaudePrefs) string {
-	if prefs.HelperModel == "" {
-		return pfmconfig.DefaultHelperModel
-	}
-	return prefs.HelperModel
-}
-
 func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) map[string]any {
 	settings, env := defaultSettings()
-	settings[knobCleanupPeriodDays] = prefs.CleanupPeriodDays
-	env[envWebSearches] = strconv.FormatInt(prefs.WebSearchesPerSession, 10)
-	env[envAutoCompactWindow] = strconv.FormatInt(prefs.AutoCompactWindow, 10)
-	env[envAnthropicSmallFastModel] = helperModel(prefs)
-	env[envFunctionHooks] = "1"
-	depth := prefs.MaxSubagentSpawnDepth
-	if depth < 1 {
-		depth = pfmconfig.DefaultSubagentSpawnDepth
-	}
-	env[envSpawnDepth] = strconv.Itoa(depth)
-	if prefs.MaxConcurrentSubagents > 0 {
-		env[envConcurrentSubagents] = strconv.Itoa(prefs.MaxConcurrentSubagents)
-	}
-	if prefs.TmuxTruecolor {
-		env[envTmuxTruecolor] = "1"
-	}
-	if prefs.NativeCursor {
-		env[envNativeCursor] = "1"
-	}
 	if fullscreen {
 		env[envNoFlicker] = "1"
 	}

@@ -11,15 +11,18 @@ import (
 )
 
 func TestArgumentsUsesOnlyPassedClaudeSettings(t *testing.T) {
-	machine := pfmconfig.Config{Claude: pfmconfig.ClaudePrefs{Theme: "from-config", MaxSubagentSpawnDepth: 9}}
+	machine := pfmconfig.Config{Claude: pfmconfig.ClaudePrefs{
+		Theme:    "from-config",
+		Settings: map[string]any{"env": map[string]any{"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "9"}},
+	}}
 	for _, test := range []struct {
 		name     string
 		settings map[string]any
 		want     string
 	}{
-		{"nothing passed", nil, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"},"outputStyle":"default","showThinkingSummaries":true}`},
-		{"passed values", map[string]any{"theme": "t", "maxSubagentSpawnDepth": 4}, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},"outputStyle":"default","showThinkingSummaries":true,"theme":"t"}`},
-		{"lean prompt", map[string]any{"systemPrompt": "lean"}, `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default","showThinkingSummaries":true}`},
+		{"nothing passed", nil, `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"8","CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_TMUX_TRUECOLOR":"1"},"outputStyle":"default","showThinkingSummaries":true}`},
+		{"passed values", map[string]any{"theme": "t", "maxSubagentSpawnDepth": 4}, `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4","CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_TMUX_TRUECOLOR":"1"},"outputStyle":"default","showThinkingSummaries":true,"theme":"t"}`},
+		{"lean prompt", map[string]any{"systemPrompt": "lean"}, `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"8","CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1","CLAUDE_CODE_TMUX_TRUECOLOR":"1"},"outputStyle":"default","showThinkingSummaries":true}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			args, err := arguments(Request{Engine: pfmengine.Claude, Config: machine, Settings: test.settings})

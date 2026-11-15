@@ -45,10 +45,8 @@ func TestClaudeEnvironmentDropsInheritedLaunchSettings(t *testing.T) {
 	var got []string
 	setEnvironment([]string{
 		"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=9",
-		"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=32",
 		"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=99",
 		"CLAUDE_CODE_TMUX_TRUECOLOR=1",
-		"CLAUDE_CODE_NATIVE_CURSOR=1",
 	}, pfmengine.Claude, "/cfg", false, &got)
 	if got, want := strings.Join(got, "\n"), "CLAUDE_CONFIG_DIR=/cfg"; got != want {
 		t.Fatalf("environment = %q, want %q", got, want)

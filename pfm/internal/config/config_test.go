@@ -142,16 +142,10 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		Plugins:               DefaultClaudePlugins(),
 		PermissionMode:        PermissionBypass,
 		Binary:                "claude",
-		WebSearchesPerSession: 9007199254740991,
-		AutoCompactWindow:     100000,
-		TmuxTruecolor:         true,
-		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
-		HelperModel:           DefaultHelperModel,
 		Cache1H:               true,
 		RemoteControl:         true,
 		CostLedger:            true,
-		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
 		t.Fatalf("Claude = %#v, want bypass/claude defaults", got.Claude)
 	}
@@ -311,16 +305,10 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		Plugins:               DefaultClaudePlugins(),
 		PermissionMode:        PermissionPrompt,
 		Binary:                "claude-custom",
-		WebSearchesPerSession: 9007199254740991,
-		AutoCompactWindow:     100000,
-		TmuxTruecolor:         true,
-		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
-		HelperModel:           DefaultHelperModel,
 		Cache1H:               true,
 		RemoteControl:         true,
 		CostLedger:            true,
-		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
 		t.Fatalf("Claude = %#v, want configured values", got.Claude)
 	}
@@ -439,12 +427,6 @@ func TestLoadRefusesAnUnusableConfig(t *testing.T) {
 		{"state db relative", `{"version":2,"state":{"db":"relative.db"}}`, "config {path}: state.db: must be absolute or start with ~/ or $HOME/, got \"relative.db\""},
 		{"remoteControl string", `{"version":2,"claude":{"remoteControl":"on"}}`, "parse config {path} at byte 43: json: cannot unmarshal string into Go struct field rawConfig.claude.remoteControl of type bool"},
 		{"account remoteControl number", `{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"remoteControl":1}}]}`, "parse config {path} at byte 80: json: cannot unmarshal number into Go struct field rawConfig.accounts.0.claude.remoteControl of type bool"},
-		{"zero spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": 0}}`, "config {path}: claude.maxSubagentSpawnDepth must be a positive integer, got 0"},
-		{"negative spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": -3}}`, "config {path}: claude.maxSubagentSpawnDepth must be a positive integer, got -3"},
-		{"zero concurrency", `{"version": 2, "claude": {"maxConcurrentSubagents": 0}}`, "config {path}: claude.maxConcurrentSubagents must be a positive integer, got 0"},
-		{"string spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": "5"}}`, "parse config {path} at byte 54: json: cannot unmarshal string into Go struct field rawConfig.claude.maxSubagentSpawnDepth of type int"},
-		{"fractional spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": 5.5}}`, "parse config {path} at byte 54: json: cannot unmarshal number 5.5 into Go struct field rawConfig.claude.maxSubagentSpawnDepth of type int"},
-		{"negative account concurrency", `{"version": 2, "accounts": [{"id": 1, "configDir": "~/one", "claude": {"maxConcurrentSubagents": -1}}]}`, "config {path}: accounts[0].maxConcurrentSubagents must be a positive integer, got -1"},
 		{"empty theme", `{"version": 2, "claude": {"theme": ""}}`, "config {path}: claude.theme must be a non-empty string"},
 		{"blank theme", `{"version": 2, "claude": {"theme": "   "}}`, "config {path}: claude.theme must be a non-empty string"},
 		{"blank account theme", `{"version": 2, "accounts": [{"id": 3, "configDir": "~/three", "claude": {"theme": "  "}}]}`, "config {path}: accounts[0].theme must be a non-empty string"},
@@ -780,9 +762,6 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "\"level\": \"info\"") {
 		t.Fatalf("default config carries no log.level default: %s", content)
-	}
-	if !strings.Contains(string(content), "\"autoCompactWindow\": 100000") {
-		t.Fatalf("default config carries no auto compact window: %s", content)
 	}
 	if _, err := Load(path, home, nil); err != nil {
 		// The strict loader check below needs the bytes on disk; this assertion

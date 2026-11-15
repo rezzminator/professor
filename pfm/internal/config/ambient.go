@@ -32,6 +32,18 @@ func AmbientClaudeConfigDirFrom(env paths.Env) string {
 // ResolvePath resolves the machine file from an override or the clone marker.
 func ResolvePath(home string) (string, error) { return ResolvePathFrom(paths.OSEnv{}, home) }
 
+// MachinePath is the machine file this process loaded: the path UseConfigPath pinned (a --config
+// override included; "" when the runtime loaded no file), else ResolvePath(home).
+func MachinePath(home string) (string, error) {
+	configPathPin.RLock()
+	path, pinned := configPathPin.path, configPathPin.pinned
+	configPathPin.RUnlock()
+	if pinned {
+		return path, nil
+	}
+	return ResolvePath(home)
+}
+
 // ResolvePathFrom applies the same rule over an injected environment.
 func ResolvePathFrom(env paths.Env, home string) (string, error) {
 	if override := strings.TrimSpace(env.Get(paths.EnvConfig)); override != "" {

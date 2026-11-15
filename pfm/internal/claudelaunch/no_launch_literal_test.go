@@ -37,6 +37,18 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 	"internal/installer/vscode_profile.go": {"pins every terminal-profile env shape pfm wrote", []string{
 		"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
 	}},
+	"internal/config/scope_unread.go": {
+		"names the claude.settings path of each retired key in its doctor warning",
+		[]string{
+			"claude.settings.env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION",
+			"claude.settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+			"claude.settings.env.ANTHROPIC_SMALL_FAST_MODEL",
+			"claude.settings.env.CLAUDE_CODE_TMUX_TRUECOLOR",
+			"claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR",
+			"claude.settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH",
+			"claude.settings.env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+		},
+	},
 	"internal/doctor/remote_control.go": {"reads launch environment to diagnose Remote Control blockers", []string{
 		"ANTHROPIC_BASE_URL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",

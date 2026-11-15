@@ -220,69 +220,40 @@ func TestRenderFreshInteractive(t *testing.T) {
 	}
 }
 
+// The plugin values ride every purpose and account's --settings env: the shipped defaults, the
+// layered claude.settings over them, never the process environment, so a stray export cannot reach
+// the helper model.
 func TestRenderPluginEnvEveryPurposeAndAccount(t *testing.T) {
 	home, machine := renderMachine(t)
-	machine.Claude.AutoCompactWindow = 250000
-	machine.Claude.HelperModel = "claude-haiku-4-5"
-	account := machine.Claude
-	account.AutoCompactWindow = 50000
-	account.HelperModel = "claude-sonnet-5-5"
-	machine.Accounts[1].Claude = &account
-	for _, purpose := range []Purpose{PurposeResume, PurposeLauncher, PurposeQuery} {
-		for _, tc := range []struct {
-			account int
-			window  string
-			helper  string
-		}{{1, "250000", "claude-haiku-4-5"}, {2, "50000", "claude-sonnet-5-5"}} {
-			_, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Account: tc.account}, machine)
-			if got := parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; got != tc.window {
-				t.Errorf("purpose %d account %d window=%q, want %q", purpose, tc.account, got, tc.window)
-			}
-			if got := parsed.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"]; got != tc.helper {
-				t.Errorf("purpose %d account %d helper model=%q, want %q", purpose, tc.account, got, tc.helper)
-			}
-			if got := parsed.SettingsEnv["CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"]; got != "1" {
-				t.Errorf("purpose %d account %d function hooks=%q", purpose, tc.account, got)
-			}
-		}
-	}
-}
-
-// Every launch purpose, with and without the cost ledger, defaults Claude's
-// helper calls to Haiku 5.5 through the --settings env block, never the process
-// environment: a stray export must not reach the helper model. A hand-built
-// machine config (the busy-agent and agent-registry queries state ClaudePrefs
-// with only a binary) never sends an empty helper model either.
-func TestRenderHelperModelDefaultsToHaikuEveryPurpose(t *testing.T) {
-	home, machine := renderMachine(t)
+	layered := map[string]any{"env": map[string]any{
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000", "ANTHROPIC_SMALL_FAST_MODEL": "claude-sonnet-5-5",
+	}}
 	for _, ledger := range []bool{true, false} {
 		machine.Claude.CostLedger = ledger
 		for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 			for _, account := range []int{1, 2} {
-				launch, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Account: account}, machine)
-				if got := parsed.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"]; got != "claude-haiku-5-5" {
-					t.Errorf("ledger=%t purpose %d account %d helper model=%q", ledger, purpose, account, got)
-				}
-				handBuilt := machine
-				handBuilt.Claude.HelperModel = ""
-				_, bare := renderParsed(t, Request{Purpose: purpose, Home: home, Account: account}, handBuilt)
-				if got := bare.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"]; got != "claude-haiku-5-5" {
-					t.Errorf("ledger=%t purpose %d account %d hand-built config helper model=%q",
-						ledger, purpose, account, got)
-				}
-				if !slices.Contains(launch.Unset, "ANTHROPIC_SMALL_FAST_MODEL") {
-					t.Errorf(
-						"ledger=%t purpose %d account %d: a stray ANTHROPIC_SMALL_FAST_MODEL export is not unset: %q",
-						ledger,
-						purpose,
-						account,
-						launch.Unset,
-					)
-				}
-				for _, entry := range launch.Env {
-					if strings.HasPrefix(entry, "ANTHROPIC_SMALL_FAST_MODEL=") {
-						t.Errorf("ledger=%t purpose %d account %d: helper model in the process env: %q",
-							ledger, purpose, account, launch.Env)
+				for _, tc := range []struct {
+					settings       map[string]any
+					window, helper string
+				}{{nil, "100000", "claude-haiku-5-5"}, {layered, "250000", "claude-sonnet-5-5"}} {
+					request := Request{Purpose: purpose, Home: home, Account: account, Settings: tc.settings}
+					launch, parsed := renderParsed(t, request, machine)
+					got := [3]string{
+						parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],
+						parsed.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"],
+						parsed.SettingsEnv["CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"],
+					}
+					if want := [3]string{tc.window, tc.helper, "1"}; got != want {
+						t.Errorf("ledger=%t purpose %d account %d settings %v: env = %q, want %q",
+							ledger, purpose, account, tc.settings, got, want)
+					}
+					if !slices.Contains(launch.Unset, "ANTHROPIC_SMALL_FAST_MODEL") {
+						t.Errorf("a stray ANTHROPIC_SMALL_FAST_MODEL export is not unset: %q", launch.Unset)
+					}
+					for _, entry := range launch.Env {
+						if strings.HasPrefix(entry, "ANTHROPIC_SMALL_FAST_MODEL=") {
+							t.Errorf("helper model in the process env: %q", launch.Env)
+						}
 					}
 				}
 			}

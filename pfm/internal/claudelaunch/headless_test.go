@@ -24,18 +24,24 @@ func TestRenderHeadlessPayload(t *testing.T) {
 	}
 	empty, err := RenderHeadless(nil)
 	if err != nil ||
-		empty != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"},"outputStyle":"default","showThinkingSummaries":true}` {
+		empty != `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"8","CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_TMUX_TRUECOLOR":"1"},"outputStyle":"default","showThinkingSummaries":true}` {
 		t.Errorf("empty=%q err=%v", empty, err)
 	}
 	window, err := RenderHeadless(map[string]any{"autoCompactWindow": 250000})
 	if err != nil ||
-		window != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"},"outputStyle":"default","showThinkingSummaries":true}` {
+		window != `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"8","CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_TMUX_TRUECOLOR":"1"},"outputStyle":"default","showThinkingSummaries":true}` {
 		t.Errorf("window=%q err=%v", window, err)
 	}
 	helper, err := RenderHeadless(map[string]any{"helperModel": "claude-sonnet-5-5"})
 	if err != nil ||
-		helper != `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"},"outputStyle":"default","showThinkingSummaries":true}` {
+		helper != `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"8","CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_TMUX_TRUECOLOR":"1"},"outputStyle":"default","showThinkingSummaries":true}` {
 		t.Errorf("helper=%q err=%v", helper, err)
+	}
+	// A per-run switch set off removes the default's variable, which Claude reads as on whatever its value.
+	off, err := RenderHeadless(map[string]any{"tmuxTruecolor": false, "nativeCursor": false})
+	if err != nil ||
+		off != `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-haiku-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"8","CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991"},"outputStyle":"default","showThinkingSummaries":true}` {
+		t.Errorf("off=%q err=%v", off, err)
 	}
 	for _, value := range []any{"", "  ", "claude haiku", 5, true} {
 		_, err := RenderHeadless(map[string]any{"helperModel": value})

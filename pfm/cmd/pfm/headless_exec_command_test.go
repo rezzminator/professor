@@ -177,7 +177,9 @@ func TestHeadlessExecPFMSettingsFile(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	argv := startedArgs(t, runner, 0)
-	want := `{"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},` +
+	want := `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000",` +
+		`"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4",` +
+		`"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_TMUX_TRUECOLOR":"1"},` +
 		`"outputStyle":"default","showThinkingSummaries":true,"theme":"t"}`
 	if !strings.Contains(argv, want) {
 		t.Fatalf("argv = %s", argv)
@@ -189,11 +191,10 @@ func TestHeadlessExecClaudeIgnoresConfiguredLaunchValues(t *testing.T) {
 	binary, runner := useHeadlessEngine(t, deps.StartOutput{Stdout: `{"result":"ok"}` + "\n"})
 	machine := headlessCLIRuntime(t, binary)
 	machine.Config.Claude.Theme = "from-config"
-	machine.Config.Claude.MaxSubagentSpawnDepth = 9
-	machine.Config.Claude.WebSearchesPerSession = 99
-	machine.Config.Claude.AutoCompactWindow = 5
-	machine.Config.Claude.HelperModel = "from-config"
-	machine.Config.Claude.TmuxTruecolor = true
+	machine.Config.Claude.Settings = map[string]any{"cleanupPeriodDays": 7, "env": map[string]any{
+		"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "9", "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "99",
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "5", "ANTHROPIC_SMALL_FAST_MODEL": "from-config",
+	}}
 	machine.Config.Claude.Cache1H = true
 	var stdout, stderr bytes.Buffer
 	code := runHeadlessExec([]string{"--engine", "claude", "-p", "x"}, strings.NewReader(""), &stdout, &stderr, machine)
@@ -206,7 +207,7 @@ func TestHeadlessExecClaudeIgnoresConfiguredLaunchValues(t *testing.T) {
 	}
 	if !strings.HasSuffix(
 		got,
-		"--settings\n{\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\"},\"outputStyle\":\"default\",\"showThinkingSummaries\":true}\n",
+		"--settings\n{\"cleanupPeriodDays\":36500,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"9007199254740991\",\"CLAUDE_CODE_TMUX_TRUECOLOR\":\"1\"},\"outputStyle\":\"default\",\"showThinkingSummaries\":true}\n",
 	) {
 		t.Fatalf("configured launch values reached child: %q", got)
 	}

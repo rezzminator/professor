@@ -3,7 +3,6 @@ package workbench
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -138,25 +137,6 @@ func (bench Bench) Enables(engine pfmengine.ID) bool {
 		}
 	}
 	return false
-}
-
-// settingsFile is the settings file's one shape: no other key exists.
-type settingsFile struct {
-	HarnessPrompt *struct {
-		Extend  string `json:"extend"`
-		Replace string `json:"replace"`
-	} `json:"harnessPrompt"`
-	Envs   json.RawMessage `json:"envs"`
-	Claude struct {
-		Settings json.RawMessage `json:"settings"`
-	} `json:"claude,omitempty"`
-}
-
-// settingsEnvReserved reports a name pfm assigns on some launch door,
-// several of them by inheritance (cx, the Herdr seat), where an adopter value
-// would land ahead of pfm's.
-func settingsEnvReserved(name string) bool {
-	return strings.HasPrefix(name, "PFM_") || name == "CODEX_HOME" || name == "CLAUDE_CONFIG_DIR"
 }
 
 // settingsPromptFile is the adopter's prompt file: relative to root, inside

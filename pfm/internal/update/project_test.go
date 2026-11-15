@@ -354,7 +354,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 		"VERSION":                                                          "0.65.0\n",
 		"templates/project/settings.json":                                  "{}\n",
 		"templates/project/rumdl-policy.toml":                              "[global]\n",
-		"templates/project/pfm.settings.json":                              "{}\n",
+		"templates/project/pfm.config.json":                                "{}\n",
 		"templates/project/commands/dev.md":                                "old\n",
 		"templates/project/agents/gitter.md":                               "body\n",
 		"templates/project/scripts/worktree.sh":                            "#!/usr/bin/env bash\n",

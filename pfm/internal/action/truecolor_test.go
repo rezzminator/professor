@@ -13,7 +13,6 @@ const truecolorName = "CLAUDE_CODE_TMUX_TRUECOLOR"
 func TestClaudeSpawnCarriesTmuxTruecolor(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
-	machine.Claude.TmuxTruecolor = true
 	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()

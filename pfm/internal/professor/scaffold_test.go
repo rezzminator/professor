@@ -26,7 +26,7 @@ func newScaffoldFixtureStore(t *testing.T) string {
 		"VERSION":                             "0.1.0\n",
 		"templates/project/settings.json":     "{}\n",
 		"templates/project/rumdl-policy.toml": "[global]\n",
-		"templates/project/pfm.settings.json": "{}\n",
+		"templates/project/pfm.config.json":   "{}\n",
 	}
 	for relative, content := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))
@@ -144,7 +144,7 @@ func TestScaffoldPersistsPinsForEntriesWrittenBeforeAFailure(t *testing.T) {
 		".claude/agents/after.md=project/agents/after.md",
 		".claude/rules/after.md=project/rules/after.md",
 		".claude/settings.json=project/settings.json",
-		"pfm.settings.json=project/pfm.settings.json",
+		"pfm.config.json=project/pfm.config.json",
 	}
 	if !reflect.DeepEqual(pinned, want) {
 		t.Fatalf("pins = %v, want %v", pinned, want)

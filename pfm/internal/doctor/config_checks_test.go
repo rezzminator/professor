@@ -164,7 +164,7 @@ func TestDoctorReportsMissingConfigKeysOnlyAfterParse(t *testing.T) {
 	if got, want := doctorRows(
 		output.String(),
 		"doctor: config: ",
-	), "doctor: config: missing key theme (default default) — informational: unset, its default applies\ndoctor: config: missing key chat.backend (default auto) — informational: unset, its default applies\ndoctor: config: missing key chat.herdrTabStatus (default emoji) — informational: unset, its default applies\ndoctor: config: missing key state.db (default ~/.local/state/pfm/pfm.db) — informational: unset, its default applies\ndoctor: config: missing key state.cacheDb (default ~/.local/state/pfm/pfm-cache.db) — informational: unset, its default applies\ndoctor: config: missing key claude.permissionMode (default bypass) — informational: unset, its default applies\ndoctor: config: missing key claude.binary (default claude) — informational: unset, its default applies\ndoctor: config: missing key claude.theme (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.cache1h (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.nativeCursor (default false) — informational: unset, its default applies\ndoctor: config: missing key claude.remoteControl (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.systemPrompt (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.webSearchesPerSession (default 9007199254740991) — informational: unset, its default applies\ndoctor: config: missing key claude.autoCompactWindow (default 100000) — informational: unset, its default applies\ndoctor: config: missing key claude.helperModel (default claude-haiku-5-5) — informational: unset, its default applies\ndoctor: config: missing key claude.tmuxTruecolor (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.cleanupPeriodDays (default 36500) — informational: unset, its default applies\ndoctor: config: missing key claude.requireManagedCleanup (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.maxSubagentSpawnDepth (default 8) — informational: unset, its default applies\ndoctor: config: missing key claude.maxConcurrentSubagents (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.pluginCheckoutRoot (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.plugins (default [cache-live-control forward-compaction auto-effort tool-visibility-controller engine-sync flights]) — informational: unset, its default applies\ndoctor: config: missing key claude.env (default map[]) — informational: unset, its default applies\ndoctor: config: missing key claude.costLedger (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.gptAgents (default false) — informational: unset, its default applies\ndoctor: config: missing key codex.yolo (default true) — informational: unset, its default applies\ndoctor: config: missing key codex.binary (default codex) — informational: unset, its default applies\ndoctor: config: missing key opencode.binary (default opencode) — informational: unset, its default applies\ndoctor: config: missing key tmux.titles.enabled (default true) — informational: unset, its default applies\ndoctor: config: missing key nameSync.interval (default 15m0s) — informational: unset, its default applies\ndoctor: config: missing key mcp.servers.chat.enabled (default false) — informational: unset, its default applies\ndoctor: config: missing key mcp.http.port (default 18377) — informational: unset, its default applies\ndoctor: config: missing key mcp.thirdParty (default map[]) — informational: unset, its default applies\ndoctor: config: missing key ask.engine (default codex) — informational: unset, its default applies\ndoctor: config: missing key ask.claude.model (default claude-haiku-4-5) — informational: unset, its default applies\ndoctor: config: missing key ask.claude.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key ask.codex.model (default gpt-5.6-luna) — informational: unset, its default applies\ndoctor: config: missing key ask.codex.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key ask.opencode.model (default gpt-5.6-luna) — informational: unset, its default applies\ndoctor: config: missing key ask.opencode.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key log.level (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key log.components (default map[]) — informational: unset, its default applies\ndoctor: config: missing key log.keepFiles (default 10) — informational: unset, its default applies\ndoctor: config: missing key log.maxMB (default 8) — informational: unset, its default applies\ndoctor: config: missing key doctor.ignoreWarnings (default []) — informational: unset, its default applies\ndoctor: config: missing key doctor.acceptedMCP (default []) — informational: unset, its default applies\n"; warnings != 0 || failures != 0 ||
+	), "doctor: config: missing key theme (default default) — informational: unset, its default applies\ndoctor: config: missing key chat.backend (default auto) — informational: unset, its default applies\ndoctor: config: missing key chat.herdrTabStatus (default emoji) — informational: unset, its default applies\ndoctor: config: missing key state.db (default ~/.local/state/pfm/pfm.db) — informational: unset, its default applies\ndoctor: config: missing key state.cacheDb (default ~/.local/state/pfm/pfm-cache.db) — informational: unset, its default applies\ndoctor: config: missing key claude.permissionMode (default bypass) — informational: unset, its default applies\ndoctor: config: missing key claude.binary (default claude) — informational: unset, its default applies\ndoctor: config: missing key claude.theme (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.cache1h (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.remoteControl (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.systemPrompt (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.requireManagedCleanup (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.pluginCheckoutRoot (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key claude.plugins (default [cache-live-control forward-compaction auto-effort tool-visibility-controller engine-sync flights]) — informational: unset, its default applies\ndoctor: config: missing key claude.env (default map[]) — informational: unset, its default applies\ndoctor: config: missing key claude.costLedger (default true) — informational: unset, its default applies\ndoctor: config: missing key claude.gptAgents (default false) — informational: unset, its default applies\ndoctor: config: missing key claude.settings (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key envs (default map[]) — informational: unset, its default applies\ndoctor: config: missing key harnessPrompt (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key codex.yolo (default true) — informational: unset, its default applies\ndoctor: config: missing key codex.binary (default codex) — informational: unset, its default applies\ndoctor: config: missing key opencode.binary (default opencode) — informational: unset, its default applies\ndoctor: config: missing key tmux.titles.enabled (default true) — informational: unset, its default applies\ndoctor: config: missing key nameSync.interval (default 15m0s) — informational: unset, its default applies\ndoctor: config: missing key mcp.servers.chat.enabled (default false) — informational: unset, its default applies\ndoctor: config: missing key mcp.http.port (default 18377) — informational: unset, its default applies\ndoctor: config: missing key mcp.thirdParty (default map[]) — informational: unset, its default applies\ndoctor: config: missing key ask.engine (default codex) — informational: unset, its default applies\ndoctor: config: missing key ask.claude.model (default claude-haiku-4-5) — informational: unset, its default applies\ndoctor: config: missing key ask.claude.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key ask.codex.model (default gpt-5.6-luna) — informational: unset, its default applies\ndoctor: config: missing key ask.codex.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key ask.opencode.model (default gpt-5.6-luna) — informational: unset, its default applies\ndoctor: config: missing key ask.opencode.effort (default low) — informational: unset, its default applies\ndoctor: config: missing key log.level (default <nil>) — informational: unset, its default applies\ndoctor: config: missing key log.components (default map[]) — informational: unset, its default applies\ndoctor: config: missing key log.keepFiles (default 10) — informational: unset, its default applies\ndoctor: config: missing key log.maxMB (default 8) — informational: unset, its default applies\ndoctor: config: missing key doctor.ignoreWarnings (default []) — informational: unset, its default applies\ndoctor: config: missing key doctor.acceptedMCP (default []) — informational: unset, its default applies\n"; warnings != 0 || failures != 0 ||
 		got != want {
 		t.Errorf("warnings=%d failures=%d config rows = %q, want %q", warnings, failures, got, want)
 	}
@@ -326,5 +326,78 @@ func TestDoctorSortsDuplicateSeatLoginAdvisoriesByEmail(t *testing.T) {
 	second := strings.Index(output.String(), "email=z@example.invalid")
 	if first < 0 || second < 0 || first >= second {
 		t.Fatalf("advisories are not sorted by email:\n%s", output.String())
+	}
+}
+
+// TestDoctorConfigScopeRows: a retired key in the machine file, and each project-file key the
+// project scope does not read, a leftover pfm.settings.json and a file a launch drops, are warnings
+// naming the key and the file; a project file that is the machine file is the machine's alone.
+func TestDoctorConfigScopeRows(t *testing.T) {
+	t.Run("retired machine key", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), config.FileName)
+		writeDoctorBenchFile(t, path, `{"version":2,"claude":{"helperModel":"claude-sonnet-5-5","nativeCursor":true}}`)
+		machine, err := config.Load(path, t.TempDir(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		warnings, failures := PrintConfig(&output, config.Runtime{Config: machine})
+		want := "doctor: config: claude.helperModel is retired: set claude.settings.env.ANTHROPIC_SMALL_FAST_MODEL instead (" +
+			path + ")\n" + "doctor: config: claude.nativeCursor is retired: set claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR \"1\" (null turns it off) instead (" +
+			path + ")\n"
+		if got := doctorRows(output.String(), " is retired: "); got != want || warnings != 2 || failures != 0 {
+			t.Fatalf("warnings=%d failures=%d rows=%q, want %q", warnings, failures, got, want)
+		}
+	})
+	for _, test := range []struct {
+		name, project, leftover, want string
+		warnings                      int
+	}{
+		{name: "clean", project: `{"envs":{"TEAM_MODE":"strict"}}`, want: "doctor: config: project {root}/pfm.config.json ok\n"},
+		{
+			name: "machine-only and retired keys", project: `{"envs":{},"theme":"x","claude":{"helperModel":"y"}}`, warnings: 2,
+			want: "doctor: config: claude.helperModel is retired: set claude.settings.env.ANTHROPIC_SMALL_FAST_MODEL instead; " +
+				"ignored in {root}/pfm.config.json\ndoctor: config: theme is machine-only; ignored in {root}/pfm.config.json\n",
+		},
+		{
+			name: "leftover settings file", leftover: `{"envs":{}}`, warnings: 1,
+			want: "doctor: config: {root}: pfm.settings.json is no longer read: move its keys into pfm.config.json\n",
+		},
+		{
+			name: "faulty project file", project: `{"envs":{"team_mode":"x"}}`, warnings: 1,
+			want: `doctor: config: config {root}/pfm.config.json: envs name "team_mode" must be upper snake: A-Z, 0-9 and _, ` +
+				"starting with a letter — every launch under {root} goes without that file\n",
+		},
+		{name: "project file is the machine file", project: `{"version":2,"theme":"x","envs":{}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeDoctorBenchFile(t, filepath.Join(root, ".professor", "baseline.json"), "{}")
+			machinePath := filepath.Join(t.TempDir(), config.FileName)
+			if test.project != "" {
+				writeDoctorBenchFile(t, config.PathIn(root), test.project)
+			}
+			if test.leftover != "" {
+				writeDoctorBenchFile(t, filepath.Join(root, config.RetiredProjectFile), test.leftover)
+			}
+			if test.name == "project file is the machine file" {
+				machinePath = config.PathIn(root)
+			}
+			var output bytes.Buffer
+			warnings := printProjectConfigRows(&output, root, machinePath)
+			if got := rooted(output.String(), root); got != test.want || warnings != test.warnings {
+				t.Fatalf("warnings=%d output=%q, want %d %q", warnings, got, test.warnings, test.want)
+			}
+			if test.name != "leftover settings file" {
+				return
+			}
+			// The workbench pass runs the project rows for the project it resolves.
+			output.Reset()
+			warnings, failures := printWorkbenchDoctor(&output, root, t.TempDir(), nil)
+			want := test.want + "doctor: workbench none under {root}\n"
+			if got := rooted(output.String(), root); got != want || warnings != 1 || failures != 0 {
+				t.Fatalf("workbench doctor warnings=%d failures=%d output=%q, want %q", warnings, failures, got, want)
+			}
+		})
 	}
 }

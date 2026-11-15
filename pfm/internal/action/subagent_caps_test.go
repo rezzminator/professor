@@ -9,12 +9,19 @@ import (
 
 // Claude Code stops a sub-agent from spawning sub-agents past 3 levels and
 // runs at most 20 at once, and reports neither refusal. These pin the lift on
-// both renderers of the spawn door, for every purpose: the depth always, the
-// concurrency cap only when the config named one.
+// both renderers of the spawn door, for every purpose: the depth always (the shipped
+// default), the concurrency cap only when the machine file's claude.settings named one.
 const (
 	spawnDepthName  = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
 	concurrencyName = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
 )
+
+// capsSettings is a machine file's claude.settings setting both caps.
+func capsSettings(depth, concurrency int) map[string]any {
+	return map[string]any{"env": map[string]any{
+		spawnDepthName: fmt.Sprint(depth), concurrencyName: fmt.Sprint(concurrency),
+	}}
+}
 
 func subagentPurposes() []Purpose {
 	return []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery}
@@ -33,7 +40,7 @@ func TestClaudeSpawnCarriesSubagentCaps(t *testing.T) {
 			home := t.TempDir()
 			machine := configuredMachinePolicy(home)
 			if len(caps) == 2 {
-				machine.Claude.MaxSubagentSpawnDepth, machine.Claude.MaxConcurrentSubagents = caps[0], caps[1]
+				machine.Claude.Settings = capsSettings(caps[0], caps[1])
 			}
 			lines := map[string]string{}
 			for _, purpose := range subagentPurposes() {
@@ -70,7 +77,7 @@ func TestClaudeSpawnCarriesSubagentCaps(t *testing.T) {
 					[]string{"--resume", "abc"},
 					t.TempDir(),
 					t.TempDir(),
-					pfmconfig.Config{}, pfmconfig.ClaudePrefs{MaxSubagentSpawnDepth: 12, MaxConcurrentSubagents: 40}, "",
+					pfmconfig.Config{}, pfmconfig.ClaudePrefs{Settings: capsSettings(12, 40)}, "",
 				)
 				if err != nil {
 					t.Fatalf("LauncherRun: %v", err)

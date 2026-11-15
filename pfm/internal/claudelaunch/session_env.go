@@ -3,10 +3,8 @@ package claudelaunch
 import (
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -52,12 +50,20 @@ func RunEnvironment(environ []string, launch Launch) []string {
 	return append(result, launch.Env...)
 }
 
-// SessionEnv returns the plugin values and the launch shell (ShellEnv) for a
-// passthrough Claude session.
-func SessionEnv(prefs pfmconfig.ClaudePrefs) []string {
-	return append([]string{
-		envFunctionHooks + "=1",
-		envAutoCompactWindow + "=" + strconv.FormatInt(prefs.AutoCompactWindow, 10),
-		envAnthropicSmallFastModel + "=" + helperModel(prefs),
-	}, ShellEnv(paths.OSEnv{}.Lookup)...)
+// sessionEnvNames are the variables a passthrough Claude session carries in its process
+// environment, the plugins reading them there.
+var sessionEnvNames = []string{envFunctionHooks, envAutoCompactWindow, envAnthropicSmallFastModel}
+
+// SessionEnv returns the plugin values, each its effective value under claude (the claude.settings
+// laid over the shipped defaults, EffectiveSettings), and the launch shell (ShellEnv) for a
+// passthrough Claude session. A variable claude sets to null is left out.
+func SessionEnv(claude map[string]any) []string {
+	env := EffectiveEnv(claude)
+	result := make([]string, 0, len(sessionEnvNames))
+	for _, name := range sessionEnvNames {
+		if value, set := env[name]; set {
+			result = append(result, name+"="+value)
+		}
+	}
+	return append(result, ShellEnv(paths.OSEnv{}.Lookup)...)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
@@ -14,7 +15,12 @@ const prependConsequence = "Claude Code 2.1.299+ seats cc-plugin-sec-default and
 func printManagedCleanupChecks(stdout io.Writer, runtime config.Runtime) (warnings, failures int) {
 	dir := runtime.Paths.ManagedSettingsDir
 	prefs := runtime.Config.Claude
-	status := installer.InspectManagedCleanup(dir, prefs.RequireManagedCleanup, prefs.CleanupPeriodDays)
+	days, err := claudelaunch.CleanupPeriodDays(prefs.Settings)
+	if err != nil {
+		fmt.Fprintf(stdout, "managed-cleanup: %s: %v — fix it in %s\n", runtime.Config.Path, err, runtime.Config.Path)
+		return 0, 1
+	}
+	status := installer.InspectManagedCleanup(dir, prefs.RequireManagedCleanup, days)
 	// alsoUnset names the second gap when the repair line fixes both.
 	alsoUnset := ""
 	if status.Prepend == installer.PrependAbsent {
@@ -41,7 +47,7 @@ func printManagedCleanupChecks(stdout io.Writer, runtime config.Runtime) (warnin
 				stdout,
 				"managed-cleanup: %s has no cleanupPeriodDays, want %d",
 				status.Path,
-				prefs.CleanupPeriodDays,
+				days,
 			)
 		} else {
 			fmt.Fprintf(
@@ -49,7 +55,7 @@ func printManagedCleanupChecks(stdout io.Writer, runtime config.Runtime) (warnin
 				"managed-cleanup: %s cleanupPeriodDays=%s, want %d",
 				status.Path,
 				status.Raw,
-				prefs.CleanupPeriodDays,
+				days,
 			)
 		}
 		fmt.Fprintf(stdout, "%s; run: %s\n", alsoUnset, fix)

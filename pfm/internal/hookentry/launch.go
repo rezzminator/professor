@@ -188,7 +188,7 @@ func LaunchWith(
 					break
 				}
 			}
-			sessionEnv := claudelaunch.SessionEnv(prefs)
+			sessionEnv := claudelaunch.SessionEnv(runtime.Config.Claude.Settings)
 			replaced := make(map[string]bool, len(sessionEnv))
 			for _, entry := range sessionEnv {
 				name, _, _ := strings.Cut(entry, "=")

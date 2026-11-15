@@ -22,7 +22,7 @@ func TestManagedCleanupChecks(t *testing.T) {
 			path := filepath.Join(dir, "pfm.json")
 			runtime := config.Runtime{
 				Paths:  paths.Values{ManagedSettingsDir: dir},
-				Config: config.Config{Claude: config.Claude{CleanupPeriodDays: 36500, RequireManagedCleanup: true}},
+				Config: config.Config{Claude: config.Claude{RequireManagedCleanup: true}},
 			}
 			const (
 				consequence = "Claude Code 2.1.299+ seats cc-plugin-sec-default and skips your plugin hooks"
@@ -122,7 +122,7 @@ func TestManagedCleanupUnreadableFile(t *testing.T) {
 	}
 	runtime := config.Runtime{
 		Paths:  paths.Values{ManagedSettingsDir: dir},
-		Config: config.Config{Claude: config.Claude{CleanupPeriodDays: 36500, RequireManagedCleanup: true}},
+		Config: config.Config{Claude: config.Claude{RequireManagedCleanup: true}},
 	}
 	var output bytes.Buffer
 	w, f := printManagedCleanupChecks(&output, runtime)

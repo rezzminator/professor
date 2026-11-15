@@ -91,7 +91,7 @@ type Options struct {
 	// their recovery records remain on disk. Other restore failures still stop it.
 	LeaveVSCodeColors     bool
 	ManagedSettingsDir    string
-	CleanupPeriodDays     int
+	ClaudeSettings        map[string]any // machine claude.settings: the drop-in's cleanupPeriodDays source
 	RequireManagedCleanup bool
 	// themeFollowerRefresh re-applies the theme follower's launch agent for
 	// home while the theme sync is on; nil uses themesync.Sync.

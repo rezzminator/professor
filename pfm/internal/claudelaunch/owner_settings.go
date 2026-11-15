@@ -1,10 +1,15 @@
 package claudelaunch
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // settingsEnvKey is the --settings key holding the launch's environment variables.
@@ -46,6 +51,7 @@ func settingsArgv(args []string, project, settings map[string]any) (rest []strin
 		}
 		mergeOwnerSettings(settings, owner)
 	}
+	dropNullEnv(settings)
 	encoded, err := json.Marshal(settings)
 	if err != nil {
 		return nil, "", fmt.Errorf("render --settings: %w", err)
@@ -66,22 +72,90 @@ func ownerSettings(value string) (map[string]any, error) {
 	return DecodeOwnerSettings(body, flagSettings+" "+source)
 }
 
-// DecodeOwnerSettings is body as settings to lay over pfm's own: a JSON object whose hooks and env,
-// when present, are objects, since any other shape would replace pfm's hooks or variables whole.
-// source names the body in the error.
+// DecodeOwnerSettings is body as settings to lay over pfm's own (pfmconfig.DecodeClaudeSettings).
 func DecodeOwnerSettings(body []byte, source string) (map[string]any, error) {
-	var owner map[string]any
-	if err := json.Unmarshal(body, &owner); err != nil || owner == nil {
-		return nil, fmt.Errorf("%s: not a JSON object (%v)", source, err)
+	return pfmconfig.DecodeClaudeSettings(body, source)
+}
+
+// LayerSettings is layers laid over one another in order, as settingsArgv lays a caller's settings
+// (mergeOwnerSettings), into a copy: the machine's claude.settings, then the project's. Nil when no
+// layer sets a key.
+func LayerSettings(layers ...map[string]any) (map[string]any, error) {
+	var result map[string]any
+	for _, layer := range layers {
+		clone, err := cloneOwnerSettings(layer)
+		if err != nil {
+			return nil, err
+		}
+		if clone == nil {
+			continue
+		}
+		if result == nil {
+			result = clone
+			continue
+		}
+		mergeOwnerSettings(result, clone)
 	}
-	for _, key := range []string{knobHooks, settingsEnvKey} {
-		if value, present := owner[key]; present {
-			if _, object := value.(map[string]any); !object {
-				return nil, fmt.Errorf("%s: %q is not a JSON object", source, key)
+	return result, nil
+}
+
+// EffectiveSettings is claude, the layered claude.settings, over the shipped defaults: the value a
+// launch's --settings carries for every key pfm does not compute. A consumer outside that wire (the
+// passthrough session's environment, the managed cleanup drop-in) reads its value here.
+func EffectiveSettings(claude map[string]any) map[string]any {
+	settings, env := defaultSettings()
+	settings[settingsEnvKey] = env
+	layered, err := LayerSettings(claude)
+	if err != nil {
+		// The shipped defaults stand; the launch's own --settings refuses the same layer.
+		obs.Logger(context.Background()).Error("claudelaunch: layer claude.settings", obs.FieldErr, err.Error())
+		return settings
+	}
+	mergeOwnerSettings(settings, layered)
+	dropNullEnv(settings)
+	return settings
+}
+
+// EffectiveEnv is EffectiveSettings' env block, each value as Claude reads it: a string kept, a null
+// left out, any other JSON value in its JSON text.
+func EffectiveEnv(claude map[string]any) map[string]string {
+	result := map[string]string{}
+	switch env := EffectiveSettings(claude)[settingsEnvKey].(type) {
+	case map[string]string:
+		for name, value := range env {
+			result[name] = value
+		}
+	case map[string]any:
+		for name, value := range env {
+			if text, isText := value.(string); isText {
+				result[name] = text
+				continue
 			}
+			if value == nil {
+				continue
+			}
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				continue // a value json.Unmarshal produced always marshals
+			}
+			result[name] = string(encoded)
 		}
 	}
-	return owner, nil
+	return result
+}
+
+// CleanupPeriodDays is the effective cleanupPeriodDays under claude: a positive whole number of days,
+// else an error naming the value.
+func CleanupPeriodDays(claude map[string]any) (int, error) {
+	value := EffectiveSettings(claude)[knobCleanupPeriodDays]
+	if days, ok := integer(value); ok && days >= 1 && days <= math.MaxInt32 {
+		return int(days), nil
+	}
+	return 0, fmt.Errorf(
+		"claude.settings.%s must be a positive whole number of days, got %v",
+		knobCleanupPeriodDays,
+		value,
+	)
 }
 
 // cloneOwnerSettings is a deep copy of settings, so a launch merging into it never writes into
@@ -114,24 +188,40 @@ func mergeOwnerSettings(settings, owner map[string]any) {
 				theirs[event] = append(append([]any(nil), pfmEntries...), ownerEntries...)
 			}
 		case key == settingsEnvKey && ours && held:
-			for name, variable := range mine {
-				theirs[name] = variable
-			}
+			mergeEnv(theirs, mine)
 		case key == settingsEnvKey && ours:
 			if pfmEnv, typed := settings[key].(map[string]string); typed {
 				merged := make(map[string]any, len(pfmEnv)+len(mine))
 				for name, variable := range pfmEnv {
 					merged[name] = variable
 				}
-				for name, variable := range mine {
-					merged[name] = variable
-				}
+				mergeEnv(merged, mine)
 				settings[key] = merged
 				continue
 			}
 			settings[key] = value
 		default:
 			settings[key] = value
+		}
+	}
+}
+
+// mergeEnv lays layer's variables over env, a null included: it outranks an earlier layer's value
+// until dropNullEnv removes the variable on the wire, the one way a layer turns off a variable an
+// earlier one set (Claude Code reads any value of a flag variable as on).
+func mergeEnv(env, layer map[string]any) {
+	for name, variable := range layer {
+		env[name] = variable
+	}
+}
+
+// dropNullEnv removes the variables settings' env sets to null, once every layer is merged.
+func dropNullEnv(settings map[string]any) {
+	if env, ok := settings[settingsEnvKey].(map[string]any); ok {
+		for name, variable := range env {
+			if variable == nil {
+				delete(env, name)
+			}
 		}
 	}
 }

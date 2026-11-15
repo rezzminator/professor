@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -254,7 +255,7 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				processes := &fakeProcesses{}
 				var wantError, wantRun, wantWarning string
 				var wantWarnings []string
-				settings := paths.Settings(filepath.Dir(filepath.Dir(dir)))
+				settings := pfmconfig.PathIn(filepath.Dir(filepath.Dir(dir)))
 				switch test.name {
 				case "settings envs beside a broken persona":
 					if err := atomicfile.Write(settings, []byte(`{"envs":{"TEAM_MODE":"strict"}}`), 0o600); err != nil {
@@ -266,8 +267,8 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 					if err := atomicfile.Write(settings, []byte(`{"envs":{"team_mode":"strict"}}`), 0o600); err != nil {
 						t.Fatal(err)
 					}
-					wantWarning = settings + `: envs name "team_mode" must be upper snake: A-Z, 0-9 and _, ` +
-						"starting with a letter; launching without the settings"
+					wantWarning = "config " + settings + `: envs name "team_mode" must be upper snake: A-Z, 0-9 and _, ` +
+						"starting with a letter; launching without that file"
 				case "broken persona opens without it":
 					wantWarning = "workbench persona not applied (" + paths.WorkbenchManifest(dir) +
 						`: "prompt" is required); launching without it`

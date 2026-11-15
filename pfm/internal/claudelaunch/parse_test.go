@@ -13,8 +13,6 @@ import (
 func TestParseRoundTripEveryKnob(t *testing.T) {
 	home, machine := renderMachine(t)
 	machine.Claude.Theme = "dark"
-	machine.Claude.NativeCursor = true
-	machine.Claude.MaxConcurrentSubagents = 3
 	machine.Claude.SystemPrompt = "professor"
 	prompt := filepath.Join(t.TempDir(), "prompt.md")
 	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
@@ -94,31 +92,23 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if !parsed.RemoteControl || parsed.RemoteControlName != "named" {
 					t.Errorf("remote control=%v name=%q", parsed.RemoteControl, parsed.RemoteControlName)
 				}
-			case "nativeCursor":
-				if parsed.SettingsEnv["CLAUDE_CODE_NATIVE_CURSOR"] != "1" {
-					t.Error("cursor missing")
-				}
-			case "maxSubagentSpawnDepth":
+			case "env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":
 				if parsed.SettingsEnv["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] != "8" {
 					t.Error("depth missing")
 				}
-			case "maxConcurrentSubagents":
-				if parsed.SettingsEnv["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] != "3" {
-					t.Error("concurrency missing")
-				}
-			case "webSearchesPerSession":
+			case "env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":
 				if parsed.SettingsEnv["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] != "9007199254740991" {
 					t.Error("web cap missing")
 				}
-			case "autoCompactWindow":
+			case "env.CLAUDE_CODE_AUTO_COMPACT_WINDOW":
 				if parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "100000" {
 					t.Error("auto compact window missing")
 				}
-			case "helperModel":
+			case "env.ANTHROPIC_SMALL_FAST_MODEL":
 				if parsed.SettingsEnv["ANTHROPIC_SMALL_FAST_MODEL"] != "claude-haiku-5-5" {
 					t.Error("helper model missing")
 				}
-			case "tmuxTruecolor":
+			case "env.CLAUDE_CODE_TMUX_TRUECOLOR":
 				if parsed.SettingsEnv["CLAUDE_CODE_TMUX_TRUECOLOR"] != "1" {
 					t.Error("truecolor missing")
 				}
@@ -130,7 +120,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.SettingsEnv["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] != "0" {
 					t.Error("agent teams missing")
 				}
-			case "functionHooks":
+			case "env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":
 				if parsed.SettingsEnv["CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"] != "1" {
 					t.Error("function hooks missing")
 				}

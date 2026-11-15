@@ -20,7 +20,8 @@ func TestRenderFoldsTheProjectsAndTheCallersSettings(t *testing.T) {
 	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	projectBody := `{"env":{"PROJECT_OWN":"1","CLAUDE_CODE_AGENT_TEAMS_MODE":"project"},"theme":"project",` +
+	projectBody := `{"env":{"PROJECT_OWN":"1","CLAUDE_CODE_AGENT_TEAMS_MODE":"project","CLAUDE_CODE_TMUX_TRUECOLOR":null},` +
+		`"theme":"project",` +
 		`"outputStyle":"project","showThinkingSummaries":false,` +
 		`"hooks":{"Stop":[{"hooks":[{"type":"command","command":"project-stop"}]}]}}`
 	project, err := DecodeOwnerSettings([]byte(projectBody), "claude.settings")
@@ -80,14 +81,16 @@ func TestRenderFoldsTheProjectsAndTheCallersSettings(t *testing.T) {
 					commands = append(commands, hook.Command)
 				}
 			}
-			if got.Theme != "owner" || got.Style != "project" || got.Thinking == nil || *got.Thinking ||
+			_, truecolor := got.Env["CLAUDE_CODE_TMUX_TRUECOLOR"]
+			if got.Theme != "owner" || got.Style != "project" || got.Thinking == nil || *got.Thinking || truecolor ||
 				got.Env["OWNER_OWN"] != "1" || got.Env["PROJECT_OWN"] != "1" ||
 				got.Env["CLAUDE_CODE_AGENT_TEAMS_MODE"] != "x" || got.Env[envFunctionHooks] != "1" ||
 				got.Env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] != "0" || len(commands) < 2 ||
 				!reflect.DeepEqual(commands[len(commands)-2:], []string{"project-stop", "owner-stop"}) {
 				t.Fatalf("--settings = theme %q, outputStyle %q, showThinkingSummaries %v, env %v, Stop hooks %q;"+
 					" want the caller's theme, the project's outputStyle and showThinkingSummaries false, the"+
-					" caller's and the project's env beside pfm's, and pfm's Stop hooks, the project's, then the"+
+					" caller's and the project's env beside pfm's, the project's null removing the truecolor default,"+
+					" and pfm's Stop hooks, the project's, then the"+
 					" caller's", got.Theme, got.Style, got.Thinking, got.Env, commands)
 			}
 		})
@@ -123,5 +126,55 @@ func TestSettingsArgvRefusesUnreadableSettings(t *testing.T) {
 	rest, payload, err := settingsArgv([]string{"--", "--settings", "x"}, nil, map[string]any{})
 	if err != nil || !reflect.DeepEqual(rest, []string{"--", "--settings", "x"}) || payload != "{}" {
 		t.Errorf("after --: rest %q payload %q err %v, want the words untouched", rest, payload, err)
+	}
+}
+
+// The layered claude.settings: the machine's, then the project's, over the shipped defaults, each key
+// merged as a caller's --settings is.
+func TestEffectiveSettingsLayersOverTheDefaults(t *testing.T) {
+	machine := map[string]any{"cleanupPeriodDays": float64(90), "env": map[string]any{"A": "machine", "B": "machine"}}
+	// A null turns off the shipped default under it.
+	project := map[string]any{
+		"env":         map[string]any{"B": "project", "CLAUDE_CODE_TMUX_TRUECOLOR": nil},
+		"outputStyle": "terse",
+	}
+	layered, err := LayerSettings(nil, machine, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"cleanupPeriodDays": float64(90), "outputStyle": "terse",
+		"env": map[string]any{"A": "machine", "B": "project", "CLAUDE_CODE_TMUX_TRUECOLOR": nil},
+	}
+	if !reflect.DeepEqual(layered, want) {
+		t.Fatalf("LayerSettings = %#v, want %#v", layered, want)
+	}
+	if machine["env"].(map[string]any)["B"] != "machine" {
+		t.Fatalf("LayerSettings wrote into its first layer: %#v", machine)
+	}
+	if none, err := LayerSettings(nil, nil); none != nil || err != nil {
+		t.Fatalf("LayerSettings of no layer = %#v, %v; want nil", none, err)
+	}
+	env := EffectiveEnv(layered)
+	_, truecolor := env["CLAUDE_CODE_TMUX_TRUECOLOR"]
+	if env["A"] != "machine" || env["B"] != "project" || env["ANTHROPIC_SMALL_FAST_MODEL"] != "claude-haiku-5-5" ||
+		truecolor || len(env) != 8 {
+		t.Fatalf("EffectiveEnv = %#v", env)
+	}
+	for _, tc := range []struct {
+		claude map[string]any
+		days   int
+		err    string
+	}{
+		{nil, 36500, ""},
+		{map[string]any{"cleanupPeriodDays": float64(1)}, 1, ""},
+		{map[string]any{"cleanupPeriodDays": float64(0)}, 0, "claude.settings.cleanupPeriodDays must be a positive whole number of days, got 0"},
+		{map[string]any{"cleanupPeriodDays": 1.5}, 0, "claude.settings.cleanupPeriodDays must be a positive whole number of days, got 1.5"},
+		{map[string]any{"cleanupPeriodDays": "30"}, 0, "claude.settings.cleanupPeriodDays must be a positive whole number of days, got 30"},
+	} {
+		days, err := CleanupPeriodDays(tc.claude)
+		if days != tc.days || (err == nil) != (tc.err == "") || err != nil && err.Error() != tc.err {
+			t.Errorf("CleanupPeriodDays(%v) = %d, %v; want %d, %q", tc.claude, days, err, tc.days, tc.err)
+		}
 	}
 }

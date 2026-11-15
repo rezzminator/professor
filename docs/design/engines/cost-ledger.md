@@ -32,11 +32,11 @@ The pieces: the launch registry points Claude Code's OpenTelemetry exporters at 
 - **A ledger failure is a marker, never a failed chat.** Every problem on the launch path becomes a `PFM_COST_LEDGER` value the status line renders and a line in the sink log `pfm doctor` shows; Claude starts regardless.
 - **The user's own telemetry wins.** A launch whose environment or account `settings.json` already names `CLAUDE_CODE_ENABLE_TELEMETRY` or any `OTEL_*` variable keeps it and runs without a ledger.
 - **One dollar on the main line.** The main status line shows exactly one dollar amount in every state; the amounts behind a flag are reported by `pfm tokens`.
-- **The ledger measures helper spend; the launch routes it.** `ANTHROPIC_SMALL_FAST_MODEL` decides which model Claude Code's helpers use; with it unset they run on the main model. Every pfm launch sets it through `claude.helperModel`, `claude-haiku-5-5` by default ([claude-launch.md](claude-launch.md#decisions)); the ledger records that spend on whichever model ran it and changes none of it. `ANTHROPIC_DEFAULT_HAIKU_MODEL` also moves Haiku sub-agents, so pfm does not set it.
+- **The ledger measures helper spend; the launch routes it.** `ANTHROPIC_SMALL_FAST_MODEL` decides which model Claude Code's helpers use; with it unset they run on the main model. Every pfm launch sets it from the shipped launch defaults (`pfm/internal/claudelaunch/defaults.json`, `claude-haiku-5-5`; a project overrides it through `claude.settings.env`) ([claude-launch.md](claude-launch.md#decisions)); the ledger records that spend on whichever model ran it and changes none of it. `ANTHROPIC_DEFAULT_HAIKU_MODEL` also moves Haiku sub-agents, so pfm does not set it.
 
 ## Calls no transcript records
 
-Measured by an OpenTelemetry probe of one chat, each call joined by `request_id`; the sum equalled Claude Code's own total. Claude Code 2.1.295 makes these calls and writes none of them to a transcript. The model column reads as measured with no helper model set; a launch with `claude.helperModel` runs `web_fetch_apply` and the `web_search_tool` call (while Claude Code's `tengu_plum_vx3` flag is true) on that model instead:
+Measured by an OpenTelemetry probe of one chat, each call joined by `request_id`; the sum equalled Claude Code's own total. Claude Code 2.1.295 makes these calls and writes none of them to a transcript. The model column reads as measured with no helper model set; a launch with the shipped helper model (`defaults.json` `settings.env.ANTHROPIC_SMALL_FAST_MODEL`) runs `web_fetch_apply` and the `web_search_tool` call (while Claude Code's `tengu_plum_vx3` flag is true) on that model instead:
 
 | `query_source` | What issues it | Cost shape |
 | --- | --- | --- |

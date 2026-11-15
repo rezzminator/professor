@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -60,7 +60,7 @@ func TestEnsureMirror(t *testing.T) {
 				}
 				reply := cleanMirrorReply
 				if testCase.disable != "" {
-					writeBenchFile(t, paths.Settings(root), `{"envs":{"ENGINE_SYNC_DISABLE":"`+testCase.disable+`"}}`)
+					writeBenchFile(t, pfmconfig.PathIn(root), `{"envs":{"ENGINE_SYNC_DISABLE":"`+testCase.disable+`"}}`)
 					reply = skippedMirrorReply(testCase.engine)
 				}
 				record, runner := testjail.FakeEngineSyncRunner(t, reply, 0)

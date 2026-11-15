@@ -241,7 +241,7 @@ func newInstallerOptions(
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]
 		options.ManagedSettingsDir = runtime.Paths.ManagedSettingsDir
-		options.CleanupPeriodDays = runtime.Config.Claude.CleanupPeriodDays
+		options.ClaudeSettings = runtime.Config.Claude.Settings
 		options.RequireManagedCleanup = runtime.Config.Claude.RequireManagedCleanup
 		options.Home = runtime.Paths.Home
 		options.StateDB = runtime.Paths.StateDB

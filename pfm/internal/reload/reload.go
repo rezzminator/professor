@@ -3,6 +3,7 @@
 // arguments.go: the /reload flags, their cache-spelling normalization and the worker's parse.
 // owner_exit.go: the pane mutex, the exit mark and the yield to an owner's /exit.
 // after_reboot.go: once the reborn chat is up, its native --then turn and the "(before --new)" label.
+// ready.go: the native chat's idle-and-empty-composer wait, before /exit and before --then.
 package reload
 
 import (

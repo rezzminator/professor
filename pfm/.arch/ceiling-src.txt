@@ -210,7 +210,7 @@ internal/reload/adapter_herdr.go 537
 internal/reload/command_herdr.go 661
 internal/reload/exit_render.go 268
 internal/reload/newname.go 295
-internal/reload/reload.go 865
+internal/reload/reload.go 866
 internal/reload/transcript.go 242
 internal/resolve/directory.go 312
 internal/resolve/ladder.go 262

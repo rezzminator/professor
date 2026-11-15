@@ -1,9 +1,11 @@
 package workbench
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -248,6 +250,46 @@ func TestSettingsFaults(t *testing.T) {
 				t.Fatalf("ForLaunch = %#v, %v; want %#v", got, err, want)
 			}
 		})
+	}
+}
+
+// TestSettingsTemplate: the template pfm init copies into a project as pfm.settings.json sets every key
+// the file takes, and a launch reads it as written, with no warning.
+func TestSettingsTemplate(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate test source")
+	}
+	path := filepath.Join(filepath.Dir(source), "..", "..", "..", "templates", "project", paths.SettingsFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	fields := reflect.TypeFor[settingsFile]()
+	for index := range fields.NumField() {
+		name, _, _ := strings.Cut(fields.Field(index).Tag.Get("json"), ",")
+		if _, set := keys[name]; !set {
+			t.Errorf("%s lacks the key %q", path, name)
+		}
+	}
+	var template struct {
+		Claude struct {
+			Settings map[string]any `json:"settings"`
+		} `json:"claude"`
+	}
+	if err := json.Unmarshal(raw, &template); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	root, _ := benchFixture(t)
+	writeBenchFile(t, paths.Settings(root), string(raw))
+	got, err := ForLaunch(filepath.Join(root, "src"), t.TempDir(), pfmengine.Claude, New)
+	want := Persona{Envs: map[string]string{}, ClaudeSettings: template.Claude.Settings}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("ForLaunch over %s = %#v, %v; want %#v", path, got, err, want)
 	}
 }
 

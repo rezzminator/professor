@@ -368,6 +368,7 @@ func buildAdoptAtStoreFixture(t *testing.T, root string) []string {
 		"VERSION":                                                          "0.65.0\n",
 		"templates/project/settings.json":                                  "{}\n",
 		"templates/project/rumdl-policy.toml":                              "# fixture rumdl policy\n[global]\n",
+		"templates/project/pfm.settings.json":                              "{}\n",
 		"templates/project/commands/dev.md":                                "old\n",
 		"templates/project/agents/gitter.md":                               "---\nname: gitter\n---\nbody\n",
 		"templates/project/scripts/worktree.sh":                            "#!/usr/bin/env bash\nset -euo pipefail\n",
@@ -413,8 +414,9 @@ func buildScaffoldStoreFixture(t *testing.T, root string) []string {
 		content string
 		mode    os.FileMode
 	}{
-		"VERSION":                         {content: "0.65.0\n", mode: 0o600},
-		"templates/project/settings.json": {content: "{}\n", mode: 0o600},
+		"VERSION":                             {content: "0.65.0\n", mode: 0o600},
+		"templates/project/settings.json":     {content: "{}\n", mode: 0o600},
+		"templates/project/pfm.settings.json": {content: "{}\n", mode: 0o600},
 		"templates/project/rumdl-policy.toml": {
 			content: "# fixture rumdl policy\n[global]\n",
 			mode:    0o600,

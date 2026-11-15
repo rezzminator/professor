@@ -1,0 +1,13 @@
+{
+  "envs": {},
+  "harnessPrompt": null,
+  "claude": {
+    "settings": {
+      "env": {
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0"
+      },
+      "outputStyle": "default",
+      "showThinkingSummaries": true
+    }
+  }
+}

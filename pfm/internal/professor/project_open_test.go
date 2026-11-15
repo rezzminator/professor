@@ -123,7 +123,7 @@ func TestOpenProjectRowsNamesEveryRowNoVerbClosed(t *testing.T) {
 	}
 	var doctor bytes.Buffer
 	if warnings := PrintDoctor(&doctor, project, t.TempDir()); warnings != 4 ||
-		doctor.String() != "professor: current 0 · review-required 2 · UNREADABLE 2\n" {
+		doctor.String() != "professor: current 1 · review-required 2 · UNREADABLE 2\n" {
 		t.Fatalf("PrintDoctor() warnings=%d output=%q, want 4 and the UNREADABLE count", warnings, doctor.String())
 	}
 

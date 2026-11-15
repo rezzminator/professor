@@ -211,7 +211,7 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 	headSHA := projectGitShortSHA(t, store)
 
-	const planSize = 11
+	const planSize = 12
 
 	// An unreadable local file costs its own pin only: the readable one
 	// still pins and saves, the unreadable one is named and reads NEW.
@@ -304,8 +304,8 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 	if !strings.Contains(stdout.String(), "absent-at-ref 1") {
 		t.Fatalf("adopt --at stdout missing absent-at-ref: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "  absent        10  (mapped template, no local file") {
-		t.Fatalf("adopt --at stdout missing absent 10 (project/rules mapped): %q", stdout.String())
+	if !strings.Contains(stdout.String(), "  absent        11  (mapped template, no local file") {
+		t.Fatalf("adopt --at stdout missing absent 11 (project/rules mapped): %q", stdout.String())
 	}
 	baseline, err := professor.Load(project)
 	if err != nil {
@@ -354,6 +354,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 		"VERSION":                                                          "0.65.0\n",
 		"templates/project/settings.json":                                  "{}\n",
 		"templates/project/rumdl-policy.toml":                              "[global]\n",
+		"templates/project/pfm.settings.json":                              "{}\n",
 		"templates/project/commands/dev.md":                                "old\n",
 		"templates/project/agents/gitter.md":                               "body\n",
 		"templates/project/scripts/worktree.sh":                            "#!/usr/bin/env bash\n",

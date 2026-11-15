@@ -2,7 +2,10 @@ package claudelaunch
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -103,4 +106,41 @@ func TestDefaultsReachEveryLaunch(t *testing.T) {
 		t.Fatalf("headless --settings %q: %v", headless, err)
 	}
 	check(t, payload)
+}
+
+// TestSettingsTemplateCarriesTheDefaults: the project template pfm init copies into a project as
+// pfm.settings.json lists every shipped launch default at its value, so a project reads them all in
+// its own file; a default added to defaults.json and not to the template fails here.
+func TestSettingsTemplateCarriesTheDefaults(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate test source")
+	}
+	path := filepath.Join(filepath.Dir(source), "..", "..", "..", "templates", "project", "pfm.settings.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var template struct {
+		Claude struct {
+			Settings map[string]any `json:"settings"`
+		} `json:"claude"`
+	}
+	if err := json.Unmarshal(raw, &template); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	var file struct {
+		Settings map[string]any `json:"settings"`
+	}
+	if err := json.Unmarshal(defaultsJSON, &file); err != nil {
+		t.Fatalf("decode defaults.json: %v", err)
+	}
+	if !reflect.DeepEqual(template.Claude.Settings, file.Settings) {
+		t.Fatalf(
+			"%s claude.settings = %#v, want defaults.json settings %#v",
+			path,
+			template.Claude.Settings,
+			file.Settings,
+		)
+	}
 }

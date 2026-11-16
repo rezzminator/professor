@@ -23,7 +23,6 @@
     "docs/references/*"
   ],
   "ignore_sources": [
-    ".claude/commands/contentor.md",
     ".claude/commands/h/",
     ".claude/commands/deploy.md",
     ".claude/commands/test.md",

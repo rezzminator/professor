@@ -196,7 +196,8 @@ fence_config_init() {
       facts="$(docker info --format '{{.OperatingSystem}}|{{.NCPU}}|{{.MemTotal}}' 2>&1)" || { echo "iso: PFM_FENCE_PROFILE detection failed: $facts" >&2; return 1; }
       IFS='|' read -r os cpus memory <<<"$facts"
       [[ "$cpus" =~ ^[1-9][0-9]*$ && "$memory" =~ ^[1-9][0-9]*$ ]] || { echo "iso: PFM_FENCE_PROFILE detection returned invalid Docker resources: $facts" >&2; return 1; }
-      case "$os" in *[Dd]esktop*) profile=desktop ;; *[Ll]inux*|Ubuntu*|Debian*|Fedora*) profile=native ;; *) echo "iso: PFM_FENCE_PROFILE unsupported Docker OperatingSystem: $os" >&2; return 1 ;; esac
+      # Ubuntu, CentOS Stream, openSUSE and SLE name no kernel in PRETTY_NAME, which is what Docker reports.
+      case "$os" in *[Dd]esktop*) profile=desktop ;; *[Ll]inux*|Ubuntu*|Debian*|Fedora*|CentOS*|openSUSE*|SLE*) profile=native ;; *) echo "iso: PFM_FENCE_PROFILE unsupported Docker OperatingSystem: $os" >&2; return 1 ;; esac
       if [[ "$profile" == native ]]; then
         native_cpu="$(PFM_FENCE_PROFILE=native _fence_config_default PFM_FENCE_CPUS)" || return 1
         native_mem="$(_fence_sh_bytes "$(PFM_FENCE_PROFILE=native _fence_config_default PFM_FENCE_MEM)")" || return 1

@@ -320,7 +320,7 @@ _fence_sh_reap_runs > "$T/reap-keys.log" 2>&1
 if [[ ! -d "$dead" ]] && grep -q '^docker exec pfm-fence-old-key ' "$REC" && grep -q '^docker exec pfm-fence-new-key ' "$REC"; then ok "dead caller reservations are reaped across all image keys"; else bad "cross-key reap" "$(cat "$REC")"; fi
 
 # Detection is Docker facts, never the host name; explicit profile avoids the probe.
-for facts in 'Docker Desktop|10|8267812044|desktop' 'Docker Desktop|24|126701535232|desktop' 'Ubuntu Linux|23|126701535232|native' 'Ubuntu Linux|8|126701535232|desktop' 'Debian Linux|23|5368709120|desktop'; do
+for facts in 'Docker Desktop|10|8267812044|desktop' 'Docker Desktop|24|126701535232|desktop' 'Ubuntu Linux|23|126701535232|native' 'Ubuntu Linux|8|126701535232|desktop' 'Debian Linux|23|5368709120|desktop' 'CentOS Stream 9|23|126701535232|native' 'CentOS Stream 9|8|126701535232|desktop' 'openSUSE Leap 15.6|23|126701535232|native' 'SLES 15 SP6|23|126701535232|native'; do
   want="${facts##*|}"; STUB_INFO="${facts%|*}"
   # a plain assignment, not a prefix: Bash 5.3 restores a function's prefix variable on return, export or not
   if got="$(PFM_FENCE_PROFILE=auto; fence_config_init && printf '%s' "$PFM_FENCE_PROFILE")" && [[ "$got" == "$want" ]]; then ok "Docker facts select $want"; else bad "Docker facts select $want" "$got"; fi

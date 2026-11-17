@@ -1,6 +1,7 @@
 // Package paths centralizes filesystem defaults and their test-jail overrides.
 //
 // logroot.go: LogRoot, the one folder every pfm log is written to and read from.
+// platform.go: Platform, the OS and architecture the binary runs on.
 package paths
 
 import (

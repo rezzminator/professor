@@ -11,6 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
+	"github.com/rezzminator/professor/pfm/internal/installping"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -72,7 +73,17 @@ func runStatuslineWithRuntime(
 		Warn:  stderr,
 	}
 	if *pacedKey != "" {
-		return runPacedStatuslineWorker(paced, *pacedKey, machine.Config.Path, stderr)
+		options := installping.ForRuntime(machine, env)
+		pinged := make(chan struct{})
+		go func() {
+			defer close(pinged)
+			_ = pacedInstallPingDaily(ctx, options) // installping logs its own failure WARN
+		}()
+		code := runPacedStatuslineWorker(paced, *pacedKey, machine.Config.Path, stderr)
+		// A worker that exits at once (another holds the lock) waits out the
+		// ping, bounded by installping.Timeout, so a claimed day is never lost.
+		<-pinged
+		return code
 	}
 	raw, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
 	if err != nil {
@@ -85,6 +96,11 @@ func runStatuslineWithRuntime(
 	paced.Front(raw, stdout)
 	return 0
 }
+
+// pacedInstallPingDaily sends the event=daily install ping from each chat's
+// long-lived paced worker, the one detached run every chat launch starts;
+// tests replace it.
+var pacedInstallPingDaily = installping.SendDaily
 
 // statuslinePacedSpawn starts a chat's paced render worker detached; tests
 // replace it, since the test binary is no pfm to start.

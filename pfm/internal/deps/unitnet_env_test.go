@@ -36,6 +36,7 @@ func TestUnitNetEnvironmentIsTheGoldenList(t *testing.T) {
 		"PATH",
 		"PFM_CONFIG",
 		"PFM_HOME",
+		"PFM_INSTALL_PING_OFFLINE",
 		"PFM_MANAGED_SETTINGS_DIR",
 		"PFM_PRICES_OFFLINE",
 		"PFM_SID_DIR",

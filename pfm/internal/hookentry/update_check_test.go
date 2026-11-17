@@ -2,6 +2,7 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installping"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
@@ -26,8 +29,19 @@ func TestUpdateCheckOfflineMakesNoLookup(t *testing.T) {
 	}))
 	defer server.Close()
 	cache := filepath.Join(t.TempDir(), "update.json")
+	var pinged []string
+	previous := updateCheckInstallPingDaily
+	t.Cleanup(func() { updateCheckInstallPingDaily = previous })
+	updateCheckInstallPingDaily = func(_ context.Context, options installping.Options) error {
+		pinged = append(pinged, options.Version)
+		return nil
+	}
 	var stderr bytes.Buffer
-	code := UpdateCheck([]string{"--cache", cache, "--current", "v1.0.0", "--url", server.URL}, &stderr)
+	code := UpdateCheck([]string{"--cache", cache, "--current", "v1.0.0", "--url", server.URL}, &stderr,
+		config.Runtime{Version: "v1.2.3"})
+	if len(pinged) != 1 || pinged[0] != "v1.2.3" {
+		t.Fatalf("daily install ping versions = %q, want [v1.2.3] even with the release lookup offline", pinged)
+	}
 	want := "pfm internal update-check: offline (PFM_UPDATE_CHECK_OFFLINE=1): no release lookup made\n"
 	if code != 0 || stderr.String() != want {
 		t.Fatalf("offline update-check = %d, %q; want 0, %q", code, stderr.String(), want)
@@ -70,7 +84,11 @@ func TestUpdateCheckFailureOutcomes(t *testing.T) {
 				}
 			}
 			var stderr bytes.Buffer
-			code := UpdateCheck([]string{"--cache", cache, "--current", "v1.0.0", "--url", tc.url}, &stderr)
+			code := UpdateCheck(
+				[]string{"--cache", cache, "--current", "v1.0.0", "--url", tc.url},
+				&stderr,
+				config.Runtime{},
+			)
 			if code != tc.wantCode || !strings.Contains(stderr.String(), "pfm internal update-check: ") {
 				t.Fatalf("code=%d stderr=%q", code, stderr.String())
 			}
@@ -141,7 +159,7 @@ func TestUpdateCheckWritesAnHTTPOutRecord(t *testing.T) {
 	var stderr bytes.Buffer
 	code := UpdateCheck([]string{
 		"--cache", cache, "--current", "v1.0.0", "--url", server.URL + "/professor-org/professor/releases/latest",
-	}, &stderr)
+	}, &stderr, config.Runtime{})
 	if code != 0 {
 		t.Fatalf("update-check exit = %d, stderr=%s", code, stderr.String())
 	}

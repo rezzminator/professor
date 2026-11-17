@@ -79,10 +79,13 @@ cat "$scratch/install.sh"
 gocache=$(go env GOCACHE) || fail "setup: go env GOCACHE failed"
 gomodcache=$(go env GOMODCACHE) || fail "setup: go env GOMODCACHE failed"
 fresh_home="$scratch/home"
+# The emptied environment drops CI and GITHUB_ACTIONS, so the install ping is
+# turned off by name: the released pfm installed here never reaches the live counter.
 fresh() {
   env -i HOME="$fresh_home" USER="${USER:-runner}" LOGNAME="${LOGNAME:-${USER:-runner}}" \
     PATH="$fresh_home/.local/bin:$PATH" SHELL="$(command -v zsh)" LANG="${LANG:-C.UTF-8}" TERM=dumb \
-    TMPDIR="${TMPDIR:-/tmp}" GOCACHE="$gocache" GOMODCACHE="$gomodcache" GOTOOLCHAIN=local "$@"
+    TMPDIR="${TMPDIR:-/tmp}" GOCACHE="$gocache" GOMODCACHE="$gomodcache" GOTOOLCHAIN=local \
+    PFM_INSTALL_PING_OFFLINE=1 "$@"
 }
 
 if [ -n "${ENGINE_SYNC_BIN:-}" ]; then

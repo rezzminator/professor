@@ -1,6 +1,7 @@
 // Command pfm manages live and resumable Claude and Codex chats.
 //
 // namesync_halves.go: name-sync's order, the native Herdr seats before the tmux windows.
+// install_ping.go: pfm install's install-ping line and its event=install ping.
 package main
 
 import (
@@ -530,7 +531,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return hookentry.TmuxTitleRenudge(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "update-check" {
-		return hookentry.UpdateCheck(args[1:], stderr)
+		return hookentry.UpdateCheck(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "primary-get" {
 		primary, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)

@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/installping"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing/modelcost"
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -217,6 +218,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			Offline:    paths.PricesOffline(),
 			Clock:      clock.Real,
 		})
+		announceInstallPing(context.Background(), stdout, *offline, installping.ForRuntime(runtime, paths.OSEnv{}))
 	}
 	return code
 }

@@ -89,6 +89,9 @@ func TestJourney(t *testing.T) {
 			vars = append(vars, name+"="+value)
 		}
 	}
+	// The install ping off, as prepare.sh exports it in every login and service: a direct read
+	// (c.Read) runs no login, and its pfm would otherwise send the daily ping (pfm/internal/installping).
+	vars = append(vars, "PFM_INSTALL_PING_OFFLINE=1")
 	treeStarted = clock.Real.Now()
 	harness.Run(t, tree(), State{Home: home, Release: "v" + release}, harness.Hooks{
 		Env:       vars,

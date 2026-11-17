@@ -8,6 +8,9 @@
 //
 // A file that is missing reads as "found nothing"; a file that exists but
 // cannot be read or parsed returns its error with its path, never an answer.
+//
+// listing.go: ReadMarketplace and ListedEnabled, a marketplace's own listing
+// and the plugins of it an account enables.
 package claudeplugin
 
 import (
@@ -22,12 +25,18 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // ConfigDir is the Claude config dir the plugin records are read in:
 // CLAUDE_CONFIG_DIR when set and non-empty, else the shared store home/.claude.
 func ConfigDir(home string) string {
-	if dir := pfmconfig.AmbientClaudeConfigDir(); dir != "" {
+	return ConfigDirIn(paths.OSEnv{}, home)
+}
+
+// ConfigDirIn is ConfigDir read from env, the environment a caller was handed.
+func ConfigDirIn(env paths.Env, home string) string {
+	if dir := pfmconfig.AmbientClaudeConfigDirFrom(env); dir != "" {
 		return dir
 	}
 	return claudelaunch.ClaudeStore(home)
@@ -219,25 +228,19 @@ type Root struct {
 // No enabled key is found nothing (nil, nil); a record that cannot be read or
 // parsed returns its error.
 func Roots(configDir, name string) ([]Root, error) {
-	settings := filepath.Join(configDir, "settings.json")
-	document, err := ReadSettings(settings)
+	enabled, err := EnabledPlugins(configDir)
 	if err != nil {
 		return nil, err
 	}
-	enabled, isObject := document["enabledPlugins"].(map[string]any)
-	if value, present := document["enabledPlugins"]; present && value != nil && !isObject {
-		return nil, fmt.Errorf("parse %s: enabledPlugins is no object", settings)
-	}
 	var roots []Root
-	for id, value := range enabled {
-		if plugin, _, _ := strings.Cut(id, "@"); plugin == name && value == true {
+	for _, id := range enabled {
+		if plugin, _, _ := strings.Cut(id, "@"); plugin == name {
 			roots = append(roots, Root{ID: id})
 		}
 	}
 	if len(roots) == 0 {
 		return nil, nil
 	}
-	slices.SortFunc(roots, func(a, b Root) int { return strings.Compare(a.ID, b.ID) })
 	_, known, err := ReadKnownMarketplaces(configDir)
 	if err != nil {
 		return nil, err
@@ -265,6 +268,29 @@ func Roots(configDir, name string) ([]Root, error) {
 	return roots, nil
 }
 
+// EnabledPlugins is every name@marketplace key configDir's settings.json sets true,
+// sorted. A missing file or member enables nothing; a file that cannot be read
+// or parsed, or an enabledPlugins that is no object, returns its error.
+func EnabledPlugins(configDir string) ([]string, error) {
+	settings := filepath.Join(configDir, "settings.json")
+	document, err := ReadSettings(settings)
+	if err != nil {
+		return nil, err
+	}
+	enabled, isObject := document["enabledPlugins"].(map[string]any)
+	if value, present := document["enabledPlugins"]; present && value != nil && !isObject {
+		return nil, fmt.Errorf("parse %s: enabledPlugins is no object", settings)
+	}
+	var ids []string
+	for id, value := range enabled {
+		if value == true {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
+
 // directoryRoot is the folder a directory marketplace's manifest lists for
 // plugin name; empty when market is no directory marketplace or its manifest
 // is missing or lists no path source for name.
@@ -272,17 +298,9 @@ func directoryRoot(market KnownMarketplace, name string) (string, error) {
 	if market.Source.Kind != MarketplaceDirectory || market.InstallLocation == "" {
 		return "", nil
 	}
-	path := filepath.Join(market.InstallLocation, ".claude-plugin", "marketplace.json")
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", path, err)
-	}
-	var manifest Marketplace
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return "", fmt.Errorf("parse %s: %w", path, err)
+	manifest, found, err := ReadMarketplace(market.InstallLocation)
+	if err != nil || !found {
+		return "", err
 	}
 	for _, entry := range manifest.Plugins {
 		if source, isPath := entry.Source.(string); entry.Name == name && isPath {

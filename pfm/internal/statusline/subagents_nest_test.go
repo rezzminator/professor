@@ -310,7 +310,7 @@ func TestAgentFactsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			parentTask, agentTask("c1", "running"), agentTask("c4", "killed"), killedAtSpawn,
 			agentTask("c2", "running"), agentTask("g1", "running"), agentTask("g2", "running"))
 		got := rows["p"]
-		if got != "4/7│Σ$0.01/54.3K/35/4+?│opus│1 error│💾94%│⟲1" {
+		if got != "4/7│Σ$0.01/54.4K/35/4+?│opus│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 4/7 (c1, c2, g1 and g2 work; c3, c4, c5 do not)", got)
 		}
 	})
@@ -323,14 +323,14 @@ func TestAgentFactsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"p": agentTranscriptLines, "c1": {longSilent}, "g1": {longSilent, silentResult},
 		}, parents)
 		got := factLinesOf(t, session, subagentNow, parentTask, agentTask("c1", "running"), agentTask("g1", "running"))["p"]
-		if got != "2/2│Σ$0.01/54.3K/35/2+?│opus│1 error│💾94%│⟲1" {
+		if got != "2/2│Σ$0.01/54.4K/35/2+?│opus│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 2/2: c1 and g1 still run", got)
 		}
 		done := nestedSession(t, map[string][]string{
 			"p": agentTranscriptLines, "c1": {longSilent, turnEnded}, "g1": {longSilent, silentResult},
 		}, parents)
 		got = factLinesOf(t, done, subagentNow, parentTask, agentTask("c1", "running"))["p"]
-		if got != "0/2│Σ$0.01/54.3K/35/2+?│opus│1 error│💾94%│⟲1" {
+		if got != "0/2│Σ$0.01/54.4K/35/2+?│opus│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 0/2: c1 ended its turn, g1 no longer runs", got)
 		}
 	})

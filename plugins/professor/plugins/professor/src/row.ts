@@ -180,10 +180,11 @@ function pulseColumn(agent: RowAgent, facts: DoorFacts | undefined, form: DoorCo
   if (form.pulse) out += ` ${pulseText(pulse(agent.tokenSamples, paint.pulse.cells, paint.pulse), paint)}`;
   out += ' '.repeat(lead);
   if (form.growth) {
-    // The newest cell's reading in figures, beside it: it names what the trace counts.
+    // The newest cell's reading in figures, beside it: it names what the trace counts. A step that neither grew nor
+    // shrank leaves the figure's seven cells blank, so a context at rest reads as no figure, never as a size of 0.
     const samples = agent.tokenSamples;
     const grown = samples.length < 2 ? 0 : samples[samples.length - 1]! - samples[samples.length - 2]!;
-    out += ` ${paint(grown === 0 ? 'muted' : 'window', (grown > 0 ? `+${tokens(grown)}` : grown < 0 ? `−${tokens(-grown)}` : '+0').padStart(7))}`;
+    out += ` ${grown === 0 ? ' '.repeat(7) : paint('window', (grown > 0 ? `+${tokens(grown)}` : `−${tokens(-grown)}`).padStart(7))}`;
   }
   out += ` ${paint(tone, (full === undefined ? '?%' : `${full}%`).padStart(4))}`;
   if (!form.window) return out;

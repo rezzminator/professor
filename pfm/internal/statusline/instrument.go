@@ -156,15 +156,16 @@ func contextColumn(
 		out += " " + pulseStrip(trace)
 	}
 	if form.Growth {
-		// The newest cell's step in figures, beside it: it names what the trace counts.
-		figure, color := "+0", cMuted
+		// The newest cell's step in figures, beside it: it names what the trace counts. A step at rest
+		// leaves its seven cells blank, never a figure read as a size of 0; nothing after it moves.
+		figure := fmt.Sprintf("%7s", "")
 		switch {
 		case grown > 0:
-			figure, color = "+"+formatContextTokens(grown), pulseGrowth
+			figure = pulseGrowth + fmt.Sprintf("%7s", "+"+formatContextTokens(grown)) + reset
 		case grown < 0:
-			figure, color = "−"+formatContextTokens(-grown), cWindow
+			figure = cWindow + fmt.Sprintf("%7s", "−"+formatContextTokens(-grown)) + reset
 		}
-		out += " " + color + fmt.Sprintf("%7s", figure) + reset
+		out += " " + figure
 	}
 	out += " " + tone + fmt.Sprintf("%4s", gauge.marker+label) + reset
 	if form.Window {

@@ -146,7 +146,7 @@ func TestContextColumnWritesTheStripsFigures(t *testing.T) {
 			gauge:  contextGauge{known: true, tokens: 14_200, window: 272_000, percent: 5, humanPrompts: 3},
 			form:   contextForms[0],
 			want: "🟢 \x1b[38;5;118m▰\x1b[2m▱▱▱▱▱▱▱\x1b[0m \x1b[38;5;245m······\x1b[0m" +
-				" \x1b[38;5;245m     +0\x1b[0m \x1b[38;5;118m  5%\x1b[0m" +
+				"         \x1b[38;5;118m  5%\x1b[0m" +
 				" \x1b[1;97m 14.2K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;117m272.0K\x1b[0m \x1b[2m✎3\x1b[0m",
 		},
 		{
@@ -197,7 +197,7 @@ func TestInstrumentLineOfAnUnmeasuredContextAddsNoReading(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, line := instrumentLine(runtime, data, "", runtime.now())
-	const want = "🟢 ▰▱▱▱▱▱▱▱ ······      +0  12%      ?/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"
+	const want = "🟢 ▰▱▱▱▱▱▱▱ ······          12%      ?/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"
 	if got := stripANSICodes(line); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}
@@ -210,7 +210,8 @@ func TestInstrumentLineOfAnUnmeasuredContextAddsNoReading(t *testing.T) {
 	}
 }
 
-// The agent row's token counts, row for row (plugins/professor/tests/text.test.ts).
+// The agent row's token counts, row for row (plugins/professor/tests/text.test.ts): one decimal,
+// rounded half up, a count that rounds to 1000.0K written in the next unit.
 func TestContextTokensAreTheAgentRowsTokens(t *testing.T) {
 	for _, tc := range []struct {
 		tokens int64
@@ -220,10 +221,18 @@ func TestContextTokensAreTheAgentRowsTokens(t *testing.T) {
 		{870, "870"},
 		{999, "999"},
 		{1_000, "1.0K"},
-		{74_250, "74.2K"},
-		{999_999, "999.9K"},
+		{1_949, "1.9K"},
+		{1_950, "2.0K"},
+		{74_250, "74.3K"},
+		{92_907, "92.9K"},
+		{999_949, "999.9K"},
+		{999_950, "1.0M"},
+		{999_999, "1.0M"},
 		{1_000_000, "1.0M"},
-		{1_250_000, "1.2M"},
+		{1_250_000, "1.3M"},
+		{1_849_999, "1.8M"},
+		{1_850_000, "1.9M"},
+		{1_874_214, "1.9M"},
 	} {
 		if got := formatContextTokens(tc.tokens); got != tc.want {
 			t.Errorf("formatContextTokens(%d) = %q, want %q", tc.tokens, got, tc.want)

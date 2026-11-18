@@ -161,6 +161,41 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			claudeCost: 8.003, want: "Σ $8.00+? · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
+			name: "a call without a request id the sink wrote as a log and a span half counts once", marker: "on",
+			child: spendChildResponse,
+			rows: append(spendRows(),
+				costledger.Row{
+					TS: "2026-10-09T18:00:03.001Z", SessionID: spendSession, AgentID: costledger.UnknownAgent,
+					QuerySource: "agent_summary", Model: "claude-opus-5-5", InputTokens: 10_000, OutputTokens: 1_000,
+					CostUSDMicros: micros(50_000), Join: costledger.JoinLog,
+					TraceID: "7a87346f49bf253d079d966a1e591680", SpanID: "3bf5c6d39d319461",
+				},
+				costledger.Row{
+					TS:           "2026-10-09T18:00:03.000Z",
+					SessionID:    spendSession,
+					AgentID:      "c1",
+					QuerySource:  "agent_summary",
+					Model:        "claude-opus-5-5[1m]",
+					InputTokens:  10_000,
+					OutputTokens: 1_000,
+					Join:         costledger.JoinSpan,
+					TraceID:      "7a87346f49bf253d079d966a1e591680",
+					SpanID:       "81196dc5ba4e3c35",
+				},
+			),
+			claudeCost: 8.053, want: "Σ $8.05 · 1.0M in · 6.1K out · 1 tool",
+		},
+		{
+			name: "a span half without a request id and no log half leaves a floor", marker: "on",
+			child: spendChildResponse,
+			rows: append(spendRows(), costledger.Row{
+				TS: "2026-10-09T18:00:03.000Z", SessionID: spendSession, AgentID: "c1",
+				QuerySource: "agent_summary", Model: "claude-opus-5-5", InputTokens: 10_000, OutputTokens: 1_000,
+				Join: costledger.JoinSpan, TraceID: "7a87346f49bf253d079d966a1e591680", SpanID: "81196dc5ba4e3c35",
+			}),
+			claudeCost: 8.003, want: "Σ $8.00+? · 1.0M in · 6.1K out · 1 tool",
+		},
+		{
 			name: "ledger without a transcript: tools unknown", rows: spendRows(), marker: "on", noSession: true,
 			claudeCost: 8.003, want: "Σ $8.00 · 1.0M in · 5.1K out · ? tools",
 		},
@@ -391,9 +426,9 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			got := stripANSICodes(line)
 			// the line up to its cache segment, the cache tests' subject
 			head, _, _ := strings.Cut(got, " │ 💾")
-			want := "🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%   1.0M/? ctx unknown │ ⏳ 0s │ " + tc.want
+			want := "🟢 ▱▱▱▱▱▱▱▱ ······           ?%   1.0M/? ctx unknown │ ⏳ 0s │ " + tc.want
 			if tc.noSession {
-				want = "🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ " + tc.want
+				want = "🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ " + tc.want
 			}
 			if head != want {
 				t.Errorf("line = %q, want %q", head, want)

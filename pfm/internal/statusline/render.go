@@ -308,12 +308,17 @@ func makeBar(percent, width int) string {
 	return fillBar(filled, width, percentColor(percent))
 }
 
+// formatContextTokens writes a token count to one decimal, rounded half up: 1,950 is 2.0K,
+// 1,874,214 is 1.9M, and a count that rounds to 1000.0K is written in the next unit, 1.0M.
+// The professor plugin's agent rows write the same figure (plugins/professor's text.ts tokens).
 func formatContextTokens(tokens int64) string {
 	switch {
-	case tokens >= 1_000_000:
-		return fmt.Sprintf("%d.%dM", tokens/1_000_000, tokens%1_000_000/100_000)
+	case tokens >= 999_950:
+		tenths := (tokens + 50_000) / 100_000
+		return fmt.Sprintf("%d.%dM", tenths/10, tenths%10)
 	case tokens >= 1_000:
-		return fmt.Sprintf("%d.%dK", tokens/1_000, tokens%1_000/100)
+		tenths := (tokens + 50) / 100
+		return fmt.Sprintf("%d.%dK", tenths/10, tenths%10)
 	default:
 		return strconv.FormatInt(tokens, 10)
 	}

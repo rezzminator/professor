@@ -391,7 +391,7 @@ func TestAgentFactsPricesRowsFromTheLedger(t *testing.T) {
 	)
 	for id, want := range map[string]string{
 		ledgerAgentRoot:   "1/1│Σ$0.95/740.0K/3.2K/4│opus│1 error│💾94%│⟲1",
-		ledgerAgentFirst:  "Σ$0.08/224.3K/1.2K/2│opus│1 error│💾94%│⟲1",
+		ledgerAgentFirst:  "Σ$0.08/224.3K/1.3K/2│opus│1 error│💾94%│⟲1",
 		ledgerAgentSecond: "Σ$0.09/224.5K/1.4K/?│opus│💾!", // no transcript: its context is unknown
 	} {
 		if rows[id] != want {
@@ -425,7 +425,7 @@ func TestAgentFactsPricesRowsFromTheLedger(t *testing.T) {
 		"main rows $%.4f: %s",
 		mainRows,
 		stripANSICodes(line),
-	), "main rows $0.3403: 🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $1.29 · 1.0M in · 4.0K out · ? tools"; got != want {
+	), "main rows $0.3403: 🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $1.29 · 1.0M in · 4.0K out · ? tools"; got != want {
 		t.Errorf("main line = %q, want %q", got, want)
 	}
 }

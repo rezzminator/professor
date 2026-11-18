@@ -72,11 +72,15 @@ export function pad(text: string, width: number): string {
   return text + ' '.repeat(Math.max(0, width - cells(text)));
 }
 
-/** A token count as the status line writes it: 870, 74.2K, 1.0M. */
+/**
+ * A token count as the status line writes it (pfm's formatContextTokens): 870, 74.3K, 1.9M, to one decimal
+ * rounded half up, a count that rounds to 1000.0K written in the next unit, 1.0M.
+ */
 export function tokens(count: number): string {
   const whole = Math.max(0, Math.floor(count));
-  if (whole >= 1_000_000) return `${Math.floor(whole / 1_000_000)}.${Math.floor((whole % 1_000_000) / 100_000)}M`;
-  if (whole >= 1_000) return `${Math.floor(whole / 1_000)}.${Math.floor((whole % 1_000) / 100)}K`;
+  const tenths = (unit: number) => Math.floor((whole + unit / 20) / (unit / 10));
+  if (whole >= 999_950) return `${Math.floor(tenths(1_000_000) / 10)}.${tenths(1_000_000) % 10}M`;
+  if (whole >= 1_000) return `${Math.floor(tenths(1_000) / 10)}.${tenths(1_000) % 10}K`;
   return String(whole);
 }
 

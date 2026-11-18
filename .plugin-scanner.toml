@@ -17,6 +17,9 @@ ignore_paths = [
   "pfm/internal/mockengine/claude_api.go",
   # Display-token interpolation in a theme fixture, not an authentication token.
   "pfm/internal/themesync/herdr_test.go",
+  # Claude Code's published type declarations, vendored for the professor plugin's
+  # type-check: a doc comment names a notification's "source token" values.
+  "plugins/professor/types/claude-code.d.ts",
   # Research quotes available sandbox modes; it does not configure a default.
   ".professor/RR/llm-coding-agent-execution-orchestration-2026-09-20.md",
   # Synthetic, unpublished plugins use the repository's license and security policy.

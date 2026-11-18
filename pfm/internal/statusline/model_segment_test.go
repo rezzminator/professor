@@ -10,8 +10,8 @@ import (
 )
 
 // Every level's bar shows only its filled blocks, in the level's own colour
-// and no other level's, then the level word in the effort colour — on the main
-// line and on a sub-agent row alike. The expected colours are literal on purpose.
+// and no other level's, then the level word in the effort colour, on the main
+// line. The expected colours are literal on purpose.
 func TestEffortBarWearsItsLevelsColourAndOnlyItsFilledBlocks(t *testing.T) {
 	levels := []struct{ level, colour, bar string }{
 		{"low", "\x1b[38;5;117m", "▰"},
@@ -26,22 +26,14 @@ func TestEffortBarWearsItsLevelsColourAndOnlyItsFilledBlocks(t *testing.T) {
 	for _, want := range levels {
 		data.Effort.Level = want.level
 		paint := want.colour + want.bar + reset + cEffort + " " + want.level + reset
-		surfaces := map[string]struct{ got, want string }{
-			"main line": {effortSuffix(data, autoEffortState{}), cMuted + "·" + reset + paint},
-			"sub-agent row": {
-				subagentModel("claude-opus-5-5", want.level, "", sessionEffortRecord{}),
-				cModel + "opus" + reset + cMuted + "·" + reset + paint,
-			},
+		got := effortSuffix(data, autoEffortState{})
+		if wantLine := cMuted + "·" + reset + paint; got != wantLine {
+			t.Errorf("main line at %s = %q, want %q", want.level, got, wantLine)
 		}
-		for surface, pair := range surfaces {
-			if pair.got != pair.want {
-				t.Errorf("%s at %s = %q, want %q", surface, want.level, pair.got, pair.want)
-			}
-			plain := styleANSI.ReplaceAllString(pair.got, "")
-			if strings.Contains(plain, "▱") || strings.Contains(plain, "effort") ||
-				strings.Count(plain, "▰") != strings.Count(want.bar, "▰") {
-				t.Errorf("%s at %s = %q, want the filled blocks only and no effort word", surface, want.level, plain)
-			}
+		plain := styleANSI.ReplaceAllString(got, "")
+		if strings.Contains(plain, "▱") || strings.Contains(plain, "effort") ||
+			strings.Count(plain, "▰") != strings.Count(want.bar, "▰") {
+			t.Errorf("main line at %s = %q, want the filled blocks only and no effort word", want.level, plain)
 		}
 		if other, dup := seen[want.colour]; dup {
 			t.Errorf("levels %s and %s share the bar colour %q", other, want.level, want.colour)

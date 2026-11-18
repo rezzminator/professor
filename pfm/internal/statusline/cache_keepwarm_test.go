@@ -281,11 +281,11 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			}
 			got := cacheWindowSegment(runtime, now, "", 94, &promptCache{TTL: "5m", ExpiresAt: &expires}, session)
 			plain := stripANSICodes(got)
-			if !strings.HasPrefix(plain, stripANSICodes(sep)+"💾5m✓5m:0s 94%") {
+			if !strings.HasPrefix(plain, stripANSICodes(sep)+"💾5m✓5m00s 94%") {
 				t.Fatalf("cache prefix lost: %q", plain)
 			}
 			if tc.want == "" {
-				if plain != " │ 💾5m✓5m:0s 94%" {
+				if plain != " │ 💾5m✓5m00s 94%" {
 					t.Fatalf("unexpected shield: %q", plain)
 				}
 			} else if !strings.HasSuffix(got, tc.color+tc.want+reset) {

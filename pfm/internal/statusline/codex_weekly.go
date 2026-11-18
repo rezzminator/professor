@@ -41,7 +41,7 @@ func codexWeeklyRow(runtime Runtime, now time.Time) quotaRow {
 		row.label = percentColor(row.percent) + "codex-7d-used:" + strconv.Itoa(row.percent) + "%" + reset +
 			resetCountdown(now, window.ResetsAt)
 		if age > 5*time.Minute {
-			row.label += " " + yellow + "stale " + formatDuration(age.Milliseconds()) + reset
+			row.label += " " + yellow + "stale " + spanText(age) + reset
 		}
 	}
 	return row

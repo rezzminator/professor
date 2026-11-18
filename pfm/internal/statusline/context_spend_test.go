@@ -126,7 +126,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 	}{
 		{
 			name: "ledger equals claude code", rows: spendRows(), marker: "on", child: spendChildResponse,
-			claudeCost: 8.003, want: "💰$8.00/1.0M/5.1K/1",
+			claudeCost: 8.003, want: "Σ $8.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name:       "ledger within the tolerance of claude code",
@@ -134,7 +134,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			marker:     "on",
 			child:      spendChildResponse,
 			claudeCost: 8.01,
-			want:       "💰$8.00/1.0M/5.1K/1",
+			want:       "Σ $8.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name:       "ledger below claude code beyond the tolerance: its total stands, nothing is flagged",
@@ -142,15 +142,15 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			marker:     "on",
 			child:      spendChildResponse,
 			claudeCost: 9.5,
-			want:       "💰$9.50/1.0M/5.1K/1",
+			want:       "Σ $9.50 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name: "ledger above claude code beyond the tolerance", rows: spendRows(), marker: "on",
-			child: spendChildResponse, claudeCost: 5, want: "💰$8.00/1.0M/5.1K/1",
+			child: spendChildResponse, claudeCost: 5, want: "Σ $8.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name: "no claude code figure: the ledger leads, nothing to compare", rows: spendRows(), marker: "on",
-			child: spendChildResponse, want: "💰$8.00/1.0M/5.1K/1",
+			child: spendChildResponse, want: "Σ $8.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name: "a call whose cost never arrived leaves a floor", marker: "on", child: spendChildResponse,
@@ -158,61 +158,61 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				RequestID: "req_late", TS: "2026-10-09T18:00:02.000Z", SessionID: spendSession, AgentID: "c1",
 				QuerySource: "repl_main_thread", Join: costledger.JoinSpan,
 			}),
-			claudeCost: 8.003, want: "💰$8.00/1.0M/5.1K/1+?",
+			claudeCost: 8.003, want: "Σ $8.00+? · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name: "ledger without a transcript: tools unknown", rows: spendRows(), marker: "on", noSession: true,
-			claudeCost: 8.003, want: "💰$8.00/1.0M/5.1K/?",
+			claudeCost: 8.003, want: "Σ $8.00 · 1.0M in · 5.1K out · ? tools",
 		},
 		{
 			name: "ledger with the sink failed since: named", rows: spendRows(), marker: "failed",
-			child: spendChildResponse, claudeCost: 8.003, want: "💰$8.00/1.0M/5.1K/1 sink failed",
+			child: spendChildResponse, claudeCost: 8.003, want: "Σ $8.00 · 1.0M in · 5.1K out · 1 tool sink failed",
 		},
 		{
 			name: "no ledger, sink failed", marker: "failed", child: spendChildResponse, claudeCost: 37.31,
-			want: "💰$37.31/1.0M/100/1 sink failed",
+			want: "Σ $37.31 · 1.0M in · 100 out · 1 tool sink failed",
 		},
 		{
 			name: "no ledger, pre-empted by the user's own telemetry", marker: "preempted", child: spendChildResponse,
-			claudeCost: 37.31, want: "💰$37.31/1.0M/100/1 ledger preempted",
+			claudeCost: 37.31, want: "Σ $37.31 · 1.0M in · 100 out · 1 tool ledger preempted",
 		},
 		{
 			name: "no ledger, switched off", marker: "off", child: spendChildResponse, claudeCost: 37.31,
-			want: "💰$37.31/1.0M/100/1 ledger off",
+			want: "Σ $37.31 · 1.0M in · 100 out · 1 tool ledger off",
 		},
 		{
 			name: "no ledger, transcripts price below claude code", marker: "on", child: spendChildResponse,
-			claudeCost: 37.31, want: "💰$37.31/1.0M/100/1 unlogged",
+			claudeCost: 37.31, want: "Σ $37.31 · 1.0M in · 100 out · 1 tool unlogged",
 		},
 		{
 			name: "no ledger, no launch marker, transcripts below claude code", child: spendChildResponse,
-			claudeCost: 37.31, want: "💰$37.31/1.0M/100/1 unlogged",
+			claudeCost: 37.31, want: "Σ $37.31 · 1.0M in · 100 out · 1 tool unlogged",
 		},
 		{
 			name: "no ledger, transcripts match claude code", child: spendChildResponse, claudeCost: 8.003,
-			want: "💰$8.00/1.0M/100/1",
+			want: "Σ $8.00 · 1.0M in · 100 out · 1 tool",
 		},
 		{
 			name: "no ledger, transcripts above claude code: its total stands", child: spendChildResponse,
-			claudeCost: 5, want: "💰$5.00/1.0M/100/1",
+			claudeCost: 5, want: "Σ $5.00 · 1.0M in · 100 out · 1 tool",
 		},
 		{
 			name: "no ledger, no claude code figure: the logged price leads", child: spendChildResponse,
-			want: "💰$8.00/1.0M/100/1",
+			want: "Σ $8.00 · 1.0M in · 100 out · 1 tool",
 		},
 		{
 			name: "no ledger, no price table: claude code's total, no gap", child: spendChildResponse, noPrices: true,
-			claudeCost: 37.31, want: "💰$37.31/1.0M/100/1",
+			claudeCost: 37.31, want: "Σ $37.31 · 1.0M in · 100 out · 1 tool",
 		},
 		{
 			name: "no ledger, an unpriced model leaves a floor", child: spendUnpricedResponse, claudeCost: 9,
-			want: "💰$9.00/1.0M/50/0+? unlogged",
+			want: "Σ $9.00+? · 1.0M in · 50 out · 0 tools unlogged",
 		},
 		{
 			name: "no ledger and no transcript: the total alone", noSession: true, claudeCost: 3.42,
-			want: "💰$3.42/?/?/?",
+			want: "Σ $3.42 · ? in · ? out · ? tools",
 		},
-		{name: "no ledger, no transcript, no total", noSession: true, want: "💰$?/?/?/?"},
+		{name: "no ledger, no transcript, no total", noSession: true, want: "Σ $? · ? in · ? out · ? tools"},
 		{
 			name:       "resumed, the launch before fully ledgered: the ledger is the whole total, nothing is flagged",
 			rows:       spendRows(),
@@ -224,7 +224,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateLine("8.003"),
 				stampLine("2026-10-09T19:00:00.000Z"),
 			},
-			want: "💰$8.00/1.0M/5.1K/1",
+			want: "Σ $8.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name:       "resumed, a call just landed and the ledger lags: claude code's total leads, nothing is flagged",
@@ -237,7 +237,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateLine("8.003"),
 				stampLine("2026-10-09T19:00:00.000Z"),
 			},
-			want: "💰$8.60/1.0M/5.1K/1",
+			want: "Σ $8.60 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name:       "resumed, the exit stamped just before the last rows: nothing is flagged",
@@ -250,7 +250,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateLine("8.003"),
 				stampLine("2026-10-09T19:00:00.000Z"),
 			},
-			want: "💰$8.00/1.0M/5.1K/1",
+			want: "Σ $8.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name:       "resumed after background agents ran while the main thread was quiet: the clock fields place the exit",
@@ -265,7 +265,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateExiting("8.003", 1791569100000),
 				stampLine("2026-10-09T19:00:00.000Z"),
 			},
-			want: "💰$8.00/1.0M/5.1K/1",
+			want: "Σ $8.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name:       "a session older than its ledger: the one dollar is the complete total, the gap is named",
@@ -278,7 +278,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateLine("75.2011"),
 				stampLine("2026-10-09T17:59:00.000Z"),
 			},
-			want: "💰$83.20/1.0M/5.1K/1 pre-ledger",
+			want: "Σ $83.20 · 1.0M in · 5.1K out · 1 tool pre-ledger",
 		},
 		{
 			name:   "a session older than its ledger, claude code's total not yet read: the ledger plus the gap",
@@ -290,7 +290,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateLine("75.2011"),
 				stampLine("2026-10-09T17:59:00.000Z"),
 			},
-			want: "💰$83.20/1.0M/5.1K/1 pre-ledger",
+			want: "Σ $83.20 · 1.0M in · 5.1K out · 1 tool pre-ledger",
 		},
 		{
 			name: "a launch that ran with no sink between two that logged: the gap is named",
@@ -299,7 +299,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				stampLine("2026-10-09T17:00:00.000Z"), costStateLine("10"), stampLine("2026-10-09T17:30:00.000Z"),
 				stampLine("2026-10-09T18:00:02.000Z"), costStateLine("18.003"), stampLine("2026-10-09T19:00:00.000Z"),
 			},
-			want: "💰$18.00/1.0M/5.1K/1 pre-ledger",
+			want: "Σ $18.00 · 1.0M in · 5.1K out · 1 tool pre-ledger",
 		},
 		{
 			name:       "a launch crashed after a healthy resume: the ledger holds what claude code lost, nothing is flagged",
@@ -319,7 +319,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateLine("8"),
 				stampLine("2026-10-09T18:50:00.000Z"),
 			},
-			want: "💰$10.00/1.0M/5.1K/1",
+			want: "Σ $10.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name:       "resumed, a background agent ran on after the main thread's last line: its calls are that launch's, nothing is flagged",
@@ -340,7 +340,7 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateLine("9.003"),
 				stampLine("2026-10-09T19:00:00.000Z"),
 			},
-			want: "💰$9.00/1.0M/5.1K/1",
+			want: "Σ $9.00 · 1.0M in · 5.1K out · 1 tool",
 		},
 		{
 			name:       "a session older than its ledger whose launch could not log: the failure is named, not the gap",
@@ -353,11 +353,15 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 				costStateLine("75.2011"),
 				stampLine("2026-10-09T17:59:00.000Z"),
 			},
-			want: "💰$83.20/1.0M/5.1K/1 sink failed",
+			want: "Σ $83.20 · 1.0M in · 5.1K out · 1 tool sink failed",
 		},
 		{
-			name: "a ledger that cannot be read is named, claude code's total stands", unreadable: true, marker: "on",
-			child: spendChildResponse, claudeCost: 8.003, want: "💰$8.00/1.0M/100/1 ledger unreadable",
+			name:       "a ledger that cannot be read is named, claude code's total stands",
+			unreadable: true,
+			marker:     "on",
+			child:      spendChildResponse,
+			claudeCost: 8.003,
+			want:       "Σ $8.00 · 1.0M in · 100 out · 1 tool ledger unreadable",
 		},
 	}
 	for _, tc := range cases {
@@ -383,13 +387,13 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			if !tc.noPrices {
 				runtime.Prices = testPrices(t)
 			}
-			_, line, _ := renderContextLine(runtime, data, "", time.Unix(1_790_000_000, 0))
+			_, line := instrumentLine(runtime, data, "", time.Unix(1_790_000_000, 0))
 			got := stripANSICodes(line)
 			// the line up to its cache segment, the cache tests' subject
 			head, _, _ := strings.Cut(got, " │ 💾")
-			want := "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% 1.0M ctx unknown │ " + tc.want
+			want := "🟢_______________      +0   ?%   1.0M/? ctx unknown │ ⏳ 0s │ " + tc.want
 			if tc.noSession {
-				want = "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ " + tc.want
+				want = "🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ " + tc.want
 			}
 			if head != want {
 				t.Errorf("line = %q, want %q", head, want)
@@ -435,8 +439,8 @@ func TestRenderContextLineReadsEachTranscriptOnce(t *testing.T) {
 		Env: map[string]string{paths.EnvCostLedgerDir: t.TempDir()},
 	}
 	counts := readCounter(t)
-	_, line, _ := renderContextLine(runtime, data, "", time.Unix(1_790_000_000, 0))
-	if !strings.Contains(stripANSICodes(line), "💰") {
+	_, line := instrumentLine(runtime, data, "", time.Unix(1_790_000_000, 0))
+	if !strings.Contains(stripANSICodes(line), "Σ $8.00 · 1.0M in · 100 out · 1 tool") {
 		t.Fatalf("line %q has no spend segment", line)
 	}
 	child := transcript.SubagentTranscript(strings.TrimSuffix(data.TranscriptPath, ".jsonl")+"/subagents", "c1")
@@ -460,7 +464,7 @@ func TestRenderContextLineResumesFromItsCheckpoint(t *testing.T) {
 			Home: t.TempDir(), Engine: pfmengine.Claude, Prices: testPrices(t), CacheDir: cacheDir,
 			Env: map[string]string{paths.EnvCostLedgerDir: t.TempDir()},
 		}.normalized()
-		_, line, _ := renderContextLine(runtime, data, "", time.Unix(1_790_000_000, 0))
+		_, line := instrumentLine(runtime, data, "", time.Unix(1_790_000_000, 0))
 		return stripANSICodes(line)
 	}
 	cacheDir := t.TempDir()
@@ -493,7 +497,7 @@ func TestRenderContextLineResumesFromItsCheckpoint(t *testing.T) {
 	if fresh := render(t.TempDir()); resumed != fresh {
 		t.Errorf("resumed line %q, want the fresh read's %q", resumed, fresh)
 	}
-	if !strings.Contains(resumed, "💰$16.01/2.0M/") {
+	if !strings.Contains(resumed, "Σ $16.01 · 2.0M in · ") {
 		t.Errorf("resumed line %q, want both main responses and both child calls billed", resumed)
 	}
 }
@@ -516,24 +520,22 @@ func TestGatewaySpendSurvivesNativeLedger(t *testing.T) {
 		rows []costledger.Row
 		want string
 	}{
-		{"native only", []costledger.Row{{Model: "claude-sonnet-5-5", CostUSDMicros: micros(1000000), InputTokens: 100}}, "💰$1.31/150.1K/10.0K/0 API-eq"},
-		{"zero gateway ledger", []costledger.Row{{Model: "gpt-6-sol", CostUSDMicros: micros(0), InputTokens: 100000, CacheReadTokens: 50000, OutputTokens: 10000}}, "💰$0.31/150.0K/10.0K/0 API-eq"},
-		{"already priced", []costledger.Row{{Model: "gpt-6-sol", CostUSDMicros: micros(310000), InputTokens: 100000, CacheReadTokens: 50000, OutputTokens: 10000}}, "💰$0.31/150.0K/10.0K/0 API-eq"},
-		{"no ledger", nil, "💰$0.31/150.0K/10.0K/0 API-eq"},
+		{"native only", []costledger.Row{{Model: "claude-sonnet-5-5", CostUSDMicros: micros(1000000), InputTokens: 100}}, "Σ $1.31/150.1K/10.0K/0 API-eq"},
+		{"zero gateway ledger", []costledger.Row{{Model: "gpt-6-sol", CostUSDMicros: micros(0), InputTokens: 100000, CacheReadTokens: 50000, OutputTokens: 10000}}, "Σ $0.31/150.0K/10.0K/0 API-eq"},
+		{"already priced", []costledger.Row{{Model: "gpt-6-sol", CostUSDMicros: micros(310000), InputTokens: 100000, CacheReadTokens: 50000, OutputTokens: 10000}}, "Σ $0.31/150.0K/10.0K/0 API-eq"},
+		{"no ledger", nil, "Σ $0.31/150.0K/10.0K/0 API-eq"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			books := ledgerBooks{ledger: costledger.Ledger{Present: tc.rows != nil, Rows: tc.rows}}
-			got := styleANSI.ReplaceAllString(
-				sessionSpendSegment(input{TranscriptPath: path}, prices, books, &scanned, transcriptScans{}),
-				"",
-			)
+			spend := sessionSpendSegment(input{TranscriptPath: path}, prices, books, &scanned, transcriptScans{})
+			got := styleANSI.ReplaceAllString(spend.text(spendSlash), "")
 			if got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 			if tc.rows != nil {
 				child := scanned.withLedger(ledgerSpend(tc.rows))
-				got = styleANSI.ReplaceAllString(spendSegment(agentActivity{spend: child}), "")
-				want := strings.Replace(tc.want, "💰", "Σ", 1)
+				got = styleANSI.ReplaceAllString(spendFact(agentActivity{spend: child}), "")
+				want := strings.Replace(tc.want, "Σ ", "Σ", 1)
 				if got != want {
 					t.Fatalf("subagent got %q, want %q", got, want)
 				}
@@ -553,7 +555,7 @@ func TestGatewayStreamingEstimateIsNotBilled(t *testing.T) {
 	if spend.usd != 0 || spend.in != 0 || !spend.partial {
 		t.Fatalf("opening estimate billed as spend: %+v", spend)
 	}
-	got := styleANSI.ReplaceAllString(spendSegment(agentActivity{spend: spend}), "")
+	got := styleANSI.ReplaceAllString(spendFact(agentActivity{spend: spend}), "")
 	if got != "Σ$?/0/0/0 API-eq" {
 		t.Fatalf("incomplete gateway must be explicit: %q", got)
 	}
@@ -585,11 +587,9 @@ func TestGatewayRestoredTotalDoesNotCountTwice(t *testing.T) {
 			Rows:    []costledger.Row{{Model: "claude-sonnet-5-5", CostUSDMicros: micros(1000000)}},
 		},
 	}
-	got := styleANSI.ReplaceAllString(
-		sessionSpendSegment(input{TranscriptPath: path}, testPrices(t), books, &spend, transcriptScans{}),
-		"",
-	)
-	if got != "💰$1.31/150.0K/10.0K/0+? API-eq" {
+	line := sessionSpendSegment(input{TranscriptPath: path}, testPrices(t), books, &spend, transcriptScans{})
+	got := styleANSI.ReplaceAllString(line.text(spendSlash), "")
+	if got != "Σ $1.31+?/150.0K/10.0K/0 API-eq" {
 		t.Fatalf("ambiguous restored gateway dollars must remain a labeled floor: %q", got)
 	}
 	var data input
@@ -597,10 +597,10 @@ func TestGatewayRestoredTotalDoesNotCountTwice(t *testing.T) {
 	data.Cost.TotalCostUSD = 0.01
 	spend.costStates = nil
 	got = styleANSI.ReplaceAllString(
-		sessionSpendSegment(data, testPrices(t), ledgerBooks{}, &spend, transcriptScans{}),
+		sessionSpendSegment(data, testPrices(t), ledgerBooks{}, &spend, transcriptScans{}).text(spendSlash),
 		"",
 	)
-	if got != "💰$0.31/150.0K/10.0K/0 API-eq" {
+	if got != "Σ $0.31/150.0K/10.0K/0 API-eq" {
 		t.Fatalf("harness side-call erased gateway price: %q", got)
 	}
 }
@@ -624,8 +624,11 @@ func TestGatewayPostSnapshotSpendKeepsNativePreLedger(t *testing.T) {
 	var data input
 	data.TranscriptPath = path
 	data.Cost.TotalCostUSD = 6
-	got := styleANSI.ReplaceAllString(sessionSpendSegment(data, testPrices(t), books, &spend, transcriptScans{}), "")
-	if got != "💰$6.31/150.0K/10.0K/0 pre-ledger API-eq" {
+	got := styleANSI.ReplaceAllString(
+		sessionSpendSegment(data, testPrices(t), books, &spend, transcriptScans{}).text(spendSlash),
+		"",
+	)
+	if got != "Σ $6.31/150.0K/10.0K/0 pre-ledger API-eq" {
 		t.Fatalf("new gateway call must add to known native history: %q", got)
 	}
 }

@@ -46,11 +46,11 @@ func parityRuntime(t *testing.T) Runtime {
 
 func TestParityMainCurrentContext(t *testing.T) {
 	for _, tc := range []struct{ name, transcript, want string }{
-		{"payload", "", "🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K │ 💰$?/?/?/? │ 💾–"},
-		{"empty transcript", "{}\n", "🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K │ 💰$0.00/0/0/0 │ 💾–"},
-		{"latest transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":50000,"cache_read_input_tokens":50000}}}` + "\n", "🟢 ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱ 20% 100.0K │ 💰$?/100.0K/0/0 API-eq │ 💾∅ 50%"},
-		{"zero transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":0,"cache_read_input_tokens":0}}}` + "\n", "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 0% 0 │ 💰$0.00/0/0/0 API-eq │ 💾–"},
-		{"model switch streaming", `{"type":"assistant","message":{"model":"gpt-6-luna","usage":{"input_tokens":100000}}}` + "\n" + `{"type":"assistant","message":{"model":"gpt-6.1-sol"}}` + "\n", "🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K │ 💰$?/0/0/0 API-eq │ 💾–"},
+		{"payload", "", "🟢     __________      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"},
+		{"empty transcript", "{}\n", "🟢     __________      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools │ 💾–"},
+		{"latest transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":50000,"cache_read_input_tokens":50000}}}` + "\n", "🟢   ____________      +0  20% 100.0K/500.0K │ ⏳ 0s │ Σ $? · 100.0K in · 0 out · 0 tools API-eq │ 💾∅ 50%"},
+		{"zero transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":0,"cache_read_input_tokens":0}}}` + "\n", "🟢_______________      +0   0%      0/500.0K │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools API-eq │ 💾–"},
+		{"model switch streaming", `{"type":"assistant","message":{"model":"gpt-6-luna","usage":{"input_tokens":100000}}}` + "\n" + `{"type":"assistant","message":{"model":"gpt-6.1-sol"}}` + "\n", "🟢     __________      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $? · 0 in · 0 out · 0 tools API-eq │ 💾–"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := parityRuntime(t)
@@ -69,7 +69,7 @@ func TestParityMainCurrentContext(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, line, _ := renderContextLine(r, d, "", r.now())
+			_, line := instrumentLine(r, d, "", r.now())
 			if got := stripANSICodes(line); got != tc.want {
 				t.Errorf("line = %q, want %q", got, tc.want)
 			}
@@ -88,21 +88,22 @@ func TestParityClaudePayloadPercentWithoutCapacity(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	_, line, _ := renderContextLine(r, d, "", r.now())
-	if got := stripANSICodes(line); got != "🟢 ▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱ 33% 165.0K ctx unknown │ 💰$?/?/?/?" {
+	_, line := instrumentLine(r, d, "", r.now())
+	const want = "🟢     __________      +0  33% 165.0K/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools"
+	if got := stripANSICodes(line); got != want {
 		t.Fatalf("same-source payload percentage/count lost: %q", got)
 	}
 }
 
 func TestParitySubagentCatalogOverridesHarnessGuess(t *testing.T) {
 	r := parityRuntime(t)
-	rows, _ := renderFixture(
+	facts, _ := factsFixture(
 		t,
-		rowsFixture{sidDir: r.SIDDir, home: r.Home, noPrices: true, env: &paths.MapEnv{Values: r.Env}, now: r.now()},
-		`{"id":"a","model":"gpt-6.1-sol-fast[1m]","contextWindowSize":1000000}`,
+		agentsFixture{session: subagentSession(t, nil, nil), home: r.Home, noPrices: true, env: r.Env, now: r.now()},
+		`{"id":"a","model":"gpt-6.1-sol-fast[1m]"}`,
 	)
-	if got := stripANSICodes(rows["a"]); got != "?/?│?/500.0K Σ$?/?/?/?│role ?│sol-6.1│running│💾!" {
-		t.Fatalf("wrong provider capacity: %s", got)
+	if got := facts["a"]; got.ContextWindow != 500_000 || factLine(got) != "Σ$?/?/?/?│sol-6.1│💾!" {
+		t.Fatalf("wrong provider capacity: %d %s", got.ContextWindow, factLine(got))
 	}
 }
 
@@ -114,8 +115,10 @@ func TestParityOpenAIMainCacheHasNoClaudeTTL(t *testing.T) {
 	if err := os.WriteFile(d.TranscriptPath, []byte(strings.Join(gptAgentLines, "\n")), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, line, _ := renderContextLine(r, d, "", r.now())
-	if got := stripANSICodes(line); got != "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 5% 14.2K │ 💰$?/21.3K/279/1 API-eq │ 💾∅ 87%" {
+	_, line := instrumentLine(r, d, "", r.now())
+	const want = "🟢 ______________      +0   5%  14.2K/272.0K │ ⏳ 0s │ " +
+		"Σ $? · 21.3K in · 279 out · 1 tool API-eq │ 💾∅ 87%"
+	if got := stripANSICodes(line); got != want {
 		t.Fatalf("completed OpenAI cache share missing: %q", got)
 	}
 }

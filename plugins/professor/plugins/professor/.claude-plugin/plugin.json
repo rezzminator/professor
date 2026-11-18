@@ -1,0 +1,25 @@
+{
+  "name": "professor",
+  "version": "0.1.0",
+  "description": "Claude Code plugin for Professor's terminal look — each sub-agent's row drawn as an instrument strip: a pulse gauge of its context, model, effort, state, spend, cache and flags, fed by pfm",
+  "license": "MIT",
+  "author": {
+    "name": "rezzminator · Professor",
+    "url": "https://github.com/rezzminator/professor"
+  },
+  "repository": "https://github.com/rezzminator/professor",
+  "homepage": "https://github.com/rezzminator/professor",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "claude-code-hooks",
+    "function-hooks",
+    "claude-code-mods",
+    "subagents",
+    "claude-code-subagents",
+    "statusline",
+    "agent-orchestration",
+    "multi-agent",
+    "professor"
+  ]
+}

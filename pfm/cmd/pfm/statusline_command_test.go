@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -88,7 +89,7 @@ func TestStatuslineOnABrokenConfigRendersTheConfigWarning(t *testing.T) {
 	if got, want := rooted(
 		stdout.String(),
 		root,
-	), "\x1b[0m\x1b[38;5;51m◆ Opus 4\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;220meffort unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢 \x1b[1;32m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m?% ?\x1b[0m \x1b[38;5;226mctx unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;226m💰$?\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;226m?/?/?\x1b[0m \x1b[2m│\x1b[0m \x1b[1;38;5;203m💾⚠config\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m\n\x1b[0m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[2mcodex-7d: no data\x1b[0m\n"; code != 0 ||
+	), "\x1b[0m\x1b[38;5;51m◆ Opus 4\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;220meffort unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢\x1b[38;5;245m_______________\x1b[0m \x1b[38;5;245m     +0\x1b[0m \x1b[38;5;245m  ?%\x1b[0m \x1b[1;97m     ?\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;117m?\x1b[0m \x1b[38;5;226mctx unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;245mΣ\x1b[0m \x1b[38;5;226m$?\x1b[0m \x1b[38;5;245m·\x1b[0m \x1b[38;5;226m?\x1b[0m \x1b[38;5;245min\x1b[0m \x1b[38;5;245m·\x1b[0m \x1b[38;5;226m?\x1b[0m \x1b[38;5;245mout\x1b[0m \x1b[38;5;245m·\x1b[0m \x1b[38;5;226m?\x1b[0m \x1b[38;5;245mtools\x1b[0m \x1b[2m│\x1b[0m \x1b[1;38;5;203m💾⚠config\x1b[0m\n\x1b[0m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[2mcodex-7d: no data\x1b[0m\n"; code != 0 ||
 		got != want {
 		t.Fatalf("broken config statusline code=%d stderr=%q stdout = %q, want %q", code, stderr.String(), got, want)
 	}
@@ -377,6 +378,89 @@ func TestStatuslinePacedWorkerFlagIsExclusiveAndRefusesABadKey(t *testing.T) {
 	}
 }
 
+// `pfm statusline --agents` prints one JSON line for the whole session, an
+// empty list when no agent runs, or the agents named after the path, an id
+// with no transcript, or one that names no file, answered absent; a path it
+// cannot read exits 1 with nothing on stdout, so a failure never reads as a
+// session without agents.
+func TestStatuslineAgentsPrintsOneJSONLineOrFails(t *testing.T) {
+	jailTest(t)
+	root := t.TempDir()
+	t.Setenv("PFM_HOME", root)
+	for _, tc := range []struct {
+		name, path, wantStdout, wantStderr string
+		ids                                []string
+		wantCode                           int
+	}{
+		{
+			name: "a session with no agent running", path: filepath.Join(root, "s1.jsonl"),
+			wantStdout: `s1 []`, wantCode: 0,
+		},
+		{
+			name: "a named agent with no transcript on disk", path: filepath.Join(root, "s1.jsonl"), ids: []string{"a1"},
+			wantStdout: `s1 [{"id":"a1","model":"","effort":"","tools":0,"toolErrors":0,"compactions":0,"cacheHit":-1,` +
+				`"cacheLifetime":true,"context":0,"contextWindow":0,"lastActivity":0,` +
+				`"nested":{"total":0,"working":0,"unknown":0,"error":"list {root}/s1/subagents: open {root}/s1/subagents: no such file or directory"},` +
+				`"spend":null,"text":{"glyph":"","family":"","effortBar":"","context":"0","in":"","out":"","usd":""},` +
+				`"error":"open sub-agent transcript {root}/s1/subagents/agent-a1.jsonl: open {root}/s1/subagents/agent-a1.jsonl: no such file or directory",` +
+				`"absent":true}]`,
+			wantCode: 0, // its causes go to the runtime's warning stream, not this stderr
+		},
+		{
+			name: "a teammate's address names no file", path: filepath.Join(root, "s1.jsonl"), ids: []string{"lead@crew"},
+			wantStdout: `s1 [{"id":"lead@crew","model":"","effort":"","tools":0,"toolErrors":0,"compactions":0,"cacheHit":-1,` +
+				`"cacheLifetime":true,"context":0,"contextWindow":0,"lastActivity":0,` +
+				`"nested":{"total":0,"working":0,"unknown":0},` +
+				`"spend":null,"text":{"glyph":"","family":"","effortBar":"","context":"0","in":"","out":"","usd":""},` +
+				`"error":"agent id \"lead@crew\" names no sub-agent transcript (letters, digits, _ and -)",` +
+				`"absent":true}]`,
+			wantCode: 0,
+		},
+		{
+			name: "a path that names no transcript", path: filepath.Join(root, "notes.txt"),
+			wantStderr: "pfm statusline --agents: session transcript \"{root}/notes.txt\" is no .jsonl path\n",
+			wantCode:   1,
+		},
+		{
+			name: "an empty path", path: "",
+			wantStderr: "pfm statusline --agents: session transcript \"\" is no .jsonl path\n",
+			wantCode:   1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := runStatuslineWithRuntime(append([]string{"--agents", tc.path}, tc.ids...), strings.NewReader(""),
+				&stdout, &stderr, statuslineTestRuntime(t), paths.OSEnv{})
+			got := stdout.String()
+			if got != "" {
+				var report struct {
+					SessionID string          `json:"sessionId"`
+					Agents    json.RawMessage `json:"agents"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &report); err != nil || strings.Count(got, "\n") != 1 {
+					t.Fatalf("stdout %q is no one JSON line: %v", got, err)
+				}
+				got = strings.ReplaceAll(report.SessionID+" "+string(report.Agents), root, "{root}")
+			}
+			gotStderr := strings.ReplaceAll(stderr.String(), root, "{root}")
+			if code != tc.wantCode || got != tc.wantStdout || gotStderr != tc.wantStderr {
+				t.Fatalf("code=%d stdout=%q stderr=%q; want %d %q %q",
+					code, got, gotStderr, tc.wantCode, tc.wantStdout, tc.wantStderr)
+			}
+		})
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runStatuslineWithRuntime([]string{"--agents", "x.jsonl", "--refresh-gpt"}, strings.NewReader(""),
+		&stdout, &stderr, statuslineTestRuntime(t), paths.OSEnv{}); code != 2 || stdout.Len() != 0 {
+		t.Fatalf("--agents with --refresh-gpt code=%d stdout=%q; want usage 2", code, stdout.String())
+	}
+	stdout.Reset()
+	if code := runStatuslineWithRuntime([]string{"a1"}, strings.NewReader(""),
+		&stdout, &stderr, statuslineTestRuntime(t), paths.OSEnv{}); code != 2 || stdout.Len() != 0 {
+		t.Fatalf("an agent id without --agents code=%d stdout=%q; want usage 2", code, stdout.String())
+	}
+}
+
 func TestStatuslineWarningsReachTheActivityLog(t *testing.T) {
 	jailTest(t)
 	root := t.TempDir()
@@ -414,7 +498,7 @@ func TestStatuslineWarningsReachTheActivityLog(t *testing.T) {
 	if got, want := rooted(
 		stdout.String(),
 		root,
-	), "\x1b[0m\x1b[38;5;51m◆ Opus 4\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[1;38;5;203meffort unknown · ERR\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢 \x1b[1;32m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m?% ?\x1b[0m \x1b[38;5;226mctx unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;226m💰$?\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;226m?/?/?\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m\n\x1b[0m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[2mcodex-7d: no data\x1b[0m\n"; code != 0 ||
+	), "\x1b[0m\x1b[38;5;51m◆ Opus 4\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[1;38;5;203meffort unknown · ERR\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢\x1b[38;5;245m_______________\x1b[0m \x1b[38;5;245m     +0\x1b[0m \x1b[38;5;245m  ?%\x1b[0m \x1b[1;97m     ?\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;117m?\x1b[0m \x1b[38;5;226mctx unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;245mΣ\x1b[0m \x1b[38;5;226m$?\x1b[0m \x1b[38;5;245m·\x1b[0m \x1b[38;5;226m?\x1b[0m \x1b[38;5;245min\x1b[0m \x1b[38;5;245m·\x1b[0m \x1b[38;5;226m?\x1b[0m \x1b[38;5;245mout\x1b[0m \x1b[38;5;245m·\x1b[0m \x1b[38;5;226m?\x1b[0m \x1b[38;5;245mtools\x1b[0m\n\x1b[0m\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[2mcodex-7d: no data\x1b[0m\n"; code != 0 ||
 		got != want {
 		t.Fatalf("code=%d stderr=%q stdout = %q, want %q", code, stderr.String(), got, want)
 	}

@@ -36,7 +36,6 @@ func TestHostSettingsProbe(t *testing.T) {
 				fmt.Sprintf("hook %q", home+"/.local/bin/pfm internal launcher-repair"),
 				`hook "pfm internal clear-hide"`,
 				"statusLine",
-				"subagentStatusLine",
 			},
 		) {
 		t.Fatalf("names=%v err=%v", names, err)

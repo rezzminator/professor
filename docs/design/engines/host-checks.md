@@ -62,7 +62,7 @@ The table gives one row per detector; exact problems and fixes follow under each
 
 Looks at each physical `settings.json` among `{store}` and every `{acct}`, once per physical file.
 
-Problem: `carries pfm's {items} — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install` (items from `installer.PFMSettingsLeftovers`: distinct `hook "{command}"` entries sorted by command, then `statusLine`, then `subagentStatusLine`, joined with `, `).
+Problem: `carries pfm's {items} — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install` (items from `installer.PFMSettingsLeftovers`: distinct `hook "{command}"` entries sorted by command, then `statusLine`, joined with `, `).
 
 Fix: `remove {items} from {path} (each hook entry running that command and each named key; keep every other entry)`.
 

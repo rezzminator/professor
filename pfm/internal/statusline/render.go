@@ -243,7 +243,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		directoryName = "~"
 	}
 
-	gauge, l2, _ := renderContextLine(runtime, data, directory, now)
+	gauge, l2 := instrumentLine(runtime, data, directory, now)
 	if data.Model.ID == "" && gauge.model != "" {
 		data.Model.ID = gauge.model
 		data.Model.DisplayName = modelFamily(gauge.model)
@@ -273,11 +273,6 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	}
 	l1 += sep + fleetSegment(runtime)
 
-	// ⏳ (U+23F3, East-Asian-Width W) over ⏱ (U+23F1, width N): every cell
-	// model — tmux, xterm.js, the harness — sizes the hourglass at 2 cells,
-	// while the stopwatch is 1 cell wide on paper and 2 cells wide in ink.
-	l2 += sep + cElapsed + "⏳ " + formatDuration(data.Cost.TotalDurationMS) + reset
-
 	l3 := ""
 	switch runtime.Engine {
 	case pfmengine.Claude:
@@ -291,19 +286,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	if l3 != "" {
 		l2 += "\n" + reset + l3
 	}
-	return reset + l1 + "\n" + reset + l2 + "\n" + agentRowLines(runtime, data, directory, now), nil
-}
-
-func formatDuration(milliseconds int64) string {
-	seconds := milliseconds / 1000
-	switch {
-	case seconds >= 3600:
-		return fmt.Sprintf("%dh%dm", seconds/3600, seconds%3600/60)
-	case seconds >= 60:
-		return fmt.Sprintf("%dm%ds", seconds/60, seconds%60)
-	default:
-		return fmt.Sprintf("%ds", seconds)
-	}
+	return reset + l1 + "\n" + reset + l2 + "\n", nil
 }
 
 func urgencyEmoji(percent int) string {
@@ -338,8 +321,7 @@ func makeBar(percent, width int) string {
 		filled = 0
 	}
 	// ▰▱ (U+25B0/U+25B1) on purpose — block elements ▓░ are WebGL custom
-	// glyphs in VS Code's terminal and render stale under repaint; the
-	// pfm-statusline patcher's GAUGE regex matches these runs.
+	// glyphs in VS Code's terminal and render stale under repaint.
 	return percentColor(percent) + strings.Repeat("▰", filled) + dim +
 		strings.Repeat("▱", width-filled) + reset
 }
@@ -781,23 +763,6 @@ func unchangedSince(
 		return now.Unix()
 	}
 	return previous.TS
-}
-
-func formatCacheTime(duration time.Duration, expired bool) string {
-	seconds := int64(duration / time.Second)
-	if seconds < 0 {
-		seconds = -seconds
-	}
-	if seconds >= 3600 {
-		if expired {
-			return fmt.Sprintf("%dh:%dm", seconds/3600, seconds%3600/60)
-		}
-		return fmt.Sprintf("%dh:%dm:%ds", seconds/3600, seconds%3600/60, seconds%60)
-	}
-	if seconds >= 60 {
-		return fmt.Sprintf("%dm:%ds", seconds/60, seconds%60)
-	}
-	return fmt.Sprintf("%ds", seconds)
 }
 
 func statuslineFileAge(path string, now time.Time) time.Duration {

@@ -1,0 +1,21 @@
+{
+  "name": "professor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code plugin for Professor's terminal look — each sub-agent's row drawn as an instrument strip: a pulse gauge of its context, model, effort, state, spend, cache and flags, fed by pfm",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "vitest run --dir tests",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.hooks.json",
+    "validate:plugin": "claude plugin validate --strict plugins/professor"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.5"
+  }
+}

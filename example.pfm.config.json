@@ -26,7 +26,8 @@
       "auto-effort",
       "tool-visibility-controller",
       "engine-sync",
-      "flights"
+      "flights",
+      "professor"
     ],
     "env": {},
     "costLedger": true,

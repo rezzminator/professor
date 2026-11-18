@@ -31,6 +31,7 @@ var testPlugins = []testPlugin{
 	{Name: "tool-visibility-controller", Source: "rezzminator/professor", ID: "tool-visibility-controller@professor"},
 	{Name: "engine-sync", Source: "rezzminator/professor", ID: "engine-sync@professor"},
 	{Name: "flights", Source: "rezzminator/professor", ID: "flights@professor"},
+	{Name: "professor", Source: "rezzminator/professor", ID: "professor@professor"},
 }
 
 // testRetiredPlugins is the retired lists' claudePlugins these tests install
@@ -265,7 +266,7 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@professor":true,` +
 		`"forward-compaction@professor":true,"auto-effort@professor":true,"tool-visibility-controller@professor":true,` +
-		`"engine-sync@professor":true,"flights@professor":true}}`
+		`"engine-sync@professor":true,"flights@professor":true,"professor@professor":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeInstalledPlugins(
 		t,
@@ -276,6 +277,7 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 		testPlugins[3].ID,
 		testPlugins[4].ID,
 		testPlugins[5].ID,
+		testPlugins[6].ID,
 	)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
@@ -510,7 +512,7 @@ func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@professor":true,` +
 		`"forward-compaction@professor":true,"auto-effort@professor":true,"tool-visibility-controller@professor":true,` +
-		`"engine-sync@professor":true,"flights@professor":true}}`
+		`"engine-sync@professor":true,"flights@professor":true,"professor@professor":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
 	writeInstalledPlugins(
@@ -522,6 +524,7 @@ func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 		testPlugins[3].ID,
 		testPlugins[4].ID,
 		testPlugins[5].ID,
+		testPlugins[6].ID,
 	)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
@@ -559,6 +562,7 @@ func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
 		testPlugins[3].ID,
 		testPlugins[4].ID,
 		testPlugins[5].ID,
+		testPlugins[6].ID,
 	}
 	for _, test := range []struct {
 		name    string

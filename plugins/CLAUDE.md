@@ -1,6 +1,6 @@
-# plugins — the Claude Code plugins professor tracks, each a git submodule, all but gpt-gateway listed in its marketplace
+# plugins — the Claude Code plugins professor tracks, each a git submodule except the in-tree `professor/`, all but gpt-gateway listed in its marketplace
 
-Professor tracks only each plugin's commit: an edit under `{name}/` belongs to that plugin's public repository, and a professor gitlink to a commit the plugin's remote lacks breaks every other clone.
+Professor tracks only each submodule plugin's commit: an edit under `{name}/` belongs to that plugin's public repository, and a professor gitlink to a commit the plugin's remote lacks breaks every other clone.
 
 # Vocabulary
 
@@ -16,6 +16,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 - engine-sync: the Codex and OpenCode mirror writer pfm execs · `engine-sync/`
 - harvester: shared engine MCP daemon and one-shot web/document CLI; its own plugin registers the MCP server `harvester` (`mcp__plugin_harvester_harvester__*` in Claude Code), pfm none · `harvester/`
 - gpt-gateway: a local passthrough between Claude Code and the Anthropic API, with a middleware hook API and an opt-in ChatGPT route; a tracked submodule the marketplace does not list · `gpt-gateway/`
+- professor: the professor plugin, tracked in this repository with no submodule or repo of its own and shipped in Professor's release; its gate is `make -C professor check` · `professor/`
 - installable plugin: the directory Claude Code installs, inside each checkout · `{name}/plugins/{name}/`
 - gitlink: professor's pin of one plugin commit, registered with `branch = develop` and `ignore = dirty` · `../.gitmodules`
 
@@ -31,7 +32,7 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 ## Host
 
-- Users install each plugin from its repository's `main`.
+- Users install each submodule plugin from its repository's `main`, and professor with Professor's release.
 - An alpha `pfm install` installs every plugin `.claude-plugin/marketplace.json` lists as `{name}@professor`, copied from `{name}/plugins/{name}` here (or under `claude.pluginCheckoutRoot` when set) into `~/.local/share/professor-dev/plugins/{name}`, a directory marketplace also named `professor`, and moves its older `{name}@{name}` and `{name}@{name}-dev` ids to it. It installs each checkout's working tree as it sits on disk, released or not — unpushed commits, uncommitted edits, no alpha tag — and no plugin's local state stops `/pfm:update`, which moves a gitlink only by a clean fast-forward of a clean checkout.
 - On alpha, `claude.plugins` in `pfm.config.json` is the enabled set, every marketplace plugin when unset; a plugin it leaves out installs disabled; a full `name@marketplace` id there is installed as named, never copied.
 - A plugin option is also an environment variable `{PLUGIN}_{OPTION}`, both names upper snake (`AUTO_EFFORT_FLOOR`): variable > the plugin's own option (`pluginConfigs`, `/config`, callmeter's `config.json`) > default; each plugin's README lists its settings.
@@ -47,8 +48,8 @@ Professor tracks only each plugin's commit: an edit under `{name}/` belongs to t
 
 ## Standalone
 
-- Dependency runs one way: pfm may depend on a plugin; a plugin depends on neither pfm, Professor nor another plugin, and installs and works fully alone.
-- A plugin's code and every file it writes carry no Professor path, agent, policy or wording; the exceptions are credit in its README and manifest, and flights, the flights family's home, whose prompts name the Professor agents and pfm verbs that family drives.
+- Every plugin but professor installs and works fully alone.
+- A plugin's code and every file it writes carry no Professor path, agent, policy or wording; the exceptions are credit in its README and manifest, flights, the flights family's home, whose prompts name the Professor agents and pfm verbs that family drives, and professor, which calls pfm.
 - Professor-specific behavior enters through the plugin's own integration surface — a config file, flag, environment variable or extension hook — with a neutral default; Professor's install and project files supply Professor's values; a new option adds its `{PLUGIN}_{OPTION}` variable, read in a function-hooks plugin by a string-literal `$.env.get('NAME')`.
 
 ## Identity

@@ -1,4 +1,10 @@
-// Package modelglyph owns model symbols, statusline effort bars and width-safe picker glyphs.
+// Package modelglyph owns model symbols, statusline effort bars, width-safe picker glyphs and the sparkline ladder.
+//
+// Entry points: Symbol, ListSymbol (model symbols), the effort bars and picker
+// glyphs below, and SparkLevels (spark.go).
+//
+//   - modelglyph.go: model symbols, effort bars and picker glyphs.
+//   - spark.go: SparkLevels, the guard-safe sparkline ladder.
 package modelglyph
 
 import "strings"

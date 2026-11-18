@@ -279,7 +279,7 @@ func TestClaudeQuotaRowsShareOneRightEdge(t *testing.T) {
 					if widths[0] != widths[1] {
 						t.Fatalf("right edges differ %v:\n%s\n%s", widths, ansi.Strip(lines[2]), ansi.Strip(lines[3]))
 					}
-					if age > time.Hour && !strings.Contains(ansi.Strip(lines[3]), "stale 2h0m") {
+					if age > time.Hour && !strings.Contains(ansi.Strip(lines[3]), "stale 2h00m") {
 						t.Fatalf("stale suffix lost: %q", ansi.Strip(lines[3]))
 					}
 				})

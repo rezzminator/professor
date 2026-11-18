@@ -2,7 +2,6 @@ package statusline
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // fixtureAgent is one sub-agent's files as Claude Code leaves them: its meta
@@ -217,7 +214,7 @@ func TestRunningAgentsPastTheScanBudget(t *testing.T) {
 	if err != nil || len(tasks) != 1 || tasks[0].ID != "a" {
 		t.Fatalf("runningAgents(%s) = %+v, %v; want agent a running", session, tasks, err)
 	}
-	want := agentRowsWho + ": end notifications of " + session + " not read to its end within the budget " +
+	want := agentsWho + ": end notifications of " + session + " not read to its end within the budget " +
 		"(an agent ended past that point counts as running)\n"
 	if warn.String() != want {
 		t.Fatalf("warn = %q, want %q", warn.String(), want)
@@ -235,7 +232,7 @@ func TestRunningAgentsReadsItsMetaFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []subagentTask{{
-		ID: "a", Name: "lander", Label: "land it", Model: "sonnet", Effort: "high",
+		ID: "a", Model: "sonnet",
 		StartTime: subagentNow.Add(-90 * time.Second).UnixMilli(),
 	}}
 	if !reflect.DeepEqual(tasks, want) {
@@ -266,82 +263,6 @@ func TestRunningAgentsWithoutAnAgentsDirectory(t *testing.T) {
 			tasks, err := runningAgents(tc.session, subagentNow, newTranscriptScans("", &bytes.Buffer{}))
 			if got := strings.ReplaceAll(fmt.Sprint(tasks, " ", err), dir, "{dir}"); got != tc.want {
 				t.Errorf("runningAgents(%q) = %q, want %q", tc.session, got, tc.want)
-			}
-		})
-	}
-}
-
-// The rows sit below the main line, one per running agent, at most four, the
-// fourth then counting the rest; none running leaves the main line as it is,
-// and an engine whose agents keep no transcripts here draws none.
-func TestRenderDrawsAgentRowsBelowTheMainLine(t *testing.T) {
-	quiet := []string{`{"type":"user","timestamp":"2026-09-24T10:02:00Z","message":{"role":"user","content":"go"}}`}
-	agents := func(ids ...string) map[string]fixtureAgent {
-		out := map[string]fixtureAgent{}
-		for index, id := range ids {
-			out[id] = fixtureAgent{
-				meta:    `{"agentType":"general-purpose","description":` + jsonText(id) + `}`,
-				metaAge: time.Duration(len(ids)-index) * time.Minute,
-				lines:   quiet,
-			}
-		}
-		return out
-	}
-	row := func(age, label string) string {
-		return "?/? Σ$0.00/0/0/0│general-purpose│running " + age + "│💾–│" + label
-	}
-	cases := []struct {
-		name   string
-		engine pfmengine.ID
-		agents map[string]fixtureAgent
-		want   []string
-	}{
-		{
-			name:   "no agent running",
-			engine: pfmengine.Claude,
-			agents: map[string]fixtureAgent{"x": {meta: finishedMeta, lines: quiet}},
-		},
-		{name: "one running", engine: pfmengine.Claude, agents: agents("a1"), want: []string{row("1m:0s", "a1")}},
-		{
-			name:   "four running fill the four rows",
-			engine: pfmengine.Claude,
-			agents: agents("a1", "a2", "a3", "a4"),
-			want:   []string{row("4m:0s", "a1"), row("3m:0s", "a2"), row("2m:0s", "a3"), row("1m:0s", "a4")},
-		},
-		{
-			name:   "five running: three rows and the count of the rest",
-			engine: pfmengine.Claude,
-			agents: agents("a1", "a2", "a3", "a4", "a5"),
-			want:   []string{row("5m:0s", "a1"), row("4m:0s", "a2"), row("3m:0s", "a3"), "+2 more agents"},
-		},
-		{name: "a Codex seat draws none", engine: pfmengine.Codex, agents: agents("a1")},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			runtime := fableRuntime(t.TempDir(), 2, subagentNow)
-			runtime.Engine = tc.engine
-			runtime.Warn = &bytes.Buffer{}
-			bare, err := Render(context.Background(), []byte(`{"session_id":"s1","cwd":"/work/repo"}`), runtime)
-			if err != nil {
-				t.Fatal(err)
-			}
-			session := agentDir(t, subagentNow, nil, tc.agents)
-			payload := `{"session_id":"s1","cwd":"/work/repo","transcript_path":` + jsonText(session) + `}`
-			got, err := Render(context.Background(), []byte(payload), runtime)
-			if err != nil {
-				t.Fatal(err)
-			}
-			base := strings.Split(strings.TrimSuffix(bare, "\n"), "\n")
-			lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-			if len(lines) < len(base) {
-				t.Fatalf("render has %d lines, fewer than the bare main line's %d: %q", len(lines), len(base), got)
-			}
-			var rows []string
-			for _, line := range lines[len(base):] {
-				rows = append(rows, stripANSICodes(line))
-			}
-			if !reflect.DeepEqual(rows, tc.want) {
-				t.Fatalf("agent rows =\n  %q\nwant\n  %q\n(session %s, warn %q)", rows, tc.want, session, runtime.Warn)
 			}
 		})
 	}

@@ -5,23 +5,19 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const (
-	agentRowsWho = "statusline: agent rows"
-	// agentRowsMax is the most rows the agents take below the main line; with
-	// more running, the last says how many are not shown.
-	agentRowsMax = 4
+	agentsWho = "statusline: agents"
 	// agentQuietBound is how long an agent that never ended (no finished mark,
-	// no end notification: its Claude Code died under it) keeps its row once
-	// its transcript stops growing. Live agents have sat half an hour quiet on
+	// no end notification: its Claude Code died under it) counts as running until
+	// its transcript has been quiet this long. Live agents have sat half an hour quiet on
 	// an unanswered request, so the bound is well past that.
 	agentQuietBound = 2 * time.Hour
 	// agentResumeSlack is how long after an agent's end its transcript may
@@ -32,57 +28,6 @@ const (
 	// agentEndsKind is the scan checkpoint of a spawner transcript's end notifications.
 	agentEndsKind = "agent-ends"
 )
-
-// agentRowLines are the lines Render draws below the main line: one per agent
-// row, each opening with a reset; none for an engine other than Claude, whose
-// sub-agents keep no transcripts beside the session's.
-func agentRowLines(runtime Runtime, data input, directory string, now time.Time) string {
-	if runtime.Engine != pfmengine.Claude {
-		return ""
-	}
-	var lines strings.Builder
-	for _, row := range agentRows(runtime, data, directory, now) {
-		lines.WriteString(reset + row + "\n")
-	}
-	return lines.String()
-}
-
-// agentRows are the main line's rows for the session's running sub-agents,
-// oldest first: none when no agent runs (or the session has no subagents
-// directory), at most agentRowsMax, the last saying "+N more agents" when
-// more run. A directory that cannot be listed is one row naming the cause,
-// never an absence.
-func agentRows(runtime Runtime, data input, directory string, now time.Time) []string {
-	tasks, err := runningAgents(data.TranscriptPath, now, runtime.scans)
-	if err != nil {
-		fmt.Fprintf(runtime.Warn, "%s: %v\n", agentRowsWho, err)
-		return []string{cBad + "agents ?: " + strings.Join(strings.Fields(err.Error()), " ") + reset}
-	}
-	if len(tasks) == 0 {
-		return nil
-	}
-	live := make(map[string]bool, len(tasks))
-	for _, task := range tasks {
-		live[task.ID] = true
-	}
-	shown, hidden := tasks, 0
-	if len(tasks) > agentRowsMax {
-		shown, hidden = tasks[:agentRowsMax-1], len(tasks)-(agentRowsMax-1)
-	}
-	rows := renderAgentRows(agentRowsInput{
-		SessionID:      data.SessionID,
-		TranscriptPath: data.TranscriptPath,
-		Cwd:            directory,
-		Columns:        runtime.Columns,
-		SessionModel:   data.Model.ID,
-		SessionWindow:  data.ContextWindow.ContextWindowSize,
-		Tasks:          shown,
-	}, live, now, runtime.SIDDir, runtime.Prices, runtime.Home, runtime.pathsEnv(), runtime.scans, runtime.Warn)
-	if hidden > 0 {
-		rows = append(rows, cMuted+fmt.Sprintf("+%d more agents", hidden)+reset)
-	}
-	return rows
-}
 
 // runningAgents are the session's sub-agents that run, at any depth, oldest
 // first. An agent runs from its meta file's birth until one of: its meta file
@@ -122,19 +67,10 @@ func runningAgents(sessionTranscript string, now time.Time, scans transcriptScan
 		if err != nil || now.Sub(info.ModTime()) > agentQuietBound {
 			continue // gone since the listing, or quiet past the bound
 		}
-		metaPath := transcript.SubagentMetaPath(filepath.Join(dir, entry.Name()))
-		meta, err := transcript.ReadSubagentMeta(metaPath)
-		// The meta file's model is the one the agent was spawned with, "" when it
-		// runs on its definition's or the session's; the row takes the model its
-		// transcript observed once a call lands (renderAgentRows).
-		task := subagentTask{ID: id, Name: meta.Name, Label: meta.Description, Model: meta.Model, Effort: meta.Effort}
-		// An unreadable meta file runs on: its row shows "role ?" and the cause.
-		metaInfo, statErr := os.Stat(metaPath)
-		if statErr == nil {
-			task.StartTime = metaInfo.ModTime().UnixMilli()
-		}
-		if err == nil && statErr == nil && (meta.Finished || meta.StoppedByUser) &&
-			!resumedAfter(info.ModTime(), metaInfo.ModTime()) {
+		task, meta, born, err := metaTask(dir, id)
+		// An unreadable meta file runs on: its facts carry what its transcript says.
+		if err == nil && !born.IsZero() && (meta.Finished || meta.StoppedByUser) &&
+			!resumedAfter(info.ModTime(), born) {
 			continue
 		}
 		spawner := sessionTranscript
@@ -154,10 +90,10 @@ func runningAgents(sessionTranscript string, now time.Time, scans transcriptScan
 			switch {
 			case err != nil:
 				fmt.Fprintf(scans.warn, "%s: end notifications of %s (its agents count as running): %v\n",
-					agentRowsWho, each.spawner, err)
+					agentsWho, each.spawner, err)
 			case !done:
 				fmt.Fprintf(scans.warn, "%s: end notifications of %s not read to its end within the budget "+
-					"(an agent ended past that point counts as running)\n", agentRowsWho, each.spawner)
+					"(an agent ended past that point counts as running)\n", agentsWho, each.spawner)
 			}
 			ends = fold.Ended
 			ended[each.spawner] = ends
@@ -173,6 +109,59 @@ func runningAgents(sessionTranscript string, now time.Time, scans transcriptScan
 		return running[a].ID < running[b].ID
 	})
 	return running, nil
+}
+
+// metaTask is agent id's task from its meta file in the subagents directory
+// dir: the model it was spawned with, "" when it runs on its definition's or
+// the session's (its facts take the model its transcript observed once a call
+// lands, agentFacts), and its start, the meta file's birth, which born also
+// gives, zero when the file cannot be stat'ed. err is the meta file's read.
+func metaTask(dir, id string) (task subagentTask, meta transcript.SubagentMeta, born time.Time, err error) {
+	metaPath := transcript.SubagentMetaPath(transcript.SubagentTranscript(dir, id))
+	meta, err = transcript.ReadSubagentMeta(metaPath)
+	task = subagentTask{ID: id, Model: meta.Model}
+	if metaInfo, statErr := os.Stat(metaPath); statErr == nil {
+		born = metaInfo.ModTime()
+		task.StartTime = born.UnixMilli()
+	}
+	return task, meta, born, err
+}
+
+// agentIDPattern is an id a caller may name an agent by: one file-name
+// element, so it never reaches outside the subagents directory.
+var agentIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+// namedAgents are the agents ids names, in the order each is first named: a
+// running one as runningAgents found it, any other from its meta file
+// (metaTask), ended or never started alike, so a caller keeps an agent's facts
+// current after it stops. An id with no files on disk is still answered; its
+// facts say it is absent. An id that cannot name a file (a teammate in a pane
+// of its own goes by its name@team address) is answered too, with no look at
+// the disk: agentFacts marks it absent (unnamableAgentFacts).
+func namedAgents(sessionTranscript string, ids []string, running []subagentTask) []subagentTask {
+	dir := transcript.SubagentsDir(sessionTranscript)
+	byID := make(map[string]subagentTask, len(running))
+	for _, task := range running {
+		byID[task.ID] = task
+	}
+	named := make([]subagentTask, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		task, ok := byID[id]
+		switch {
+		case ok:
+		case agentIDPattern.MatchString(id):
+			task, _, _, _ = metaTask(dir, id) // an unreadable meta file leaves the model to the transcript
+		default:
+			task = subagentTask{ID: id}
+		}
+		named = append(named, task)
+	}
+	return named
 }
 
 // resumedAfter reports whether an agent's transcript, last written at written,

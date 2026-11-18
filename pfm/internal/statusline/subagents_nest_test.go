@@ -1,7 +1,6 @@
 package statusline
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,7 +60,7 @@ func nestedSession(t *testing.T, transcripts map[string][]string, parents map[st
 	return session
 }
 
-func TestRenderAgentRowsNestedAgents(t *testing.T) {
+func TestAgentFactsNestedAgents(t *testing.T) {
 	cases := []struct {
 		name        string
 		transcripts map[string][]string
@@ -79,7 +78,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "g1": "c3", "g2": "c1"},
 			running: []string{"c2", "g1"},
-			want:    "2/5│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/3│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:    "2/5│Σ$0.01/2.0K/35/3│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name: "only a grandchild works: it counts",
@@ -88,7 +87,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
 			running: []string{"g1"},
-			want:    "1/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:    "1/2│Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name: "every agent below finished: none counts",
@@ -98,7 +97,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			running: []string{"c1", "c2"}, // listed a moment longer than their turns: the tails decide
-			want:    "0/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/3│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:    "0/2│Σ$0.01/2.0K/35/3│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name: "a handback result ends the turn: the agents that handed back are finished",
@@ -108,7 +107,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "g1": "c1"},
 			running: []string{"c1", "c2", "g1"},
-			want:    "0/3│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/5│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:    "0/3│Σ$0.01/2.0K/35/5│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name: "a result Claude Code does not mark as ending the turn is still working",
@@ -117,29 +116,29 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			running: []string{"c1", "c2"},
-			want:    "1/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:    "1/2│Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a reply still streaming is working",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {turnStreaming}},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			want:        "1/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:        "1/1│Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a child spawned but not yet writing is working",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {}},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			want:        "1/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:        "1/1│Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a child whose transcript cannot be read is unread, never finished",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			want:        "0/1 (1 unread)│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
-			warn:        "statusline: agent rows: row p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory",
+			want:        "0/1 (1 unread)│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1",
+			warn:        "statusline: agents: p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory",
 		},
 		{
 			// Claude Code dropped it from its list: it is over, so its count is
@@ -147,14 +146,14 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			name:        "a child Claude Code no longer lists is finished, even when its transcript cannot be read",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "0/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
-			warn:        "statusline: agent rows: row p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory",
+			want:        "0/1│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1",
+			warn:        "statusline: agents: p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory",
 		},
 		{
 			name:        "an agent that spawned none has no nesting segment, the row opens on the gauge",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "other": {turnToolCall}},
 			parents:     map[string]string{"p": "", "other": ""},
-			want:        "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:        "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
 		},
 	}
 	for _, tc := range cases {
@@ -164,7 +163,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 			for _, id := range tc.running {
 				tasks = append(tasks, agentTask(id, "running"))
 			}
-			got, warned := renderRowOf(t, session, "p", subagentNow, tasks...)
+			got, warned := factLineOf(t, session, "p", subagentNow, tasks...)
 			if got != tc.want {
 				t.Errorf("content = %q, want %q", got, tc.want)
 			}
@@ -176,7 +175,7 @@ func TestRenderAgentRowsNestedAgents(t *testing.T) {
 }
 
 // A real cycle (a → b → a) must not hang the walk or count an agent twice.
-func TestRenderAgentRowsNestedCycleTerminates(t *testing.T) {
+func TestAgentFactsNestedCycleTerminates(t *testing.T) {
 	session := nestedSession(t, map[string][]string{
 		"p": agentTranscriptLines, "a": {turnEnded}, "b": {turnEnded},
 	}, map[string]string{"p": "", "a": "p", "b": "a"})
@@ -186,26 +185,26 @@ func TestRenderAgentRowsNestedCycleTerminates(t *testing.T) {
 		[]byte(`{"agentType":"x","parentAgentId":"b"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := renderOneSubagent(t, session, parentTask)
-	if got != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
+	got, _ := factsOfOne(t, session, parentTask)
+	if got != "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1" {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
-	aRow, _ := renderRowOf(t, session, "a", subagentNow,
+	aRow, _ := factLineOf(t, session, "a", subagentNow,
 		`{"id":"a","status":"running"}`, agentTask("b", "running"))
-	if aRow != "0/1│?/? Σ$0.00/0/0/0│x│running│idle 1m0s│💾–" {
+	if aRow != "0/1│Σ$0.00/0/0/0│💾–" {
 		t.Fatalf("cycle row = %q, want 0/1", aRow)
 	}
 }
 
 // A last message longer than the line reader's buffer is still found.
-func TestRenderAgentRowsNestedLongTail(t *testing.T) {
+func TestAgentFactsNestedLongTail(t *testing.T) {
 	long := `{"type":"assistant","timestamp":"2026-09-24T10:01:00Z","message":{"stop_reason":"end_turn",` +
 		`"content":[{"type":"text","text":"` + strings.Repeat("x", 3*(64<<10)) + `"}]}}`
 	session := nestedSession(t, map[string][]string{
 		"p": agentTranscriptLines, "c1": {turnToolCall, long, `{"type":"assist`},
 	}, map[string]string{"p": "", "c1": "p"})
-	got, warned := renderRowOf(t, session, "p", subagentNow, parentTask, agentTask("c1", "running"))
-	if got != "0/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/3│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" ||
+	got, warned := factLineOf(t, session, "p", subagentNow, parentTask, agentTask("c1", "running"))
+	if got != "0/1│Σ$0.01/2.0K/35/3│opus│1 error│💾94%│⟲1" ||
 		warned != "" {
 		t.Fatalf("content = %q warn = %q, want 0/1", got, warned)
 	}
@@ -214,20 +213,20 @@ func TestRenderAgentRowsNestedLongTail(t *testing.T) {
 // A meta file that cannot be parsed hides which agent spawned that one agent
 // only: every other edge stands, the row counts the unreadable agent as unread
 // (it may sit below the task), and the cause goes to warn, never "none".
-func TestRenderAgentRowsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
+func TestAgentFactsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		transcripts map[string][]string
 		parents     map[string]string
 		want, warn  string
 	}{
-		{"alone", map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""}, "0/0 (1 unread)│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate", "statusline: agent rows: row p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n"},
+		{"alone", map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""}, "0/0 (1 unread)│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1", "statusline: agents: p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n"},
 		{
 			"beside a readable child",
 			map[string][]string{"p": agentTranscriptLines, "c2": {turnEnded}},
 			map[string]string{"p": "", "c2": "p"},
-			"0/1 (1 unread)│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
-			"statusline: agent rows: row p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n",
+			"0/1 (1 unread)│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1",
+			"statusline: agents: p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -236,7 +235,7 @@ func TestRenderAgentRowsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "agent-c1.meta.json"), []byte(`{"agentTy`), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			got, warned := renderOneSubagent(t, session, parentTask)
+			got, warned := factsOfOne(t, session, parentTask)
 			if got != tc.want {
 				t.Errorf("content = %q, want %q", got, tc.want)
 			}
@@ -247,74 +246,30 @@ func TestRenderAgentRowsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
 	}
 }
 
-// renderRawSubagent returns task's row content with its colour escapes, from
-// a payload that also lists the other tasks Claude Code runs.
-func renderRawSubagent(t *testing.T, session, task string, now time.Time, listed ...string) string {
+// factLinesOf reads one payload of several tasks and returns each agent's
+// factLine by task id.
+func factLinesOf(t *testing.T, session string, now time.Time, tasks ...string) map[string]string {
 	t.Helper()
-	var parsed fixtureTask
-	if err := json.Unmarshal([]byte(task), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ := renderPayload(t, session, now, append([]string{task}, listed...)...)
-	content, ok := rows[parsed.ID]
+	lines, _ := factLinesFixture(t, agentsFixture{session: session, now: now}, tasks...)
+	return lines
+}
+
+// factLineOf reads one payload and returns agent id's factLine and the
+// warnings that name that agent.
+func factLineOf(t *testing.T, session, id string, now time.Time, tasks ...string) (line, warned string) {
+	t.Helper()
+	lines, warnings := factLinesFixture(t, agentsFixture{session: session, now: now}, tasks...)
+	line, ok := lines[id]
 	if !ok {
-		t.Fatalf("no row for %q in %v", parsed.ID, rows)
-	}
-	return content
-}
-
-// The working count wears the running colour and the total the tools colour,
-// so the two numbers read apart at a glance.
-func TestRenderAgentRowsNestedCountColours(t *testing.T) {
-	session := nestedSession(t, map[string][]string{
-		"p": agentTranscriptLines, "c1": {turnToolCall}, "c2": {turnEnded},
-	}, map[string]string{"p": "", "c1": "p", "c2": "p"})
-	raw := renderRawSubagent(t, session, parentTask, subagentNow, agentTask("c1", "running"))
-	want := cRunning + "1" + reset + cMuted + "/" + reset + cTools + "2" + reset
-	if raw != "\x1b[38;5;118m1\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;87m2\x1b[0m\x1b[2m│\x1b[0m\x1b[1;32m\x1b[2m▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m0%\x1b[0m \x1b[1;97m1.0K\x1b[0m\x1b[38;5;117m/1.0M\x1b[0m \x1b[38;5;245mΣ\x1b[0m\x1b[38;5;222m$0.01\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m2.0K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m35\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;87m3\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;213mgeneral-purpose\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;51mopus\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;118mrunning\x1b[0m \x1b[38;5;215m2m:0s\x1b[0m\x1b[2m│\x1b[0m\x1b[1;38;5;203m1 error\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;118m💾5m✓3m:8s\x1b[0m \x1b[38;5;118m94%\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;177m⟲1\x1b[0m\x1b[2m│\x1b[0m\x1b[38;5;156mpfm\x1b[0m\x1b[2m│\x1b[0m\x1b[97morchestrate\x1b[0m" {
-		t.Fatalf("row = %q, want it to open with %q", raw, want)
-	}
-}
-
-// renderPayload renders one payload of several tasks and returns each row's
-// raw body by task id, and the warnings.
-func renderPayload(
-	t *testing.T,
-	session string,
-	now time.Time,
-	tasks ...string,
-) (rows map[string]string, warned string) {
-	t.Helper()
-	return renderFixture(t, rowsFixture{session: session, now: now}, tasks...)
-}
-
-// renderTasks renders one payload of several tasks and returns each row's
-// ANSI-stripped body by task id.
-func renderTasks(t *testing.T, session string, now time.Time, tasks ...string) map[string]string {
-	t.Helper()
-	rows, _ := renderPayload(t, session, now, tasks...)
-	for id, content := range rows {
-		rows[id] = stripANSICodes(content)
-	}
-	return rows
-}
-
-// renderRowOf renders one payload and returns row id's ANSI-stripped body and
-// the warnings that name that row.
-func renderRowOf(t *testing.T, session, id string, now time.Time, tasks ...string) (content, warned string) {
-	t.Helper()
-	rows, warnings := renderPayload(t, session, now, tasks...)
-	raw, ok := rows[id]
-	if !ok {
-		t.Fatalf("no row for %q in %v", id, rows)
+		t.Fatalf("no facts for %q in %v", id, lines)
 	}
 	var own []string
-	for _, line := range strings.Split(warnings, "\n") {
-		if strings.Contains(line, "row "+id+": ") {
-			own = append(own, line)
+	for _, warning := range strings.Split(warnings, "\n") {
+		if strings.Contains(warning, "statusline: agents: "+id+": ") {
+			own = append(own, warning)
 		}
 	}
-	return stripANSICodes(raw), strings.Join(own, "\n")
+	return line, strings.Join(own, "\n")
 }
 
 // agentTask is an agent task on opus with a 1M window.
@@ -331,7 +286,7 @@ func agentTask(id, status string) string {
 // still running, under an orchestrator rendered 0/16 and one rendered
 // completed). Finished, working, killed, long-silent and nested agents sit
 // below one parent here; only the four Claude Code runs with an open turn count.
-func TestRenderAgentRowsNestedCountsOnlyAgentsThatWork(t *testing.T) {
+func TestAgentFactsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 	const (
 		longSilent = `{"type":"assistant","timestamp":"2026-09-24T09:30:00Z","message":{"stop_reason":null,` +
 			`"content":[{"type":"text","text":"thinking"}],"usage":{"input_tokens":26185,"output_tokens":0}}}`
@@ -351,11 +306,11 @@ func TestRenderAgentRowsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"c5": {turnToolResult},           // killed before its first reply: a row Claude Code lists with no counts
 		}, map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "c4": "p", "g1": "c3", "g2": "c2", "c5": "p"})
 		killedAtSpawn := `{"id":"c5","status":"killed","startTime":1790244000000,"label":"c5"}`
-		rows := renderTasks(t, session, subagentNow,
+		rows := factLinesOf(t, session, subagentNow,
 			parentTask, agentTask("c1", "running"), agentTask("c4", "killed"), killedAtSpawn,
 			agentTask("c2", "running"), agentTask("g1", "running"), agentTask("g2", "running"))
 		got := rows["p"]
-		if got != "4/7│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/54.3K/35/4+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
+		if got != "4/7│Σ$0.01/54.3K/35/4+?│opus│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 4/7 (c1, c2, g1 and g2 work; c3, c4, c5 do not)", got)
 		}
 	})
@@ -367,15 +322,15 @@ func TestRenderAgentRowsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 		session := nestedSession(t, map[string][]string{
 			"p": agentTranscriptLines, "c1": {longSilent}, "g1": {longSilent, silentResult},
 		}, parents)
-		got := renderTasks(t, session, subagentNow, parentTask, agentTask("c1", "running"), agentTask("g1", "running"))["p"]
-		if got != "2/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/54.3K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
+		got := factLinesOf(t, session, subagentNow, parentTask, agentTask("c1", "running"), agentTask("g1", "running"))["p"]
+		if got != "2/2│Σ$0.01/54.3K/35/2+?│opus│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 2/2: c1 and g1 still run", got)
 		}
 		done := nestedSession(t, map[string][]string{
 			"p": agentTranscriptLines, "c1": {longSilent, turnEnded}, "g1": {longSilent, silentResult},
 		}, parents)
-		got = renderTasks(t, done, subagentNow, parentTask, agentTask("c1", "running"))["p"]
-		if got != "0/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/54.3K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
+		got = factLinesOf(t, done, subagentNow, parentTask, agentTask("c1", "running"))["p"]
+		if got != "0/2│Σ$0.01/54.3K/35/2+?│opus│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 0/2: c1 ended its turn, g1 no longer runs", got)
 		}
 	})
@@ -394,12 +349,12 @@ func TestRenderAgentRowsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"g2": {finalText("09:47:30")},        // finished 14m30s ago, the same
 			"c2": {turnToolCall, turnToolResult}, // killed after a tool result nothing answered
 		}, map[string]string{"p": "", "c1": "p", "g1": "c1", "g2": "c1", "c2": "p"})
-		got := renderTasks(t, session, subagentNow, parentTask)["p"]
-		if got != "0/4│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.2K/45/3+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
+		got := factLinesOf(t, session, subagentNow, parentTask)["p"]
+		if got != "0/4│Σ$0.01/2.2K/45/3+?│opus│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 0/4: none of the agents below it runs", got)
 		}
-		listed := renderTasks(t, session, subagentNow, parentTask, agentTask("g1", "running"))["p"]
-		if listed != "1/4│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.2K/45/3+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
+		listed := factLinesOf(t, session, subagentNow, parentTask, agentTask("g1", "running"))["p"]
+		if listed != "1/4│Σ$0.01/2.2K/45/3+?│opus│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 1/4: g1 still runs", listed)
 		}
 	})
@@ -427,15 +382,15 @@ func readCounter(t *testing.T) (counts func() map[string]int) {
 	}
 }
 
-// TestRenderAgentRowsReadsEachTranscriptOnce pins the read-once law: c1 is a
+// TestAgentFactsReadsEachTranscriptOnce pins the read-once law: c1 is a
 // task row and also a descendant of the row p, g1 a descendant of both, and
 // one render reads each of their transcripts a single time.
-func TestRenderAgentRowsReadsEachTranscriptOnce(t *testing.T) {
+func TestAgentFactsReadsEachTranscriptOnce(t *testing.T) {
 	session := nestedSession(t, map[string][]string{
 		"p": agentTranscriptLines, "c1": {turnToolCall}, "g1": {turnToolCall},
 	}, map[string]string{"p": "", "c1": "p", "g1": "c1"})
 	counts := readCounter(t)
-	rows := renderTasks(t, session, subagentNow, agentTask("p", "running"), agentTask("c1", "running"))
+	rows := factLinesOf(t, session, subagentNow, agentTask("p", "running"), agentTask("c1", "running"))
 	if len(rows) != 2 {
 		t.Fatalf("rows = %v, want p and c1", rows)
 	}

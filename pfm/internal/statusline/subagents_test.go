@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -97,71 +98,54 @@ func jsonText(value any) string {
 	return string(encoded)
 }
 
-func renderOneSubagent(t *testing.T, session, task string) (content, warned string) {
+// factsOfOne reads one task's facts the way Agents does, at subagentNow, as
+// its factLine.
+func factsOfOne(t *testing.T, session, task string) (line, warned string) {
 	t.Helper()
-	return renderSubagentAt(t, session, task, subagentNow)
+	return factsOfOneAt(t, session, task, subagentNow)
 }
 
-func renderSubagentAt(t *testing.T, session, task string, now time.Time) (content, warned string) {
+func factsOfOneAt(t *testing.T, session, task string, now time.Time) (line, warned string) {
 	t.Helper()
-	return renderSubagentWith(t, session, task, now, 200)
-}
-
-func renderOneSubagentColumns(t *testing.T, session, task string, columns int) (content, warned string) {
-	t.Helper()
-	return renderSubagentWith(t, session, task, subagentNow, columns)
-}
-
-func renderSubagentWith(t *testing.T, session, task string, now time.Time, columns int) (content, warned string) {
-	t.Helper()
-	rows, warned := renderFixture(t, rowsFixture{session: session, now: now, columns: columns}, task)
-	if len(rows) != 1 {
-		t.Fatalf("want exactly one row, got %d: %q", len(rows), rows)
+	facts, warned := factsFixture(t, agentsFixture{session: session, now: now}, task)
+	if len(facts) != 1 {
+		t.Fatalf("want exactly one agent's facts, got %d: %v", len(facts), facts)
 	}
-	for _, raw := range rows {
-		content = stripANSICodes(raw)
+	for id := range facts {
+		line = factLine(facts[id])
 	}
-	return content, warned
+	return line, warned
 }
 
-// fixtureTask is a task as a test writes it: what the meta file names, and its
-// status — only an agent whose status is not ended counts as running.
+// fixtureTask is a task as a test writes it: the agent's id, the model it was
+// spawned with, and its status — only an agent whose status is not ended
+// counts as running.
 type fixtureTask struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Label             string `json:"label"`
-	Model             string `json:"model"`
-	Effort            string `json:"effort"`
-	StartTime         int64  `json:"startTime"`
-	ContextWindowSize int64  `json:"contextWindowSize"`
-	Status            string `json:"status"`
+	ID        string `json:"id"`
+	Model     string `json:"model"`
+	StartTime int64  `json:"startTime"`
+	Status    string `json:"status"`
 }
 
-// rowsFixture is what renderFixture renders under: zero fields take the
-// defaults (a fresh sid dir, the test prices unless noPrices, no env, 200
-// columns, subagentNow, the session cwd /work/repo).
-type rowsFixture struct {
-	session, sessionID, sidDir, home string
-	sessionModel                     string
-	sessionWindow                    int64
-	noPrices                         bool
-	env                              paths.Env
-	columns                          int
-	now                              time.Time
+// agentsFixture is what factsFixture reads under: zero fields take the
+// defaults (a fresh home, the test prices unless noPrices, an empty closed
+// env, subagentNow).
+type agentsFixture struct {
+	session, sessionID, home string
+	noPrices                 bool
+	env                      map[string]string
+	now                      time.Time
 }
 
-// renderFixture renders every task's row through renderAgentRows and returns
-// each raw row by task id, and the warnings.
-func renderFixture(t *testing.T, fixture rowsFixture, tasks ...string) (rows map[string]string, warned string) {
+// factsFixture reads every task's facts through agentFacts, the door's own
+// reader, and returns them by task id, and the warnings.
+func factsFixture(t *testing.T, fixture agentsFixture, tasks ...string) (facts map[string]AgentFacts, warned string) {
 	t.Helper()
-	if fixture.sidDir == "" {
-		fixture.sidDir = t.TempDir()
+	if fixture.home == "" {
+		fixture.home = t.TempDir()
 	}
 	if fixture.env == nil {
-		fixture.env = noEnv
-	}
-	if fixture.columns == 0 {
-		fixture.columns = 200
+		fixture.env = map[string]string{}
 	}
 	if fixture.now.IsZero() {
 		fixture.now = subagentNow
@@ -170,54 +154,136 @@ func renderFixture(t *testing.T, fixture rowsFixture, tasks ...string) (rows map
 	if fixture.noPrices {
 		prices = nil
 	}
-	data := agentRowsInput{
-		SessionID:      fixture.sessionID,
-		TranscriptPath: fixture.session,
-		Cwd:            "/work/repo",
-		Columns:        fixture.columns,
-		SessionModel:   fixture.sessionModel,
-		SessionWindow:  fixture.sessionWindow,
+	var warn bytes.Buffer
+	now := fixture.now
+	runtime := Runtime{
+		Now: func() time.Time { return now }, Home: fixture.home, CacheDir: t.TempDir(),
+		Env: fixture.env, Prices: prices, Warn: &warn,
 	}
+	runtime.scans = newTranscriptScans("", &warn)
+	runtime = runtime.normalized()
+	var list []subagentTask
 	live := map[string]bool{}
 	for _, raw := range tasks {
 		var task fixtureTask
 		if err := json.Unmarshal([]byte(raw), &task); err != nil {
 			t.Fatalf("fixture task %s: %v", raw, err)
 		}
-		data.Tasks = append(data.Tasks, subagentTask{
-			ID: task.ID, Name: task.Name, Label: task.Label, Model: task.Model, Effort: task.Effort,
-			StartTime: task.StartTime, ContextWindowSize: task.ContextWindowSize,
-		})
+		list = append(list, subagentTask{ID: task.ID, Model: task.Model, StartTime: task.StartTime})
 		switch task.Status {
 		case "completed", "failed", "killed":
 		default:
 			live[task.ID] = true
 		}
 	}
-	var warn bytes.Buffer
-	got := renderAgentRows(data, live, fixture.now, fixture.sidDir, prices, fixture.home, fixture.env,
-		newTranscriptScans("", &warn), &warn)
-	if len(got) != len(data.Tasks) {
-		t.Fatalf("renderAgentRows gave %d rows for %d tasks: %q", len(got), len(data.Tasks), got)
+	got := agentFacts(runtime, fixture.sessionID, fixture.session, list, live)
+	if len(got) != len(list) {
+		t.Fatalf("agentFacts gave %d agents for %d tasks: %v", len(got), len(list), got)
 	}
-	rows = map[string]string{}
-	for index, row := range got {
-		rows[data.Tasks[index].ID] = row
+	facts = map[string]AgentFacts{}
+	for index := range got {
+		facts[got[index].ID] = got[index]
 	}
-	return rows, warn.String()
+	return facts, warn.String()
 }
 
-func TestRenderAgentRowsRowBodies(t *testing.T) {
+// factLinesFixture is factsFixture with each agent's facts as its factLine.
+func factLinesFixture(t *testing.T, fixture agentsFixture, tasks ...string) (lines map[string]string, warned string) {
+	t.Helper()
+	facts, warned := factsFixture(t, fixture, tasks...)
+	lines = map[string]string{}
+	for id := range facts {
+		lines[id] = factLine(facts[id])
+	}
+	return lines, warned
+}
+
+// factLine writes one agent's facts as one line a test compares whole:
+// nesting│spend│family·effort│tool errors│cache hit│compactions, a segment
+// left out when it has nothing to say. Spend is Σ{usd}/{in}/{out}/{tools},
+// "Σ$?/?/?/?" when it is unknown; the cache is 💾! for a transcript that did
+// not read, 💾– before a first reply, 💾∅ for a model with no cache lifetime.
+func factLine(facts AgentFacts) string {
+	var parts []string
+	switch nest := facts.Nested; {
+	case nest.Error != "":
+		parts = append(parts, "?/?")
+	case nest.Total > 0 || nest.Unknown > 0:
+		count := strconv.Itoa(nest.Working) + "/" + strconv.Itoa(nest.Total)
+		if nest.Unknown > 0 {
+			count += " (" + strconv.Itoa(nest.Unknown) + " unread)"
+		}
+		parts = append(parts, count)
+	}
+	spend := "Σ$?/?/?/?"
+	if booked := facts.Spend; booked != nil {
+		usd, tools := facts.Text.USD, strconv.Itoa(booked.Tools)
+		if usd == "" {
+			usd = "$?"
+		}
+		if facts.Error != "" {
+			tools = "?"
+		}
+		spend = "Σ" + usd + "/" + facts.Text.In + "/" + facts.Text.Out + "/" + tools
+		switch {
+		case booked.AdvisorUnpriced > 0:
+			spend += " adv n/a"
+		case booked.AdvisorUSD > 0:
+			spend += " adv $" + strconv.FormatFloat(booked.AdvisorUSD, 'f', 2, 64)
+		}
+		if booked.Floor {
+			spend += "+?"
+		}
+		if booked.APIEquivalent {
+			spend += " API-eq"
+		}
+	}
+	parts = append(parts, spend)
+	if family := facts.Text.Family; family != "" {
+		if facts.Text.EffortBar != "" {
+			family += "·" + facts.Text.EffortBar + " " + facts.Effort
+		}
+		parts = append(parts, family)
+	}
+	switch {
+	case facts.ToolErrors == 1:
+		parts = append(parts, "1 error")
+	case facts.ToolErrors > 1:
+		parts = append(parts, strconv.Itoa(facts.ToolErrors)+" errors")
+	}
+	switch {
+	case facts.Error != "":
+		parts = append(parts, "💾!")
+	case facts.CacheHit < 0:
+		parts = append(parts, "💾–")
+	case !facts.CacheLifetime:
+		parts = append(parts, "💾∅ "+strconv.Itoa(facts.CacheHit)+"%")
+	default:
+		parts = append(parts, "💾"+strconv.Itoa(facts.CacheHit)+"%")
+	}
+	if facts.Compactions > 0 {
+		parts = append(parts, "⟲"+strconv.Itoa(facts.Compactions))
+	}
+	return strings.Join(parts, "│")
+}
+
+func TestAgentFactsRowBodies(t *testing.T) {
 	quiet := []string{`{"type":"user","timestamp":"2026-09-24T10:02:00Z","message":{"role":"user","content":"go"}}`}
 	session := subagentSession(t, map[string][]string{
 		"a1":    agentTranscriptLines,
 		"fresh": agentTranscriptLines[:1],
-		"g1":    quiet, "g2": quiet, "g3": quiet, "g4": quiet, "g5": quiet, "g0": quiet, "gw": quiet,
-		"same": {`{"type":"user","timestamp":"2026-09-24T10:02:00Z","cwd":"/work/repo/","message":{"content":"go"}}`},
+		"e": {
+			`{"type":"user","timestamp":"2026-09-24T10:00:00Z","message":{"role":"user","content":"go"}}`,
+			`{"type":"assistant","timestamp":"2026-09-24T10:00:05Z","message":{"content":[]},"effort":"low"}`,
+			`{"type":"assistant","timestamp":"2026-09-24T10:00:10Z","message":{"content":[]},"effort":"medium"}`,
+			`{"type":"assistant","timestamp":"2026-09-24T10:00:15Z","message":{"content":[]}}`,
+			`{"type":"assistant","timestamp":"2026-09-24T10:00:20Z","message":{"content":[]},"effort":""}`,
+		},
+		"g1": quiet, "g2": quiet, "g3": quiet, "g4": quiet, "g5": quiet, "g0": quiet, "gw": quiet,
 	}, map[string]string{
 		"a1": "tracer", "fresh": "general-purpose", "g1": "general-purpose", "g2": "general-purpose",
 		"g3": "general-purpose", "g4": "general-purpose", "g5": "general-purpose", "g0": "general-purpose",
-		"gw": "general-purpose", "same": "general-purpose",
+		"gw": "general-purpose", "e": "tracer",
 	})
 	task := func(fields string) string {
 		return `{"startTime":` + jsonText(subagentStart.UnixMilli()) + `,` + fields + `}`
@@ -225,74 +291,73 @@ func TestRenderAgentRowsRowBodies(t *testing.T) {
 	cases := []struct {
 		name string
 		task string
-		want string // ANSI-stripped content
+		want string // factLine
 	}{
 		{
 			name: "running agent: every segment, errors and compactions included",
 			task: task(`"id":"a1","name":"scout","label":"map the resolver",` +
 				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000`),
-			want: "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│scout·tracer│opus·▰▰▰ high│running 2m:0s│1 error│💾5m✓3m:8s 94%│" +
-				"⟲1│pfm│map the resolver",
+			want: "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name: "the model its calls went to wins over the alias it was spawned with",
 			task: task(`"id":"a1","label":"x","model":"haiku","contextWindowSize":1000000`),
-			want: "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│tracer│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│x",
+			want: "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name: "no model turn yet: unknown context, zero tools, an empty cache, and idle since its prompt",
 			task: task(`"id":"fresh","label":"x","model":"haiku","contextWindowSize":200000`),
-			want: "?/200.0K Σ$0.00/0/0/0│general-purpose│haiku│running 2m:0s│idle 2m0s│💾–│pfm│x",
+			want: "Σ$0.00/0/0/0│haiku│💾–",
 		},
 		{
 			name: "no model and no window: the row still renders, context unknown",
 			task: task(`"id":"fresh","label":"x"`),
-			want: "?/? Σ$0.00/0/0/0│general-purpose│running 2m:0s│idle 2m0s│💾–│pfm│x",
+			want: "Σ$0.00/0/0/0│💾–",
+		},
+		{
+			name: "the effort its newest request recorded, an entry without one leaving it standing",
+			task: `{"id":"e","model":"claude-opus-5-5"}`,
+			want: "Σ$0.00/0/0/0│opus·▰▰ medium│💾–",
 		},
 		{
 			name: "a gpt- agent renders its tier then its version",
 			task: `{"id":"g1","name":"sol","model":"gpt-6-sol","effort":"low"}`,
-			want: "?/? ctx missing Σ$0.00/0/0/0│sol·general-purpose│sol-6·▰ low│running│💾–",
+			want: "Σ$0.00/0/0/0│sol-6│💾–",
 		},
 		{
 			name: "a gpt- agent's dotted version survives",
 			task: `{"id":"g2","name":"bot","model":"gpt-5.6-terra","effort":"high"}`,
-			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│terra-5.6·▰▰▰ high│running│💾–",
+			want: "Σ$0.00/0/0/0│terra-5.6│💾–",
 		},
 		{
 			name: "a bare gpt- version has no tier and renders whole",
 			task: `{"id":"g3","name":"bot","model":"gpt-6"}`,
-			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│gpt-6│running│💾–",
+			want: "Σ$0.00/0/0/0│gpt-6│💾–",
 		},
 		{
 			name: "a gpt- agent on the priority tier renders its tier, not the -fast suffix",
 			task: `{"id":"g4","name":"bot","model":"gpt-6-sol-fast[1m]"}`,
-			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│sol-6│running│💾–",
+			want: "Σ$0.00/0/0/0│sol-6│💾–",
 		},
 		{
 			name: "a bare gpt- version on the priority tier renders whole, without the -fast suffix",
 			task: `{"id":"g5","name":"bot","model":"gpt-5.5-fast"}`,
-			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│gpt-5.5│running│💾–",
+			want: "Σ$0.00/0/0/0│gpt-5.5│💾–",
 		},
 		{
 			name: "a gateway agent's harness window is not authoritative",
 			task: `{"id":"g0","name":"bot","model":"gpt-6-sol","contextWindowSize":200000}`,
-			want: "?/? ctx missing Σ$0.00/0/0/0│bot·general-purpose│sol-6│running│💾–",
+			want: "Σ$0.00/0/0/0│sol-6│💾–",
 		},
 		{
 			name: "a gateway asset reference names its model's family",
 			task: `{"id":"gw","name":"bot","model":"gw:catalog/claude-opus-5-5[1m]"}`,
-			want: "?/? Σ$0.00/0/0/0│bot·general-purpose│opus│running│💾–",
-		},
-		{
-			name: "an agent in the session's own directory shows no cwd",
-			task: `{"id":"same","model":"haiku","label":"x"}`,
-			want: "?/? Σ$0.00/0/0/0│general-purpose│haiku│running│💾–│x",
+			want: "Σ$0.00/0/0/0│opus│💾–",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, warned := renderOneSubagent(t, session, tc.task)
+			got, warned := factsOfOne(t, session, tc.task)
 			if got != tc.want {
 				t.Fatalf("content =\n  %q\nwant\n  %q", got, tc.want)
 			}
@@ -303,139 +368,19 @@ func TestRenderAgentRowsRowBodies(t *testing.T) {
 	}
 }
 
-// An agent on the session's model version shares the session's window; one on
-// another model has no window to borrow and shows "/?".
-func TestRenderAgentRowsSharesTheSessionWindowOnlyOnItsModel(t *testing.T) {
-	session := subagentSession(t, map[string][]string{"fresh": agentTranscriptLines[:1]},
-		map[string]string{"fresh": "general-purpose"})
-	for _, tc := range []struct{ model, want string }{
-		{"claude-opus-5-5", "?/1.0M Σ$0.00/0/0/0│general-purpose│opus│running 2m:0s│idle 2m0s│💾–│pfm│x"},
-		{"haiku", "?/? Σ$0.00/0/0/0│general-purpose│haiku│running 2m:0s│idle 2m0s│💾–│pfm│x"},
-	} {
-		t.Run(tc.model, func(t *testing.T) {
-			rows, warned := renderFixture(t, rowsFixture{
-				session: session, sessionModel: "claude-opus-5-5[1m]", sessionWindow: 1_000_000,
-			}, `{"id":"fresh","label":"x","model":"`+tc.model+`","startTime":`+jsonText(subagentStart.UnixMilli())+`}`)
-			if got := stripANSICodes(rows["fresh"]); got != tc.want || warned != "" {
-				t.Fatalf("row =\n  %q\nwant\n  %q (warned %q)", got, tc.want, warned)
-			}
-		})
-	}
-}
-
-// A row names the agent type it was launched as, never the family its
-// definition's role key names: rr-pro and rr-pro-max must not both read rr.
-func TestRenderAgentRowsIdentityIsTheLaunchedAgentType(t *testing.T) {
-	repo := t.TempDir()
-	definition := filepath.Join(repo, ".claude", "agents", "rr-pro.md")
-	if err := os.MkdirAll(filepath.Dir(definition), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(definition, []byte("---\nname: rr-pro\nrole: rr\n---\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	session := subagentSession(
-		t,
-		map[string][]string{"a1": agentTranscriptLines[:1]},
-		map[string]string{"a1": "rr-pro"},
-	)
-	got, _ := renderOneSubagent(t, session, `{"id":"a1","model":"claude-opus-5-5"}`)
-	if content := got; content != "?/? Σ$0.00/0/0/0│rr-pro│opus│running│idle 2m0s│💾–│pfm" {
-		t.Fatalf("content = %q, want the launched type rr-pro", content)
-	}
-}
-
 // An unreadable transcript is a failure to look: the row says "?" for both
 // transcript facts and the cause is reported, never rendered as zero tools.
-func TestRenderAgentRowsUnreadableTranscriptIsNotZero(t *testing.T) {
+func TestAgentFactsUnreadableTranscriptIsNotZero(t *testing.T) {
 	session := subagentSession(t, nil, nil)
-	got, warned := renderOneSubagent(t, session,
+	got, warned := factsOfOne(t, session,
 		`{"id":"gone","status":"running","contextWindowSize":1000}`)
-	if got != "?/1.0K Σ$?/?/?/?│role ?│running│💾!" {
+	if got != "Σ$?/?/?/?│💾!" {
 		t.Fatalf("content = %q, want the ? markers", got)
 	}
-	for _, cause := range []string{"row gone: read sub-agent meta", "row gone: open sub-agent transcript"} {
+	for _, cause := range []string{"statusline: agents: gone: open sub-agent transcript"} {
 		if !strings.Contains(warned, cause) {
 			t.Fatalf("warn = %q, want %q", warned, cause)
 		}
-	}
-}
-
-// A meta file without agentType is a failure to read the role, not "no role".
-func TestRenderAgentRowsMetaWithoutRoleIsNotEmpty(t *testing.T) {
-	session := subagentSession(t, map[string][]string{"m": agentTranscriptLines[:1]}, map[string]string{"m": ""})
-	got, warned := renderOneSubagent(t, session,
-		`{"id":"m","status":"running"}`)
-	got += "\n" + strings.ReplaceAll(warned, filepath.Dir(session), "{dir}")
-	if want := "?/? Σ$0.00/0/0/0│role ?│running│idle 2m0s│💾–│pfm\n" +
-		"statusline: agent rows: row m: sub-agent meta {dir}/session/subagents/agent-m.meta.json names no agentType\n"; got != want {
-		t.Fatalf("content and warn = %q, want %q", got, want)
-	}
-}
-
-// Quiet time turns yellow past a minute and red past five.
-func TestRenderAgentRowsIdleOnlyWhileRunning(t *testing.T) {
-	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines}, map[string]string{"a1": "tracer"})
-	lastEntry := time.Date(2026, 9, 24, 10, 1, 30, 0, time.UTC)
-	for _, tc := range []struct {
-		status   string
-		now      time.Time
-		wantIdle string
-	}{
-		{"running", lastEntry.Add(59 * time.Second), ""},
-		{"running", lastEntry.Add(6 * time.Minute), "idle 6m0s"},
-	} {
-		task := `{"id":"a1","status":` + jsonText(tc.status) + `}`
-		got, _ := renderSubagentAt(t, session, task, tc.now)
-		if tc.wantIdle == "" && got != "1.0K/? Σ$0.01/2.0K/35/2│tracer│opus│running│1 error│💾5m✓2m:39s 94%│⟲1│pfm" {
-			t.Fatalf("%s at +%s rendered idle: %q", tc.status, tc.now.Sub(lastEntry), got)
-		}
-		if tc.wantIdle != "" &&
-			got != "1.0K/? Σ$0.01/2.0K/35/2│tracer│opus│running│idle 6m0s│1 error│💾5m✗2m:22s was 94%│⟲1│pfm" {
-			t.Fatalf("%s at +%s = %q, want %q", tc.status, tc.now.Sub(lastEntry), got, tc.wantIdle)
-		}
-	}
-}
-
-// Claude Code draws the status line in the terminal's own colours; a row dims
-// nothing but its│separators and the gauge's empty cells.
-func TestRenderAgentRowsRowDimsOnlyItsSeparators(t *testing.T) {
-	session := subagentSession(t, map[string][]string{"a1": agentTranscriptLines}, map[string]string{"a1": "tracer"})
-	rows, _ := renderPayload(t, session, subagentNow,
-		`{"id":"a1","label":"x","model":"claude-opus-5-5","contextWindowSize":1000}`)
-	// dim only on the separators and the gauge's empty cells
-	if got, want := strings.ReplaceAll(
-		rows["a1"],
-		rowSep,
-		"{sep}",
-	), "\x1b[1;31m▰▰▰▰▰▰▰▰\x1b[2m\x1b[0m \x1b[1;31m100%\x1b[0m \x1b[1;97m1.0K\x1b[0m\x1b[38;5;117m/1.0K\x1b[0m \x1b[38;5;245mΣ\x1b[0m\x1b[38;5;222m$0.01\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m2.0K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[1;97m35\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;87m2\x1b[0m{sep}\x1b[38;5;213mtracer\x1b[0m{sep}\x1b[38;5;51mopus\x1b[0m{sep}\x1b[38;5;118mrunning\x1b[0m{sep}\x1b[1;38;5;203m1 error\x1b[0m{sep}\x1b[38;5;118m💾5m✓3m:8s\x1b[0m \x1b[38;5;118m94%\x1b[0m{sep}\x1b[38;5;177m⟲1\x1b[0m{sep}\x1b[38;5;156mpfm\x1b[0m{sep}\x1b[97mx\x1b[0m"; got != want {
-		t.Fatalf("row = %q, want %q", got, want)
-	}
-}
-
-// A payload without a session transcript cannot name the role either: the row
-// says "role ?", never a name trailed by an empty role.
-func TestRenderAgentRowsNoSessionTranscriptMarksTheRole(t *testing.T) {
-	got, warned := renderOneSubagent(t, "",
-		`{"id":"x","name":"scout","status":"running","contextWindowSize":1000}`)
-	if got, want := got+"\n"+warned, "?/?│?/1.0K Σ$?/?/?/?│scout·role ?│running│💾!\nstatusline: agent rows: row x: payload names no session transcript\n"; got != want {
-		t.Fatalf("content and warn = %q, want %q", got, want)
-	}
-}
-
-// A sub-agent's own transcript is all sidechain records; its cache window is
-// read from them, in the main line's shape, with the TTL its write used.
-func TestRenderAgentRowsCacheWindowFromItsOwnTranscript(t *testing.T) {
-	session := subagentSession(t, map[string][]string{"s1": {
-		`{"type":"user","isSidechain":true,"timestamp":"2026-09-24T10:01:00Z","message":{"role":"user","content":"go"}}`,
-		`{"type":"assistant","isSidechain":true,"timestamp":"2026-09-24T10:01:40Z","message":{"content":[{"type":"text","text":"ok"}],` +
-			`"usage":{"input_tokens":2,"cache_read_input_tokens":9944,"cache_creation_input_tokens":10357,` +
-			`"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":10357}}}}`,
-	}}, map[string]string{"s1": "gitter"})
-	got, _ := renderOneSubagent(t, session,
-		`{"id":"s1","status":"running","contextWindowSize":1000}`)
-	if got != "▰▰▰▰▰▰▰▰ 2030% 20.3K/1.0K Σ$?/20.3K/0/0│gitter│running│💾1h✓59m:0s 48%" {
-		t.Fatalf("content = %q, want the agent's own 1h window from its sidechain records and 48%%", got)
 	}
 }
 
@@ -523,7 +468,7 @@ var gptAgentLines = []string{
 // "∅" — not the "?" of a transcript with no request to count from, and not the
 // "!" of a transcript that could not be read. The message_start line of the
 // call still streaming reports no cache fields and must not read as 0%.
-func TestRenderAgentRowsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
+func TestAgentFactsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 	task := func(id string) string {
 		return `{"id":"` + id + `","status":"running","model":"gpt-6-luna[1m]",` +
 			`"contextWindowSize":1000000}`
@@ -550,7 +495,7 @@ func TestRenderAgentRowsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			session := subagentSession(t, map[string][]string{"g1": tc.lines}, map[string]string{"g1": "tracer"})
-			got, _ := renderOneSubagent(t, session, task("g1"))
+			got, _ := factsOfOne(t, session, task("g1"))
 			if !strings.HasSuffix(got, tc.want) && !strings.Contains(got, tc.want+"│") {
 				t.Fatalf("content = %q, want the cache segment %q", got, tc.want)
 			}
@@ -561,17 +506,17 @@ func TestRenderAgentRowsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 	}
 	t.Run("an unreadable transcript is still the failure marker", func(t *testing.T) {
 		session := subagentSession(t, map[string][]string{}, map[string]string{"g2": "tracer"})
-		got, _ := renderOneSubagent(t, session, task("g2"))
-		if got != "?/? ctx missing Σ$?/?/?/?│tracer│luna-6│running│💾!" {
+		got, _ := factsOfOne(t, session, task("g2"))
+		if got != "Σ$?/?/?/?│luna-6│💾!" {
 			t.Fatalf("content = %q, want 💾! and no unknown-window marker", got)
 		}
 	})
 	t.Run("the model the transcript records names the provider when the payload names none", func(t *testing.T) {
 		session := subagentSession(t,
 			map[string][]string{"g3": gptAgentLines[:6]}, map[string]string{"g3": "tracer"})
-		got, _ := renderOneSubagent(t, session,
+		got, _ := factsOfOne(t, session,
 			`{"id":"g3","status":"running","contextWindowSize":1000000}`)
-		if got != "13.7K/? ctx missing Σ$?/21.3K/279/1 API-eq│tracer│luna-6│running│idle 1m10s│💾∅ 87%" {
+		if got != "Σ$?/21.3K/279/1 API-eq│luna-6│💾∅ 87%" {
 			t.Fatalf("content = %q, want the unknown window and 87%%", got)
 		}
 	})
@@ -580,7 +525,7 @@ func TestRenderAgentRowsOpenAICacheShowsHitWithoutAWindow(t *testing.T) {
 // A Claude row keeps its window and its hit exactly: the length from the cache
 // write's split, the countdown from its newest request, and a message_start
 // line that carries cache fields counts as a real call.
-func TestRenderAgentRowsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
+func TestAgentFactsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"c1": {
 		`{"type":"user","timestamp":"2026-09-24T10:00:00Z","message":{"role":"user","content":"go"}}`,
 		`{"type":"assistant","timestamp":"2026-09-24T10:01:00Z","message":{"id":"m1","model":"claude-opus-5-5",` +
@@ -588,10 +533,10 @@ func TestRenderAgentRowsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
 			`"usage":{"input_tokens":6,"cache_read_input_tokens":900,"cache_creation_input_tokens":94,` +
 			`"cache_creation":{"ephemeral_5m_input_tokens":94,"ephemeral_1h_input_tokens":0},"output_tokens":1}}}`,
 	}}, map[string]string{"c1": "tracer"})
-	got, _ := renderOneSubagent(t, session,
+	got, _ := factsOfOne(t, session,
 		`{"id":"c1","status":"running","model":"claude-opus-5-5[1m]",`+
 			`"contextWindowSize":1000000}`)
-	if got != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.00/1.0K/1/0│tracer│opus│running│idle 1m0s│💾5m✓3m:0s 90%" {
+	if got != "Σ$0.00/1.0K/1/0│opus│💾90%" {
 		t.Fatalf("content = %q, want the Claude row's 5m window and 90%%", got)
 	}
 }

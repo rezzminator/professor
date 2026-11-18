@@ -42,7 +42,7 @@ func TestStatuslineFiveMinuteWindowUsesLaunchAndNewestRequest(t *testing.T) {
 		Env:      map[string]string{},
 	}
 	got := stripANSICodes(cacheWindowSegment(runtime, now, path, -1, nil, "S"))
-	if got != " │ 💾5m✓3m:0s" {
+	if got != " │ 💾5m✓3m00s" {
 		t.Fatalf("window = %q, want the launch's 5m TTL from newest request", got)
 	}
 }
@@ -56,12 +56,12 @@ func TestStatuslineHarnessExpiryUsesItsOwnLabelElseRecord(t *testing.T) {
 	expires := now.Add(2 * time.Minute).Unix()
 	got := stripANSICodes(cacheWindowSegment(Runtime{Home: home, Env: map[string]string{}}, now, "", -1,
 		&promptCache{TTL: "1h", ExpiresAt: &expires}, "S"))
-	if got != " │ 💾1h✓2m:0s" {
+	if got != " │ 💾1h✓2m00s" {
 		t.Fatalf("window = %q, want harness expiry with its own 1h label", got)
 	}
 	got = stripANSICodes(cacheWindowSegment(Runtime{Home: home, Env: map[string]string{}}, now, "", -1,
 		&promptCache{ExpiresAt: &expires}, "S"))
-	if got != " │ 💾5m✓2m:0s" {
+	if got != " │ 💾5m✓2m00s" {
 		t.Fatalf("window = %q, want harness expiry with the launch's 5m label", got)
 	}
 }
@@ -198,11 +198,11 @@ func TestCacheWindowSegmentUsesLaunchLengthAndWrite(t *testing.T) {
 	cacheLaunch(t, root, "S", false)
 	runtime := Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}}
 	got := stripANSICodes(cacheWindowSegment(runtime, now, path, 94, nil, "S"))
-	if got != " │ 💾5m✓3m:0s 94%" {
+	if got != " │ 💾5m✓3m00s 94%" {
 		t.Fatalf("segment = %q, want the measured 5m window and 94%%", got)
 	}
 	cold := cacheWindowSegment(runtime, now, path, cacheHitPercent(27_615, 207_108, 2), nil, "S")
-	if cold != " \x1b[2m│\x1b[0m \x1b[38;5;118m💾5m✓3m:0s\x1b[0m \x1b[1;38;5;203m11%\x1b[0m" {
+	if cold != " \x1b[2m│\x1b[0m \x1b[38;5;118m💾5m✓3m00s\x1b[0m \x1b[1;38;5;203m11%\x1b[0m" {
 		t.Fatalf("a full re-write must read red: %q", cold)
 	}
 }
@@ -225,7 +225,7 @@ func TestCacheWindowPrefersTheHarnessExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := stripANSICodes(cacheWindowSegment(runtime, now, path, 99, payload.PromptCache, "S"))
-	if got != " │ 💾1h✓59m:0s 99%" {
+	if got != " │ 💾1h✓59m00s 99%" {
 		t.Fatalf("segment = %q, want the harness's 1h window with 59m left", got)
 	}
 	lapsed := jsonText(now.Add(-2 * time.Minute).Unix())
@@ -235,19 +235,19 @@ func TestCacheWindowPrefersTheHarnessExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = stripANSICodes(cacheWindowSegment(runtime, now, path, -1, payload.PromptCache, "S"))
-	if got != " │ 💾5m✗2m:0s" {
+	if got != " │ 💾5m✗2m00s" {
 		t.Fatalf("segment = %q, want the harness expiry and its own 5m label", got)
 	}
 	noExpiry := &promptCache{TTL: "5m"}
 	got = stripANSICodes(cacheWindowSegment(runtime, now, path, -1, noExpiry, "S"))
-	if got != " │ 💾1h✗2m:0s" {
+	if got != " │ 💾1h✗2m00s" {
 		t.Fatalf("a prompt_cache without expiry must fall back to the transcript, got %q", got)
 	}
 }
 
 // A lapsed window's hit rate is history: the last call read it while the
 // cache was warm, and the next call will not. It renders as "was N%" in the
-// muted colour, on the main line and on a sub-agent row alike.
+// muted colour.
 func TestLapsedCacheWindowMarksTheHitAsPast(t *testing.T) {
 	now := time.Date(2026, 9, 2, 10, 10, 0, 0, time.UTC)
 	path := writeTranscript(
@@ -262,21 +262,18 @@ func TestLapsedCacheWindowMarksTheHitAsPast(t *testing.T) {
 	harness := &promptCache{TTL: "5m", ExpiresAt: &expires}
 
 	main := cacheWindowSegment(runtime, now, path, 99, harness, "S")
-	if got := stripANSICodes(main); got != " │ 💾5m✗4m:0s was 99%" {
+	if got := stripANSICodes(main); got != " │ 💾5m✗4m00s was 99%" {
 		t.Fatalf("harness segment = %q, want the lapsed hit as was 99%%", got)
 	}
-	if main != " \x1b[2m│\x1b[0m \x1b[1;38;5;203m💾5m✗4m:0s\x1b[0m \x1b[38;5;245mwas 99%\x1b[0m" {
+	if main != " \x1b[2m│\x1b[0m \x1b[1;38;5;203m💾5m✗4m00s\x1b[0m \x1b[38;5;245mwas 99%\x1b[0m" {
 		t.Fatalf("a lapsed hit must render muted, not as live health: %q", main)
 	}
 	transcript := stripANSICodes(cacheWindowSegment(runtime, now, path, 99, nil, "S"))
-	if got := transcript; got != " │ 💾5m✗5m:0s was 99%" {
+	if got := transcript; got != " │ 💾5m✗5m00s was 99%" {
 		t.Fatalf("transcript segment = %q, want the lapsed hit as was 99%%", got)
 	}
-	if got := stripANSICodes(agentCacheText(path, 94, now)); got != "💾5m✗5m:0s was 94%" {
-		t.Fatalf("agent row = %q, want the lapsed hit as was 94%%", got)
-	}
 	live := stripANSICodes(cacheWindowSegment(runtime, now.Add(-9*time.Minute), path, 99, nil, "S"))
-	if live != " │ 💾5m✓4m:0s 99%" {
+	if live != " │ 💾5m✓4m00s 99%" {
 		t.Fatalf("a live window keeps the bare hit: %q", live)
 	}
 }
@@ -332,7 +329,7 @@ func TestStatuslineCacheWindowReadsConfigStateDB(t *testing.T) {
 			}
 			runtime := configRuntime(t, home, flagPath, envPath, "")
 			got := stripANSICodes(cacheWindowSegment(runtime, now, "", -1, &promptCache{ExpiresAt: &expires}, "S"))
-			if got != " │ 💾1h✓2m:0s" {
+			if got != " │ 💾1h✓2m00s" {
 				t.Fatalf("window = %q, want the 1h launch recorded in config state.db %s", got, stateDB)
 			}
 		})
@@ -349,7 +346,7 @@ func TestStatuslineCacheWindowStateDBEnvOverridesConfig(t *testing.T) {
 	launchAt(t, envDB, "S", true)
 	runtime := configRuntime(t, home, "", writeStateConfig(t, configDB), envDB)
 	got := stripANSICodes(cacheWindowSegment(runtime, now, "", -1, &promptCache{ExpiresAt: &expires}, "S"))
-	if got != " │ 💾1h✓2m:0s" {
+	if got != " │ 💾1h✓2m00s" {
 		t.Fatalf("window = %q, want the 1h launch from PFM_STATE_DB %s over config %s", got, envDB, configDB)
 	}
 }

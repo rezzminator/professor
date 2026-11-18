@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
-// agentNesting is what a row says about the agents below its task, at every
+// agentNesting is what Agents says about the agents below a task, at every
 // depth: how many there are, how many are working right now (they still run,
 // runningAgents, and their own turn is open), and how many could
 // not be read, an agent whose meta file could not be read included (its parent
@@ -223,7 +222,6 @@ type activityFold struct {
 	Context     int64               `json:"context"`
 	Effort      string              `json:"effort,omitempty"`
 	Model       string              `json:"model,omitempty"`
-	Cwd         string              `json:"cwd,omitempty"`
 	Turn        turnFold            `json:"turn"`
 	Spend       *spendScan          `json:"spend"`
 	// ownSpend is the scan Spend must be: a checkpoint decodes into it, and one
@@ -293,24 +291,4 @@ func messageTurnOpen(line []byte) (open, ok bool) {
 		}
 	}
 	return toolCall || entry.Message.StopReason == nil || *entry.Message.StopReason == "", true
-}
-
-// nestingSegment renders "2/5": the agents below the task working right now
-// (green) over all of them at every depth (the tools colour). "" when it
-// spawned none, so the row carries no segment and no separator; "?/?" when the
-// scan failed, and an "(N unread)" suffix for agents whose turn state could
-// not be read.
-func nestingSegment(nest agentNesting) string {
-	if nest.err != nil {
-		return cWarn + "?/?" + reset
-	}
-	if nest.total == 0 && nest.unknown == 0 {
-		return ""
-	}
-	working := cRunning + strconv.Itoa(nest.active) + reset
-	line := working + cMuted + "/" + reset + cTools + strconv.Itoa(nest.total) + reset
-	if nest.unknown > 0 {
-		line += cWarn + " (" + strconv.Itoa(nest.unknown) + " unread)" + reset
-	}
-	return line
 }

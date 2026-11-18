@@ -42,7 +42,7 @@ func TestReadTranscriptSpendBillsAResponseOncePerRequestID(t *testing.T) {
 
 // A row's spend is the agent's own billing plus every agent's below it, at
 // any depth; a floor it cannot vouch for says "+?", never a quiet low number.
-func TestRenderAgentRowsSpendCoversTheWholeTree(t *testing.T) {
+func TestAgentFactsSpendCoversTheWholeTree(t *testing.T) {
 	const (
 		// $3000e-6 on sonnet-5-5: 1000 in at $2, 100 out at $10.
 		childResponse = `{"type":"assistant","message":{"id":"c-1","model":"claude-sonnet-5-5",` +
@@ -65,7 +65,7 @@ func TestRenderAgentRowsSpendCoversTheWholeTree(t *testing.T) {
 			name:        "a lone agent: its own two responses, the repeated one once",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": ""},
-			want:        "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:        "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name: "a streamed response counts its last line, the final output",
@@ -75,7 +75,7 @@ func TestRenderAgentRowsSpendCoversTheWholeTree(t *testing.T) {
 				turnEnded,
 			}},
 			parents: map[string]string{"p": "", "c1": "p"},
-			want:    "0/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/3.0K/135/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:    "0/1│Σ$0.01/3.0K/135/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name: "a child and a grandchild add in",
@@ -83,20 +83,20 @@ func TestRenderAgentRowsSpendCoversTheWholeTree(t *testing.T) {
 				"p": agentTranscriptLines, "c1": {childResponse, turnEnded}, "g1": {grandchildResponse, turnEnded},
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
-			want:    "0/2│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$8.01/1.0M/135/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:    "0/2│Σ$8.01/1.0M/135/2│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a model the table cannot price leaves a floor",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {unpricedResponse, turnEnded}},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "0/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.5K/85/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
+			want:        "0/1│Σ$0.01/2.5K/85/2+?│opus│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a child transcript that cannot be read leaves a floor and its cause",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "0/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
-			warn:        "statusline: agent rows: row p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory\n",
+			want:        "0/1│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1",
+			warn:        "statusline: agents: p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory\n",
 		},
 		{
 			name: "an agent whose meta file cannot be read leaves the nested sum a floor, the readable child still adds in",
@@ -105,8 +105,8 @@ func TestRenderAgentRowsSpendCoversTheWholeTree(t *testing.T) {
 			},
 			parents:  map[string]string{"p": "", "c1": "p", "c2": "p"},
 			tornMeta: []string{"c1"},
-			want:     "0/1 (1 unread)│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/3.0K/135/2+?│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate",
-			warn:     "statusline: agent rows: row p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n",
+			want:     "0/1 (1 unread)│Σ$0.01/3.0K/135/2+?│opus│1 error│💾94%│⟲1",
+			warn:     "statusline: agents: p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n",
 		},
 	}
 	for _, tc := range cases {
@@ -122,7 +122,7 @@ func TestRenderAgentRowsSpendCoversTheWholeTree(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			got, warned := renderOneSubagent(t, session, parentTask)
+			got, warned := factsOfOne(t, session, parentTask)
 			if got != tc.want {
 				t.Errorf("content = %q, want %q", got, tc.want)
 			}
@@ -134,13 +134,11 @@ func TestRenderAgentRowsSpendCoversTheWholeTree(t *testing.T) {
 }
 
 // With no price table every row still counts its tokens; the dollars say "$?".
-func TestRenderAgentRowsSpendWithoutPrices(t *testing.T) {
+func TestAgentFactsSpendWithoutPrices(t *testing.T) {
 	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""})
-	rows, _ := renderFixture(t, rowsFixture{session: session, noPrices: true}, parentTask)
-	if content := stripANSICodes(
-		rows["p"],
-	); content != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$?/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm│orchestrate" {
-		t.Fatalf("content = %q, want Σ$?/2.0K/35/2 after the gauge", content)
+	rows, _ := factLinesFixture(t, agentsFixture{session: session, noPrices: true}, parentTask)
+	if content := rows["p"]; content != "Σ$?/2.0K/35/2│opus│1 error│💾94%│⟲1" {
+		t.Fatalf("facts = %q, want the tokens counted and the dollars $?", content)
 	}
 }
 
@@ -276,16 +274,11 @@ func TestReadTranscriptSpendPricesTheAdvisorAtItsOwnModel(t *testing.T) {
 			spend.partial,
 		)
 	}
-	plain := spendSegment(agentActivity{spend: agentSpend{usd: 1.5, advisorUSD: 0.25, priced: 1}})
-	if got := stripANSICodes(plain); !strings.Contains(got, "$1.50/0/0/0 adv $0.25") {
+	got := spendFact(agentActivity{spend: agentSpend{usd: 1.5, advisorUSD: 0.25, priced: 1}})
+	if got != "Σ$1.50/0/0/0 adv $0.25" {
 		t.Errorf("segment %q; want the advisor's dollars shown as advisor spend", got)
 	}
-	if got := stripANSICodes(
-		spendSegment(agentActivity{spend: agentSpend{usd: 1.5, priced: 1}}),
-	); strings.Contains(
-		got,
-		"adv",
-	) {
+	if got := spendFact(agentActivity{spend: agentSpend{usd: 1.5, priced: 1}}); got != "Σ$1.50/0/0/0" {
 		t.Errorf("segment %q; want no advisor mark without advisor spend", got)
 	}
 }
@@ -306,7 +299,7 @@ func TestReadTranscriptSpendMarksAnUnpricedAdvisorAsAFloor(t *testing.T) {
 		if !spend.partial || spend.advisorUSD != 0 || math.Abs(spend.usd-executor) > 1e-12 {
 			t.Errorf("advisor model %q: %+v; want a partial sum of the executor's %v", model, spend, executor)
 		}
-		if got := stripANSICodes(spendSegment(agentActivity{spend: spend})); !strings.Contains(got, " adv n/a") ||
+		if got := stripANSICodes(spendFact(agentActivity{spend: spend})); !strings.Contains(got, " adv n/a") ||
 			strings.Contains(got, "adv $") {
 			t.Errorf("advisor model %q: segment %q; want the advisor's dollars as n/a, never $0", model, got)
 		}
@@ -363,33 +356,31 @@ func ledgerTask(id string) string {
 		`"model":"claude-opus-5-5","contextWindowSize":1000000}`
 }
 
-// renderLedgerRows renders the tasks of one session and returns each row's content, ANSI stripped.
-func renderLedgerRows(t *testing.T, ledgerDir, sessionID, session string, ids ...string) map[string]string {
+// ledgerFactLines reads the tasks of one session under the ledger in ledgerDir and returns each
+// agent's factLine.
+func ledgerFactLines(t *testing.T, ledgerDir, sessionID, session string, ids ...string) map[string]string {
 	t.Helper()
 	tasks := make([]string, 0, len(ids))
 	for _, id := range ids {
 		tasks = append(tasks, ledgerTask(id))
 	}
-	rows, _ := renderFixture(
+	lines, _ := factLinesFixture(
 		t,
-		rowsFixture{session: session, sessionID: sessionID, env: ledgerEnv(ledgerDir)},
+		agentsFixture{session: session, sessionID: sessionID, env: ledgerEnv(ledgerDir)},
 		tasks...)
-	for id, raw := range rows {
-		rows[id] = stripANSICodes(raw)
-	}
-	return rows
+	return lines
 }
 
 // With a ledger a row's dollars and tokens are the ledger rows of that agent and every agent below
 // it, side calls included, the tree taken from the rows' parent_agent_id (agent a..03 has no meta
 // file at all) and the meta files. The main line's one dollar amount is the ledger total, and it is
 // the main thread's own rows plus every top-level row.
-func TestRenderAgentRowsPricesRowsFromTheLedger(t *testing.T) {
+func TestAgentFactsPricesRowsFromTheLedger(t *testing.T) {
 	ledgerDir := useLedgerSample(t)
 	session := nestedSession(t,
 		map[string][]string{ledgerAgentRoot: agentTranscriptLines, ledgerAgentFirst: agentTranscriptLines},
 		map[string]string{ledgerAgentRoot: "", ledgerAgentFirst: ledgerAgentRoot})
-	rows := renderLedgerRows(
+	rows := ledgerFactLines(
 		t,
 		ledgerDir,
 		ledgerSampleSession,
@@ -399,9 +390,9 @@ func TestRenderAgentRowsPricesRowsFromTheLedger(t *testing.T) {
 		ledgerAgentSecond,
 	)
 	for id, want := range map[string]string{
-		ledgerAgentRoot:   "1/1│▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.95/740.0K/3.2K/4│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm",
-		ledgerAgentFirst:  "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.08/224.3K/1.2K/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm",
-		ledgerAgentSecond: "?/1.0M Σ$0.09/224.5K/1.4K/?│role ?│opus│running 2m:0s│💾!", // no transcript: its context is unknown
+		ledgerAgentRoot:   "1/1│Σ$0.95/740.0K/3.2K/4│opus│1 error│💾94%│⟲1",
+		ledgerAgentFirst:  "Σ$0.08/224.3K/1.2K/2│opus│1 error│💾94%│⟲1",
+		ledgerAgentSecond: "Σ$0.09/224.5K/1.4K/?│opus│💾!", // no transcript: its context is unknown
 	} {
 		if rows[id] != want {
 			t.Errorf("row %s = %q, want %q", id, rows[id], want)
@@ -429,19 +420,19 @@ func TestRenderAgentRowsPricesRowsFromTheLedger(t *testing.T) {
 		},
 	}
 	// the main line's total is the main rows plus the top-level row
-	_, line, _ := renderContextLine(runtime, data, "", subagentNow)
+	_, line := instrumentLine(runtime, data, "", subagentNow)
 	if got, want := fmt.Sprintf(
 		"main rows $%.4f: %s",
 		mainRows,
 		stripANSICodes(line),
-	), "main rows $0.3403: 🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$1.29/1.0M/4.0K/?"; got != want {
+	), "main rows $0.3403: 🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $1.29 · 1.0M in · 4.0K out · ? tools"; got != want {
 		t.Errorf("main line = %q, want %q", got, want)
 	}
 }
 
 // An agent the ledger has no row for yet (its calls reach the ledger up to 20 s late) keeps today's
 // transcript pricing; an advisor consulted by a ledger-priced agent stays its own "adv $X".
-func TestRenderAgentRowsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
+func TestAgentFactsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	dir := useLedgerSample(t)
 	if err := costledger.Append(dir, costledger.Row{
 		RequestID: "req_adv", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "adv1",
@@ -453,20 +444,20 @@ func TestRenderAgentRowsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 	session := nestedSession(t,
 		map[string][]string{"fresh": agentTranscriptLines, "adv1": {advisorResponse("claude-opus-5-5")}},
 		map[string]string{"fresh": "", "adv1": ""})
-	rows := renderLedgerRows(t, dir, ledgerSampleSession, session, "fresh", "adv1")
-	if want := "1.0K/1.0M Σ$0.01/2.0K/35/2"; rows["fresh"] != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm" {
+	rows := ledgerFactLines(t, dir, ledgerSampleSession, session, "fresh", "adv1")
+	if want := "Σ$0.01/2.0K/35/2"; rows["fresh"] != "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1" {
 		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
 	}
 	// the gauge reads the transcript's call, not the payload's 1.0K:
 	// its last executor iteration (2 + 87829 + 890), never the top level's sum of both
-	if want := "88.7K/1.0M Σ$1.00/10/20/0 adv $0.48"; rows["adv1"] != "▱▱▱▱▱▱▱▱ 9% 88.7K/1.0M Σ$1.00/10/20/0 adv $0.48│general-purpose│sonnet│running 2m:0s│💾5m? 99%" {
+	if want := "Σ$1.00/10/20/0 adv $0.48"; rows["adv1"] != "Σ$1.00/10/20/0 adv $0.48│sonnet│💾99%" {
 		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
 	}
 }
 
 // A sub-agent whose ledger rows all lack a cost (a span-only join) keeps its transcript's price,
 // tokens and tool calls: the ledger prices nothing of it, so it must not overwrite them with $0.00.
-func TestRenderAgentRowsLedgerRowsWithoutCostKeepTheTranscriptPrice(t *testing.T) {
+func TestAgentFactsLedgerRowsWithoutCostKeepTheTranscriptPrice(t *testing.T) {
 	dir := useLedgerSample(t)
 	if err := costledger.Append(dir, costledger.Row{
 		RequestID: "req_null", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "fresh",
@@ -475,15 +466,15 @@ func TestRenderAgentRowsLedgerRowsWithoutCostKeepTheTranscriptPrice(t *testing.T
 		t.Fatal(err)
 	}
 	session := nestedSession(t, map[string][]string{"fresh": agentTranscriptLines}, map[string]string{"fresh": ""})
-	got := renderLedgerRows(t, dir, ledgerSampleSession, session, "fresh")["fresh"]
-	if want := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.01/2.0K/35/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm"; got != want {
+	got := ledgerFactLines(t, dir, ledgerSampleSession, session, "fresh")["fresh"]
+	if want := "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1"; got != want {
 		t.Errorf("row whose ledger rows carry no cost = %q, want %q", got, want)
 	}
 }
 
 // A sub-agent whose transcript did not read and whose ledger rows all lack a cost keeps the
 // ledger's tokens with unknown dollars: neither a manufactured $0.00 nor a row of "?".
-func TestRenderAgentRowsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testing.T) {
+func TestAgentFactsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testing.T) {
 	dir := useLedgerSample(t)
 	if err := costledger.Append(dir, costledger.Row{
 		RequestID: "req_ghost", TS: "2026-10-09T18:40:00.000Z", SessionID: ledgerSampleSession, AgentID: "ghost",
@@ -492,8 +483,8 @@ func TestRenderAgentRowsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testin
 		t.Fatal(err)
 	}
 	session := nestedSession(t, map[string][]string{"fresh": agentTranscriptLines}, map[string]string{"fresh": ""})
-	got := renderLedgerRows(t, dir, ledgerSampleSession, session, "ghost")["ghost"]
-	if want := "Σ$?/10/20/?"; got != "?/1.0M Σ$?/10/20/?│role ?│opus│running 2m:0s│💾!" {
+	got := ledgerFactLines(t, dir, ledgerSampleSession, session, "ghost")["ghost"]
+	if want := "Σ$?/10/20/?"; got != "Σ$?/10/20/?│opus│💾!" {
 		t.Errorf("row with costless ledger rows and no transcript = %q, want %q", got, want)
 	}
 }
@@ -503,7 +494,7 @@ func TestRenderAgentRowsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testin
 // (input_tokens = total - cached - written): the row prices it at its Codex
 // row's rates, input and a cache write at in, cache read at cached, output at
 // out (the tiers are pricing's TestResponseRequestsCostParts).
-func TestRenderAgentRowsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
+func TestAgentFactsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 	gpt := func(usage string) []string {
 		return []string{
 			`{"type":"assistant","message":{"id":"g-1","model":"gpt-6-sol","usage":` + usage + `}}`, turnEnded,
@@ -521,7 +512,7 @@ func TestRenderAgentRowsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 			name: "the base tier, a cache write billed as input",
 			lines: gpt(`{"input_tokens":100000,"output_tokens":1000000,"cache_read_input_tokens":150000,` +
 				`"cache_creation_input_tokens":10000}`),
-			want: "260.0K/? ctx missing Σ$10.25/260.0K/1.0M/0 API-eq│general-purpose│sol-6│running 1m:30s│💾∅ 57%│orchestrate",
+			want: "Σ$10.25/260.0K/1.0M/0 API-eq│sol-6│💾∅ 57%",
 		},
 		{
 			name: "a model no row prices stays unpriced",
@@ -529,13 +520,13 @@ func TestRenderAgentRowsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 				`{"type":"assistant","message":{"id":"g-1","model":"gpt-nonesuch-9","usage":` +
 					`{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0}}}`, turnEnded,
 			},
-			want: "1.0K/? ctx missing Σ$?/1.0K/100/0 API-eq│general-purpose│9-nonesuch│running 1m:30s│💾∅ 0%│orchestrate",
+			want: "Σ$?/1.0K/100/0 API-eq│9-nonesuch│💾∅ 0%",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			session := nestedSession(t, map[string][]string{"p": tc.lines}, map[string]string{"p": ""})
 			// the row is read inside the minute after the turn ended, before a finished row collapses
-			got, _ := renderSubagentAt(t, session, task, subagentStart.Add(90*time.Second))
+			got, _ := factsOfOneAt(t, session, task, subagentStart.Add(90*time.Second))
 			// the transcript's call leads the payload's 1K; the catalog this test never
 			// writes leaves the gpt window unknown
 			if got != tc.want {
@@ -545,26 +536,23 @@ func TestRenderAgentRowsSpendPricesAGatewayGptAtItsCodexRow(t *testing.T) {
 	}
 }
 
-// noEnv is an empty closed environment: a render under it can reach no ledger the test did not build.
-var noEnv paths.Env = &paths.MapEnv{Values: map[string]string{}}
-
 // ledgerEnv is the closed environment whose cost ledger directory is dir.
-func ledgerEnv(dir string) paths.Env {
-	return &paths.MapEnv{Values: map[string]string{paths.EnvCostLedgerDir: dir}}
+func ledgerEnv(dir string) map[string]string {
+	return map[string]string{paths.EnvCostLedgerDir: dir}
 }
 
-// The sub-agent rows resolve the ledger from the env they are handed, never the process's: a decoy
+// Agents resolves the ledger from the env it is handed, never the process's: a decoy
 // ledger in the process environment (the real one a test must not reach) is not read, the injected
 // one is. The same ledger is read by the main line through its Runtime, so the totals add up.
-func TestRenderAgentRowsReadsTheLedgerUnderTheInjectedEnv(t *testing.T) {
+func TestAgentFactsReadsTheLedgerUnderTheInjectedEnv(t *testing.T) {
 	decoy := t.TempDir()
 	t.Setenv(paths.EnvCostLedgerDir, decoy)
 	ledgerDir := useLedgerSample(t)
 	session := nestedSession(t,
 		map[string][]string{ledgerAgentRoot: agentTranscriptLines},
 		map[string]string{ledgerAgentRoot: ""})
-	rows := renderLedgerRows(t, ledgerDir, ledgerSampleSession, session, ledgerAgentRoot)
-	if want := "$0.95/740.0K/3.2K/"; rows[ledgerAgentRoot] != "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M Σ$0.95/740.0K/3.2K/2│general-purpose│opus│running 2m:0s│1 error│💾5m✓3m:8s 94%│⟲1│pfm" {
+	rows := ledgerFactLines(t, ledgerDir, ledgerSampleSession, session, ledgerAgentRoot)
+	if want := "$0.95/740.0K/3.2K/"; rows[ledgerAgentRoot] != "Σ$0.95/740.0K/3.2K/2│opus│1 error│💾94%│⟲1" {
 		t.Fatalf("row = %q, want the injected ledger's %q", rows[ledgerAgentRoot], want)
 	}
 }
@@ -599,11 +587,11 @@ func TestRenderGatewayZeroLedgerWithNativeChild(t *testing.T) {
 			CostUSDMicros: micros(3000),
 		},
 	})
-	rows := renderLedgerRows(t, dir, spendSession, session, "p", "c")
-	if rows["p"] != "1/1│150.0K/? ctx missing Σ$0.31/151.0K/10.1K/1 API-eq│general-purpose│sol-6│running 2m:0s│💾∅ 33%" {
+	rows := ledgerFactLines(t, dir, spendSession, session, "p", "c")
+	if rows["p"] != "1/1│Σ$0.31/151.0K/10.1K/1 API-eq│sol-6│💾∅ 33%" {
 		t.Fatalf("gateway parent lost price/native child: %q", rows["p"])
 	}
-	if rows["c"] != "?/1.0M Σ$0.00/1.0K/100/1│general-purpose│sonnet│running 2m:0s│💾–" {
+	if rows["c"] != "Σ$0.00/1.0K/100/1│sonnet│💾–" {
 		t.Fatalf("native child changed: %q", rows["c"])
 	}
 }
@@ -660,4 +648,11 @@ func TestFailedReadSpendKeepsOnlyWhatWasFolded(t *testing.T) {
 			}
 		})
 	}
+}
+
+// spendFact is the spend segment of the factLine the door's facts of an agent
+// read as activity give.
+func spendFact(activity agentActivity) string {
+	activity.cacheHit = -1
+	return strings.Split(factLine(newAgentFacts(subagentTask{}, &activity, 0)), "│")[0]
 }

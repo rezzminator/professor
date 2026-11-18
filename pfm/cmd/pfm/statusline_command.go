@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -30,19 +32,33 @@ func runStatuslineWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
-	flags := cli.NewFlagSet("statusline", "usage: pfm statusline [--refresh-gpt]", stderr)
+	flags := cli.NewFlagSet(
+		"statusline",
+		"usage: pfm statusline [--refresh-gpt | --agents TRANSCRIPT [AGENT-ID...]]",
+		stderr,
+	)
 	refreshCodex := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
+	agents := flags.String(
+		"agents",
+		"",
+		"print the sub-agents of the session TRANSCRIPT names, as JSON: the running ones, or each AGENT-ID named after it",
+	)
 	pacedKey := flags.String("paced", "", "internal: run the paced render worker of one chat key")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
+	// --agents is a mode by its presence: an empty path is the door's failure,
+	// never a fall-through to the main render.
+	agentsMode := false
+	flags.Visit(func(f *flag.Flag) { agentsMode = agentsMode || f.Name == "agents" })
 	modes := 0
-	for _, set := range []bool{*refreshCodex, *pacedKey != ""} {
+	for _, set := range []bool{*refreshCodex, *pacedKey != "", agentsMode} {
 		if set {
 			modes++
 		}
 	}
-	if flags.NArg() != 0 || modes > 1 {
+	// Only --agents takes arguments: the agent ids it answers for.
+	if (flags.NArg() != 0 && !agentsMode) || modes > 1 {
 		flags.Usage()
 		return 2
 	}
@@ -57,6 +73,10 @@ func runStatuslineWithRuntime(
 			return 1
 		}
 		return 0
+	}
+
+	if agentsMode {
+		return runStatuslineAgents(*agents, flags.Args(), stdout, stderr, machine, env)
 	}
 
 	paced := statusline.Paced{
@@ -83,6 +103,34 @@ func runStatuslineWithRuntime(
 	paced.Key = statusline.PacedKey(raw, env.Get("COLUMNS"), env.Get(pfmengine.MustLookup(pfmengine.Claude).HomeEnv),
 		resolve.EnvironmentOf(env.Get))
 	paced.Front(raw, stdout)
+	return 0
+}
+
+// runStatuslineAgents is `pfm statusline --agents TRANSCRIPT [AGENT-ID...]`,
+// the door the professor plugin's sub-agent row reads, for the running agents
+// or exactly the ids named: one JSON line on stdout, exit 0; a
+// failure prints nothing on stdout, its cause on stderr, and exits 1, so it
+// never reads as a session with no agents.
+func runStatuslineAgents(
+	sessionTranscript string,
+	ids []string,
+	stdout, stderr io.Writer,
+	machine commandRuntime,
+	env paths.Env,
+) int {
+	runtime, err := statuslineRuntime(machine, env, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm statusline --agents: %v\n", err)
+		return 1
+	}
+	report, err := statusline.Agents(sessionTranscript, ids, runtime)
+	if err == nil {
+		err = json.NewEncoder(stdout).Encode(report)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm statusline --agents: %v\n", err)
+		return 1
+	}
 	return 0
 }
 

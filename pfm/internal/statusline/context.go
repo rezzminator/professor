@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -39,77 +38,14 @@ type contextGauge struct {
 	scanned *agentSpend
 }
 
-func renderContextLine(runtime Runtime, data input, project string, now time.Time) (contextGauge, string, int64) {
-	var mainScan *spendScan
-	if runtime.Engine != pfmengine.Codex {
-		mainScan = newSpendScan(runtime.Prices)
-	}
-	gauge := transcriptGauge(runtime, data, project, mainScan)
-	percent := gauge.percent
-	label := "?%"
-	if (gauge.window > 0 && gauge.known) || gauge.percentKnown {
-		label = strconv.Itoa(percent) + "%"
-	} else if !gauge.known && data.ContextWindow.UsedPercentage > 0 {
-		label = strconv.Itoa(percent) + "%"
-	}
-	count := "?"
-	if gauge.known {
-		count = formatContextTokens(gauge.tokens)
-	}
-	l2 := urgencyEmoji(
-		percent,
-	) + " " + makeBar(
-		percent,
-		15,
-	) + " " + percentColor(
-		percent,
-	) + gauge.marker + label + " " + count + reset
-	if gauge.capacityState != "" {
-		l2 += " " + cWarn + "ctx " + gauge.capacityState + reset
-	}
-	if gauge.transcript && runtime.Engine == pfmengine.Codex && gauge.window > 0 {
-		l2 += " " + cWindow + "of " + formatContextTokens(gauge.window) + reset
-	}
-	if runtime.Engine == pfmengine.Codex && gauge.humanPrompts > 0 {
-		l2 += " " + dim + "✎" + strconv.Itoa(gauge.humanPrompts) + reset
-	}
-	contextTokens := gauge.tokens
-	if runtime.Engine != pfmengine.Codex {
-		books := readLedgerBooks(runtime, data.SessionID)
-		l2 += sep + sessionSpendSegment(data, runtime.Prices, books, gauge.scanned, runtime.scans)
-	}
-	// Never width-gated: a recorded launch reports its cache window and
-	// transcript readability. Codex reports no cache split.
-	hit := -1
-	if runtime.Engine != pfmengine.Codex {
-		usage := data.ContextWindow.CurrentUsage
-		hit = cacheHitPercent(usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.InputTokens)
-	}
-	if openAIModel(gauge.model) || openAIModel(data.Model.ID) ||
-		(data.Model.ID == "" && openAIModel(data.Model.DisplayName)) {
-		text := unmeasuredCacheText(gauge.cacheHit)
-		if gauge.transcriptErr {
-			text = cBad + "💾!" + reset
-		}
-		return gauge, l2 + sep + text, contextTokens
-	}
-	return gauge, l2 + cacheWindowSegment(
-		runtime,
-		now,
-		data.TranscriptPath,
-		hit,
-		data.PromptCache,
-		data.SessionID,
-	), contextTokens
-}
-
-// sessionSpendSegment is the main line's "💰$4.68/6.5M/31K/46 sink failed": exactly ONE dollar
-// amount in every state, then prompt tokens, output tokens and tool calls. With a cost ledger the
+// sessionSpendSegment is the main line's spend, "Σ $4.68 · 6.5M in · 31.0K out · 46 tools sink failed"
+// in its fullest form (spendText): exactly ONE dollar amount in every state, then prompt tokens,
+// output tokens and tool calls. With a cost ledger the
 // amount is the complete session total (completeSpend): the ledger's total — Claude Code's own
 // price of every API call of the session, the ones no transcript records included — plus the spend
 // the ledger never saw (preLedgerUSD), unless Claude Code's payload is ahead of that by more than the
 // tolerance; the tokens are the ledger's sums. That total is the main thread's rows plus every
-// top-level sub-agent row plus the before-ledger spend, and `pfm tokens`' session total. Without one the amount is Claude Code's cost.total_cost_usd and the tokens are the
+// top-level sub-agent row of the ledger plus the before-ledger spend, and `pfm tokens`' session total. Without one the amount is Claude Code's cost.total_cost_usd and the tokens are the
 // transcripts', this chat's and every sub-agent's, priced at the served table; with no Claude Code
 // figure the logged price leads. Tool calls are always the transcripts'. A floor carries "+?" (a
 // call whose cost never arrived, a model the table cannot price); a transcript that cannot be
@@ -121,7 +57,7 @@ func sessionSpendSegment(
 	books ledgerBooks,
 	scanned *agentSpend,
 	scans transcriptScans,
-) string {
+) spendText {
 	total := data.Cost.TotalCostUSD
 	var spend agentSpend
 	readable := strings.TrimSpace(data.TranscriptPath) != ""
@@ -131,10 +67,7 @@ func sessionSpendSegment(
 			readable = false
 		}
 	}
-	tools := cWarn + "?" + reset
-	if readable {
-		tools = cTools + strconv.Itoa(spend.tools) + reset
-	}
+	text := spendText{countsKnown: true, tools: spend.tools, toolsKnown: readable}
 	if books.ledger.Present {
 		native := ledgerSpend(books.ledger.Rows)
 		booked := spend.withLedger(native)
@@ -144,58 +77,25 @@ func sessionSpendSegment(
 			before, ambiguous = beforeGatewayOverlap(books.ledger.Rows, spend, supplement)
 			booked.partial = booked.partial || ambiguous
 		}
-		one := completeSpend(booked.usd, before, total)
-		line := spendDollars(one, true) + spendTail(booked.in, booked.out, tools)
-		if booked.partial || booked.behind {
-			line += cWarn + "+?" + reset
-		}
-		return line + markerText(spendMarker(books, one, 0, false, before)) + booked.gateway.note()
+		text.usd, text.usdKnown = completeSpend(booked.usd, before, total), true
+		text.in, text.out, text.floor = booked.in, booked.out, booked.partial || booked.behind
+		text.marker, text.gateway = spendMarker(books, text.usd, 0, false, before), booked.gateway
+		return text
 	}
 	if !readable {
-		return spendDollars(total, total > 0) + cWarn + "?/?/?" + reset +
-			markerText(spendMarker(books, total, 0, false, 0))
+		return spendText{usd: total, usdKnown: total > 0, marker: spendMarker(books, total, 0, false, 0)}
 	}
 	logged := spend.priced > 0 || !spend.partial
-	line := spendDollars(spend.usd, logged)
+	text.usd, text.usdKnown = spend.usd, logged
 	if total > 0 {
 		if spend.gateway.present {
 			total = max(total, spend.usd)
 		}
-		line = spendDollars(total, true)
+		text.usd, text.usdKnown = total, true
 	}
-	line += spendTail(spend.in, spend.out, tools)
-	if spend.partial && (logged || spend.behind) {
-		line += cWarn + "+?" + reset
-	}
-	return line + markerText(spendMarker(books, total, spend.usd, logged, 0)) + spend.gateway.note()
-}
-
-// spendTail is "1.0M/5.1K/46": prompt tokens, output tokens, tool calls.
-func spendTail(in, out int64, tools string) string {
-	return cTokens + formatContextTokens(in) + reset + cMuted + "/" + reset +
-		cTokens + formatContextTokens(out) + reset + cMuted + "/" + reset + tools
-}
-
-// markerText renders a spendMarker, "" for none.
-func markerText(marker string) string {
-	if marker == "" {
-		return ""
-	}
-	return cWarn + " " + marker + reset
-}
-
-// spendDollars is "💰$4.68/" coloured by size, or "💰$?/" when unknown.
-func spendDollars(usd float64, known bool) string {
-	if !known {
-		return cWarn + "💰$?" + reset + cMuted + "/" + reset
-	}
-	color := dim
-	if usd >= 10 {
-		color = red
-	} else if usd >= 2 {
-		color = yellow
-	}
-	return color + "💰" + fmt.Sprintf("$%.2f", usd) + reset + cMuted + "/" + reset
+	text.in, text.out, text.floor = spend.in, spend.out, spend.partial && (logged || spend.behind)
+	text.marker, text.gateway = spendMarker(books, total, spend.usd, logged, 0), spend.gateway
+	return text
 }
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.

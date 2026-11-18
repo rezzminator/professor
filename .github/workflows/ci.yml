@@ -399,6 +399,26 @@ jobs:
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml; }
           python3 scripts/check-plugin-workflows.py
 
+      # The in-tree professor plugin (plugins/professor/) has no CI of its own: it
+      # ships in this repository's release. Its tests, type-check and strict
+      # validation run here, after the scanner, so the scanner never scores the
+      # node_modules its install leaves; the validation runs on the Claude Code
+      # its agent-row mod is written against.
+      - name: Set up Node for the professor plugin
+        if: ${{ !cancelled() }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: The professor plugin passes its tests, type-check and validation
+        if: ${{ !cancelled() }}
+        env:
+          CLAUDE_CODE_VERSION: "2.1.326"
+        run: |
+          set -euo pipefail
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          make plugin-check
+
   # main takes only release pull requests: VERSION moved past main's, and its
   # authored notes releases/v{VERSION}.md exist and pass the grammar.
   release:

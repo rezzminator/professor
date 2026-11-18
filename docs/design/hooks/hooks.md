@@ -261,7 +261,7 @@ The same check stats the first word of every template command, following a symli
 
 ### Account files: pfm-settings
 
-`pfm-settings` reads each physical `settings.json` in the store and configured account dirs once, against the ownership ledger and pfm command shapes. Its items are distinct `hook "{command}"` entries sorted by command, then `statusLine`, then `subagentStatusLine`, joined with `, `. Doctor prints `host-check: BLOCK pfm-settings {file} — carries pfm's {items} — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install`, followed by `host-check:   fix: remove {items} from {file} (each hook entry running that command and each named key; keep every other entry)`. Install refuses until the operator fixes the file.
+`pfm-settings` reads each physical `settings.json` in the store and configured account dirs once, against the ownership ledger and pfm command shapes. Its items are distinct `hook "{command}"` entries sorted by command, then `statusLine`, joined with `, `. Doctor prints `host-check: BLOCK pfm-settings {file} — carries pfm's {items} — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install`, followed by `host-check:   fix: remove {items} from {file} (each hook entry running that command and each named key; keep every other entry)`. Install refuses until the operator fixes the file.
 
 An absent file or a file without pfm-owned keys produces no row. An unreadable file or ownership ledger produces a BLOCK `UNREADABLE` row with its cause and remedy; failed inspection is never clean. A custom status line and unrelated hook commands remain the operator's settings.
 

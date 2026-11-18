@@ -20,7 +20,7 @@ import (
 )
 
 // cacheWindowSegment renders the prompt cache's time left and the share of
-// the last call's prompt read from it: 💾1h✓59m:28s 94%. The window's length
+// the last call's prompt read from it: 💾1h✓59m28s 94%. The window's length
 // comes first from Claude Code's own prompt_cache (its request clock and TTL);
 // when the payload carries no TTL the launch record decides it, never the
 // statusline's own environment; a session pfm never launched falls to the
@@ -250,41 +250,17 @@ func transcriptWindow(runtime Runtime, transcriptPath string) (cacheWindow, bool
 	return window, true
 }
 
-// countdownText renders a live or lapsed cache window, 💾1h✓59m:28s or
-// 💾5m✗2m:0s, and reports whether it has lapsed.
+// countdownText renders a live or lapsed cache window, 💾1h✓59m28s or
+// 💾5m✗2m00s, and reports whether it has lapsed.
 func countdownText(label string, expires, now time.Time) (string, bool) {
 	remaining := expires.Sub(now)
 	if remaining > 0 {
-		return cGood + "💾" + label + "✓" + formatCacheTime(remaining, false) + reset, false
+		return cGood + "💾" + label + "✓" + spanText(remaining) + reset, false
 	}
-	return cBad + "💾" + label + "✗" + formatCacheTime(-remaining, true) + reset, true
+	return cBad + "💾" + label + "✗" + spanText(-remaining) + reset, true
 }
 
-// agentCacheText is a sub-agent row's cache segment in the main line's shape —
-// 💾5m✓3m:8s 94% — measured from the agent's own transcript: the length its
-// newest cache write used, counted from its newest request. The row payload
-// carries no prompt_cache per agent. hit < 0 (no reply yet) renders 💾–.
-func agentCacheText(transcript string, hit int, now time.Time) string {
-	if hit < 0 {
-		return cMuted + "💾–" + reset
-	}
-	window := cacheAnchorIn(transcript, true)
-	label := "?"
-	ttl := 5 * time.Minute
-	switch window.ttl {
-	case time.Hour:
-		label, ttl = "1h", time.Hour
-	case 5 * time.Minute:
-		label = "5m"
-	}
-	text, lapsed := cWarn+"💾"+label+"?"+reset, false
-	if !window.anchor.IsZero() {
-		text, lapsed = countdownText(label, window.anchor.Add(ttl), now)
-	}
-	return text + " " + cacheHitText(hit, lapsed)
-}
-
-// unmeasuredCacheText is a sub-agent row's cache segment when its provider
+// unmeasuredCacheText is the cache segment when the model's provider
 // names no cache lifetime (a gpt- model through the gateway's chatgpt route):
 // the hit share of the newest completed call, and in the window's place a muted
 // 💾∅. It is neither the warning "?" (a transcript read with no request to
@@ -327,7 +303,8 @@ func (usage *transcriptUsage) UnmarshalJSON(raw []byte) error {
 }
 
 // cacheHitText renders the share of one call's prompt read from the cache:
-// 94%. Green from 80, yellow from 50, red below — the context re-written.
+// 94%. Green from cacheHitGoodFrom, yellow from cacheHitWarnFrom, red below —
+// the context re-written.
 // The figure only changes when a call completes, so once the window has
 // lapsed it describes a warm cache that is gone: it renders muted as
 // was 94%, never as live health beside the expiry.
@@ -337,13 +314,20 @@ func cacheHitText(percent int, lapsed bool) string {
 	}
 	color := cBad
 	switch {
-	case percent >= 80:
+	case percent >= cacheHitGoodFrom:
 		color = cGood
-	case percent >= 50:
+	case percent >= cacheHitWarnFrom:
 		color = cWarn
 	}
 	return color + fmt.Sprintf("%d%%", percent) + reset
 }
+
+// cacheHitWarnFrom and cacheHitGoodFrom are the hit shares cacheHitText turns
+// at; the agents door hands them to the professor plugin's row (agentsLook).
+const (
+	cacheHitWarnFrom = 50
+	cacheHitGoodFrom = 80
+)
 
 // cacheHitPercent is cache reads over the whole prompt; -1 for no prompt.
 func cacheHitPercent(read, created, uncached int64) int {
@@ -355,7 +339,7 @@ func cacheHitPercent(read, created, uncached int64) int {
 }
 
 // cacheWindow carries the transcript's newest request anchor and the length
-// its newest cache write used: a sub-agent row and a session pfm never
+// its newest cache write used: a session pfm never
 // launched take their window from it; a launched chat uses its launch record.
 type cacheWindow struct {
 	anchor time.Time
@@ -408,12 +392,6 @@ func readAnchorCache(path string) (string, cacheWindow) {
 // newest reply instead. The ttl is the lifetime the newest cache write used,
 // from its usage.cache_creation breakdown.
 func cacheAnchor(path string) cacheWindow {
-	return cacheAnchorIn(path, false)
-}
-
-// cacheAnchorIn reads a cache window from a transcript; sidechain admits the
-// records a sub-agent's own transcript is made of.
-func cacheAnchorIn(path string, sidechain bool) cacheWindow {
 	var replied cacheWindow
 	for _, size := range []int64{65_536, 1_048_576} {
 		body, _, err := transcript.ReadTailLines(path, size)
@@ -433,7 +411,7 @@ func cacheAnchorIn(path string, sidechain bool) cacheWindow {
 					Usage   pricing.UsageBlock `json:"usage"`
 				} `json:"message"`
 			}
-			if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Sidechain && !sidechain {
+			if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Sidechain {
 				continue
 			}
 			switch record.Type {

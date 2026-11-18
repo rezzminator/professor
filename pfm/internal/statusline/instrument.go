@@ -150,24 +150,22 @@ func contextColumn(
 			on = gaugeLit(gauge.tokens, gauge.window, gaugeCells)
 		}
 	}
-	trace, grown := pulseTrace(readings, now, pulseCells)
+	trace, grown := pulseTrace(readings, now, pulseCellsWide)
+	share := gauge.marker + label
+	// Without a growth figure the pulse widens over its blank cells and the share's pad.
+	figure := form.Growth && grown != 0
+	widen := form.Pulse && !figure
 	out := urgencyEmoji(gauge.percent) + " " + fillBar(on, gaugeCells, tone)
 	if form.Pulse {
-		out += " " + pulseStrip(trace)
+		out += " " + pulseStrip(trace[len(trace)-pulseCellsAt(form, figure, share):])
 	}
-	if form.Growth {
-		// The newest cell's step in figures, beside it: it names what the trace counts. A step at rest
-		// leaves its seven cells blank, never a figure read as a size of 0; nothing after it moves.
-		figure := fmt.Sprintf("%7s", "")
-		switch {
-		case grown > 0:
-			figure = pulseGrowth + fmt.Sprintf("%7s", "+"+formatContextTokens(grown)) + reset
-		case grown < 0:
-			figure = cWindow + fmt.Sprintf("%7s", "−"+formatContextTokens(-grown)) + reset
-		}
-		out += " " + figure
+	if form.Growth && !widen {
+		out += " " + growthFigure(grown)
 	}
-	out += " " + tone + fmt.Sprintf("%4s", gauge.marker+label) + reset
+	if !widen {
+		share = fmt.Sprintf("%*s", shareCells, share)
+	}
+	out += " " + tone + share + reset
 	if form.Window {
 		count, window := "?", "?"
 		if gauge.known {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -50,8 +51,8 @@ func TestInstrumentLineGivesUpPartsAsTheTerminalNarrows(t *testing.T) {
 	const (
 		// The context block's form comes from contextForms by the terminal's width alone.
 		full        = "🟢 ▰▱▱▱▱▱▱▱ ·····•   +3.0K  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
-		pulseWords  = "🟢 ▰▱▱▱▱▱▱▱ ·····•  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
-		pulseSlash  = "🟢 ▰▱▱▱▱▱▱▱ ·····•  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
+		pulseWords  = "🟢 ▰▱▱▱▱▱▱▱ ······• 17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
+		pulseSlash  = "🟢 ▰▱▱▱▱▱▱▱ ······• 17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
 		windowSlash = "🟢 ▰▱▱▱▱▱▱▱  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
 		gaugeWords  = "🟢 ▰▱▱▱▱▱▱▱  17% │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
 		gaugeSlash  = "🟢 ▰▱▱▱▱▱▱▱  17% │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
@@ -60,32 +61,45 @@ func TestInstrumentLineGivesUpPartsAsTheTerminalNarrows(t *testing.T) {
 		dollars   = "🟢 ▰▱▱▱▱▱▱▱  17%│⏳ 8m12s│Σ $1.50 API-eq│💾∅ 60%"
 		noClock   = "🟢 ▰▱▱▱▱▱▱▱  17%│Σ $1.50 API-eq│💾∅ 60%"
 		cacheTail = "🟢 ▰▱▱▱▱▱▱▱  17%│💾∅ 60%"
+		// At rest the pulse runs over the growth figure's blank cells and the share's pad to one blank
+		// before the share, which stays on the cells it holds beside a growth figure.
+		restFull  = "🟢 ▰▱▱▱▱▱▱▱ ··············· 17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
+		restWords = "🟢 ▰▱▱▱▱▱▱▱ ······· 17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
+		restSlash = "🟢 ▰▱▱▱▱▱▱▱ ······· 17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
+		growing   = 79_500
+		resting   = 82_500
 	)
 	cases := []struct {
 		columns int
+		before  int64
 		want    string
 	}{
-		{0, full},
-		{120, full},
-		{119, pulseWords},
-		{108, pulseWords},
-		{107, pulseSlash},
-		{100, pulseSlash},
-		{99, windowSlash},
-		{90, windowSlash},
-		{89, gaugeWords},
-		{87, gaugeWords},
-		{86, gaugeSlash},
-		{68, gaugeSlash},
-		{67, tight},
-		{62, tight},
-		{61, dollars},
-		{52, dollars},
-		{51, noClock},
-		{43, noClock},
-		{42, cacheTail},
-		{28, cacheTail},
-		{20, cacheTail},
+		{0, resting, restFull},
+		{120, resting, restFull},
+		{119, resting, restWords},
+		{100, resting, restSlash},
+		{99, resting, windowSlash},
+		{0, growing, full},
+		{120, growing, full},
+		{119, growing, pulseWords},
+		{108, growing, pulseWords},
+		{107, growing, pulseSlash},
+		{100, growing, pulseSlash},
+		{99, growing, windowSlash},
+		{90, growing, windowSlash},
+		{89, growing, gaugeWords},
+		{87, growing, gaugeWords},
+		{86, growing, gaugeSlash},
+		{68, growing, gaugeSlash},
+		{67, growing, tight},
+		{62, growing, tight},
+		{61, growing, dollars},
+		{52, growing, dollars},
+		{51, growing, noClock},
+		{43, growing, noClock},
+		{42, growing, cacheTail},
+		{28, growing, cacheTail},
+		{20, growing, cacheTail},
 	}
 	for _, tc := range cases {
 		runtime := parityRuntime(t)
@@ -103,15 +117,15 @@ func TestInstrumentLineGivesUpPartsAsTheTerminalNarrows(t *testing.T) {
 		if err := os.WriteFile(data.TranscriptPath, []byte(turn), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		// The step before this render read 79,500 tokens: the newest cell grows by 3,000.
-		before := `[{"at":` + "1799999995000" + `,"tokens":79500}]`
+		// The step before this render read 79,500 tokens, the newest cell growing by 3,000, or 82,500, at rest.
+		before := `[{"at":1799999995000,"tokens":` + strconv.FormatInt(tc.before, 10) + `}]`
 		readings := filepath.Join(runtime.CacheDir, "cc-sl-pulse-session-1")
 		if err := os.WriteFile(readings, []byte(before), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		_, line := instrumentLine(runtime, data, "", runtime.now())
 		if got := stripANSICodes(line); got != tc.want {
-			t.Errorf("at %d columns line = %q, want %q", tc.columns, got, tc.want)
+			t.Errorf("at %d columns, %d tokens before, line = %q, want %q", tc.columns, tc.before, got, tc.want)
 		}
 	}
 }
@@ -145,8 +159,8 @@ func TestContextColumnWritesTheStripsFigures(t *testing.T) {
 			engine: pfmengine.Codex,
 			gauge:  contextGauge{known: true, tokens: 14_200, window: 272_000, percent: 5, humanPrompts: 3},
 			form:   contextForms[0],
-			want: "🟢 \x1b[38;5;118m▰\x1b[2m▱▱▱▱▱▱▱\x1b[0m \x1b[38;5;245m······\x1b[0m" +
-				"         \x1b[38;5;118m  5%\x1b[0m" +
+			want: "🟢 \x1b[38;5;118m▰\x1b[2m▱▱▱▱▱▱▱\x1b[0m \x1b[38;5;245m················\x1b[0m" +
+				" \x1b[38;5;118m5%\x1b[0m" +
 				" \x1b[1;97m 14.2K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;117m272.0K\x1b[0m \x1b[2m✎3\x1b[0m",
 		},
 		{
@@ -197,7 +211,7 @@ func TestInstrumentLineOfAnUnmeasuredContextAddsNoReading(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, line := instrumentLine(runtime, data, "", runtime.now())
-	const want = "🟢 ▰▱▱▱▱▱▱▱ ······          12%      ?/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"
+	const want = "🟢 ▰▱▱▱▱▱▱▱ ··············· 12%      ?/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"
 	if got := stripANSICodes(line); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}

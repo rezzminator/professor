@@ -19,7 +19,7 @@ const ok = (answer: unknown): Run => ({ exitCode: 0, stdout: `${JSON.stringify(a
 
 // The planner's row alone, unbounded: before pfm answers, with its facts, and with the cause of their absence.
 const UNANSWERED = ' ▱▱▱▱▱▱▱▱ ······   +4.5K  17% 171.9K/1.0M │ planner │ claude-opus-9·medium │ running 12m04s │ Σ … │ 💾5m✓3m08s … │ Map the parser › Reading lexer.go';
-const ANSWERED = ' ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆ opus·▰▰ medium │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools │ 💾5m✓3m08s 94% │ 2 errors │ ⟲1 │ ↳ 1/3 below │ Map the parser › Reading lexer.go';
+const ANSWERED = '↳1/3 ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆ opus·▰▰ medium │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools │ 💾5m✓3m08s 94% │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go';
 const refused = (cause: string) => ` ▱▱▱▱▱▱▱▱ ······   +4.5K  17% 171.9K/1.0M │ planner │ claude-opus-9·medium │ running 12m04s │ $0.46 own │ 💾5m✓3m08s ?% │ pfm ✗ ${cause} │ Map the parser › Reading lexer.go`;
 
 async function until(what: string, met: () => boolean): Promise<void> {
@@ -101,10 +101,10 @@ describe('the agent list', () => {
     const eng = engine();
     expect(eng.filters).toEqual({ 'ui.render': { component: 'AgentRow' } });
     expect(await eng.drawList(80)).toEqual([
-      ' ▰▱▱▱▱▱▱▱    17%│planner│running 12m04s│2 err│⟲1│↳1/3│Map the pars… › Reading l…',
-      ' ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s│Build the d… › Running g…',
-      ' ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.jsonl: permi…│Find the callers',
-      ' ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
+      '↳1/3 ▰▱▱▱▱▱▱▱    17%│planner│running 12m04s│2 err│⟲1│Map the pars… › Reading le…',
+      '     ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s│Build the d… › Runni…',
+      '     ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.jsonl: p…│Find the callers',
+      '     ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
     ]);
     expect(eng.doorRuns).toEqual([DOOR]);
     expect(eng.redraws).toEqual(['ui.render']);

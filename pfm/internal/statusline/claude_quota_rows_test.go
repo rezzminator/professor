@@ -430,7 +430,7 @@ func TestRenderFitsEveryLineToTheTerminal(t *testing.T) {
 		}},
 		{100, []string{
 			"🥈 ✦ Fable·▰▰▰▰│professor-workb…│🌳 strip-look-ever…│🌿 flight/strip-lo… +2 ~5│INSERT",
-			"🟢 ▰▱▱▱▱▱▱▱ ·····•  17% 172.5K/1.0M │ ⏳ 1h04m │ " + slash2,
+			"🟢 ▰▱▱▱▱▱▱▱ ······• 17% 172.5K/1.0M │ ⏳ 1h04m │ " + slash2,
 			"▰▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ ▰▰▰▱▱ 7d-used:62% ↻3d3h",
 			"▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d-used:52% ↻3d7h",
 		}},
@@ -479,7 +479,7 @@ func TestRenderFitsEveryLineToTheTerminal(t *testing.T) {
 		case columns >= 120:
 			block = "🟢 ▰▱▱▱▱▱▱▱ ·····•   +4.5K  17% 172.5K/1.0M"
 		case columns >= 100:
-			block = "🟢 ▰▱▱▱▱▱▱▱ ·····•  17% 172.5K/1.0M"
+			block = "🟢 ▰▱▱▱▱▱▱▱ ······• 17% 172.5K/1.0M"
 		case columns >= 90:
 			block = "🟢 ▰▱▱▱▱▱▱▱  17% 172.5K/1.0M"
 		}
@@ -512,6 +512,42 @@ func TestRenderFitsEveryLineToTheTerminal(t *testing.T) {
 		}
 		if got, _, _ := strings.Cut(ansi.Strip(lines[1]), "│"); strings.TrimSpace(got) != block {
 			t.Errorf("%d columns: line 2's context block = %q, want %q", columns, strings.TrimSpace(got), block)
+		}
+		// At rest the pulse runs over the growth figure's blank cells and the share's pad to one
+		// blank before the share, and the line keeps every cell it had while the context grew.
+		payload := fitPayload(t, runtime)
+		rest := `[{"at":` + strconv.FormatInt(quotaNow.Add(-pulseStep).UnixMilli(), 10) + `,"tokens":172500}]`
+		if err := os.WriteFile(
+			filepath.Join(runtime.CacheDir, "cc-sl-pulse-session-1"),
+			[]byte(rest),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		resting := renderQuotaLines(t, runtime, payload)
+		block = "🟢 ▰▱▱▱▱▱▱▱  17%"
+		switch {
+		case columns >= 120:
+			block = "🟢 ▰▱▱▱▱▱▱▱ ··············· 17% 172.5K/1.0M"
+		case columns >= 100:
+			block = "🟢 ▰▱▱▱▱▱▱▱ ······· 17% 172.5K/1.0M"
+		case columns >= 90:
+			block = "🟢 ▰▱▱▱▱▱▱▱  17% 172.5K/1.0M"
+		}
+		if len(resting) != len(lines) {
+			t.Fatalf("%d columns at rest: %d lines, want %d: %q", columns, len(resting), len(lines), resting)
+		}
+		if got, _, _ := strings.Cut(ansi.Strip(resting[1]), "│"); strings.TrimSpace(got) != block {
+			t.Errorf("%d columns at rest: line 2's context block = %q, want %q", columns, strings.TrimSpace(got), block)
+		}
+		if got, want := ansi.StringWidth(resting[1]), ansi.StringWidth(lines[1]); got != want {
+			t.Errorf(
+				"%d columns at rest: line 2 is %d cells, want the %d it holds growing: %q",
+				columns,
+				got,
+				want,
+				ansi.Strip(resting[1]),
+			)
 		}
 	}
 }

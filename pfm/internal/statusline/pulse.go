@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
@@ -40,8 +42,12 @@ const (
 	pulseDropFrom = 1_000
 	// pulseStep is the wall time one cell covers, the agent row's five-second reading.
 	pulseStep = 5 * time.Second
-	// pulseCells is the pulse's width in cells.
-	pulseCells       = 6
+	// pulseCells is the pulse's width in cells beside a drawn growth figure.
+	pulseCells = 6
+	// pulseCellsWide is its widest: widened over a blank growth figure's
+	// cells and the share's pad, the most cells a strip draws, the readings
+	// it keeps.
+	pulseCellsWide   = pulseCells + 1 + growthCells + shareCells - 2
 	pulseLevelDrop   = -1
 	pulseLevelUnborn = -2
 	// pulseGrowth is the colour of a step that grew, the growth figure's beside the strip.
@@ -50,6 +56,10 @@ const (
 	gaugeOn    = "▰"
 	gaugeOff   = "▱"
 	gaugeCells = 8
+	// growthCells is the growth figure's width in cells and shareCells the
+	// share's, each right-aligned in them (contextColumn).
+	growthCells = 7
+	shareCells  = 4
 )
 
 // pulseReading is the context's size at one render, At in Unix milliseconds.
@@ -185,7 +195,7 @@ func pulseReadings(runtime Runtime, sessionID string, now time.Time, tokens int6
 	}
 	slices.SortStableFunc(readings, func(a, b pulseReading) int { return int(a.At - b.At) })
 	// The newest reading before the strip's first step stays: the first cell grows from it.
-	first := reading.At/width - pulseCells + 1
+	first := reading.At/width - pulseCellsWide + 1
 	keep := slices.IndexFunc(readings, func(r pulseReading) bool { return r.At/width >= first })
 	readings = readings[max(0, keep-1):]
 	next, err := json.Marshal(readings)
@@ -197,4 +207,32 @@ func pulseReadings(runtime Runtime, sessionID string, now time.Time, tokens int6
 		fmt.Fprintf(runtime.Warn, "statusline: write pulse readings %s: %v\n", path, err)
 	}
 	return readings
+}
+
+// pulseCellsAt is the pulse's width in a block of form whose share reads
+// share: its base cells beside a drawn growth figure (figure), else widened
+// over the figure's blank cells and the share's pad, so the strip runs to one
+// blank before the share and the share stays on its cells either way.
+func pulseCellsAt(form ContextForm, figure bool, share string) int {
+	if figure {
+		return pulseCells
+	}
+	cells := pulseCells + max(0, shareCells-ansi.StringWidth(share))
+	if form.Growth {
+		cells += 1 + growthCells
+	}
+	return cells
+}
+
+// growthFigure is the newest step's growth in figures, beside the pulse: it
+// names what the trace counts. A step at rest is blank cells, never a figure
+// read as a size of 0.
+func growthFigure(grown int64) string {
+	switch {
+	case grown > 0:
+		return pulseGrowth + fmt.Sprintf("%*s", growthCells, "+"+formatContextTokens(grown)) + reset
+	case grown < 0:
+		return cWindow + fmt.Sprintf("%*s", growthCells, "−"+formatContextTokens(-grown)) + reset
+	}
+	return strings.Repeat(" ", growthCells)
 }

@@ -162,16 +162,16 @@ func TestPulseReadingsKeepOneReadingAStepAndOnlyWhatTheStripNeeds(t *testing.T) 
 			file: `[{"at":1790000002000,"tokens":1200},{"at":1790000005000,"tokens":1500}]`,
 		},
 		{
-			name: "the reading one step before the strip stays, the one before it goes", after: 80 * time.Second,
+			name: "the reading one step before the strip stays, the one before it goes", after: 130 * time.Second,
 			tokens: 1_800, known: true,
-			want: []pulseReading{{At: 1_790_000_005_000, Tokens: 1_500}, {At: 1_790_000_080_000, Tokens: 1_800}},
-			file: `[{"at":1790000005000,"tokens":1500},{"at":1790000080000,"tokens":1800}]`,
+			want: []pulseReading{{At: 1_790_000_005_000, Tokens: 1_500}, {At: 1_790_000_130_000, Tokens: 1_800}},
+			file: `[{"at":1790000005000,"tokens":1500},{"at":1790000130000,"tokens":1800}]`,
 		},
 		{
-			name: "past the strip only the newest older reading stays", after: 200 * time.Second, tokens: 2_000,
+			name: "past the strip only the newest older reading stays", after: 300 * time.Second, tokens: 2_000,
 			known: true,
-			want:  []pulseReading{{At: 1_790_000_080_000, Tokens: 1_800}, {At: 1_790_000_200_000, Tokens: 2_000}},
-			file:  `[{"at":1790000080000,"tokens":1800},{"at":1790000200000,"tokens":2000}]`,
+			want:  []pulseReading{{At: 1_790_000_130_000, Tokens: 1_800}, {At: 1_790_000_300_000, Tokens: 2_000}},
+			file:  `[{"at":1790000130000,"tokens":1800},{"at":1790000300000,"tokens":2000}]`,
 		},
 	} {
 		got := pulseReadings(runtime, "session-1", pulseNow.Add(step.after), step.tokens, step.known)

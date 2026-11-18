@@ -114,7 +114,7 @@ func TestClaudeAccountFourDoesNotRenderCodexUsage(t *testing.T) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	if plain != `🍀 ● Claude·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf("Claude account 4 rendered Codex usage: %q", plain)
@@ -134,7 +134,7 @@ func TestStatuslineRendersFableRateAndSymbol(t *testing.T) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	if plain != `✦ Fable·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱▱▱▱ 5h-used:— │ ▰▱▱▱▱ 7d-fable-used:23% ↻6d8h │ ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:—
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
@@ -201,7 +201,7 @@ func TestStatuslineDropsUnknownTopLevelWindows(t *testing.T) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	if plain != `● Claude·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf("unknown top-level key rendered as a window: %q", plain)
@@ -382,7 +382,7 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if want := "🥇 ◆ Opus 4·▰▰▰ high │ sample │ 🔖 BUILDER:1 │ ·2 ·1\n🟢 ▰▰▰▱▱▱▱▱ ······          43%  10.3K/? ctx unknown │ ⏳ 5m32s │ Σ $3.42 · ? in · ? out · ? tools\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"; plain != want {
+	if want := "🥇 ◆ Opus 4·▰▰▰ high │ sample │ 🔖 BUILDER:1 │ ·2 ·1\n🟢 ▰▰▰▱▱▱▱▱ ··············· 43%  10.3K/? ctx unknown │ ⏳ 5m32s │ Σ $3.42 · ? in · ? out · ? tools\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"; plain != want {
 		t.Fatalf("render = %q, want %q", plain, want)
 	}
 }
@@ -449,7 +449,7 @@ func renderPostCompactEstimate(t *testing.T, model string) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	if plain != `◆ Opus 4·effort unknown │ sample │ · ·
-🟢 ▰▰▱▱▱▱▱▱ ······         ~20% 200.0K/1.0M │ ⏳ 0s │ Σ $? · 700.0K in · 1.0K out · 0 tools
+🟢 ▰▰▱▱▱▱▱▱ ·············· ~20% 200.0K/1.0M │ ⏳ 0s │ Σ $? · 700.0K in · 1.0K out · 0 tools
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf(
@@ -489,7 +489,7 @@ func TestRenderMarksCompactBoundaryEstimateWithoutPostTokens(t *testing.T) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	if plain != `◆ Opus 4·effort unknown │ sample │ · ·
-⚡ ▰▰▰▰▰▰▱▱ ······         ~70% 700.0K/1.0M │ ⏳ 0s │ Σ $? · 700.0K in · 0 out · 0 tools
+⚡ ▰▰▰▰▰▰▱▱ ·············· ~70% 700.0K/1.0M │ ⏳ 0s │ Σ $? · 700.0K in · 0 out · 0 tools
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf("compact boundary without postTokens did not mark the prior occupancy as estimated:\n%q", plain)
@@ -585,7 +585,7 @@ func TestCodexSegmentDoesNotOverwriteTranscriptGauge(t *testing.T) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	if plain != `● sol-5.6·effort unknown │ ~ │ · ·
-🟢 ▰▰▱▱▱▱▱▱ ······          25%  68.0K/272.0K │ ⏳ 0s │ 💾–
+🟢 ▰▰▱▱▱▱▱▱ ··············· 25%  68.0K/272.0K │ ⏳ 0s │ 💾–
 ChatGPT quota missing
 ` {
 		t.Fatalf("Codex overwrote transcript gauge:\n%q", plain)
@@ -608,7 +608,7 @@ func TestCodexEngineOwnsCodexUsageIndependentOfAccountID(t *testing.T) {
 	}
 	plain := stripANSICodes(got)
 	if plain != `● sol-6.1·effort unknown │ ~ │ ·1 ·
-🟢 ▰▰▰▱▱▱▱▱ ······          33% 165.0K/500.0K │ ⏳ 0s │ 💾–
+🟢 ▰▰▰▱▱▱▱▱ ··············· 33% 165.0K/500.0K │ ⏳ 0s │ 💾–
 ChatGPT quota missing
 ` {
 		t.Fatalf("Codex render: %s", plain)
@@ -647,7 +647,7 @@ func TestFleetSnapshotCountsOnlySocketsPresentInProcOnLinux(t *testing.T) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	if plain != `🥇 ● Claude·effort unknown │ ~ │ ·1 ·1 ·1
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf("graveyard socket affected live fleet count: %q", plain)
@@ -678,12 +678,12 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 	}{
 		{
 			name: "a gateway model's transcript that cannot be read", path: root, model: `{"id":"gpt-6-sol"}`,
-			want: "● sol-6·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ······          10%      ?/? ctx missing │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾!\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n",
+			want: "● sol-6·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ··············· 10%      ?/? ctx missing │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾!\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n",
 		},
-		{name: "a readable transcript anchors the window", path: live, want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ······          10%      ?/? ctx unknown │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools │ 💾5m✓3m00s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
-		{name: "a path with no file behind it", path: filepath.Join(root, "gone.jsonl"), want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ······          10%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾5m!\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
-		{name: "no path at all", path: "", want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ······          10%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾5m!\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
-		{name: "a path that is a directory", path: root, want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ······          10%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾5m!\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
+		{name: "a readable transcript anchors the window", path: live, want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ··············· 10%      ?/? ctx unknown │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools │ 💾5m✓3m00s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
+		{name: "a path with no file behind it", path: filepath.Join(root, "gone.jsonl"), want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ··············· 10%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾5m!\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
+		{name: "no path at all", path: "", want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ··············· 10%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾5m!\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
+		{name: "a path that is a directory", path: root, want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱ ··············· 10%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾5m!\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
 		{name: "a narrow pane keeps the timer", path: live, columns: 97, want: "◆ Opus 4·effort unknown │ sample │ · ·\n🟢 ▰▱▱▱▱▱▱▱  10%      ?/? ctx unknown │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools │ 💾5m✓3m00s\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n"},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {

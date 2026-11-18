@@ -71,7 +71,7 @@ func TestRenderKeepsTheLineOverABadPayloadValue(t *testing.T) {
 		{
 			name:        "negative context counters read as unknown",
 			payload:     `{"context_window":{"current_usage":{"input_tokens":-1}}}`,
-			wantContext: "  ?%      ?/? ctx unknown",
+			wantContext: "▱ ················ ?%      ?/? ctx unknown",
 			wantWarn:    "statusline: input: negative current_usage counters: context tokens unknown\n",
 		},
 		{

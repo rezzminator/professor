@@ -2,8 +2,8 @@
 // list is drawn as one instrument panel: the same columns at the same cells in
 // every row, so a glance down a column compares the agents.
 //
-//   gauge + pulse + last growth + share + tokens/window │ who │ model·effort │
-//   state + time │ Σ spend │ cache │ flags │ @directory │ task › progress
+//   ↳agents below + gauge + pulse + last growth + share + tokens/window │ who │
+//   model·effort │ state + time │ Σ spend │ cache │ flags │ @directory │ task › progress
 //
 // The engine's props give the live half (status, tokens, readings, last
 // request); pfm's door gives the half only transcripts hold (spend with every
@@ -14,6 +14,8 @@
 // from the terminal's width alone, by pfm's table (look.context), so it stands on
 // the main status line's cells; when the row is still too narrow every row of the
 // list gives up the same parts, in GIVE's order, so the columns stay aligned.
+// The count of the agents below opens the row, in a column as wide as the
+// list's widest count, none where no row has one: a row never gives it up.
 
 import type { DoorContextForm, DoorFacts, DoorGauge, DoorLook, DoorPulse, DoorState } from './door';
 import { litCells, pulse, type PulseCell } from './pulse';
@@ -42,7 +44,7 @@ export type Scene = { agents: readonly RowAgent[]; pfm: RowPfm; now: number; col
 type Rank = {
   who: number; family: boolean; effortWord: boolean; model: boolean;
   spend: 'words' | 'slash' | 'usd' | 'none'; cache: 'full' | 'left' | 'none';
-  /** `'short'`: the flags without their words, `2 err` and `↳1/3`. */
+  /** `'short'`: the flags without their words, `2 err`. */
   flags: 'words' | 'short';
   /** The cells every row keeps for its task's words after its columns and flags. */
   task: number;
@@ -75,6 +77,9 @@ const IDLE_FROM_MS = 60_000;
 const IDLE_LONG_MS = 300_000;
 const CACHE_MS = { '5m': 300_000, '1h': 3_600_000 } as const;
 const RESET = '\x1b[0m';
+/** The growth figure's cells and the share's, each right-aligned in them, as pfm's main line draws them. */
+const GROWTH_CELLS = 7;
+const SHARE_CELLS = 4;
 /**
  * The blank before the gauge. The engine's lead before a row takes the two cells the main status line's urgency emoji
  * takes, and pfm puts one blank between that emoji and its gauge: with this one the gauges stand on the same cells.
@@ -170,25 +175,44 @@ function contextForm(scene: Scene, look: DoorLook): DoorContextForm {
   return forms.find((form) => scene.columns! + ROW_INSET >= form.from) ?? forms[forms.length - 1]!;
 }
 
-/** `lead`: blanks after the strip that put a row less nested than the list's deepest back on the same cells. */
+/**
+ * `lead`: the cells after the strip that put a row less nested than the list's deepest back on the same cells. Without
+ * a growth figure the strip widens over the figure's blank cells, the lead and the share's pad, to one blank before the
+ * share, so the share stays on its cells and no run of blanks sits between them; a figure drawn takes its cells back.
+ */
 function pulseColumn(agent: RowAgent, facts: DoorFacts | undefined, form: DoorContextForm, lead: number, paint: Brush): string {
   const window = facts && facts.contextWindow > 0 ? facts.contextWindow : agent.contextWindowSize;
   const used = agent.tokenCount;
   const full = share(used, window);
   const tone = full === undefined ? 'muted' : paint.shareTone(full);
+  const samples = agent.tokenSamples;
+  const grown = samples.length < 2 ? 0 : samples[samples.length - 1]! - samples[samples.length - 2]!;
+  const figure = form.growth && grown !== 0;
+  const widen = form.pulse && !figure;
+  const part = full === undefined ? '?%' : `${full}%`;
   let out = GAUGE_LEAD + gaugeText(paint.fill ? litCells(used, window, paint.gauge.cells) : 0, tone, paint);
-  if (form.pulse) out += ` ${pulseText(pulse(agent.tokenSamples, paint.pulse.cells, paint.pulse), paint)}`;
-  out += ' '.repeat(lead);
-  if (form.growth) {
+  if (form.pulse) {
+    const strip = paint.pulse.cells + lead + (widen ? (form.growth ? 1 + GROWTH_CELLS : 0) + Math.max(0, SHARE_CELLS - cells(part)) : 0);
+    out += ` ${pulseText(pulse(samples, strip, paint.pulse), paint)}`;
+  } else out += ' '.repeat(lead);
+  if (form.growth && !widen) {
     // The newest cell's reading in figures, beside it: it names what the trace counts. A step that neither grew nor
-    // shrank leaves the figure's seven cells blank, so a context at rest reads as no figure, never as a size of 0.
-    const samples = agent.tokenSamples;
-    const grown = samples.length < 2 ? 0 : samples[samples.length - 1]! - samples[samples.length - 2]!;
-    out += ` ${grown === 0 ? ' '.repeat(7) : paint('window', (grown > 0 ? `+${tokens(grown)}` : `−${tokens(-grown)}`).padStart(7))}`;
+    // shrank draws no figure, so a context at rest reads as no figure, never as a size of 0.
+    out += ` ${grown === 0 ? ' '.repeat(GROWTH_CELLS) : paint('window', (grown > 0 ? `+${tokens(grown)}` : `−${tokens(-grown)}`).padStart(GROWTH_CELLS))}`;
   }
-  out += ` ${paint(tone, (full === undefined ? '?%' : `${full}%`).padStart(4))}`;
+  out += ` ${paint(tone, widen ? part : part.padStart(SHARE_CELLS))}`;
   if (!form.window) return out;
   return `${out} ${paint('tokens', tokens(used).padStart(6))}${paint('muted', '/')}${paint('window', window === undefined ? '?' : tokens(window))}`;
+}
+
+/** The agents below `facts`' agent, working of all, as the row's first part; `''` with none, or no facts. */
+function nestedText(facts: DoorFacts | undefined, paint: Brush): string {
+  const nested = facts?.nested;
+  if (nested === undefined) return '';
+  if (nested.error !== undefined) return paint('warn', '↳?/?');
+  if (nested.total === 0) return '';
+  const working = `${paint(nested.working > 0 ? 'good' : 'muted', String(nested.working))}${paint('muted', '/')}${paint('label', String(nested.total))}`;
+  return `${paint('muted', '↳')}${working}${nested.unknown > 0 ? paint('warn', `+${nested.unknown}?`) : ''}`;
 }
 
 function whoColumn(agent: RowAgent, rank: Rank, paint: Brush): string {
@@ -295,16 +319,6 @@ function tail(agent: RowAgent, state: Known, scene: Scene, rank: Rank, paint: Br
     if (facts.toolErrors > 0) out.push(paint('bad', `${facts.toolErrors} ${short ? 'err' : facts.toolErrors === 1 ? 'error' : 'errors'}`));
     if (facts.compactions > 0) out.push(paint('window', `⟲${facts.compactions}`));
   }
-  if (facts) {
-    const nested = facts.nested;
-    // Short, the arrow alone says the agents are below.
-    const gap = short ? '' : ' ';
-    if (nested.error !== undefined) out.push(paint('warn', short ? '↳?/?' : '↳ ?/? below'));
-    else if (nested.total > 0) {
-      const working = `${paint(nested.working > 0 ? 'good' : 'muted', String(nested.working))}${paint('muted', '/')}${paint('label', String(nested.total))}`;
-      out.push(`${paint('muted', '↳')}${gap}${working}${short ? '' : ` ${paint('muted', 'below')}`}${nested.unknown > 0 ? paint('warn', `${gap}+${nested.unknown}?`) : ''}`);
-    }
-  }
   const notes: string[] = [];
   if (scene.sessionCwd !== undefined && agent.cwd !== '' && agent.cwd !== scene.sessionCwd) {
     notes.push(paint('tools', `@${cut(clean(agent.cwd.replace(/\/+$/, '').split('/').pop() ?? ''), 24)}`));
@@ -348,14 +362,18 @@ function causeLeast(cause: string | undefined, bar: number): number {
   return bar + MARK.length + (cause === '' ? 0 : 1 + Math.min(CAUSE_MIN, cells(cause)));
 }
 
-function draw(agent: RowAgent, scene: Scene, rank: Rank, form: DoorContextForm, paint: Brush, depths: ReadonlyMap<string, number>): Drawn {
+/** The list's rows as each draws: the depth of each, and the cells of the widest count of the agents below. */
+type Tree = { depths: ReadonlyMap<string, number>; below: number };
+
+function draw(agent: RowAgent, scene: Scene, rank: Rank, form: DoorContextForm, paint: Brush, tree: Tree): Drawn {
   const state = known(agent, scene.pfm);
+  const { depths } = tree;
   const indent = 2 * (depths.get(agent.id) ?? 0);
   const what = clean(agent.description);
   const doing = clean(agent.label);
   return {
     columns: [
-      pulseColumn(agent, state.facts, form, 2 * Math.max(0, ...depths.values()) - indent, paint), whoColumn(agent, rank, paint), modelColumn(agent, state.facts, rank, paint),
+      pad(nestedText(state.facts, paint), tree.below) + pulseColumn(agent, state.facts, form, 2 * Math.max(0, ...depths.values()) - indent, paint), whoColumn(agent, rank, paint), modelColumn(agent, state.facts, rank, paint),
       stateColumn(agent, state.facts, scene.now, paint), spendColumn(agent, state, rank, paint), cacheColumn(agent, state, rank, scene.now, paint),
     ],
     tail: tail(agent, state, scene, rank, paint),
@@ -364,9 +382,10 @@ function draw(agent: RowAgent, scene: Scene, rank: Rank, form: DoorContextForm, 
   };
 }
 
-function depths(agents: readonly RowAgent[]): Map<string, number> {
-  const byId = new Map(agents.map((agent) => [agent.id, agent]));
-  return new Map(agents.map((agent) => [agent.id, depth(agent, byId)]));
+function tree(scene: Scene, paint: Brush): Tree {
+  const byId = new Map(scene.agents.map((agent) => [agent.id, agent]));
+  const below = Math.max(0, ...scene.agents.map((agent) => cells(nestedText(known(agent, scene.pfm).facts, paint))));
+  return { depths: new Map(scene.agents.map((agent) => [agent.id, depth(agent, byId)])), below };
 }
 
 /** The parts every row of the list keeps, and each column's width in cells (a nested row's indent inside the first). */
@@ -383,7 +402,7 @@ export function layout(scene: Scene): Layout {
   const look = scene.pfm.look ?? BARE;
   const paint = brush(look);
   const form = contextForm(scene, look);
-  const deep = depths(scene.agents);
+  const deep = tree(scene, paint);
   let chosen: Layout = { rank: 0, widths: [] };
   for (let rank = 0; rank < RANKS.length; rank += 1) {
     const at = RANKS[rank]!;
@@ -408,7 +427,7 @@ export function drawRow(scene: Scene, id: string, chosen: Layout = layout(scene)
   const look = scene.pfm.look ?? BARE;
   const paint = brush(look);
   const rank = RANKS[chosen.rank]!;
-  const row = draw(agent, scene, rank, contextForm(scene, look), paint, depths(scene.agents));
+  const row = draw(agent, scene, rank, contextForm(scene, look), paint, tree(scene, paint));
   const bar = rank.tight ? paint('dim', '│') : ` ${paint('dim', '│')} `;
   const gap = barCells(rank);
   const parts: string[] = [];

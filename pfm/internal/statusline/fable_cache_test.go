@@ -103,7 +103,7 @@ func TestFableWindowFallsBackToUsageCacheWhenHarnessOmitsLimits(t *testing.T) {
 	}
 	plain := stripANSICodes(got)
 	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:38% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
@@ -142,14 +142,14 @@ func TestFableWindowPrefersHarnessLimitsOverCache(t *testing.T) {
 	}
 	plain := stripANSICodes(got)
 	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:23% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf("harness-reported fable window lost to the cache:\n%q", plain)
 	}
 	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:23% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
@@ -182,14 +182,14 @@ func TestFableWindowPresentButEmptyLimitsArrayIsNotCacheFallback(t *testing.T) {
 	}
 	plain := stripANSICodes(got)
 	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:31% ↻6d0h
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf("a present-but-empty limits array answered without Fable, so its row must be hidden:\n%q", plain)
 	}
 	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:31% ↻6d0h
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
@@ -226,21 +226,21 @@ func TestHarnessMainWindowsTakePrecedenceOverCache(t *testing.T) {
 	}
 	plain := stripANSICodes(got)
 	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:38% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf("harness five_hour/seven_day values were lost:\n%q", plain)
 	}
 	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:38% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 		t.Fatalf("five_hour/seven_day were sourced from pfm's own cache instead of the harness payload:\n%q", plain)
 	}
 	if plain != `🥈 ◆ Opus 4·effort unknown │ ~ │ · ·
-🟢 ▱▱▱▱▱▱▱▱ ······           ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ▱▱▱▱▱ 5h-used:11% ↻4h0m │ ▰▱▱▱▱ 7d-fable-used:38% ↻7d0h │ ▰▱▱▱▱ 7d-used:31% ↻6d0h
 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {

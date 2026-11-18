@@ -28,12 +28,8 @@ func killLiveFromPicker(c *harness.Ctx, s State) State {
 	term.WaitScreen("the picker narrowed to "+s.Name, stepBound, func(screen string) bool {
 		return strings.Contains(screen, "find › "+s.Name)
 	})
-	if !rowIs(selectedRow(term.Screen()), "● ", s.Name) {
-		term.Press(harness.Down)
-	}
-	term.WaitScreen("the live chat "+s.Name+" selected", stepBound, func(screen string) bool {
-		return rowIs(selectedRow(screen), "● ", s.Name)
-	})
+	// The find also lists other chats whose text holds the name's letters in order, above it or below.
+	pickerSelect(term, "live chat "+s.Name, func(cells string) bool { return rowIs(cells, "● ", s.Name) })
 	term.Press(harness.Ctrl('x'))
 	c.Poll("the engine "+fmt.Sprint(s.Chat.Engine)+" of the killed chat gone", stepBound, func() (bool, string) {
 		_, alive := processes(c)[s.Chat.Engine]
@@ -46,11 +42,29 @@ func killLiveFromPicker(c *harness.Ctx, s State) State {
 		)
 		return hidden == "1" && chatLsRow(out, s.Name) == nil, "killed rows " + hidden + ", listed:\n" + out
 	})
-	// The picker is still the pane's screen once the kill has landed: its find line holds the name, and
-	// no row and no shell prompt is drawn.
+	// The picker is still the pane's screen once the kill has landed: its find line holds the name, its
+	// header names the hidden chat, and neither the killed row nor a shell prompt is drawn. Another
+	// branch's live chat may stay listed: the find also matches a row whose name holds the query's
+	// letters in order (a prompt naming a path under the run's scratch directory does).
 	term.WaitScreen("the picker drawn without the killed row", stepBound, func(screen string) bool {
-		return strings.Contains(screen, "find › "+s.Name) && strings.Contains(screen, "no matches for “"+s.Name+"”") &&
-			!strings.Contains(screen, prompt)
+		return strings.Contains(screen, "find › "+s.Name) && strings.Contains(screen, "hidden — "+s.Name) &&
+			!pickerDrawsRow(screen, s.Name) && !strings.Contains(screen, prompt)
 	})
 	return s
+}
+
+// pickerDrawsRow reports whether a list row of the picker's screen, selected (`││› ● name`) or not
+// (`│││ ● name`), is the chat named name.
+func pickerDrawsRow(screen, name string) bool {
+	for _, line := range strings.Split(screen, "\n") {
+		_, row, found := strings.Cut(line, "││")
+		if !found {
+			continue
+		}
+		row = strings.TrimLeft(row, " │›") // the row's rail: a bar, or the cursor's chevron on the selected row
+		if mark, _, marked := strings.Cut(row, " "); marked && rowIs(row, mark+" ", name) {
+			return true
+		}
+	}
+	return false
 }

@@ -131,7 +131,9 @@ func TestTmuxListingsKeepEveryParsedPane(t *testing.T) {
 		}
 	})
 	t.Run("pane owners", func(t *testing.T) {
-		ctx := tmuxPrinting(context.Background(), "1234 %0\nabc %1\n")
+		// " %2" is a pane tmux lists with no process in it (its pid blank): no caller runs there, so it is
+		// passed over without a loss.
+		ctx := tmuxPrinting(context.Background(), "1234 %0\n %2\nabc %1\n")
 		owners, err := CommandPaneOwners{Binary: "tmux"}.PaneOwners(ctx, "/sockets/cc-1")
 		want := []PaneOwner{{SocketPath: "/sockets/cc-1", PaneID: "%0", PanePID: 1234}}
 		if !reflect.DeepEqual(owners, want) {

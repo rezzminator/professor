@@ -2,7 +2,7 @@
 // list is drawn as one instrument panel: the same columns at the same cells in
 // every row, so a glance down a column compares the agents.
 //
-//   ↳agents below + gauge + pulse + last growth + share + tokens/window │ who │
+//   agents below + gauge + pulse + last growth + share + tokens/window │ who │
 //   model·effort │ state + time │ Σ spend │ cache │ flags │ @directory │ task › progress
 //
 // The engine's props give the live half (status, tokens, readings, last
@@ -209,10 +209,10 @@ function pulseColumn(agent: RowAgent, facts: DoorFacts | undefined, form: DoorCo
 function nestedText(facts: DoorFacts | undefined, paint: Brush): string {
   const nested = facts?.nested;
   if (nested === undefined) return '';
-  if (nested.error !== undefined) return paint('warn', '↳?/?');
+  if (nested.error !== undefined) return paint('warn', '?/?');
   if (nested.total === 0) return '';
   const working = `${paint(nested.working > 0 ? 'good' : 'muted', String(nested.working))}${paint('muted', '/')}${paint('label', String(nested.total))}`;
-  return `${paint('muted', '↳')}${working}${nested.unknown > 0 ? paint('warn', `+${nested.unknown}?`) : ''}`;
+  return `${working}${nested.unknown > 0 ? paint('warn', `+${nested.unknown}?`) : ''}`;
 }
 
 function whoColumn(agent: RowAgent, rank: Rank, paint: Brush): string {

@@ -35,10 +35,10 @@ describe('the list', () => {
   // A row's `columns` are the terminal's less six cells: the footer's padding each side and the engine's lead.
   it.each<[string, () => Door, number, string[]]>([
     ['the terminal is wide', () => answered(), 252, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the door › Running go test ./internal/...',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the door › Running go test ./internal/...',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
     ]],
     ['no row has agents below it', () => answered({ nested: { total: 0, working: 0, unknown: 0 } }), 252, [
       ' ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
@@ -47,58 +47,58 @@ describe('the list', () => {
       ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
     ]],
     ['the list spells the spend in slashes, the flags and the model short', () => answered(), 200, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆·▰▰  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 err │ ⟲1 │ Map the parser › Reading lexer.go',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇·▰▰▰ │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the d… › Running g…',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○     │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl:… │ Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │       │ pending        │ Σ …                      │ 💾–                │ Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆·▰▰  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 err │ ⟲1 │ Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇·▰▰▰ │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the do… › Running g…',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○     │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl:… │ Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │       │ pending        │ Σ …                      │ 💾–                │ Wait for the build',
     ]],
     ['it takes the blanks around its bars before the pad of its columns', () => answered(), 174, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M  │planner     │◆·▰▰ │running 12m04s│Σ $3.41/2.0M/24.3K/57   │💾5m✓3m08s 94%    │2 err│⟲1│Map the parser › Reading lexer…',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s │Σ $12.50+?/812.0K/9.3K/1│💾5m✗1m40s was 31%│idle 3m20s│@door│Build the d… › Running…',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore     │○    │done          │Σ $?                    │💾– ?%            │pfm ✗ open agent-a3.js…│Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?     │general-pur…│     │pending       │Σ …                     │💾–               │Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M  │planner     │◆·▰▰ │running 12m04s│Σ $3.41/2.0M/24.3K/57   │💾5m✓3m08s 94%    │2 err│⟲1│Map the parser › Reading lexer.…',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s │Σ $12.50+?/812.0K/9.3K/1│💾5m✗1m40s was 31%│idle 3m20s│@door│Build the d… › Running…',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore     │○    │done          │Σ $?                    │💾– ?%            │pfm ✗ open agent-a3.jso…│Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?     │general-pur…│     │pending       │Σ …                     │💾–               │Wait for the build',
     ]],
     ['it takes the blanks around its bars and the pad of its columns', () => answered(), 170, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│Σ $3.41/2.0M/24.3K/57│💾5m✓3m08s 94%│2 err│⟲1│Map the parser › Reading lexer.go',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│Σ $12.50+?/812.0K/9.3K/1│💾5m✗1m40s was 31%│idle 3m20s│@door│Build the door',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│Σ $?│💾– ?%│pfm ✗ open agent-a3.jsonl: permission denied│Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Σ …│💾–│Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│Σ $3.41/2.0M/24.3K/57│💾5m✓3m08s 94%│2 err│⟲1│Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│Σ $12.50+?/812.0K/9.3K/1│💾5m✗1m40s was 31%│idle 3m20s│@door│Build the d… › Runni…',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│Σ $?│💾– ?%│pfm ✗ open agent-a3.jsonl: permission denied│Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Σ …│💾–│Wait for the build',
     ]],
     ["it gives up the spend's counts", () => answered(), 160, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│Σ $3.41│💾5m✓3m08s 94%│2 err│⟲1│Map the parser › Reading lexer.go',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│Σ $12.50+?│💾5m✗1m40s was 31%│idle 3m20s│@door│Build the d… › Running…',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│Σ $?│💾– ?%│pfm ✗ open agent-a3.jsonl: permission denied│Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Σ …│💾–│Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│Σ $3.41│💾5m✓3m08s 94%│2 err│⟲1│Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│Σ $12.50+?│💾5m✗1m40s was 31%│idle 3m20s│@door│Build the d… › Running g…',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│Σ $?│💾– ?%│pfm ✗ open agent-a3.jsonl: permission denied│Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Σ …│💾–│Wait for the build',
     ]],
     ["it gives up the spend's counts and the cache's hit", () => answered(), 140, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│Σ $3.41│💾✓3m08s│2 err│⟲1│Map the parser › Reading lexer.…',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│Σ $12.50+?│💾✗1m40s│idle 3m20s│Build the door',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│Σ $?│💾–│pfm ✗ open agent-a3.jsonl: permission deni…│Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Σ …│💾–│Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│Σ $3.41│💾✓3m08s│2 err│⟲1│Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│Σ $12.50+?│💾✗1m40s│idle 3m20s│Build the d… › Runni…',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│Σ $?│💾–│pfm ✗ open agent-a3.jsonl: permission denied│Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Σ …│💾–│Wait for the build',
     ]],
     ['it gives up the spend and the cache', () => answered(), 120, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│2 err│⟲1│Map the parser › Reading lex…',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│idle 3m20s│Build the door',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│pfm ✗ open agent-a3.jsonl: perm…│Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│2 err│⟲1│Map the parser › Reading lexe…',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│idle 3m20s│Build the d… › Runni…',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│pfm ✗ open agent-a3.jsonl: permi…│Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Wait for the build',
     ]],
     ['the block gives up its growth figure and the rows the model', () => answered(), 100, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ·•••••••• 17% 171.9K/1.0M│planner│running 12m04s│2 err│⟲1│Map the par… › Readin…',
-      '     ▰▰▰▰▰▰▰▱ ●●•●●●••• 86% 173.0K/200.0K│door·flight…│running 1m01s│idle 3m20s│@door│Build t…',
-      '     ▰▱▱▱▱▱▱▱ ······•↓ 5%   9.0K/200.0K│Explore│done│pfm ✗ open agent-a3.j…│Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·········· ?%      0/?│general-pur…│pending│Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ·•••••••• 17% 171.9K/1.0M│planner│running 12m04s│2 err│⟲1│Map the par… › Reading…',
+      '    ▰▰▰▰▰▰▰▱ ●●•●●●••• 86% 173.0K/200.0K│door·flight…│running 1m01s│idle 3m20s│@door│Build th…',
+      '    ▰▱▱▱▱▱▱▱ ······•↓ 5%   9.0K/200.0K│Explore│done│pfm ✗ open agent-a3.js…│Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·········· ?%      0/?│general-pur…│pending│Wait for the build',
     ]],
     ['the block keeps the gauge and the share alone', () => answered(), 80, [
-      '↳1/3 ▰▱▱▱▱▱▱▱    17%│planner│running 12m04s│2 err│⟲1│Map the par… › Readi…',
-      '     ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s│@door│Build th…',
-      '     ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.js…│Find the callers',
-      '     ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱    17%│planner│running 12m04s│2 err│⟲1│Map the par… › Readin…',
+      '    ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s│@door│Build the…',
+      '    ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.jso…│Find the callers',
+      '    ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
     ]],
     ['it is too narrow for its task', () => answered(), 66, [
-      '↳1/3 ▰▱▱▱▱▱▱▱    17%│planner│running 12m04s│2 err│⟲1',
-      '     ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s',
-      '     ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.jsonl…',
-      '     ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱    17%│planner│running 12m04s│2 err│⟲1│Map the…',
+      '    ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s',
+      '    ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.jsonl:…',
+      '    ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
     ]],
     ['pfm has not answered yet', () => new Door(), 200, [
       ' ▱▱▱▱▱▱▱▱ ········   +4.5K  17% 171.9K/1.0M   │ planner              │ claude-opus-9·medium │ running 12m04s │ Σ … │ 💾5m✓3m08s … │ Map the parser › Reading lexer.go',
@@ -119,10 +119,10 @@ describe('the list', () => {
       ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                      │ pending        │ $? own     │ 💾–           │ pfm ✗ │ Wait for the build',
     ]],
     ['pfm fails after it answered', () => failed('list /c/subagents: permission denied', answered()), 252, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ pfm ✗ list /c/subagents: permissi… │ Map the parser › Reading lexer.go',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ pfm ✗ │ Build the door › Running go test ./internal/…',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ │ Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ $? own                   │ 💾–                │ pfm ✗ │ Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ pfm ✗ list /c/subagents: permissio… │ Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ pfm ✗ │ Build the door › Running go test ./internal/.…',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ │ Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ $? own                   │ 💾–                │ pfm ✗ │ Wait for the build',
     ]],
   ])('draws every row to the same cells when %s', (_name, pfm, terminal, rows) => {
     const drawn = list(pfm(), terminal - 6);
@@ -132,12 +132,12 @@ describe('the list', () => {
   });
 
   it('fits every row in its cells, its gauge, who and state kept, the block in pfm\'s form, at every terminal width from 80', () => {
-    const kept = [['↳1/3 ▰▱▱▱▱▱▱▱', 'planner', 'running 12m04s'], [' ▰▰▰▰▰▰▰▱', 'door·', 'running 1m01s'], [' ▰▱▱▱▱▱▱▱', 'Explore', 'done'], [' ▱▱▱▱▱▱▱▱', 'general-pur', 'pending']];
+    const kept = [['1/3 ▰▱▱▱▱▱▱▱', 'planner', 'running 12m04s'], [' ▰▰▰▰▰▰▰▱', 'door·', 'running 1m01s'], [' ▰▱▱▱▱▱▱▱', 'Explore', 'done'], [' ▱▱▱▱▱▱▱▱', 'general-pur', 'pending']];
     for (let terminal = 80; terminal <= 260; terminal += 1) {
       const drawn = list(answered(), terminal - 6);
       const room = AGENTS.map((agent) => terminal - 6 - (agent.parentId === undefined ? 0 : 2));
-      const block = terminal >= 120 ? '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M' : terminal >= 100 ? '↳1/3 ▰▱▱▱▱▱▱▱ ·•••••••• 17% 171.9K/1.0M'
-        : terminal >= 90 ? '↳1/3 ▰▱▱▱▱▱▱▱    17% 171.9K/1.0M' : '↳1/3 ▰▱▱▱▱▱▱▱    17%';
+      const block = terminal >= 120 ? '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M' : terminal >= 100 ? '1/3 ▰▱▱▱▱▱▱▱ ·•••••••• 17% 171.9K/1.0M'
+        : terminal >= 90 ? '1/3 ▰▱▱▱▱▱▱▱    17% 171.9K/1.0M' : '1/3 ▰▱▱▱▱▱▱▱    17%';
       expect({ terminal, cells: drawn.map((row) => cells(row)) }).toEqual({ terminal, cells: drawn.map((row, index) => Math.min(cells(row), room[index]!)) });
       expect({ terminal, kept: drawn.map((row, index) => kept[index]!.filter((fact) => !row.includes(fact))) }).toEqual({ terminal, kept: AGENTS.map(() => []) });
       expect({ terminal, block: drawn[0]!.split('│')[0]!.trimEnd() }).toEqual({ terminal, block });
@@ -146,10 +146,10 @@ describe('the list', () => {
 
   it('draws every row to the same cells when the surface measures no width', () => {
     expect(list(answered(), undefined)).toEqual([
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ Build the door › Running go test ./internal/...',
-      '     ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ Build the door › Running go test ./internal/...',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
     ]);
   });
 
@@ -159,17 +159,17 @@ describe('the list', () => {
   const still = [rest(PLANNER), FOREMAN, rest(CHILD), AGENTS[3]!];
   it.each<[number, string[], number]>([
     [252, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ·••●••●·••••••••· 17% 171.9K/1.0M',
-      '     ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K',
-      '     ▰▱▱▱▱▱▱▱ ·············•↓· 5%   9.0K/200.0K',
-      '     ▱▱▱▱▱▱▱▱ ·················· ?%      0/?',
-    ], 35],
+      '1/3 ▰▱▱▱▱▱▱▱ ·••●••●·••••••••· 17% 171.9K/1.0M',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K',
+      '    ▰▱▱▱▱▱▱▱ ·············•↓· 5%   9.0K/200.0K',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?',
+    ], 34],
     [100, [
-      '↳1/3 ▰▱▱▱▱▱▱▱ ••••••••· 17% 171.9K/1.0M',
-      '     ▰▰▰▰▰▰▰▱ ●●•●●●••• 86% 173.0K/200.0K',
-      '     ▰▱▱▱▱▱▱▱ ·····•↓· 5%   9.0K/200.0K',
-      '     ▱▱▱▱▱▱▱▱ ·········· ?%      0/?',
-    ], 27],
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••· 17% 171.9K/1.0M',
+      '    ▰▰▰▰▰▰▰▱ ●●•●●●••• 86% 173.0K/200.0K',
+      '    ▰▱▱▱▱▱▱▱ ·····•↓· 5%   9.0K/200.0K',
+      '    ▱▱▱▱▱▱▱▱ ·········· ?%      0/?',
+    ], 26],
   ])('draws the strip to one blank before the share at rest, at a terminal of %i', (terminal, blocks, share) => {
     const drawn = still.map((agent) => plain(drawRow(scene(still, answered(), terminal - 6), agent.id)).split('│')[0]!.trimEnd());
     expect(drawn).toEqual(blocks);
@@ -197,17 +197,17 @@ describe('one row', () => {
     ['has been quiet for a minute', {}, { lastActivity: NOW - 60_000 }, 6, 'idle 1m00s'],
     ['has been quiet for a moment less', {}, { lastActivity: NOW - 59_999 }, 6, '2 errors'],
     ['had one tool error', {}, { toolErrors: 1 }, 6, '1 error'],
-    ['has agents below that pfm could not list', {}, { nested: { total: 0, working: 0, unknown: 0, error: 'list /c/subagents: permission denied' } }, 0, '↳?/? ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M'],
-    ['has agents below that pfm could not read', {}, { nested: { total: 3, working: 0, unknown: 2 } }, 0, '↳0/3+2? ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M'],
+    ['has agents below that pfm could not list', {}, { nested: { total: 0, working: 0, unknown: 0, error: 'list /c/subagents: permission denied' } }, 0, '?/? ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M'],
+    ['has agents below that pfm could not read', {}, { nested: { total: 3, working: 0, unknown: 2 } }, 0, '0/3+2? ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M'],
     ['has an advisor pfm could not price', {}, { spend: { ...SPEND, advisorUnpriced: 1 } }, 8, 'adv n/a'],
     ['works in another directory', { cwd: '/w/other/' }, {}, 8, '@other'],
     ['has a name', { name: 'lexer' }, {}, 1, 'lexer·planner'],
     ['has an effort and no model', { model: undefined, lastRequest: undefined }, { text: { ...ANSWER.agents[0]!.text, glyph: '', family: '' } }, 2, '▰▰ medium'],
     ['is named as its type', { name: 'planner' }, {}, 1, 'planner'],
-    ['has a window only pfm knows', {}, { contextWindow: 200_000 }, 0, '↳1/3 ▰▰▰▰▰▰▰▱ ••••••   +4.5K  86% 171.9K/200.0K'],
-    ['fills its window', { tokenCount: 1_000_000 }, {}, 0, '↳1/3 ▰▰▰▰▰▰▰▰ ••••••   +4.5K 100%   1.0M/1.0M'],
-    ['has one reading', { tokenSamples: [171_928] }, {}, 0, '↳1/3 ▰▱▱▱▱▱▱▱ ··············· 17% 171.9K/1.0M'],
-    ['fills its window at rest', { tokenCount: 1_000_000, tokenSamples: [1_000_000] }, {}, 0, '↳1/3 ▰▰▰▰▰▰▰▰ ·············· 100%   1.0M/1.0M'],
+    ['has a window only pfm knows', {}, { contextWindow: 200_000 }, 0, '1/3 ▰▰▰▰▰▰▰▱ ••••••   +4.5K  86% 171.9K/200.0K'],
+    ['fills its window', { tokenCount: 1_000_000 }, {}, 0, '1/3 ▰▰▰▰▰▰▰▰ ••••••   +4.5K 100%   1.0M/1.0M'],
+    ['has one reading', { tokenSamples: [171_928] }, {}, 0, '1/3 ▰▱▱▱▱▱▱▱ ··············· 17% 171.9K/1.0M'],
+    ['fills its window at rest', { tokenCount: 1_000_000, tokenSamples: [1_000_000] }, {}, 0, '1/3 ▰▰▰▰▰▰▰▰ ·············· 100%   1.0M/1.0M'],
     ['has no description', { description: '' }, {}, 8, 'Reading lexer.go'],
     ['is doing what its description says', { label: 'Map the parser' }, {}, 8, 'Map the parser'],
     ['reports progress with an escape sequence and a line break in it', { label: `Reading ${ESC}[31mlexer${ESC}[0m\n.go` }, {}, 8, 'Map the parser › Reading lexer .go'],
@@ -216,7 +216,7 @@ describe('one row', () => {
   });
 
   // The planner's three agents below, one of them working, open its row.
-  const COUNT = `${MUTED}↳${R}${GOOD}1${R}${MUTED}/${R}${LABEL}3${R}`;
+  const COUNT = `${GOOD}1${R}${MUTED}/${R}${LABEL}3${R}`;
   const gauge = (tone: string, on: number, share: string, used: string) =>
     `${COUNT} ${tone}${'▰'.repeat(on)}${R}${DIM}${'▱'.repeat(8 - on)}${R} ${MUTED}${'·'.repeat(15)}${R} ${tone}${share}${R} ${TOKENS}${used}${R}${MUTED}/${R}${WINDOW}100${R}`;
   const sum = (dollars: string) => `${MUTED}Σ${R} ${dollars} ${MUTED}·${R} ${TOKENS}2.0M${R} ${MUTED}in${R} ${MUTED}·${R} ${TOKENS}24.3K${R} ${MUTED}out${R} ${MUTED}·${R} ${TOOLS}57${R} ${MUTED}tools${R}`;
@@ -230,9 +230,9 @@ describe('one row', () => {
     ['a growing step and a drop in the growth figure\'s colour, a quiet or unborn step muted', { tokenSamples: [100, 100, 6_100, 5_000], tokenCount: 5_000, contextWindowSize: 100_000 }, {}, 0,
       `${COUNT} ${GOOD}▰${R}${DIM}▱▱▱▱▱▱▱${R} ${MUTED}····${R}${WINDOW}●↓${R} ${WINDOW}  −1.1K${R} ${GOOD}  5%${R} ${TOKENS}  5.0K${R}${MUTED}/${R}${WINDOW}100.0K${R}`],
     ['a count of the agents below with none working muted, one it could not read a warning', {}, { nested: { total: 3, working: 0, unknown: 2 } }, 0,
-      `${MUTED}↳${R}${MUTED}0${R}${MUTED}/${R}${LABEL}3${R}${WARN}+2?${R} ${GOOD}▰${R}${DIM}▱▱▱▱▱▱▱${R} ${WINDOW}••••••${R} ${WINDOW}  +4.5K${R} ${GOOD} 17%${R} ${TOKENS}171.9K${R}${MUTED}/${R}${WINDOW}1.0M${R}`],
+      `${MUTED}0${R}${MUTED}/${R}${LABEL}3${R}${WARN}+2?${R} ${GOOD}▰${R}${DIM}▱▱▱▱▱▱▱${R} ${WINDOW}••••••${R} ${WINDOW}  +4.5K${R} ${GOOD} 17%${R} ${TOKENS}171.9K${R}${MUTED}/${R}${WINDOW}1.0M${R}`],
     ['agents below pfm could not list a warning', {}, { nested: { total: 0, working: 0, unknown: 0, error: 'list /c/subagents: permission denied' } }, 0,
-      `${WARN}↳?/?${R} ${GOOD}▰${R}${DIM}▱▱▱▱▱▱▱${R} ${WINDOW}••••••${R} ${WINDOW}  +4.5K${R} ${GOOD} 17%${R} ${TOKENS}171.9K${R}${MUTED}/${R}${WINDOW}1.0M${R}`],
+      `${WARN}?/?${R} ${GOOD}▰${R}${DIM}▱▱▱▱▱▱▱${R} ${WINDOW}••••••${R} ${WINDOW}  +4.5K${R} ${GOOD} 17%${R} ${TOKENS}171.9K${R}${MUTED}/${R}${WINDOW}1.0M${R}`],
     ['a spend under two dollars plain', {}, { spend: { ...SPEND, usd: 1.99 } }, 4, sum(`${LABEL}$3.41${R}`)],
     ['a spend of two dollars a warning', {}, { spend: { ...SPEND, usd: 2 } }, 4, sum(`${WARN}$3.41${R}`)],
     ['a spend under ten dollars a warning', {}, { spend: { ...SPEND, usd: 9.99 } }, 4, sum(`${WARN}$3.41${R}`)],
@@ -284,15 +284,15 @@ describe('one row', () => {
   it('keeps a nested row inside the two cells its connector takes', () => {
     const pair = [FOREMAN, { ...PLANNER, parentId: 'a2' }];
     expect(pair.map((agent) => plain(drawRow(scene(pair, answered(), 62), agent.id)))).toEqual([
-      '     ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s',
-      '↳1/3 ▰▱▱▱▱▱▱▱  17%│planner│running 12m04s│2 err│⟲1│Map the…',
+      '    ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s',
+      '1/3 ▰▱▱▱▱▱▱▱  17%│planner│running 12m04s│2 err│⟲1│Map the p…',
     ]);
   });
 
   it.each<[string, Record<string, unknown>, string]>([
-    ['could not list the agents below', { nested: { total: 0, working: 0, unknown: 0, error: 'list /c/subagents: permission denied' } }, '↳?/? ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 2 err │ ⟲1 │ Map the pars… › Reading l…'],
-    ['could not read two of the agents below', { nested: { total: 3, working: 0, unknown: 2 } }, '↳0/3+2? ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 2 err │ ⟲1 │ Map the par… › Reading…'],
-    ['counted one tool error', { toolErrors: 1 }, '↳1/3 ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 1 err │ ⟲1 │ Map the pars… › Reading l…'],
+    ['could not list the agents below', { nested: { total: 0, working: 0, unknown: 0, error: 'list /c/subagents: permission denied' } }, '?/? ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 2 err │ ⟲1 │ Map the pars… › Reading le…'],
+    ['could not read two of the agents below', { nested: { total: 3, working: 0, unknown: 2 } }, '0/3+2? ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 2 err │ ⟲1 │ Map the par… › Reading…'],
+    ['counted one tool error', { toolErrors: 1 }, '1/3 ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 1 err │ ⟲1 │ Map the pars… › Reading le…'],
   ])('says in a narrow list, without the flags\' words, that pfm %s', (_name, facts, row) => {
     expect(plain(drawRow(scene([PLANNER], answered(facts), 162), 'a1'))).toBe(row);
   });

@@ -60,12 +60,11 @@ const (
 // snapshot is never read; the poll scans for itself, so sharing can lose its
 // saving but never a fact.
 type ScanShare struct {
-	path string
-	lock string
-	key  string
-	// clock is real time: the waits are on other processes, never on the
-	// watch's poll clock.
-	clock clock.Clock
+	path    string
+	lock    string
+	key     string
+	clock   clock.Clock // the watch's poll clock: every instant a snapshot carries or is judged by
+	elapsed clock.Clock // real time: the waits on other processes, a scratch file's age on disk
 
 	mu    sync.Mutex
 	noted map[string]bool
@@ -78,16 +77,17 @@ type shareHeader struct {
 	// the binary, the user, the paths, the machine config, the caller's
 	// directory and socket. A snapshot under another key is someone else's.
 	Key string `json:"key"`
-	// StartNS is the wall-clock instant the scan began.
+	// StartNS is the instant the scan began, on the watches' poll clock.
 	StartNS int64 `json:"start_ns"`
 	// Sum is the SHA-256 of the scan bytes that follow the header line.
 	Sum string `json:"sum"`
 }
 
 // NewScanShare opens the share every watch under the same binary, user, paths,
-// config and caller reads and writes. An error means this process cannot
-// share (it scans each poll itself), never that the fleet is unreadable.
-func NewScanShare(runtime *pfmconfig.Runtime) (*ScanShare, error) {
+// config and caller reads and writes, on the clock since comes from. An error
+// means this process cannot share (it scans each poll itself), never that the
+// fleet is unreadable.
+func NewScanShare(runtime *pfmconfig.Runtime, pollClock clock.Clock) (*ScanShare, error) {
 	env, err := fleet.ResolveEnv(fleet.Request{Runtime: runtime})
 	if err != nil {
 		return nil, fmt.Errorf("watch snapshot: resolve the scan environment: %w", err)
@@ -97,7 +97,9 @@ func NewScanShare(runtime *pfmconfig.Runtime) (*ScanShare, error) {
 		return nil, err
 	}
 	path := paths.WatchSnapshot(env.Paths)
-	return &ScanShare{path: path, lock: path + ".lock", key: key, clock: clock.Real, noted: map[string]bool{}}, nil
+	return &ScanShare{
+		path: path, lock: path + ".lock", key: key, clock: pollClock, elapsed: clock.Real, noted: map[string]bool{},
+	}, nil
 }
 
 // shareKey hashes every input a scan's rows depend on besides the world
@@ -180,13 +182,14 @@ func (share *ScanShare) acquire(
 	if held {
 		return true, FleetScan{}, false
 	}
-	deadline := share.clock.Now().Add(ShareLockWait)
-	if started, stamped := holderStart(lock); stamped && started.Add(ShareLockWait).Before(deadline) {
-		deadline = started.Add(ShareLockWait)
+	wait := ShareLockWait
+	if started, stamped := holderStart(lock); stamped {
+		wait = min(wait, started.Add(ShareLockWait).Sub(share.clock.Now()))
 	}
+	deadline := share.elapsed.Now().Add(wait)
 	last := statFile(share.path)
-	for share.clock.Now().Before(deadline) {
-		if err := share.clock.Sleep(ctx, sharePollEvery); err != nil {
+	for share.elapsed.Now().Before(deadline) {
+		if err := share.elapsed.Sleep(ctx, sharePollEvery); err != nil {
 			return false, FleetScan{}, false
 		}
 		if current := statFile(share.path); !sameStat(current, last) {
@@ -321,7 +324,7 @@ func (share *ScanShare) sweepScratch() error {
 			continue
 		}
 		info, err := entry.Info()
-		if err != nil || share.clock.Now().Sub(info.ModTime()) < shareScratchAge {
+		if err != nil || share.elapsed.Now().Sub(info.ModTime()) < shareScratchAge {
 			continue
 		}
 		scratch := filepath.Join(directory, entry.Name())

@@ -36,6 +36,9 @@ func watchCommand(
 	runner deps.Runner,
 	runtimes ...commandRuntime,
 ) int {
+	if pollClock == nil {
+		pollClock = clock.Real
+	}
 	usage := "usage: pfm chat watch <target|glob>... [--transitions [--no-working] [--quiet-after SECS]] " +
 		"[--idle-after SECS] [--on-idle CMD] [--on-exit CMD] [--once] [--poll SECS]"
 	flags := cli.NewFlagSet("chat watch", usage, stderr)
@@ -87,7 +90,7 @@ func watchCommand(
 	}
 	// One scan per poll tick serves every watch on the box: a share that
 	// cannot open costs this watch its saving, never a fact.
-	share, err := pfmchat.NewScanShare(runtime)
+	share, err := pfmchat.NewScanShare(runtime, pollClock)
 	if err != nil {
 		obs.Logger(ctx).Warn("watch.snapshot.open", obs.FieldErr, err.Error())
 	}
@@ -101,11 +104,7 @@ func watchCommand(
 	// one scan, shared with the watches starting beside it.
 	var first *watchRound
 	if len(precheck) > 0 {
-		now := clock.Real.Now
-		if pollClock != nil {
-			now = pollClock.Now
-		}
-		first = &watchRound{runtime: runtime, share: share, since: now()}
+		first = &watchRound{runtime: runtime, share: share, since: pollClock.Now()}
 	}
 	for _, target := range precheck {
 		if _, err := pfmchat.TargetIn(ctx, target, first.rows, runtime); err != nil {

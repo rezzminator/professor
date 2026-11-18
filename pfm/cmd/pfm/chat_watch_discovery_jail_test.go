@@ -37,9 +37,9 @@ func writeLadderFile(t *testing.T, path string, content []byte) {
 	}
 }
 
-// holdShareLock takes the snapshot's lock as a watch that began a scan just
-// now and never finishes it would, until release.
-func holdShareLock(t *testing.T, snapshot string) func() {
+// holdShareLock takes the snapshot's lock as a watch that began a scan at
+// started and never finishes it would, until release.
+func holdShareLock(t *testing.T, snapshot string, started time.Time) func() {
 	t.Helper()
 	lock, err := os.OpenFile(snapshot+".lock", os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -48,7 +48,7 @@ func holdShareLock(t *testing.T, snapshot string) func() {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatalf("lock %s: %v", lock.Name(), err)
 	}
-	stamp := strconv.FormatInt(time.Now().UnixNano(), 10) + " 1\n"
+	stamp := strconv.FormatInt(started.UnixNano(), 10) + " 1\n"
 	if _, err := lock.WriteAt([]byte(stamp), 0); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestWatchLadderAnUnfitSharedSnapshotNeverHidesATurn(t *testing.T) {
 	ladder, snapshot := shareLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions")
-	watch.expect("SEEN lad-a idle")
+	watch.expect("SEEN lad-a idle idle_seconds=0")
 	published, err := os.ReadFile(snapshot)
 	if err != nil {
 		t.Fatalf("the watch's first poll published no snapshot: %v", err)
@@ -88,13 +88,14 @@ func TestWatchLadderAnUnfitSharedSnapshotNeverHidesATurn(t *testing.T) {
 			}
 			return func() {}
 		}},
-		{"locked by a holder that never publishes", func() func() { return holdShareLock(t, snapshot) }},
+		// The holder began at this poll's tick: the poll waits it out.
+		{"locked by a holder that never publishes", func() func() { return holdShareLock(t, snapshot, watch.timer.due) }},
 	} {
 		t.Log(fault.name)
 		release := fault.damage()
 		seat.turn()
 		watch.poll()
-		watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+		watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 		release()
 	}
 }
@@ -106,16 +107,16 @@ func TestWatchLadderASharedSnapshotNeverOutlivesAnExit(t *testing.T) {
 	testjail.TmuxServer(t)
 	for _, test := range []struct {
 		name  string
-		forge func(t *testing.T, alive []byte) []byte
+		forge func(t *testing.T, now time.Time, alive []byte) []byte // now: the watch's clock
 	}{
-		{"stale: taken before the exit", func(_ *testing.T, alive []byte) []byte { return alive }},
-		{"stamped in this clock's future", func(t *testing.T, alive []byte) []byte {
+		{"stale: taken before the exit", func(_ *testing.T, _ time.Time, alive []byte) []byte { return alive }},
+		{"stamped in this clock's future", func(t *testing.T, now time.Time, alive []byte) []byte {
 			header, payload, _ := bytes.Cut(alive, []byte("\n"))
 			var fields map[string]any
 			if err := json.Unmarshal(header, &fields); err != nil {
 				t.Fatal(err)
 			}
-			fields["start_ns"] = time.Now().Add(time.Hour).UnixNano()
+			fields["start_ns"] = now.Add(time.Hour).UnixNano()
 			forged, err := json.Marshal(fields)
 			if err != nil {
 				t.Fatal(err)
@@ -127,13 +128,13 @@ func TestWatchLadderASharedSnapshotNeverOutlivesAnExit(t *testing.T) {
 			ladder, snapshot := shareLadder(t)
 			seat := ladder.start("lad-a")
 			watch := ladder.watch("lad-a", "--transitions")
-			watch.expect("SEEN lad-a idle")
+			watch.expect("SEEN lad-a idle idle_seconds=0")
 			alive, err := os.ReadFile(snapshot)
 			if err != nil {
 				t.Fatalf("the watch's first poll published no snapshot: %v", err)
 			}
 			seat.exit()
-			writeLadderFile(t, snapshot, test.forge(t, alive))
+			writeLadderFile(t, snapshot, test.forge(t, ladder.clock.Now(), alive))
 			watch.poll()
 			watch.expect("EXIT lad-a")
 			watch.expectEnded(codeDeadChat)
@@ -167,7 +168,7 @@ func TestWatchLadderAQuietFollowedSeatIsNotRescanned(t *testing.T) {
 	ladder, snapshot := shareLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions")
-	watch.expect("SEEN lad-a idle")
+	watch.expect("SEEN lad-a idle idle_seconds=0")
 	// The polls after binding list the seat against its fingerprint until a
 	// listing finds it as the fingerprint saw it: that pair is the baseline.
 	watch.poll()
@@ -176,18 +177,18 @@ func TestWatchLadderAQuietFollowedSeatIsNotRescanned(t *testing.T) {
 	scanned := snapshotScan(t, snapshot)
 	seat.turn()
 	watch.poll()
-	watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+	watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 	watch.poll()
 	watch.expect()
 	if got := snapshotScan(t, snapshot); got != scanned {
 		t.Fatalf("the watch rescanned (snapshot scan %d, was %d) a seat whose fingerprint held", got, scanned)
 	}
 	seat.typeLine("/clear")
-	seat.waitPane("❯")
+	seat.waitProject(`"customTitle":"lad-a"`, seat.transcript) // the successor's title
 	ladder.replies++
 	reply := fmt.Sprintf("reply-%d", ladder.replies)
 	seat.typeLine(`mock-engine: [{"type":"turn","reply":"` + reply + `","busy_ms":0}]`)
-	waitForReply(t, filepath.Dir(seat.transcript), reply)
+	seat.waitProject(answered(reply), "")
 	watch.poll()
 	if got := snapshotScan(t, snapshot); got == scanned {
 		t.Fatal("a /clear left the watch on its old row: no scan followed the rewritten crumb")
@@ -195,15 +196,17 @@ func TestWatchLadderAQuietFollowedSeatIsNotRescanned(t *testing.T) {
 	// The /clear itself may read as a turn; the next real turn is announced
 	// once, last.
 	lines := strings.Split(strings.TrimSuffix(watch.stdout.String(), "\n"), "\n")[watch.read:]
+	const idle = "IDLE lad-a idle_seconds=10"
 	idles := 0
 	for _, line := range lines {
-		if strings.HasPrefix(line, "IDLE lad-a idle_seconds=") {
+		if line == idle {
 			idles++
 		}
 	}
-	if idles != 1 || !strings.HasPrefix(lines[len(lines)-1], "IDLE lad-a") {
+	if idles != 1 || lines[len(lines)-1] != idle {
 		t.Fatalf(
-			"after /clear the next turn was not announced once, last: %q (stderr %q)",
+			"after /clear the next turn was not announced once, last, as %q: %q (stderr %q)",
+			idle,
 			lines,
 			watch.stderr.String(),
 		)
@@ -229,8 +232,8 @@ func TestWatchLadderASeatFirstSeenWithoutItsSocketKeepsItsWatch(t *testing.T) {
 	ladder.waitRow("lad-a", "", true)
 	named := ladder.watch("lad-a", "--transitions")
 	glob := ladder.watch("lad-*", "--transitions")
-	named.expect("SEEN lad-a idle")
-	glob.expect("SEEN lad-a idle")
+	named.expect("SEEN lad-a idle idle_seconds=0")
+	glob.expect("SEEN lad-a idle idle_seconds=0")
 	seat.signalServer(syscall.SIGUSR1) // tmux recreates its socket
 	ladder.waitRow("lad-a", seat.socket, true)
 	named.poll()
@@ -239,9 +242,9 @@ func TestWatchLadderASeatFirstSeenWithoutItsSocketKeepsItsWatch(t *testing.T) {
 	glob.expect()
 	seat.turn()
 	named.poll()
-	named.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+	named.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 	glob.poll()
-	glob.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+	glob.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 	seat.exit()
 	named.poll()
 	named.expect("EXIT lad-a")

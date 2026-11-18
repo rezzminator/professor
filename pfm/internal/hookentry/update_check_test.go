@@ -30,9 +30,9 @@ func TestUpdateCheckOfflineMakesNoLookup(t *testing.T) {
 	defer server.Close()
 	cache := filepath.Join(t.TempDir(), "update.json")
 	var pinged []string
-	previous := updateCheckInstallPingDaily
-	t.Cleanup(func() { updateCheckInstallPingDaily = previous })
-	updateCheckInstallPingDaily = func(_ context.Context, options installping.Options) error {
+	previous := installPingDaily
+	t.Cleanup(func() { installPingDaily = previous })
+	installPingDaily = func(_ context.Context, options installping.Options) error {
 		pinged = append(pinged, options.Version)
 		return nil
 	}

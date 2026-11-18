@@ -17,10 +17,6 @@ import (
 
 const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
-// updateCheckInstallPingDaily sends the event=daily install ping; tests
-// replace it.
-var updateCheckInstallPingDaily = installping.SendDaily
-
 // UpdateCheck refreshes the release notice cache for the picker and first
 // sends the daily install ping, whatever the release lookup does. An unreachable
 // release lookup is recorded in the failure marker, logged WARN, and exits 0;
@@ -43,7 +39,7 @@ func UpdateCheck(args []string, stderr io.Writer, runtime config.Runtime) int {
 		return 2
 	}
 	// installping honours its own switches and logs its own failure WARN.
-	_ = updateCheckInstallPingDaily(context.Background(), installping.ForRuntime(runtime, paths.OSEnv{}))
+	_ = installPingDaily(context.Background(), installping.ForRuntime(runtime, paths.OSEnv{}))
 	if paths.UpdateCheckOffline() {
 		fmt.Fprintf(
 			stderr,

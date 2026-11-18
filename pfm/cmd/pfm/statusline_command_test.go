@@ -10,13 +10,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/installping"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -461,48 +459,6 @@ func TestStatuslineAgentsPrintsOneJSONLineOrFails(t *testing.T) {
 		&stdout, &stderr, statuslineTestRuntime(t), paths.OSEnv{}); code != 2 || stdout.Len() != 0 {
 		t.Fatalf("an agent id without --agents code=%d stdout=%q; want usage 2", code, stdout.String())
 	}
-}
-
-// TestStatuslinePacedWorkerSendsTheDailyInstallPing: each chat's paced worker
-// sends the daily install ping with the machine's version, and a worker that
-// exits at once (here a bad key) returns only once the ping has finished.
-func TestStatuslinePacedWorkerSendsTheDailyInstallPing(t *testing.T) {
-	jailTest(t)
-	t.Setenv("PFM_HOME", t.TempDir())
-	previous := pacedInstallPingDaily
-	t.Cleanup(func() { pacedInstallPingDaily = previous })
-	pinged := make(chan string, 1)
-	stderr := &firstWriteSignal{written: make(chan struct{})}
-	pacedInstallPingDaily = func(_ context.Context, options installping.Options) error {
-		<-stderr.written // the worker has already refused its key and is returning
-		pinged <- options.Version
-		return nil
-	}
-	runtime := statuslineTestRuntime(t)
-	runtime.Version = "1.2.3"
-	var stdout bytes.Buffer
-	runStatuslineWithRuntime([]string{"--paced", "../escape"}, strings.NewReader(""),
-		&stdout, stderr, runtime, paths.OSEnv{})
-	select {
-	case version := <-pinged:
-		if version != "1.2.3" {
-			t.Fatalf("paced worker daily ping version = %q, want 1.2.3", version)
-		}
-	default:
-		t.Fatal("paced worker returned before its daily install ping finished")
-	}
-}
-
-// firstWriteSignal closes written on its first write: the moment the paced
-// worker reports its refusal.
-type firstWriteSignal struct {
-	once    sync.Once
-	written chan struct{}
-}
-
-func (signal *firstWriteSignal) Write(raw []byte) (int, error) {
-	signal.once.Do(func() { close(signal.written) })
-	return len(raw), nil
 }
 
 func TestStatuslineWarningsReachTheActivityLog(t *testing.T) {

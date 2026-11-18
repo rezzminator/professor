@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installping"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -49,12 +50,40 @@ func TestInstallPingNoticeSaysOnOrWhatTurnedItOff(t *testing.T) {
 				sent++
 				return errors.New("counter unreachable")
 			}
-			options := installping.Options{Env: &paths.MapEnv{Values: tc.env}, Version: "1.2.3"}
 			var stdout bytes.Buffer
-			announceInstallPing(context.Background(), &stdout, tc.offline, options)
+			InstallPing(context.Background(), &stdout, tc.offline,
+				config.Runtime{Version: "1.2.3"}, &paths.MapEnv{Values: tc.env})
 			if stdout.String() != tc.want || sent != tc.wantSent {
 				t.Fatalf("notice=%q sent=%d, want %q sent=%d", stdout.String(), sent, tc.want, tc.wantSent)
 			}
 		})
+	}
+}
+
+// TestDailyInstallPingDuringWaitsOutThePing: the daily ping carries the
+// runtime's version, and work that returns at once is held until the ping has
+// finished.
+func TestDailyInstallPingDuringWaitsOutThePing(t *testing.T) {
+	previous := installPingDaily
+	t.Cleanup(func() { installPingDaily = previous })
+	worked := make(chan struct{})
+	pinged := make(chan string, 1)
+	installPingDaily = func(_ context.Context, options installping.Options) error {
+		<-worked // work has already returned
+		pinged <- options.Version
+		return nil
+	}
+	code := DailyInstallPingDuring(context.Background(), config.Runtime{Version: "1.2.3"},
+		&paths.MapEnv{Values: map[string]string{}}, func() int {
+			close(worked)
+			return 7
+		})
+	select {
+	case version := <-pinged:
+		if code != 7 || version != "1.2.3" {
+			t.Fatalf("code=%d daily ping version=%q, want 7 and 1.2.3", code, version)
+		}
+	default:
+		t.Fatalf("code=%d returned before the daily install ping finished", code)
 	}
 }

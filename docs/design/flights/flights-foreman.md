@@ -68,8 +68,12 @@ How the batching happens: inside one Bash call (20 to 28 commands chained), not 
 - **Tests are one table:** a row per case the acceptance names and per boundary of a guard, each asserting the exact value.
 - **Write and prove in one round:** the test edits, the new tests run on the unchanged code (the red proof), the change, then one foreground call chaining the affected tests and the static checks, each step ending `|| echo "FAILED: {step}"`.
 - **A red in the change:** read to its cause, every cause fixed in one round, one rerun.
-- **A red in a file the foreman did not touch:** its first error line under `OUTSIDE`, uninvestigated.
-- **The full suite and the gate** stay the lander's.
+- **A red in a file the foreman did not touch,** in the affected-test run: its first error line under `OUTSIDE`, uninvestigated.
+- **The whole unit suite, once, before the return (step 7):** the unit suite of each project the foreman's files sit in, by the testing manual's command, each result line joining `TESTS`. Every red there is read to its cause whatever file it sits in: one the change causes is fixed and that suite rerun, any other goes under `OUTSIDE` with its first error line.
+- **The gate past those unit suites** stays the lander's.
+
+Why the unit-suite step: an adopter's first full gate of a landing on 2026-11-16 was red on 7 of 7,949 backend unit tests and 1 test of another project, none selected by the foremen's affected-test runs. Unbenched: the step rests on that field data; no bench run has measured its cost.
+
 - **Every named item is built,** or the return is `PARTIAL` naming it.
 
 Why the table: blind graders found the first law's cheaper builds correct but thinner in tests; with the table rule the opus · medium builds passed all three clearer tasks (8, 8, 9).
@@ -146,7 +150,7 @@ The project contract is already in context.
 
 ## Waiting, gates, decisions, law
 
-- **Waiting:** a waited command runs in the foreground with a timeout of at most 270 s; one that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 270 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints, never by shorter polls. Why: past 300 s the prompt cache expires and the next request re-pays the whole context; over 239 past landings the requests that followed one wait of 290 s or more cost $77, against $9 in 270 s slices.
+- **Waiting:** a waited command runs in the foreground with a timeout of at most 170 s, its Bash `timeout` 175000 at most; one that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 170 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints, never by shorter polls. Why 170 s: Claude Code moves a sub-agent's foreground call still running at 180 s to the background, so a 270 s wait never ended in the foreground; an adopter's landing on 2026-11-16 had 14 calls moved that way, and every move seen in six days of sub-agent transcripts was at 180 s. Slices also stay short of the 300 s the prompt cache lives: over 239 past landings the requests that followed one wait of 290 s or more cost $77, against $9 in 270 s slices.
 - **Gates:** a failing gate is fixed in the code; a limit rises only through the project's documented exception route.
 - **Decisions:** the foreman decides everything the work leaves open, never asks the user, sends a critical decision to `SendMessage(to: "main")` and keeps working.
 - **Nothing named is left open:** an item the brief names, or a file it points to lists, is built, or the return is `PARTIAL` naming it. The run's size, its context and its price are never the why (the definition carries one ✗ and one ✓ example). Neither is a check it cannot run (a screen it cannot see, a device, a live service): the item is built from the code, and what could not be checked goes under `UNTESTED`. Why: with the size rule alone, five of seven runs still left 6 to 13 listed items open as "needs a rendered check"; with the sentence the two Opus runs left 4 and 4 and one Sonnet run 4, the other Sonnet run about 14 (it disobeyed the sentence).
@@ -180,7 +184,7 @@ Why the status rule: without it 2 of 4 list-rung runs opened with `DONE` while a
 
 - no child, tracer or other agent;
 - no effort button;
-- no full suite or gate;
+- no gate past the unit suites of its own projects;
 - no commit, merge or landing;
 - no question to the user;
 - no `DONE` over an item left unbuilt;
@@ -198,10 +202,11 @@ Open after the heavy-rung bench:
 - The work list's folder is not pinned: "a file outside the tree" landed in the session scratch folder (2 runs), the shared temp root (2 runs) and the brief's own folder (2 runs).
 - Sonnet on a heavy list is not reliable: 4 to 14 of 24 minor items open over six runs; four of six Sonnet returns run 45 to 73 lines with bullets against the 25-line block; one opened with other words before `PARTIAL`.
 - One tool call a request is still the norm on heavy runs; the reading rounds become ten and more single-call reads on a many-item brief.
-- Wait-only requests cost 10-14% of a run that waits on long commands; waits are cut into 270 s slices (§ Waiting, gates, decisions, law).
+- Wait-only requests cost 10-14% of a run that waits on long commands; waits are cut into 170 s slices (§ Waiting, gates, decisions, law).
 
 Unbenched:
 
+- The whole-unit-suite step before the return: field data only, its cost unmeasured.
 - Compaction point: replay prices a compaction at 150k tokens 11.4% lower and one at 80k 10.5% higher; a replay of 22 runs of 60 minutes and more puts a reset past 180k at -2%, past 130k at +4%, past 110k at +18%; no live run tested it.
 - A brief that carries the reading list (exact files and symbols): not tested live.
 - The same law on the lander, tracer and reviewers.

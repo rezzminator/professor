@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # infra/fence/mkdir-lock.sh: one case per behaviour of mkdir_lock_try — a free lock taken with its
-# owner's pid, a live holder kept and named, a dead holder's lock broken, a fresh pid-less lock kept, an
-# old pid-less one broken, a stale breaker directory cleared, and two waiters that saw one dead holder
-# never both holding the lock. Every lock lives under $T.
+# owner's pid, a live holder kept and named, even when mkdir reports a lost creation race as success,
+# a dead holder's lock broken, a pid-file-less directory taken, a fresh empty pid file kept, an old one
+# broken, a stale breaker cleared, and two waiters that saw one dead holder never both holding the
+# lock. Every lock lives under $T.
 #   bash infra/fence/tests/mkdir-lock_test.sh
 set -uo pipefail
 
@@ -35,26 +36,41 @@ if ! mkdir_lock_try "$L" 4343 && [ "$MKDIR_LOCK_HOLDER" = "$live" ] && [ "$(cat 
   ok 'a live holder keeps its lock, MKDIR_LOCK_HOLDER names it'
 else bad 'live holder' "holder=$MKDIR_LOCK_HOLDER pid=$(cat "$L/pid" 2>&1)"; fi
 
+# uutils mkdir checks for the path, then creates it, and exits 0 when another creator wins in between:
+# this mkdir, first on PATH, answers every existing directory that way.
+mkdir "$T/racing-mkdir"
+printf '#!/bin/sh\n[ -d "$1" ] && exit 0\nexec %s "$@"\n' "$(command -v mkdir)" >"$T/racing-mkdir/mkdir"
+chmod +x "$T/racing-mkdir/mkdir"
+if ! (PATH="$T/racing-mkdir:$PATH" mkdir_lock_try "$L" 4343) && [ "$(cat "$L/pid")" = "$live" ]; then
+  ok "a mkdir that reports a lost creation race as success never takes a live holder's lock"
+else bad 'lost mkdir race' "pid=$(cat "$L/pid" 2>&1)"; fi
+
 L="$T/dead.lock"
 mkdir "$L"; dead_pid >"$L/pid"
 if mkdir_lock_try "$L" 4444 && [ "$(cat "$L/pid")" = 4444 ] && [ ! -e "$L.break" ]; then
   ok "a dead holder's lock is broken and taken, no breaker left behind"
 else bad 'dead holder' "pid=$(cat "$L/pid" 2>&1) break=$(ls -d "$L.break" 2>&1)"; fi
 
-L="$T/fresh.lock"
+L="$T/bare.lock"
 mkdir "$L"
-if ! mkdir_lock_try "$L" 4545 && [ -z "$MKDIR_LOCK_HOLDER" ] && [ ! -e "$L/pid" ]; then
-  ok 'a fresh lock with no pid yet (its owner between mkdir and the pid write) is kept'
-else bad 'fresh pid-less lock' "holder=$MKDIR_LOCK_HOLDER $(ls -la "$L" 2>&1)"; fi
+if mkdir_lock_try "$L" 4545 && [ "$(cat "$L/pid")" = 4545 ]; then
+  ok 'a lock directory with no pid file is taken: the pid file, not the directory, names the owner'
+else bad 'bare directory' "$(ls -la "$L" 2>&1)"; fi
+
+L="$T/fresh.lock"
+mkdir "$L"; : >"$L/pid"
+if ! mkdir_lock_try "$L" 4545 && [ -z "$MKDIR_LOCK_HOLDER" ] && [ ! -s "$L/pid" ]; then
+  ok 'a fresh empty pid file (its owner between the create and the pid write) is kept'
+else bad 'fresh empty pid file' "holder=$MKDIR_LOCK_HOLDER $(ls -la "$L" 2>&1)"; fi
 
 L="$T/stale.lock"
-mkdir "$L"; old "$L"
-if mkdir_lock_try "$L" 4646 && [ "$(cat "$L/pid")" = 4646 ]; then ok 'a pid-less lock over a minute old is broken and taken'
-else bad 'old pid-less lock' "$(ls -la "$L" 2>&1)"; fi
+mkdir "$L"; : >"$L/pid"; old "$L"
+if mkdir_lock_try "$L" 4646 && [ "$(cat "$L/pid")" = 4646 ]; then ok 'an empty pid file over a minute old is broken and taken'
+else bad 'old empty pid file' "$(ls -la "$L" 2>&1)"; fi
 
 L="$T/breaker.lock"
-mkdir "$L" "$L.break"; dead_pid >"$L/pid"
-if ! mkdir_lock_try "$L" 4747 && [ -d "$L.break" ]; then ok 'a fresh breaker directory (another waiter mid-break) is left alone'
+mkdir "$L"; : >"$L.break"; dead_pid >"$L/pid"
+if ! mkdir_lock_try "$L" 4747 && [ -f "$L.break" ]; then ok 'a fresh breaker (another waiter mid-break) is left alone'
 else bad 'fresh breaker' "$(ls -la "$T" 2>&1)"; fi
 old "$L.break"
 mkdir_lock_try "$L" 4747 >/dev/null 2>&1
@@ -69,10 +85,10 @@ mkdir "$L"; gone="$(dead_pid)"; printf '%s\n' "$gone" >"$L/pid"
 sleep 30 &
 first=$!
 mkdir_lock_try "$L" "$first"; rc1=$?
-mkdir "$L.break"
+_mkdir_lock_create "$L.break" second
 now="$(cat "$L/pid" 2>/dev/null)"
 if [ "$now" = "$gone" ] && _mkdir_lock_stale "$L" "$now"; then rm -rf "$L"; fi # the second's re-check, its stale read
-rmdir "$L.break"
+rm -f "$L.break"
 if [ "$rc1" -eq 0 ] && [ "$(cat "$L/pid")" = "$first" ]; then ok "a second breaker's re-check under the breaker leaves the first's fresh lock"
 else bad 'break re-check' "rc1=$rc1 pid=$(cat "$L/pid" 2>&1)"; fi
 # Six waiters race one dead holder; a winner holds until released, so a loser can only take the lock

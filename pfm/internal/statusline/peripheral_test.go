@@ -20,7 +20,7 @@ func TestParityIdentityAndFailuresVisible(t *testing.T) {
 		want    string
 	}{
 		// A socket path that is a file cannot be listed: the fleet is unknown.
-		{name: "unreadable socket directory", want: "● sol-6.1·effort unknown │ work │ git! │ fleet!\n🟢_______________      +0   ?%      ?/500.0K │ ⏳ 0s │ 💾–\nChatGPT quota missing\n", tmuxDir: func(home string) string {
+		{name: "unreadable socket directory", want: "● sol-6.1·effort unknown │ work │ git! │ fleet!\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/500.0K │ ⏳ 0s │ 💾–\nChatGPT quota missing\n", tmuxDir: func(home string) string {
 			path := filepath.Join(home, "not-a-directory")
 			if err := os.WriteFile(path, nil, 0o600); err != nil {
 				t.Fatal(err)
@@ -28,7 +28,7 @@ func TestParityIdentityAndFailuresVisible(t *testing.T) {
 			return path
 		}},
 		// No socket directory means no tmux server ever ran: an empty fleet.
-		{name: "absent socket directory", want: "● sol-6.1·effort unknown │ work │ git! │ · ·\n🟢_______________      +0   ?%      ?/500.0K │ ⏳ 0s │ 💾–\nChatGPT quota missing\n", tmuxDir: func(home string) string { return filepath.Join(home, "absent") }},
+		{name: "absent socket directory", want: "● sol-6.1·effort unknown │ work │ git! │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/500.0K │ ⏳ 0s │ 💾–\nChatGPT quota missing\n", tmuxDir: func(home string) string { return filepath.Join(home, "absent") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := parityRuntime(t)
@@ -65,7 +65,7 @@ func TestGitBranchFailureIsNotDetachedHEAD(t *testing.T) {
 	r := parityRuntime(t)
 	r.Command = branchFailureCommand{}
 	r.Warn = &bytes.Buffer{}
-	if got, want := stripANSICodes(gitSegment(context.Background(), r, "/fixture")), "git!"; got != want {
+	if got, want := stripANSICodes(gitRead(context.Background(), r, "/fixture").text(0)), "git!"; got != want {
 		t.Fatalf("failed branch read segment = %q, want %q", got, want)
 	}
 }

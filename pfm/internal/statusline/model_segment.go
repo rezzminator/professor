@@ -20,12 +20,13 @@ import (
 
 // modelSegment is the main line's model block: the model's symbol and name,
 // then the effort joined by a muted "·". Missing effort remains explicitly
-// unknown.
-func modelSegment(data input, state autoEffortState) string {
+// unknown. Without words a level with a bar is the bar alone: the same level in
+// fewer cells.
+func modelSegment(data input, state autoEffortState, words bool) string {
 	return cModel + modelglyph.Symbol(
 		data.Model.DisplayName,
 	) + " " + data.Model.DisplayName + reset + effortSuffix(
-		data, state,
+		data, state, words,
 	)
 }
 
@@ -34,7 +35,7 @@ func modelSegment(data input, state autoEffortState) string {
 // level shows, marked "requested" whatever the mode. Off, no level, no file or
 // no live keeper reads as if the plugin were not installed: the payload's level
 // alone. Only a state file that cannot be trusted adds a word, ERR.
-func effortSuffix(data input, state autoEffortState) string {
+func effortSuffix(data input, state autoEffortState, words bool) string {
 	joint := cMuted + "·" + reset
 	plain := modelglyph.EffortLabel(data.Effort.Level)
 	if plain == "" {
@@ -44,9 +45,9 @@ func effortSuffix(data input, state autoEffortState) string {
 	case state.err != nil:
 		return joint + cBad + plain + " · ERR" + reset
 	case state.found && state.mode != "off" && state.level != "":
-		return joint + paintedEffort(state.level, cEffort) + " · requested" + reset
+		return joint + paintedEffort(state.level, cEffort, words) + " · requested" + reset
 	}
-	label := paintedEffort(data.Effort.Level, cEffort)
+	label := paintedEffort(data.Effort.Level, cEffort, words)
 	if label == "" {
 		label = cEffort + plain
 	}
@@ -56,14 +57,18 @@ func effortSuffix(data input, state autoEffortState) string {
 // paintedEffort is a level's filled-only bar in the level's own colour
 // (effortBarColors), then the level word in ambient, the colour the segment
 // wears. A level outside the five has no bar and no level colour, and no level
-// is "". The caller closes the segment with reset.
-func paintedEffort(level, ambient string) string {
+// is "". Without words a level with a bar is its bar alone. The caller closes
+// the segment with reset.
+func paintedEffort(level, ambient string, words bool) string {
 	name, bar := modelglyph.EffortBar(level)
 	if bar == "" {
 		if name == "" {
 			return ""
 		}
 		return ambient + modelglyph.EffortLabel(level)
+	}
+	if !words {
+		return effortBarColors[name] + bar + reset + ambient
 	}
 	return effortBarColors[name] + bar + reset + ambient + " " + name
 }

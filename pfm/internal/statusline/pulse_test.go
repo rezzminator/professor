@@ -12,8 +12,9 @@ import (
 // pulseNow is a render time on the pulse's five-second grid.
 var pulseNow = time.Unix(1_790_000_000, 0)
 
-// pulseTraceReadings is a trace that holds every kind of step: no growth, three
-// of the five growth levels, a compaction, and a recount that sheds a few tokens.
+// pulseTraceReadings is a trace that holds every kind of step over fifteen
+// cells: no growth, both growth levels, a compaction, and a recount that sheds
+// a few tokens; the newest six, the pulse's width, hold no step of 5,000.
 func pulseTraceReadings() []pulseReading {
 	at := func(seconds int) int64 { return pulseNow.Add(time.Duration(seconds) * time.Second).UnixMilli() }
 	return []pulseReading{
@@ -43,15 +44,9 @@ func TestPulseLevelIsTheAgentRowsScale(t *testing.T) {
 		{-1, 0},
 		{0, 0},
 		{1, 1},
-		{999, 1},
-		{1_000, 2},
-		{4_999, 2},
-		{5_000, 3},
-		{19_999, 3},
-		{20_000, 4},
-		{49_999, 4},
-		{50_000, 5},
-		{1_000_000, 5},
+		{4_999, 1},
+		{5_000, 2},
+		{1_000_000, 2},
 	}
 	for _, tc := range cases {
 		if got := pulseLevel(tc.grown); got != tc.level {
@@ -60,61 +55,60 @@ func TestPulseLevelIsTheAgentRowsScale(t *testing.T) {
 	}
 }
 
-func TestPulseLitIsTheAgentRowsFill(t *testing.T) {
+func TestGaugeLitIsTheAgentRowsFill(t *testing.T) {
 	cases := []struct {
 		used, window int64
 		lit          int
 	}{
 		{0, 1_000, 0},
 		{1, 1_000, 1},
-		{100, 1_000, 2},
-		{500, 1_000, 8},
-		{999, 1_000, 14},
-		{1_000, 1_000, 15},
-		{1_500, 1_000, 15},
+		{187, 1_000, 1},
+		{188, 1_000, 2},
+		{500, 1_000, 4},
+		{937, 1_000, 7},
+		{999, 1_000, 7},
+		{1_000, 1_000, 8},
+		{1_500, 1_000, 8},
 		{10, 0, 0},
 	}
 	for _, tc := range cases {
-		if got := pulseLit(tc.used, tc.window, 15); got != tc.lit {
-			t.Errorf("pulseLit(%d, %d, 15) = %d, want %d", tc.used, tc.window, got, tc.lit)
+		if got := gaugeLit(tc.used, tc.window, gaugeCells); got != tc.lit {
+			t.Errorf("gaugeLit(%d, %d, %d) = %d, want %d", tc.used, tc.window, gaugeCells, got, tc.lit)
 		}
 	}
 }
 
-func TestPulseStripDrawsFillAndGrowthInOneStrip(t *testing.T) {
+func TestPulseStripDrawsEachStepsGrowth(t *testing.T) {
 	first := []pulseReading{{At: pulseNow.Add(-12 * time.Second).UnixMilli(), Tokens: 700}}
 	for _, tc := range []struct {
 		name     string
 		readings []pulseReading
-		lit      int
 		cells    int
-		tone     string
 		want     string
 		grown    int64
 	}{
 		{
-			name: "every kind of step, the first four cells lit", readings: pulseTraceReadings(), lit: 4, cells: 15,
-			tone: cGood, grown: 1,
-			want: "\x1b[38;5;118m\x1b[7m_⎽__\x1b[0m\x1b[38;5;117m_⎼_¯_↓___⎽⎽\x1b[0m",
+			name: "every kind of step", readings: pulseTraceReadings(), cells: 15, grown: 1,
+			want: "\x1b[38;5;245m·\x1b[0m\x1b[38;5;117m•\x1b[0m\x1b[38;5;245m···\x1b[0m\x1b[38;5;117m•\x1b[0m" +
+				"\x1b[38;5;245m·\x1b[0m\x1b[38;5;117m●\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;117m↓\x1b[0m" +
+				"\x1b[38;5;245m···\x1b[0m\x1b[38;5;117m••\x1b[0m",
 		},
 		{
-			name: "the narrow strip keeps the newest steps", readings: pulseTraceReadings(), lit: 8, cells: 8,
-			tone: cBad, grown: 1,
-			want: "\x1b[1;38;5;203m\x1b[7m¯_↓___⎽⎽\x1b[0m",
+			name: "the pulse keeps the newest steps", readings: pulseTraceReadings(), cells: pulseCells, grown: 1,
+			want: "\x1b[38;5;117m↓\x1b[0m\x1b[38;5;245m···\x1b[0m\x1b[38;5;117m••\x1b[0m",
 		},
 		{
-			name: "steps before the first reading are unborn, lit ones blank blocks", readings: first, lit: 2,
-			cells: 15, tone: cWarn,
-			want: "\x1b[38;5;226m\x1b[7m  \x1b[0m\x1b[38;5;245m__________\x1b[0m\x1b[38;5;117m___\x1b[0m",
+			name: "steps before the first reading are unborn, drawn as quiet ones", readings: first, cells: pulseCells,
+			want: "\x1b[38;5;245m······\x1b[0m",
 		},
 		{
-			name: "no reading at all", lit: 0, cells: 15, tone: cMuted,
-			want: "\x1b[38;5;245m_______________\x1b[0m",
+			name: "no reading at all", cells: pulseCells,
+			want: "\x1b[38;5;245m······\x1b[0m",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			strip, grown := pulseTrace(tc.readings, pulseNow, tc.lit, tc.cells)
-			if got := pulseStrip(strip, tc.tone); got != tc.want {
+			strip, grown := pulseTrace(tc.readings, pulseNow, tc.cells)
+			if got := pulseStrip(strip); got != tc.want {
 				t.Errorf("strip = %q, want %q", got, tc.want)
 			}
 			if grown != tc.grown {

@@ -9,25 +9,38 @@ import (
 // AgentsLook is how the main status line draws what an agent row shows, so
 // the professor plugin's row wears pfm's look without a copy of its own:
 // Palette maps each meaning to the SGR sequence the main line draws it in,
-// EffortColors each effort level to its bar's colour, Pulse the strip's scale
-// and Tones where an amount turns from one colour to the next.
+// EffortColors each effort level to its bar's colour, Gauge the context
+// gauge's cells, Pulse the pulse's scale, Context the context block's width
+// table (contextForms) and Tones where an amount turns from one colour to the
+// next.
 type AgentsLook struct {
 	Palette      map[string]string `json:"palette"`
 	EffortColors map[string]string `json:"effortColors"`
+	Gauge        AgentsGauge       `json:"gauge"`
 	Pulse        AgentsPulse       `json:"pulse"`
+	Context      []ContextForm     `json:"context"`
 	Tones        AgentsTones       `json:"tones"`
 }
 
-// AgentsPulse is the pulse strip's scale (pulse.go): Glyphs the cell per
-// growth level, none to most; Steps the fewest tokens one step must add to
-// reach each level above the first; Drop the cell of a step that shed at
-// least DropFrom tokens; StepMs the wall time one main-line cell covers.
+// AgentsGauge is the context gauge (pulse.go): On a used cell, Off a free
+// one, Cells its width.
+type AgentsGauge struct {
+	On    string `json:"on"`
+	Off   string `json:"off"`
+	Cells int    `json:"cells"`
+}
+
+// AgentsPulse is the pulse's scale (pulse.go): Glyphs the cell per growth
+// level, none to most; Steps the fewest tokens one step must add to reach each
+// level above the first; Drop the cell of a step that shed at least DropFrom
+// tokens; StepMs the wall time one main-line cell covers; Cells its width.
 type AgentsPulse struct {
 	Glyphs   []string `json:"glyphs"`
 	Drop     string   `json:"drop"`
 	Steps    []int64  `json:"steps"`
 	DropFrom int64    `json:"dropFrom"`
 	StepMs   int64    `json:"stepMs"`
+	Cells    int      `json:"cells"`
 }
 
 // AgentsTones is where the main line's amounts change colour: USD a dollar
@@ -80,10 +93,12 @@ func agentsLook() AgentsLook {
 			"dim": dim, "reset": reset,
 		},
 		EffortColors: effortBarColors,
+		Gauge:        AgentsGauge{On: gaugeOn, Off: gaugeOff, Cells: gaugeCells},
 		Pulse: AgentsPulse{
 			Glyphs: slices.Clone(pulseGlyphs[:]), Drop: pulseDrop, Steps: slices.Clone(pulseSteps[:]),
-			DropFrom: pulseDropFrom, StepMs: pulseStep.Milliseconds(),
+			DropFrom: pulseDropFrom, StepMs: pulseStep.Milliseconds(), Cells: pulseCells,
 		},
+		Context: slices.Clone(contextForms[:]),
 		Tones: AgentsTones{
 			USD:      AgentsTone{Warn: usdWarnFrom, Bad: usdBadFrom},
 			Share:    AgentsTone{Warn: shareWarnFrom, Bad: shareBadFrom},

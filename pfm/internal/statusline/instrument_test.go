@@ -43,35 +43,49 @@ func TestShareToneTurnsAtHalfAndFourFifths(t *testing.T) {
 }
 
 // Line 2 gives its parts up in the agent row's order as the terminal narrows:
-// the spend's words, the growth figure, the spend's counts, seven cells of the
-// strip, the tokens over the window. Each rank is drawn at the narrowest width
+// the spend's words, the growth figure, the spend's counts, the pulse beside
+// the gauge, the tokens over the window. Each rank is drawn at the narrowest width
 // that holds it and the next at one column less; the cache window never goes.
 func TestInstrumentLineGivesUpPartsAsTheTerminalNarrows(t *testing.T) {
 	const (
-		full     = "🟢  ____________⎼   +3.0K  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
-		slashes  = "🟢  ____________⎼   +3.0K  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
-		noGrowth = "🟢  ____________⎼  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
-		dollars  = "🟢  ____________⎼  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 API-eq │ 💾∅ 60%"
-		short    = "🟢 ______⎼  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 API-eq │ 💾∅ 60%"
-		noTokens = "🟢 ______⎼  17% │ ⏳ 8m12s │ Σ $1.50 API-eq │ 💾∅ 60%"
+		// The context block's form comes from contextForms by the terminal's width alone.
+		full        = "🟢 ▰▱▱▱▱▱▱▱ ·····•   +3.0K  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
+		pulseWords  = "🟢 ▰▱▱▱▱▱▱▱ ·····•  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
+		pulseSlash  = "🟢 ▰▱▱▱▱▱▱▱ ·····•  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
+		windowSlash = "🟢 ▰▱▱▱▱▱▱▱  17%  82.5K/500.0K │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
+		gaugeWords  = "🟢 ▰▱▱▱▱▱▱▱  17% │ ⏳ 8m12s │ Σ $1.50 · 82.5K in · 0 out · 0 tools API-eq │ 💾∅ 60%"
+		gaugeSlash  = "🟢 ▰▱▱▱▱▱▱▱  17% │ ⏳ 8m12s │ Σ $1.50/82.5K/0/0 API-eq │ 💾∅ 60%"
+		// Then the blanks around each separator, then the facts.
+		tight     = "🟢 ▰▱▱▱▱▱▱▱  17%│⏳ 8m12s│Σ $1.50/82.5K/0/0 API-eq│💾∅ 60%"
+		dollars   = "🟢 ▰▱▱▱▱▱▱▱  17%│⏳ 8m12s│Σ $1.50 API-eq│💾∅ 60%"
+		noClock   = "🟢 ▰▱▱▱▱▱▱▱  17%│Σ $1.50 API-eq│💾∅ 60%"
+		cacheTail = "🟢 ▰▱▱▱▱▱▱▱  17%│💾∅ 60%"
 	)
 	cases := []struct {
 		columns int
 		want    string
 	}{
 		{0, full},
-		{115, full},
-		{114, slashes},
-		{96, slashes},
-		{95, noGrowth},
-		{88, noGrowth},
-		{87, dollars},
-		{78, dollars},
-		{77, short},
-		{71, short},
-		{70, noTokens},
-		{57, noTokens},
-		{40, noTokens},
+		{120, full},
+		{119, pulseWords},
+		{108, pulseWords},
+		{107, pulseSlash},
+		{100, pulseSlash},
+		{99, windowSlash},
+		{90, windowSlash},
+		{89, gaugeWords},
+		{87, gaugeWords},
+		{86, gaugeSlash},
+		{68, gaugeSlash},
+		{67, tight},
+		{62, tight},
+		{61, dollars},
+		{52, dollars},
+		{51, noClock},
+		{43, noClock},
+		{42, cacheTail},
+		{28, cacheTail},
+		{20, cacheTail},
 	}
 	for _, tc := range cases {
 		runtime := parityRuntime(t)
@@ -83,7 +97,7 @@ func TestInstrumentLineGivesUpPartsAsTheTerminalNarrows(t *testing.T) {
 			t.Fatal(err)
 		}
 		data.TranscriptPath = filepath.Join(runtime.Home, "main.jsonl")
-		// 82,500 of 500,000 tokens is 16.5%: two cells of fifteen, where the rounded 17% would light three.
+		// 82,500 of 500,000 tokens is 16.5%: one cell of the gauge's eight.
 		turn := `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":32500,` +
 			`"cache_read_input_tokens":50000}}}` + "\n"
 		if err := os.WriteFile(data.TranscriptPath, []byte(turn), 0o600); err != nil {
@@ -111,6 +125,7 @@ func TestContextColumnWritesTheStripsFigures(t *testing.T) {
 		engine   pfmengine.ID
 		gauge    contextGauge
 		readings []pulseReading
+		form     ContextForm
 		want     string
 	}{
 		{
@@ -120,7 +135,8 @@ func TestContextColumnWritesTheStripsFigures(t *testing.T) {
 			readings: []pulseReading{
 				{At: now.Add(-pulseStep).UnixMilli(), Tokens: 150_000}, {At: now.UnixMilli(), Tokens: 20_000},
 			},
-			want: "🟢\x1b[38;5;118m\x1b[7m  \x1b[0m\x1b[38;5;245m____________\x1b[0m\x1b[38;5;117m↓\x1b[0m" +
+			form: contextForms[0],
+			want: "🟢 \x1b[38;5;118m▰\x1b[2m▱▱▱▱▱▱▱\x1b[0m \x1b[38;5;245m·····\x1b[0m\x1b[38;5;117m↓\x1b[0m" +
 				" \x1b[38;5;117m−130.0K\x1b[0m \x1b[38;5;118m 10%\x1b[0m" +
 				" \x1b[1;97m 20.0K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;117m200.0K\x1b[0m",
 		},
@@ -128,13 +144,37 @@ func TestContextColumnWritesTheStripsFigures(t *testing.T) {
 			name:   "codex counts the human prompts",
 			engine: pfmengine.Codex,
 			gauge:  contextGauge{known: true, tokens: 14_200, window: 272_000, percent: 5, humanPrompts: 3},
-			want: "🟢\x1b[38;5;118m\x1b[7m \x1b[0m\x1b[38;5;245m______________\x1b[0m" +
+			form:   contextForms[0],
+			want: "🟢 \x1b[38;5;118m▰\x1b[2m▱▱▱▱▱▱▱\x1b[0m \x1b[38;5;245m······\x1b[0m" +
 				" \x1b[38;5;245m     +0\x1b[0m \x1b[38;5;118m  5%\x1b[0m" +
 				" \x1b[1;97m 14.2K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;117m272.0K\x1b[0m \x1b[2m✎3\x1b[0m",
 		},
+		{
+			// 92,500 of 500,000 tokens is 18.5%: one cell of eight, where the rounded 19% would turn on two.
+			name:   "the narrowest rank draws the gauge alone, by the tokens over the window",
+			engine: pfmengine.Claude,
+			gauge:  contextGauge{known: true, tokens: 92_500, window: 500_000, percent: 19},
+			readings: []pulseReading{
+				{At: now.Add(-pulseStep).UnixMilli(), Tokens: 80_000}, {At: now.UnixMilli(), Tokens: 92_500},
+			},
+			form: contextForms[len(contextForms)-1],
+			want: "🟢 \x1b[38;5;118m▰\x1b[2m▱▱▱▱▱▱▱\x1b[0m \x1b[38;5;118m 19%\x1b[0m",
+		},
+		{
+			name:   "a step of 5,000 tokens or more is the pulse's highest",
+			engine: pfmengine.Claude,
+			gauge:  contextGauge{known: true, tokens: 170_000, window: 200_000, percent: 85},
+			readings: []pulseReading{
+				{At: now.Add(-pulseStep).UnixMilli(), Tokens: 165_000}, {At: now.UnixMilli(), Tokens: 170_000},
+			},
+			form: contextForms[0],
+			want: "🔥 \x1b[1;38;5;203m▰▰▰▰▰▰▰\x1b[2m▱\x1b[0m \x1b[38;5;245m·····\x1b[0m\x1b[38;5;117m●\x1b[0m" +
+				" \x1b[38;5;117m  +5.0K\x1b[0m \x1b[1;38;5;203m 85%\x1b[0m" +
+				" \x1b[1;97m170.0K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;117m200.0K\x1b[0m",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := contextColumn(tc.engine, input{}, tc.gauge, tc.readings, now, instrumentRanks[0])
+			got := contextColumn(tc.engine, input{}, tc.gauge, tc.readings, now, tc.form)
 			if got != tc.want {
 				t.Errorf("column = %q, want %q", got, tc.want)
 			}
@@ -157,7 +197,7 @@ func TestInstrumentLineOfAnUnmeasuredContextAddsNoReading(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, line := instrumentLine(runtime, data, "", runtime.now())
-	const want = "🟢  _____________      +0  12%      ?/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"
+	const want = "🟢 ▰▱▱▱▱▱▱▱ ······      +0  12%      ?/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"
 	if got := stripANSICodes(line); got != want {
 		t.Errorf("line = %q, want %q", got, want)
 	}

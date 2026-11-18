@@ -6,6 +6,7 @@
 // and SpawnDetached, the detached cache refreshers a render arms.
 //
 //   - render.go: Render, the main line from its payload, and the 🔖 label's tmux window name.
+//   - line_one.go: line 1, the badge, model, effort, places and names, and what a narrow terminal gives up.
 //   - runtime.go: Runtime, a render's paths, engine, environment and seams.
 //   - input_validation.go: out-of-range payload values degraded to unknown, one note each.
 //   - herdr_name.go: a Claude /rename carried to the chat's native Herdr seat; the render's fleet database.
@@ -17,8 +18,8 @@
 //   - full_width_row.go: quota readings drawn as labelled full-width bars.
 //   - cache_window.go: the prompt cache's time left and hit share, 💾1h✓59m28s 94%.
 //   - cache_keepwarm.go: the cache-keepwarm shield beside the cache window.
-//   - instrument.go: line 2, the chat's instrument row: pulse, clock, spend, cache, and what a narrow terminal gives up.
-//   - pulse.go: the context gauge as a strip of cells, its fill the share used, its heights the growth a step.
+//   - instrument.go: line 2, the chat's instrument row: the context block's width table, clock, spend, cache, and what a narrow terminal gives up.
+//   - pulse.go: the context strip, the ▰▱ gauge of the share used (fillBar) and the pulse of the growth a step.
 //   - spend_text.go: a spend's forms, words, slashes or dollars alone.
 //   - context.go: the main line's spend and the context gauge's facts.
 //   - context_capacity.go: context windows from the gateway's catalog, read once per render.

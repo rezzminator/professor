@@ -6,7 +6,7 @@ const SCALE = LOOK.pulse;
 
 describe('pulse', () => {
   it.each<[number, number | 'drop']>([
-    [-90_000, 'drop'], [-1_001, 'drop'], [-1_000, 'drop'], [-999, 0], [-1, 0], [0, 0], [1, 1], [999, 1], [1_000, 2], [4_999, 2], [5_000, 3], [19_999, 3], [20_000, 4], [49_999, 4], [50_000, 5], [1_000_000, 5],
+    [-90_000, 'drop'], [-1_001, 'drop'], [-1_000, 'drop'], [-999, 0], [-1, 0], [0, 0], [1, 1], [4_999, 1], [5_000, 2], [1_000_000, 2],
   ])('a reading that adds %i tokens is level %s', (grown, level) => {
     expect(pulseLevel(grown, SCALE)).toBe(level);
   });
@@ -18,22 +18,20 @@ describe('pulse', () => {
   );
 
   it.each<[number, number | undefined, number]>([
-    [0, 1_000, 0], [1, 1_000, 1], [100, 1_000, 2], [500, 1_000, 8], [999, 1_000, 14], [1_000, 1_000, 15], [1_500, 1_000, 15], [10, undefined, 0], [10, 0, 0],
-  ])('%i of %s tokens lights %i of 15 cells', (used, window, lit) => {
-    expect(litCells(used, window, 15)).toBe(lit);
+    [0, 1_000, 0], [1, 1_000, 1], [187, 1_000, 1], [188, 1_000, 2], [500, 1_000, 4], [937, 1_000, 7], [999, 1_000, 7], [1_000, 1_000, 8], [1_500, 1_000, 8], [10, undefined, 0], [10, 0, 0],
+  ])('%i of %s tokens turns on %i of 8 cells', (used, window, on) => {
+    expect(litCells(used, window, 8)).toBe(on);
   });
 
-  it('right-aligns the steps between readings, leaves the cells before the first reading unborn, and lights from the left', () => {
-    expect(pulse([0, 1_300, 1_300, 200], 200, 1_000, 5, SCALE)).toEqual([
-      { level: 'unborn', lit: true }, { level: 'unborn', lit: false }, { level: 2, lit: false }, { level: 0, lit: false }, { level: 'drop', lit: false },
-    ]);
+  it('right-aligns the steps between readings and leaves the cells before the first reading unborn', () => {
+    expect(pulse([0, 1_300, 1_300, 200], 5, SCALE)).toEqual(['unborn', 'unborn', 1, 0, 'drop']);
   });
 
   it('keeps the newest steps when there are more readings than cells', () => {
-    expect(pulse([0, 10, 5_000, 5_000, 65_000], 65_000, undefined, 2, SCALE)).toEqual([{ level: 0, lit: false }, { level: 5, lit: false }]);
+    expect(pulse([0, 10, 5_000, 5_000, 65_000], 2, SCALE)).toEqual([0, 2]);
   });
 
   it('draws an agent with no reading yet as all unborn', () => {
-    expect(pulse([], 0, 1_000, 3, SCALE)).toEqual([{ level: 'unborn', lit: false }, { level: 'unborn', lit: false }, { level: 'unborn', lit: false }]);
+    expect(pulse([], 3, SCALE)).toEqual(['unborn', 'unborn', 'unborn']);
   });
 });

@@ -14,20 +14,20 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 )
 
-// The pulse is the context gauge as one strip of cells that reads twice: how
-// many cells are lit, from the left, is how full the context window is; the
-// height of each cell is how much the context grew in one step of five
-// seconds, newest on the right, so the trace moves one cell a step. The
-// professor plugin's agent row draws the same strip on the same scale (its
-// src/pulse.ts), so a chat's trace and its agents' compare by eye.
+// The context strip is two instruments side by side. The gauge (fillBar) is
+// how full the context window is: its first cells on, in the share's tone, the
+// rest dimmed, as line 3's quota bars are drawn. The pulse is how much the
+// context grew in each step of five seconds, one cell a step, newest on the
+// right, so the trace moves one cell a step. The professor plugin's agent row
+// draws the same gauge and pulse from the agents door's look (agents_look.go),
+// so a chat's strip and its agents' compare by eye.
 var (
-	// pulseGlyphs is the glyph per growth level, none to most: the sparkline ladder.
-	pulseGlyphs = modelglyph.SparkLevels
+	// pulseGlyphs is the glyph per growth level, none to most.
+	pulseGlyphs = [...]string{"·", "•", "●"}
 	// pulseSteps is the fewest tokens one step must add to reach each level above the first.
-	pulseSteps = [...]int64{1, 1_000, 5_000, 20_000, 50_000}
+	pulseSteps = [...]int64{1, 5_000}
 	// pulseSession is a session id a pulse file may be named by: one path element.
 	pulseSession = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 )
@@ -40,26 +40,22 @@ const (
 	pulseDropFrom = 1_000
 	// pulseStep is the wall time one cell covers, the agent row's five-second reading.
 	pulseStep = 5 * time.Second
-	// pulseCells is the strip's width, pulseCellsNarrow its width once the line must give.
-	pulseCells       = 15
-	pulseCellsNarrow = 8
+	// pulseCells is the pulse's width in cells.
+	pulseCells       = 6
 	pulseLevelDrop   = -1
 	pulseLevelUnborn = -2
-	// reverse makes a lit cell: the tone as the cell's ground, the glyph cut out of it.
-	reverse = "\x1b[7m"
+	// pulseGrowth is the colour of a step that grew, the growth figure's beside the strip.
+	pulseGrowth = cWindow
+	// gaugeOn and gaugeOff are a gauge's used and free cells; gaugeCells is the context gauge's width.
+	gaugeOn    = "▰"
+	gaugeOff   = "▱"
+	gaugeCells = 8
 )
 
 // pulseReading is the context's size at one render, At in Unix milliseconds.
 type pulseReading struct {
 	At     int64 `json:"at"`
 	Tokens int64 `json:"tokens"`
-}
-
-// pulseCell is one cell of the strip: level 0 to 5 by pulseSteps,
-// pulseLevelDrop, or pulseLevelUnborn before the first reading.
-type pulseCell struct {
-	level int
-	lit   bool
 }
 
 // pulseLevel is the level of one step's growth in tokens.
@@ -76,9 +72,9 @@ func pulseLevel(grown int64) int {
 	return level
 }
 
-// pulseLit is how many of cells are lit: one at least once anything is used,
-// all only when the window is full.
-func pulseLit(used, window int64, cells int) int {
+// gaugeLit is how many of a gauge's cells are on: one at least once anything
+// is used, all only when the window is full.
+func gaugeLit(used, window int64, cells int) int {
 	if window <= 0 || used <= 0 {
 		return 0
 	}
@@ -88,10 +84,17 @@ func pulseLit(used, window int64, cells int) int {
 	return min(cells-1, max(1, int(math.Round(float64(used)/float64(window)*float64(cells)))))
 }
 
-// pulseTrace is the strip at now from readings, oldest first: the newest
-// cells steps on a fixed grid of pulseStep, the first lit ones lit, a step
-// with no reading before it unborn. grown is the newest step's growth.
-func pulseTrace(readings []pulseReading, now time.Time, lit, cells int) (strip []pulseCell, grown int64) {
+// fillBar is a gauge of width cells, the first on of them used, in tone, the
+// rest dimmed. ▰▱ (U+25B0/U+25B1) on purpose: block elements ▓░ are WebGL
+// custom glyphs in VS Code's terminal and render stale under repaint.
+func fillBar(on, width int, tone string) string {
+	return tone + strings.Repeat(gaugeOn, on) + dim + strings.Repeat(gaugeOff, width-on) + reset
+}
+
+// pulseTrace is the pulse at now from readings, oldest first: the level of
+// each of the newest cells steps on a fixed grid of pulseStep, a step with no
+// reading before it unborn. grown is the newest step's growth.
+func pulseTrace(readings []pulseReading, now time.Time, cells int) (levels []int, grown int64) {
 	width := pulseStep.Milliseconds()
 	first := now.UnixMilli()/width - int64(cells-1)
 	next := 0
@@ -99,24 +102,24 @@ func pulseTrace(readings []pulseReading, now time.Time, lit, cells int) (strip [
 	for next < len(readings) && readings[next].At/width < first {
 		before, next = &readings[next], next+1
 	}
-	strip = make([]pulseCell, cells)
-	for cell := range strip {
+	levels = make([]int, cells)
+	for cell := range levels {
 		start := before
 		for next < len(readings) && readings[next].At/width <= first+int64(cell) {
 			before, next = &readings[next], next+1
 		}
-		strip[cell] = pulseCell{level: pulseLevelUnborn, lit: cell < lit}
+		levels[cell] = pulseLevelUnborn
 		if start != nil {
 			grown = before.Tokens - start.Tokens
-			strip[cell].level = pulseLevel(grown)
+			levels[cell] = pulseLevel(grown)
 		}
 	}
-	return strip, grown
+	return levels, grown
 }
 
-// pulseStrip draws a strip: a lit cell in tone and reverse video, an unlit one
-// in the window colour, an unborn one muted, a lit unborn one a blank.
-func pulseStrip(strip []pulseCell, tone string) string {
+// pulseStrip draws a pulse: a step that grew in the growth figure's colour, a
+// drop in the window colour, a quiet or unborn step muted.
+func pulseStrip(levels []int) string {
 	var out strings.Builder
 	run, style := "", ""
 	flush := func() {
@@ -125,21 +128,13 @@ func pulseStrip(strip []pulseCell, tone string) string {
 		}
 		run = ""
 	}
-	for _, cell := range strip {
+	for _, level := range levels {
 		next, glyph := cWindow, pulseDrop
 		switch {
-		case cell.lit:
-			next = tone + reverse
-		case cell.level == pulseLevelUnborn:
-			next = cMuted
-		}
-		switch {
-		case cell.level == pulseLevelUnborn && cell.lit:
-			glyph = " "
-		case cell.level == pulseLevelUnborn:
-			glyph = pulseGlyphs[0]
-		case cell.level >= 0:
-			glyph = pulseGlyphs[cell.level]
+		case level > 0:
+			next, glyph = pulseGrowth, pulseGlyphs[level]
+		case level != pulseLevelDrop:
+			next, glyph = cMuted, pulseGlyphs[0]
 		}
 		if next != style {
 			flush()

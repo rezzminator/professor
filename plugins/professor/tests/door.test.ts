@@ -37,6 +37,14 @@ describe('door answer', () => {
     expect(answer.agents[2]!.error).toBe('open agent-a3.jsonl: permission denied');
   });
 
+  it('reads a gauge and a pulse one cell wide', () => {
+    const answer = JSON.parse(JSON.stringify(ANSWER));
+    answer.look.gauge.cells = 1;
+    answer.look.pulse.cells = 1;
+    const { look } = readDoorAnswer(ok(answer));
+    expect([look.gauge, look.pulse.cells]).toEqual([{ on: '▰', off: '▱', cells: 1 }, 1]);
+  });
+
   it('takes escape sequences out of the words pfm sends', () => {
     const answer = readDoorAnswer(ok(withValue(['agents', 0, 'text', 'family'], `op${ESC}]0;title${BELL}us${ESC}[31m`)));
     expect(answer.agents[0]!.text.family).toBe('opus');
@@ -63,7 +71,24 @@ describe('door answer', () => {
     ['a step is text', ok(withValue(['look', 'pulse', 'steps', 1], '250')), 'answer.look.pulse.steps[1] is not a number'],
     ['the glyphs are none', ok(withValue(['look', 'pulse', 'glyphs'], [])), 'answer.look.pulse.glyphs is not a list of words'],
     ['a glyph is a number', ok(withValue(['look', 'pulse', 'glyphs', 2], 3)), 'answer.look.pulse.glyphs[2] is not text'],
+    ['the gauge is missing', ok(withValue(['look', 'gauge'], undefined)), 'answer.look.gauge is not an object'],
+    ['the gauge\'s used cell is a number', ok(withValue(['look', 'gauge', 'on'], 1)), 'answer.look.gauge.on is not text'],
+    ['the gauge\'s free cell is empty', ok(withValue(['look', 'gauge', 'off'], '')), 'answer.look.gauge.off is not one cell'],
+    ['the gauge\'s used cell is two cells wide', ok(withValue(['look', 'gauge', 'on'], '▰▰')), 'answer.look.gauge.on is not one cell'],
+    ['a pulse glyph is two cells wide', ok(withValue(['look', 'pulse', 'glyphs', 1], '🟢')), 'answer.look.pulse.glyphs[1] is not one cell'],
+    ['the drop mark is empty', ok(withValue(['look', 'pulse', 'drop'], '')), 'answer.look.pulse.drop is not one cell'],
+    ['the gauge has no cells', ok(withValue(['look', 'gauge', 'cells'], 0)), 'answer.look.gauge.cells is not a cell count'],
+    ['the pulse is part of a cell wide', ok(withValue(['look', 'pulse', 'cells'], 2.5)), 'answer.look.pulse.cells is not a cell count'],
+    ['the pulse\'s width is missing', ok(withValue(['look', 'pulse', 'cells'], undefined)), 'answer.look.pulse.cells is not a cell count'],
     ['the drop threshold is missing', ok(withValue(['look', 'pulse', 'dropFrom'], undefined)), 'answer.look.pulse.dropFrom is not a number'],
+    ['the context table is missing', ok(withValue(['look', 'context'], undefined)), 'answer.look.context is not a list of forms'],
+    ['the context table is empty', ok(withValue(['look', 'context'], [])), 'answer.look.context is not a list of forms'],
+    ['a form starts below no columns', ok(withValue(['look', 'context', 0, 'from'], -1)), 'answer.look.context[0].from is not a count of columns'],
+    ['a form starts part of a column in', ok(withValue(['look', 'context', 1, 'from'], 99.5)), 'answer.look.context[1].from is not a count of columns'],
+    ['a form\'s pulse is a word', ok(withValue(['look', 'context', 2, 'pulse'], 'yes')), 'answer.look.context[2].pulse is not true or false'],
+    ['a form is no object', ok(withValue(['look', 'context', 3], 80)), 'answer.look.context[3] is not an object'],
+    ['a form is as wide as the one before it', ok(withValue(['look', 'context', 2, 'from'], 100)), 'answer.look.context[2].from is not below the form before it'],
+    ['a form is wider than the one before it', ok(withValue(['look', 'context', 1, 'from'], 121)), 'answer.look.context[1].from is not below the form before it'],
     ['the tones are missing', ok(withValue(['look', 'tones'], undefined)), 'answer.look.tones is not an object'],
     ['a tone is text', ok(withValue(['look', 'tones', 'share', 'bad'], '80')), 'answer.look.tones.share.bad is not a number'],
     ['the cache-hit tone is missing', ok(withValue(['look', 'tones', 'cacheHit'], undefined)), 'answer.look.tones.cacheHit is not an object'],

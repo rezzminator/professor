@@ -46,11 +46,11 @@ func parityRuntime(t *testing.T) Runtime {
 
 func TestParityMainCurrentContext(t *testing.T) {
 	for _, tc := range []struct{ name, transcript, want string }{
-		{"payload", "", "🟢     __________      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"},
-		{"empty transcript", "{}\n", "🟢     __________      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools │ 💾–"},
-		{"latest transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":50000,"cache_read_input_tokens":50000}}}` + "\n", "🟢   ____________      +0  20% 100.0K/500.0K │ ⏳ 0s │ Σ $? · 100.0K in · 0 out · 0 tools API-eq │ 💾∅ 50%"},
-		{"zero transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":0,"cache_read_input_tokens":0}}}` + "\n", "🟢_______________      +0   0%      0/500.0K │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools API-eq │ 💾–"},
-		{"model switch streaming", `{"type":"assistant","message":{"model":"gpt-6-luna","usage":{"input_tokens":100000}}}` + "\n" + `{"type":"assistant","message":{"model":"gpt-6.1-sol"}}` + "\n", "🟢     __________      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $? · 0 in · 0 out · 0 tools API-eq │ 💾–"},
+		{"payload", "", "🟢 ▰▰▰▱▱▱▱▱ ······      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools │ 💾–"},
+		{"empty transcript", "{}\n", "🟢 ▰▰▰▱▱▱▱▱ ······      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools │ 💾–"},
+		{"latest transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":50000,"cache_read_input_tokens":50000}}}` + "\n", "🟢 ▰▰▱▱▱▱▱▱ ······      +0  20% 100.0K/500.0K │ ⏳ 0s │ Σ $? · 100.0K in · 0 out · 0 tools API-eq │ 💾∅ 50%"},
+		{"zero transcript", `{"type":"assistant","message":{"model":"gpt-6.1-sol","usage":{"input_tokens":0,"cache_read_input_tokens":0}}}` + "\n", "🟢 ▱▱▱▱▱▱▱▱ ······      +0   0%      0/500.0K │ ⏳ 0s │ Σ $0.00 · 0 in · 0 out · 0 tools API-eq │ 💾–"},
+		{"model switch streaming", `{"type":"assistant","message":{"model":"gpt-6-luna","usage":{"input_tokens":100000}}}` + "\n" + `{"type":"assistant","message":{"model":"gpt-6.1-sol"}}` + "\n", "🟢 ▰▰▰▱▱▱▱▱ ······      +0  33% 165.0K/500.0K │ ⏳ 0s │ Σ $? · 0 in · 0 out · 0 tools API-eq │ 💾–"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := parityRuntime(t)
@@ -89,7 +89,7 @@ func TestParityClaudePayloadPercentWithoutCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, line := instrumentLine(r, d, "", r.now())
-	const want = "🟢     __________      +0  33% 165.0K/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools"
+	const want = "🟢 ▰▰▰▱▱▱▱▱ ······      +0  33% 165.0K/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools"
 	if got := stripANSICodes(line); got != want {
 		t.Fatalf("same-source payload percentage/count lost: %q", got)
 	}
@@ -116,7 +116,7 @@ func TestParityOpenAIMainCacheHasNoClaudeTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, line := instrumentLine(r, d, "", r.now())
-	const want = "🟢 ______________      +0   5%  14.2K/272.0K │ ⏳ 0s │ " +
+	const want = "🟢 ▰▱▱▱▱▱▱▱ ······      +0   5%  14.2K/272.0K │ ⏳ 0s │ " +
 		"Σ $? · 21.3K in · 279 out · 1 tool API-eq │ 💾∅ 87%"
 	if got := stripANSICodes(line); got != want {
 		t.Fatalf("completed OpenAI cache share missing: %q", got)

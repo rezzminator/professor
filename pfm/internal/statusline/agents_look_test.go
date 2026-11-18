@@ -1,6 +1,7 @@
 package statusline
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -44,11 +45,20 @@ func TestNewAgentText(t *testing.T) {
 	}
 	look := agentsLook()
 	pulseWant := AgentsPulse{
-		Glyphs: []string{"_", "⎽", "⎼", "⎻", "⎺", "¯"}, Drop: "↓",
-		Steps: []int64{1, 1_000, 5_000, 20_000, 50_000}, DropFrom: 1_000, StepMs: 5_000,
+		Glyphs: []string{"·", "•", "●"}, Drop: "↓", Steps: []int64{1, 5_000}, DropFrom: 1_000, StepMs: 5_000, Cells: 6,
 	}
 	if got := look.Pulse; !reflect.DeepEqual(got, pulseWant) {
 		t.Errorf("look pulse = %+v, want %+v", got, pulseWant)
+	}
+	if gaugeWant := (AgentsGauge{On: "▰", Off: "▱", Cells: 8}); look.Gauge != gaugeWant {
+		t.Errorf("look gauge = %+v, want %+v", look.Gauge, gaugeWant)
+	}
+	// The context block's width table, as the door hands it to the agent row.
+	contextWant := `[{"from":120,"pulse":true,"growth":true,"window":true},` +
+		`{"from":100,"pulse":true,"growth":false,"window":true},` +
+		`{"from":90,"pulse":false,"growth":false,"window":true},{"from":0,"pulse":false,"growth":false,"window":false}]`
+	if got, err := json.Marshal(look.Context); err != nil || string(got) != contextWant {
+		t.Errorf("look context = %s (%v), want %s", got, err, contextWant)
 	}
 	tonesWant := AgentsTones{
 		USD:      AgentsTone{Warn: 2, Bad: 10},

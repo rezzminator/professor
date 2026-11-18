@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { Door, readDoorAnswer } from '../plugins/professor/src/door.ts';
 import { drawRow, failureRow, type RowAgent } from '../plugins/professor/src/row.ts';
-import { plain } from '../plugins/professor/src/text.ts';
+import { cells, plain } from '../plugins/professor/src/text.ts';
 import { AGENTS, ANSWER, CHILD, FOREMAN, LOOK, NOW, PLANNER, SESSION_CWD } from './scene.ts';
 
 const ESC = String.fromCharCode(0x1b);
 const R = `${ESC}[0m`;
-const REVERSE = `${ESC}[7m`;
 const { tokens: TOKENS, window: WINDOW, model: MODEL, elapsed: ELAPSED, tools: TOOLS, label: LABEL, muted: MUTED, good: GOOD, warn: WARN, bad: BAD, dim: DIM } = LOOK.palette;
 const BAR = ` ${DIM}│${R} `;
 const SPEND = ANSWER.agents[0]!.spend!;
@@ -33,63 +32,113 @@ const alone = (agent: Partial<RowAgent>, facts: Record<string, unknown>, bar = B
 };
 
 describe('the list', () => {
-  it.each<[string, () => Door, number | undefined, string[]]>([
-    ['the terminal is wide', () => answered(), 260, [
-      '⎽⎽⎻⎼⎼⎻_⎼⎽⎽⎽⎽⎼⎼⎼     +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ ↳ 1/3 below │ Map the parser › Reading lexer.go',
-      '      ⎺⎻⎽⎻⎻¯⎽⎽⎽      +144  86% 172.9K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ Build the door › Running go test ./internal/…',
-      ' ____________⎼↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
-      '_______________        +0   ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
+  // A row's `columns` are the terminal's less six cells: the footer's padding each side and the engine's lead.
+  it.each<[string, () => Door, number, string[]]>([
+    ['the terminal is wide', () => answered(), 252, [
+      ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ ↳ 1/3 below │ Map the parser › Reading lexer.go',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••      +144  86% 172.9K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the door › Running go test ./internal/...',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
     ]],
-    ["the list gives up the growth figure and the spend's words", () => answered(), 200, [
-      '⎽⎽⎻⎼⎼⎻_⎼⎽⎽⎽⎽⎼⎼⎼    17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ ↳ 1/3 below │ Map the par… › Reading…',
-      '      ⎺⎻⎽⎻⎻¯⎽⎽⎽    86% 172.9K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ Build the door',
-      ' ____________⎼↓   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permis… │ Find the callers',
-      '_______________     ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                      │ 💾–                │ Wait for the build',
+    ['the list spells the spend in slashes, the flags and the model short', () => answered(), 200, [
+      ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M   │ planner              │ ◆·▰▰  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 err │ ⟲1 │ ↳1/3 │ Map the parser › Reading lexe…',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••      +144  86% 172.9K/200.0K │ door·flights:foreman │ ◇·▰▰▰ │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the door › Running go…',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○     │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: per… │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?      │ general-purpose      │       │ pending        │ Σ …                      │ 💾–                │ Wait for the build',
     ]],
-    ["it gives up the flags' words, the token figures, the cache and the model's name", () => answered(), 120, [
-      '⎼⎽⎽⎽⎽⎼⎼⎼    17% │ planner              │ ◆·▰▰  │ running 12m04s │ Σ $3.41    │ 2 err │ ⟲1 │ ↳1/3 │ Map the par… › Readi…',
-      '⎻⎽⎻⎻¯⎽⎽⎽    86% │ door·flights:foreman │ ◇·▰▰▰ │ running 1m01s  │ Σ $12.50+? │ idle 3m20s │ @door │ Build the door',
-      ' _____⎼↓   5% │ Explore              │ ○     │ done           │ Σ $?       │ pfm ✗ open agent-a3.j… │ Find the callers',
-      '________     ?% │ general-purpose      │       │ pending        │ Σ …        │ Wait for the build',
+    ['it takes the blanks around its bars before the pad of its columns', () => answered(), 170, [
+      ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M  │planner     │◆·▰▰ │running 12m04s│Σ $3.41/2.0M/24.3K/57   │💾5m✓3m08s 94%    │2 err│⟲1│↳1/3│Map the pars… › Reading l…',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••      +144  86% 172.9K/200.0K│door·flight…│◇·▰▰▰│running 1m01s │Σ $12.50+?/812.0K/9.3K/1│💾5m✗1m40s was 31%│idle 3m20s│@door│Build the d… › Running…',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore     │○    │done          │Σ $?                    │💾– ?%            │pfm ✗ open agent-a3.js…│Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?     │general-pur…│     │pending       │Σ …                     │💾–               │Wait for the build',
     ]],
-    ['it gives up the spend and the model and cuts each name', () => answered(), 80, [
-      '⎼⎽⎽⎽⎽⎼⎼⎼    17% │ planner      │ running 12m04s │ 2 err │ ⟲1 │ ↳1/3 │ Map the p…',
-      '⎻⎽⎻⎻¯⎽⎽⎽    86% │ door·flight… │ running 1m01s  │ idle 3m20s │ @door │ Build th…',
-      ' _____⎼↓   5% │ Explore      │ done           │ pfm ✗ open agent-a3.jsonl: pe…',
-      '________     ?% │ general-pur… │ pending        │ Wait for the build',
+    ['it takes the blanks around its bars and the pad of its columns', () => answered(), 160, [
+      ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│Σ $3.41/2.0M/24.3K/57│💾5m✓3m08s 94%│2 err│⟲1│↳1/3│Map the parser › Reading lexer…',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••      +144  86% 172.9K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│Σ $12.50+?/812.0K/9.3K/1│💾5m✗1m40s was 31%│idle 3m20s│Build the door',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│Σ $?│💾– ?%│pfm ✗ open agent-a3.jsonl: permission denied│Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?│general-pur…│pending│Σ …│💾–│Wait for the build',
     ]],
-    ['it is too narrow for its flags', () => answered(), 60, [
-      '⎼⎽⎽⎽⎽⎼⎼⎼    17% │ planner      │ running 12m04s │ 2 err │ ⟲…',
-      '⎻⎽⎻⎻¯⎽⎽⎽    86% │ door·flight… │ running 1m01s  │ idle 3m20s',
-      ' _____⎼↓   5% │ Explore      │ done           │ pfm ✗ ope…',
-      '________     ?% │ general-pur… │ pending        │ Wait for…',
+    ["it gives up the spend's counts and the cache's hit", () => answered(), 140, [
+      ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│Σ $3.41│💾✓3m08s│2 err│⟲1│↳1/3│Map the parser › Reading lexer…',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••      +144  86% 172.9K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│Σ $12.50+?│💾✗1m40s│idle 3m20s│Build the d… › Running…',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│Σ $?│💾–│pfm ✗ open agent-a3.jsonl: permission denied│Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?│general-pur…│pending│Σ …│💾–│Wait for the build',
     ]],
-    ['the surface measures no width', () => answered(), undefined, [
-      '⎽⎽⎻⎼⎼⎻_⎼⎽⎽⎽⎽⎼⎼⎼     +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ ↳ 1/3 below │ Map the parser › Reading lexer.go',
-      '      ⎺⎻⎽⎻⎻¯⎽⎽⎽      +144  86% 172.9K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ Build the door › Running go test ./internal/...',
-      ' ____________⎼↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
-      '_______________        +0   ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
+    ['it gives up the spend and the cache', () => answered(), 120, [
+      ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M│planner│◆·▰▰│running 12m04s│2 err│⟲1│↳1/3│Map the parser › Reading le…',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••      +144  86% 172.9K/200.0K│door·flight…│◇·▰▰▰│running 1m01s│idle 3m20s│Build the d… › Running…',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K│Explore│○│done│pfm ✗ open agent-a3.jsonl: permissi…│Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?│general-pur…│pending│Wait for the build',
+    ]],
+    ['the block gives up its growth figure and the rows the model', () => answered(), 100, [
+      ' ▰▱▱▱▱▱▱▱ ••••••    17% 171.9K/1.0M│planner│running 12m04s│2 err│⟲1│↳1/3│Map the par… › Readi…',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••    86% 172.9K/200.0K│door·flight…│running 1m01s│idle 3m20s│@door│Build the d…',
+      ' ▰▱▱▱▱▱▱▱ ····•↓   5%   9.0K/200.0K│Explore│done│pfm ✗ open agent-a3.jsonl…│Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······     ?%      0/?│general-pur…│pending│Wait for the build',
+    ]],
+    ['the block keeps the gauge and the share alone', () => answered(), 80, [
+      ' ▰▱▱▱▱▱▱▱    17%│planner│running 12m04s│2 err│⟲1│↳1/3│Map the parser',
+      ' ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s│@door│Build the do…',
+      ' ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.jsonl:…│Find the callers',
+      ' ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
+    ]],
+    ['it is too narrow for its task', () => answered(), 66, [
+      ' ▰▱▱▱▱▱▱▱    17%│planner│running 12m04s│2 err│⟲1│↳1/3',
+      ' ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s',
+      ' ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.jsonl: pe…',
+      ' ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
     ]],
     ['pfm has not answered yet', () => new Door(), 200, [
-      '_______________     +4.5K  17% 171.9K/1.0M   │ planner              │ claude-opus-9·medium │ running 12m04s │ Σ … │ 💾5m✓3m08s … │ Map the parser › Reading lexer.go',
-      '      _________      +144  86% 172.9K/200.0K │ door·flights:foreman │ claude-sonnet-9·high │ running 1m01s  │ Σ … │ 💾5m✗1m40s … │ @door │ Build the door › Running go test ./internal/...',
-      ' ______________  −22.0K   5%   9.0K/200.0K │ Explore              │ claude-haiku-9       │ done           │ Σ … │ 💾– …        │ Find the callers',
-      '_______________        +0   ?%      0/?      │ general-purpose      │                      │ pending        │ Σ … │ 💾–          │ Wait for the build',
+      ' ▱▱▱▱▱▱▱▱ ······     +4.5K  17% 171.9K/1.0M   │ planner              │ claude-opus-9·medium │ running 12m04s │ Σ … │ 💾5m✓3m08s … │ Map the parser › Reading lexer.go',
+      ' ▱▱▱▱▱▱▱▱ ······      +144  86% 172.9K/200.0K │ door·flights:foreman │ claude-sonnet-9·high │ running 1m01s  │ Σ … │ 💾5m✗1m40s … │ @door │ Build the door › Running go test ./internal/...',
+      ' ▱▱▱▱▱▱▱▱ ······  −22.0K   5%   9.0K/200.0K │ Explore              │ claude-haiku-9       │ done           │ Σ … │ 💾– …        │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?      │ general-purpose      │                      │ pending        │ Σ … │ 💾–          │ Wait for the build',
+    ]],
+    ['pfm has not answered yet and the terminal is narrow', () => new Door(), 80, [
+      ' ▱▱▱▱▱▱▱▱ ······     +4.5K  17% 171.9K/1.0M│planner│running 12m04s',
+      ' ▱▱▱▱▱▱▱▱ ······      +144  86% 172.9K/200.0K│door·flight…│running 1m01s',
+      ' ▱▱▱▱▱▱▱▱ ······  −22.0K   5%   9.0K/200.0K│Explore│done│Find the calle…',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?│general-pur…│pending│Wait for th…',
     ]],
     ['pfm is not there', () => failed('not on PATH'), 200, [
-      '_______________     +4.5K  17% 171.9K/1.0M   │ planner              │ claude-opus-9·medium │ running 12m04s │ $0.46 own  │ 💾5m✓3m08s ?% │ pfm ✗ not on PATH │ Map the parser › Reading lexer.go',
-      '      _________      +144  86% 172.9K/200.0K │ door·flights:foreman │ claude-sonnet-9·high │ running 1m01s  │ $12.50 own │ 💾5m✗1m40s ?% │ @door │ pfm ✗ │ Build the door › Running go test ./internal/…',
-      ' ______________  −22.0K   5%   9.0K/200.0K │ Explore              │ claude-haiku-9       │ done           │ $0.02 own  │ 💾– ?%        │ pfm ✗ │ Find the callers',
-      '_______________        +0   ?%      0/?      │ general-purpose      │                      │ pending        │ $? own     │ 💾–           │ pfm ✗ │ Wait for the build',
+      ' ▱▱▱▱▱▱▱▱ ······     +4.5K  17% 171.9K/1.0M   │ planner              │ claude-opus-9·medium │ running 12m04s │ $0.46 own  │ 💾5m✓3m08s ?% │ pfm ✗ not on PATH │ Map the parser › Reading lexer.go',
+      ' ▱▱▱▱▱▱▱▱ ······      +144  86% 172.9K/200.0K │ door·flights:foreman │ claude-sonnet-9·high │ running 1m01s  │ $12.50 own │ 💾5m✗1m40s ?% │ pfm ✗ │ Build the door › Running go test ./internal/.…',
+      ' ▱▱▱▱▱▱▱▱ ······  −22.0K   5%   9.0K/200.0K │ Explore              │ claude-haiku-9       │ done           │ $0.02 own  │ 💾– ?%        │ pfm ✗ │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?      │ general-purpose      │                      │ pending        │ $? own     │ 💾–           │ pfm ✗ │ Wait for the build',
     ]],
     ['pfm fails after it answered', () => failed('list /c/subagents: permission denied', answered()), 252, [
-      '⎽⎽⎻⎼⎼⎻_⎼⎽⎽⎽⎽⎼⎼⎼     +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ ↳ 1/3 below │ pfm ✗ list /c/subagents: permi… │ Map the parser › Reading lexer.go',
-      '      ⎺⎻⎽⎻⎻¯⎽⎽⎽      +144  86% 172.9K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ pfm ✗ │ Build the door › Running go test ./internal/...',
-      ' ____________⎼↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ │ Find the callers',
-      '_______________        +0   ?%      0/?      │ general-purpose      │                   │ pending        │ $? own                   │ 💾–                │ pfm ✗ │ Wait for the build',
+      ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ ↳ 1/3 below │ pfm ✗ list /c/subagents: p… │ Map the parser › Reading lexe…',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••      +144  86% 172.9K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ pfm ✗ │ Build the door › Running go test ./inte…',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?      │ general-purpose      │                   │ pending        │ $? own                   │ 💾–                │ pfm ✗ │ Wait for the build',
     ]],
-  ])('draws every row to the same cells when %s', (_name, pfm, columns, rows) => {
-    expect(list(pfm(), columns)).toEqual(rows);
+  ])('draws every row to the same cells when %s', (_name, pfm, terminal, rows) => {
+    const drawn = list(pfm(), terminal - 6);
+    expect(drawn).toEqual(rows);
+    // Each row within the cells it is given, a nested row's connector taking two of them.
+    expect(drawn.map((row, index) => cells(row) <= terminal - 6 - (AGENTS[index]!.parentId === undefined ? 0 : 2))).toEqual(AGENTS.map(() => true));
+  });
+
+  it('fits every row in its cells, its gauge, who and state kept, the block in pfm\'s form, at every terminal width from 80', () => {
+    const kept = [[' ▰▱▱▱▱▱▱▱', 'planner', 'running 12m04s'], [' ▰▰▰▰▰▰▰▱', 'door·', 'running 1m01s'], [' ▰▱▱▱▱▱▱▱', 'Explore', 'done'], [' ▱▱▱▱▱▱▱▱', 'general-pur', 'pending']];
+    for (let terminal = 80; terminal <= 260; terminal += 1) {
+      const drawn = list(answered(), terminal - 6);
+      const room = AGENTS.map((agent) => terminal - 6 - (agent.parentId === undefined ? 0 : 2));
+      const block = terminal >= 120 ? ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M' : terminal >= 100 ? ' ▰▱▱▱▱▱▱▱ ••••••    17% 171.9K/1.0M'
+        : terminal >= 90 ? ' ▰▱▱▱▱▱▱▱    17% 171.9K/1.0M' : ' ▰▱▱▱▱▱▱▱    17%';
+      expect({ terminal, cells: drawn.map((row) => cells(row)) }).toEqual({ terminal, cells: drawn.map((row, index) => Math.min(cells(row), room[index]!)) });
+      expect({ terminal, kept: drawn.map((row, index) => kept[index]!.filter((fact) => !row.includes(fact))) }).toEqual({ terminal, kept: AGENTS.map(() => []) });
+      expect({ terminal, block: drawn[0]!.split('│')[0]!.trimEnd() }).toEqual({ terminal, block });
+    }
+  });
+
+  it('draws every row to the same cells when the surface measures no width', () => {
+    expect(list(answered(), undefined)).toEqual([
+      ' ▰▱▱▱▱▱▱▱ ••••••     +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ ↳ 1/3 below │ Map the parser › Reading lexer.go',
+      ' ▰▰▰▰▰▰▰▱ ●●●•••      +144  86% 172.9K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ Build the door › Running go test ./internal/...',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ······        +0   ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
+    ]);
   });
 });
 
@@ -116,9 +165,9 @@ describe('one row', () => {
     ['has a name', { name: 'lexer' }, {}, 1, 'lexer·planner'],
     ['has an effort and no model', { model: undefined, lastRequest: undefined }, { text: { ...ANSWER.agents[0]!.text, glyph: '', family: '' } }, 2, '▰▰ medium'],
     ['is named as its type', { name: 'planner' }, {}, 1, 'planner'],
-    ['has a window only pfm knows', {}, { contextWindow: 200_000 }, 0, '⎽⎽⎻⎼⎼⎻_⎼⎽⎽⎽⎽⎼⎼⎼   +4.5K  86% 171.9K/200.0K'],
-    ['fills its window', { tokenCount: 1_000_000 }, {}, 0, '⎽⎽⎻⎼⎼⎻_⎼⎽⎽⎽⎽⎼⎼⎼   +4.5K 100%   1.0M/1.0M'],
-    ['has one reading', { tokenSamples: [171_928] }, {}, 0, '   ____________      +0  17% 171.9K/1.0M'],
+    ['has a window only pfm knows', {}, { contextWindow: 200_000 }, 0, ' ▰▰▰▰▰▰▰▱ ••••••   +4.5K  86% 171.9K/200.0K'],
+    ['fills its window', { tokenCount: 1_000_000 }, {}, 0, ' ▰▰▰▰▰▰▰▰ ••••••   +4.5K 100%   1.0M/1.0M'],
+    ['has one reading', { tokenSamples: [171_928] }, {}, 0, ' ▰▱▱▱▱▱▱▱ ······      +0  17% 171.9K/1.0M'],
     ['has no description', { description: '' }, {}, 9, 'Reading lexer.go'],
     ['is doing what its description says', { label: 'Map the parser' }, {}, 9, 'Map the parser'],
     ['reports progress with an escape sequence and a line break in it', { label: `Reading ${ESC}[31mlexer${ESC}[0m\n.go` }, {}, 9, 'Map the parser › Reading lexer .go'],
@@ -126,16 +175,18 @@ describe('one row', () => {
     expect(alone(agent, facts, ' │ ')[part]).toBe(text);
   });
 
-  const gauge = (tone: string, lit: number, share: string, used: string) =>
-    `${tone}${REVERSE}${' '.repeat(lit)}${R}${MUTED}${'_'.repeat(15 - lit)}${R} ${MUTED}     +0${R} ${tone}${share}${R} ${TOKENS}${used}${R}${MUTED}/${R}${WINDOW}100${R}`;
+  const gauge = (tone: string, on: number, share: string, used: string) =>
+    ` ${tone}${'▰'.repeat(on)}${R}${DIM}${'▱'.repeat(8 - on)}${R} ${MUTED}······${R} ${MUTED}     +0${R} ${tone}${share}${R} ${TOKENS}${used}${R}${MUTED}/${R}${WINDOW}100${R}`;
   const sum = (dollars: string) => `${MUTED}Σ${R} ${dollars} ${MUTED}·${R} ${TOKENS}2.0M${R} ${MUTED}in${R} ${MUTED}·${R} ${TOKENS}24.3K${R} ${MUTED}out${R} ${MUTED}·${R} ${TOOLS}57${R} ${MUTED}tools${R}`;
   const unread = { tokenSamples: [], contextWindowSize: 100 };
 
   it.each<[string, Partial<RowAgent>, Record<string, unknown>, number, string]>([
-    ['a window under half full good', { ...unread, tokenCount: 49 }, {}, 0, gauge(GOOD, 7, ' 49%', '    49')],
-    ['a window half full a warning', { ...unread, tokenCount: 50 }, {}, 0, gauge(WARN, 8, ' 50%', '    50')],
-    ['a window under four fifths full a warning', { ...unread, tokenCount: 79 }, {}, 0, gauge(WARN, 12, ' 79%', '    79')],
-    ['a window four fifths full bad', { ...unread, tokenCount: 80 }, {}, 0, gauge(BAD, 12, ' 80%', '    80')],
+    ['a window under half full good', { ...unread, tokenCount: 49 }, {}, 0, gauge(GOOD, 4, ' 49%', '    49')],
+    ['a window half full a warning', { ...unread, tokenCount: 50 }, {}, 0, gauge(WARN, 4, ' 50%', '    50')],
+    ['a window under four fifths full a warning', { ...unread, tokenCount: 79 }, {}, 0, gauge(WARN, 6, ' 79%', '    79')],
+    ['a window four fifths full bad', { ...unread, tokenCount: 80 }, {}, 0, gauge(BAD, 6, ' 80%', '    80')],
+    ['a growing step and a drop in the growth figure\'s colour, a quiet or unborn step muted', { tokenSamples: [100, 100, 6_100, 5_000], tokenCount: 5_000, contextWindowSize: 100_000 }, {}, 0,
+      ` ${GOOD}▰${R}${DIM}▱▱▱▱▱▱▱${R} ${MUTED}····${R}${WINDOW}●↓${R} ${WINDOW}  −1.1K${R} ${GOOD}  5%${R} ${TOKENS}  5.0K${R}${MUTED}/${R}${WINDOW}100.0K${R}`],
     ['a spend under two dollars plain', {}, { spend: { ...SPEND, usd: 1.99 } }, 4, sum(`${LABEL}$3.41${R}`)],
     ['a spend of two dollars a warning', {}, { spend: { ...SPEND, usd: 2 } }, 4, sum(`${WARN}$3.41${R}`)],
     ['a spend under ten dollars a warning', {}, { spend: { ...SPEND, usd: 9.99 } }, 4, sum(`${WARN}$3.41${R}`)],
@@ -150,23 +201,23 @@ describe('one row', () => {
     expect(alone(agent, facts)[part]).toBe(styled);
   });
 
-  it('paints in pfm\'s colours, the gauge\'s lit cells in reverse video', () => {
-    expect(drawRow(scene([FOREMAN], answered(), 130), 'a2')).toBe([
-      `${BAD}${REVERSE}⎻⎽⎻⎻¯⎽⎽${R}${WINDOW}⎽${R} ${BAD} 86%${R}`,
-      `${TOKENS}door${R}${MUTED}·${R}${LABEL}flights:foreman${R}`,
-      `${MODEL}◇ sonnet${R}${MUTED}·${R}${LOOK.effortColors.high}▰▰▰${R}`,
+  it('paints in pfm\'s colours, the gauge\'s used cells in the share\'s tone, the rest dimmed', () => {
+    expect(drawRow(scene([FOREMAN], answered(), 131), 'a2')).toBe([
+      ` ${BAD}▰▰▰▰▰▰▰${R}${DIM}▱${R} ${WINDOW}●●●•••${R} ${WINDOW}   +144${R} ${BAD} 86%${R} ${TOKENS}172.9K${R}${MUTED}/${R}${WINDOW}200.0K${R}`,
+      `${TOKENS}door${R}${MUTED}·${R}${LABEL}flight…${R}`,
+      `${MODEL}◇${R}${MUTED}·${R}${LOOK.effortColors.high}▰▰▰${R}`,
       `${GOOD}running${R} ${ELAPSED}1m01s${R}`,
       `${MUTED}Σ${R} ${BAD}$12.50${R}${WARN}+?${R}`,
       `${BAD}💾✗1m40s${R}`,
       `${WARN}idle 3m20s${R}`,
       `${LABEL}Build the d…${R} ${MUTED}› Running…${R}`,
-    ].join(BAR));
+    ].join(`${DIM}│${R}`));
   });
 
   it('paints by weight alone, the engine\'s own dollars named as such, when pfm never answered', () => {
     const bar = ` ${ESC}[2m│${R} `;
     expect(drawRow(scene([{ ...PLANNER, cost: { usd: 0.46, hasUnknownPrice: true } }], failed('not on PATH'), undefined), 'a1')).toBe([
-      `${REVERSE}___${R}____________   +4.5K  17% ${ESC}[1m171.9K${R}${ESC}[2m/${R}1.0M`,
+      ` ${ESC}[2m▱▱▱▱▱▱▱▱${R} ${ESC}[2m······${R}   +4.5K  17% ${ESC}[1m171.9K${R}${ESC}[2m/${R}1.0M`,
       `${ESC}[1mplanner${R}`,
       `claude-opus-9${ESC}[2m·${R}medium`,
       'running 12m04s',
@@ -178,26 +229,26 @@ describe('one row', () => {
   });
 
   it.each<[string, number, string]>([
-    ['gives the cause its least and the task its least where both just fit', 66, ' _____⎼↓   5% │ Explore │ done │ pfm ✗ open agent-a3.j… │ Find th…'],
-    ['gives the cause all that is left where the task\'s least no longer fits', 65, ' _____⎼↓   5% │ Explore │ done │ pfm ✗ open agent-a3.jsonl: perm…'],
+    ['gives the cause its least and the task its least where both just fit', 59, ' ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.j…│Find th…'],
+    ['gives the cause all that is left where the task\'s least no longer fits', 58, ' ▰▱▱▱▱▱▱▱   5%│Explore│done│pfm ✗ open agent-a3.jsonl: pe…'],
   ])('%s', (_name, columns, row) => {
     expect(plain(drawRow(scene([{ ...CHILD, parentId: undefined }], answered(), columns), 'a3'))).toBe(row);
   });
 
   it('keeps a nested row inside the two cells its connector takes', () => {
     const pair = [FOREMAN, { ...PLANNER, parentId: 'a2' }];
-    expect(pair.map((agent) => plain(drawRow(scene(pair, answered(), 60), agent.id)))).toEqual([
-      '⎻⎽⎻⎻¯⎽⎽⎽    86% │ door·flight… │ running 1m01s  │ idle 3m20s',
-      '⎼⎽⎽⎽⎽⎼⎼⎼  17% │ planner      │ running 12m04s │ 2 err │ ⟲…',
+    expect(pair.map((agent) => plain(drawRow(scene(pair, answered(), 62), agent.id)))).toEqual([
+      ' ▰▰▰▰▰▰▰▱    86%│door·flight…│running 1m01s│idle 3m20s',
+      ' ▰▱▱▱▱▱▱▱  17%│planner│running 12m04s│2 err│⟲1│↳1/3│Map the…',
     ]);
   });
 
   it.each<[string, Record<string, unknown>, string]>([
-    ['could not list the agents below', { nested: { total: 0, working: 0, unknown: 0, error: 'list /c/subagents: permission denied' } }, '⎼⎽⎽⎽⎽⎼⎼⎼  17% │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41 │ 2 err │ ⟲1 │ ↳?/? │ Map the parser'],
-    ['could not read two of the agents below', { nested: { total: 3, working: 0, unknown: 2 } }, '⎼⎽⎽⎽⎽⎼⎼⎼  17% │ planner │ ◆·▰▰ │ running 12m04s │ 2 err │ ⟲1 │ ↳0/3+2? │ Map the pars… › Reading le…'],
-    ['counted one tool error', { toolErrors: 1 }, '⎼⎽⎽⎽⎽⎼⎼⎼  17% │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41 │ 1 err │ ⟲1 │ ↳1/3 │ Map the parser'],
+    ['could not list the agents below', { nested: { total: 0, working: 0, unknown: 0, error: 'list /c/subagents: permission denied' } }, ' ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 2 err │ ⟲1 │ ↳?/? │ Map the par… › Reading…'],
+    ['could not read two of the agents below', { nested: { total: 3, working: 0, unknown: 2 } }, ' ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 2 err │ ⟲1 │ ↳0/3+2? │ Map the parser'],
+    ['counted one tool error', { toolErrors: 1 }, ' ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆·▰▰ │ running 12m04s │ Σ $3.41/2.0M/24.3K/57 │ 💾5m✓3m08s 94% │ 1 err │ ⟲1 │ ↳1/3 │ Map the par… › Reading…'],
   ])('says in a narrow list, without the flags\' words, that pfm %s', (_name, facts, row) => {
-    expect(plain(drawRow(scene([PLANNER], answered(facts), 100), 'a1'))).toBe(row);
+    expect(plain(drawRow(scene([PLANNER], answered(facts), 162), 'a1'))).toBe(row);
   });
 
   it('says how old pfm\'s facts are once its answer leaves an agent out', () => {
@@ -212,16 +263,16 @@ describe('one row', () => {
     expect(flags(FOREMAN)).toEqual(['idle 5m05s', '@door']);
   });
 
-  it('draws the strip on pfm\'s scale, in its glyphs and with its drop mark', () => {
+  it('draws the strip on pfm\'s scale, in its glyphs, its widths and with its drop mark', () => {
     const door = new Door();
-    const look = { ...LOOK, pulse: { glyphs: ['.', ':', '|'], drop: 'v', steps: [500, 5_000], dropFrom: 20_000, stepMs: 5_000 } };
+    const look = { ...LOOK, gauge: { on: '=', off: '-', cells: 4 }, pulse: { glyphs: ['.', ':', '|'], drop: 'v', steps: [500, 5_000], dropFrom: 20_000, stepMs: 5_000, cells: 3 } };
     door.land(readDoorAnswer({ exitCode: 0, stdout: JSON.stringify({ ...ANSWER, look }), stderr: '' }));
-    expect(plain(drawRow(scene([{ ...CHILD, parentId: undefined }], door, undefined), 'a3')).split(' │ ')[0]).toBe(' ............:v  −22.0K   5%   9.0K/200.0K');
+    expect(plain(drawRow(scene([{ ...CHILD, parentId: undefined }], door, undefined), 'a3')).split(' │ ')[0]).toBe(' =--- .:v  −22.0K   5%   9.0K/200.0K');
   });
 
   it('shows the engine\'s own dollars for an ended agent pfm never named', () => {
     expect(plain(drawRow(scene([{ ...CHILD, id: 'a9', parentId: undefined }], answered(), undefined), 'a9'))).toBe(
-      ' ____________⎼↓  −22.0K   5%   9.0K/200.0K │ Explore │ claude-haiku-9 │ done │ $0.02 own │ 💾– ?% │ Find the callers',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore │ claude-haiku-9 │ done │ $0.02 own │ 💾– ?% │ Find the callers',
     );
   });
 });

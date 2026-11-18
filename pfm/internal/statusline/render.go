@@ -248,30 +248,15 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		data.Model.ID = gauge.model
 		data.Model.DisplayName = modelFamily(gauge.model)
 	}
-	l1 := badge + modelSegment(data, sessionAutoEffort(runtime, data))
-	l1 += sep + blue + directoryName + reset
-	if data.Worktree.Name != "" {
-		l1 += sep + magenta + "🌳 " + data.Worktree.Name + reset
-	} else if data.Workspace.GitWorktree != "" {
-		l1 += sep + magenta + "🌳 " + data.Workspace.GitWorktree + reset
+	worktree := data.Worktree.Name
+	if worktree == "" {
+		worktree = data.Workspace.GitWorktree
 	}
-	if git := gitSegment(ctx, runtime, directory); git != "" {
-		l1 += sep + git
-	}
-	if data.Agent.Name != "" {
-		l1 += sep + magenta + "⚡" + data.Agent.Name + reset
-	}
-	if data.Vim.Mode != "" {
-		color := green
-		if data.Vim.Mode == "NORMAL" {
-			color = cyan
-		}
-		l1 += sep + color + data.Vim.Mode + reset
-	}
-	if data.SessionName != "" {
-		l1 += sep + cLabel + "🔖 " + data.SessionName + reset
-	}
-	l1 += sep + fleetSegment(runtime)
+	l1 := identityLine(runtime, identityFacts{
+		badge: badge, data: data, effort: sessionAutoEffort(runtime, data), directory: directoryName,
+		worktree: worktree, git: gitRead(ctx, runtime, directory), agent: data.Agent.Name, vim: data.Vim.Mode,
+		session: data.SessionName, fleet: fleetSegment(runtime),
+	})
 
 	l3 := ""
 	switch runtime.Engine {
@@ -320,10 +305,7 @@ func makeBar(percent, width int) string {
 	if filled < 0 {
 		filled = 0
 	}
-	// ▰▱ (U+25B0/U+25B1) on purpose — block elements ▓░ are WebGL custom
-	// glyphs in VS Code's terminal and render stale under repaint.
-	return percentColor(percent) + strings.Repeat("▰", filled) + dim +
-		strings.Repeat("▱", width-filled) + reset
+	return fillBar(filled, width, percentColor(percent))
 }
 
 func formatContextTokens(tokens int64) string {

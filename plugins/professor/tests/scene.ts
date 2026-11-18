@@ -15,7 +15,12 @@ export const LOOK = {
     label: `${E}[97m`, muted: `${E}[38;5;245m`, good: `${E}[38;5;118m`, warn: `${E}[38;5;226m`, bad: `${E}[1;38;5;203m`, dim: `${E}[2m`, reset: `${E}[0m`,
   },
   effortColors: { low: `${E}[38;5;117m`, medium: `${E}[38;5;118m`, high: `${E}[38;5;226m`, xhigh: `${E}[38;5;215m`, max: `${E}[1;38;5;203m` },
-  pulse: { glyphs: ['_', '⎽', '⎼', '⎻', '⎺', '¯'], drop: '↓', steps: [1, 1_000, 5_000, 20_000, 50_000], dropFrom: 1_000, stepMs: 5_000 },
+  gauge: { on: '▰', off: '▱', cells: 8 },
+  pulse: { glyphs: ['·', '•', '●'], drop: '↓', steps: [1, 5_000], dropFrom: 1_000, stepMs: 5_000, cells: 6 },
+  context: [
+    { from: 120, pulse: true, growth: true, window: true }, { from: 100, pulse: true, growth: false, window: true },
+    { from: 90, pulse: false, growth: false, window: true }, { from: 0, pulse: false, growth: false, window: false },
+  ],
   tones: { usd: { warn: 2, bad: 10 }, share: { warn: 50, bad: 80 }, cacheHit: { warn: 50, good: 80 } },
 };
 

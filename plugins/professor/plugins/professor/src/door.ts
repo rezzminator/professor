@@ -1,11 +1,11 @@
 // pfm's door for the agent rows: the one command that answers, for every row
 // of the list at once, the facts the engine's AgentRow props do not carry, and
-// the look the status line draws them in: its colours, the pulse strip's scale
-// and where an amount changes colour. This file
+// the look the status line draws them in: its colours, the context gauge's
+// cells, the pulse's scale and where an amount changes colour. This file
 // builds the command, refuses an answer of another shape by the field that is
 // wrong, and holds what was last learnt between calls.
 
-import { clean } from './text';
+import { cells, clean } from './text';
 
 /** The fewest milliseconds between two calls: one per refresh for all rows, never one per row. */
 export const DOOR_EVERY_MS = 4_000;
@@ -29,21 +29,31 @@ export type DoorFacts = {
   context: number; contextWindow: number; lastActivity: number;
   nested: DoorNested; spend: DoorSpend | null; text: DoorText; error?: string; absent?: true;
 };
+/** The context gauge: the cell of the window's used part, the cell of its free part, and its width in cells. */
+export type DoorGauge = { on: string; off: string; cells: number };
 /**
- * The pulse strip's scale: the cell per growth level, none to most; the cell of a step that shed `dropFrom` tokens
- * or more; the fewest tokens a step must add to reach each level above the first; a main-line cell's wall time.
+ * The pulse's scale: the cell per growth level, none to most; the cell of a step that shed `dropFrom` tokens or more;
+ * the fewest tokens a step must add to reach each level above the first; a main-line cell's wall time; its width in cells.
  */
-export type DoorPulse = { glyphs: readonly string[]; drop: string; steps: readonly number[]; dropFrom: number; stepMs: number };
+export type DoorPulse = { glyphs: readonly string[]; drop: string; steps: readonly number[]; dropFrom: number; stepMs: number; cells: number };
+/**
+ * One form of the context block the main status line and the rows open with: the gauge and the share always, the pulse,
+ * the newest step's growth figure and the tokens over the window when set; drawn from `from` terminal cells (the hook's
+ * COLUMNS) up to the next fuller form's.
+ */
+export type DoorContextForm = { from: number; pulse: boolean; growth: boolean; window: boolean };
 /** Where an amount turns to the warning colour, and to the bad one, each inclusive. */
 export type DoorTone = { warn: number; bad: number };
 /** Where a share that is better high turns from bad to the warning colour, and to good, each inclusive. */
 export type DoorHitTone = { warn: number; good: number };
 /**
- * The status line's look: its SGR sequence per meaning and per effort level for its bar, the pulse strip's scale,
- * and the tones of a dollar amount, of a share of the context window and of a cache-hit share.
+ * The status line's look: its SGR sequence per meaning and per effort level for its bar, the context gauge, the
+ * pulse's scale, the context block's width table, and the tones of a dollar amount, of a share of the context window and of a cache-hit share.
  */
 export type DoorLook = {
-  palette: Record<string, string>; effortColors: Record<string, string>; pulse: DoorPulse;
+  palette: Record<string, string>; effortColors: Record<string, string>; gauge: DoorGauge; pulse: DoorPulse;
+  /** The context block's forms, fullest first; the first one a width holds is drawn. */
+  context: readonly DoorContextForm[];
   tones: { usd: DoorTone; share: DoorTone; cacheHit: DoorHitTone };
 };
 export type DoorAnswer = { at: number; agents: DoorFacts[]; look: DoorLook };
@@ -90,12 +100,36 @@ function numbers(from: Json, key: string, at: string): number[] {
     return each;
   });
 }
-function words(from: Json, key: string, at: string): string[] {
+function cellCount(from: Json, key: string, at: string): number {
+  const value = from[key];
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error(`${at}.${key} is not a cell count`);
+  return value;
+}
+/** A glyph of the gauge or the pulse: one cell, as every row and the main line count their cells by it. */
+function glyph(from: Json, key: string, at: string): string {
+  const value = text(from, key, at);
+  if (cells(value) !== 1) throw new Error(`${at}.${key} is not one cell`);
+  return value;
+}
+function glyphs(from: Json, key: string, at: string): string[] {
   const value = from[key];
   if (!Array.isArray(value) || value.length === 0) throw new Error(`${at}.${key} is not a list of words`);
   return value.map((each: unknown, index) => {
     if (typeof each !== 'string') throw new Error(`${at}.${key}[${index}] is not text`);
-    return clean(each);
+    const clear = clean(each);
+    if (cells(clear) !== 1) throw new Error(`${at}.${key}[${index}] is not one cell`);
+    return clear;
+  });
+}
+function contextForms(value: unknown, at: string): DoorContextForm[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${at} is not a list of forms`);
+  return value.map((each: unknown, index) => {
+    const form = object(each, `${at}[${index}]`);
+    const from = form.from;
+    if (typeof from !== 'number' || !Number.isInteger(from) || from < 0) throw new Error(`${at}[${index}].from is not a count of columns`);
+    // Fullest first: the first form a width reaches is drawn, so a form after a narrower one would never be.
+    if (index > 0 && from >= (value[index - 1] as { from: number }).from) throw new Error(`${at}[${index}].from is not below the form before it`);
+    return { from, pulse: flag(form, 'pulse', `${at}[${index}]`), growth: flag(form, 'growth', `${at}[${index}]`), window: flag(form, 'window', `${at}[${index}]`) };
   });
 }
 function tone(value: unknown, at: string): DoorTone {
@@ -169,6 +203,7 @@ export function readDoorAnswer(result: DoorResult): DoorAnswer {
   const answer = object(parsed, 'answer');
   if (!Array.isArray(answer.agents)) throw new Error('answer.agents is not a list');
   const look = object(answer.look, 'answer.look');
+  const gauge = object(look.gauge, 'answer.look.gauge');
   const scale = object(look.pulse, 'answer.look.pulse');
   const tones = object(look.tones, 'answer.look.tones');
   const at = 'answer.look.pulse';
@@ -177,7 +212,12 @@ export function readDoorAnswer(result: DoorResult): DoorAnswer {
     agents: answer.agents.map((agent, index) => facts(agent, `answer.agents[${index}]`)),
     look: {
       palette: colours(look.palette, 'answer.look.palette'), effortColors: colours(look.effortColors, 'answer.look.effortColors'),
-      pulse: { glyphs: words(scale, 'glyphs', at), drop: text(scale, 'drop', at), steps: numbers(scale, 'steps', at), dropFrom: number(scale, 'dropFrom', at), stepMs: number(scale, 'stepMs', at) },
+      gauge: { on: glyph(gauge, 'on', 'answer.look.gauge'), off: glyph(gauge, 'off', 'answer.look.gauge'), cells: cellCount(gauge, 'cells', 'answer.look.gauge') },
+      pulse: {
+        glyphs: glyphs(scale, 'glyphs', at), drop: glyph(scale, 'drop', at), steps: numbers(scale, 'steps', at), dropFrom: number(scale, 'dropFrom', at),
+        stepMs: number(scale, 'stepMs', at), cells: cellCount(scale, 'cells', at),
+      },
+      context: contextForms(look.context, 'answer.look.context'),
       tones: {
         usd: tone(tones.usd, 'answer.look.tones.usd'), share: tone(tones.share, 'answer.look.tones.share'),
         cacheHit: hitTone(tones.cacheHit, 'answer.look.tones.cacheHit'),

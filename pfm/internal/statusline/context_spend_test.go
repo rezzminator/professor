@@ -391,9 +391,9 @@ func TestMainLineRendersOneDollarAmountInEveryState(t *testing.T) {
 			got := stripANSICodes(line)
 			// the line up to its cache segment, the cache tests' subject
 			head, _, _ := strings.Cut(got, " │ 💾")
-			want := "🟢_______________      +0   ?%   1.0M/? ctx unknown │ ⏳ 0s │ " + tc.want
+			want := "🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%   1.0M/? ctx unknown │ ⏳ 0s │ " + tc.want
 			if tc.noSession {
-				want = "🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ " + tc.want
+				want = "🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ " + tc.want
 			}
 			if head != want {
 				t.Errorf("line = %q, want %q", head, want)

@@ -425,7 +425,7 @@ func TestAgentFactsPricesRowsFromTheLedger(t *testing.T) {
 		"main rows $%.4f: %s",
 		mainRows,
 		stripANSICodes(line),
-	), "main rows $0.3403: 🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $1.29 · 1.0M in · 4.0K out · ? tools"; got != want {
+	), "main rows $0.3403: 🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $1.29 · 1.0M in · 4.0K out · ? tools"; got != want {
 		t.Errorf("main line = %q, want %q", got, want)
 	}
 }

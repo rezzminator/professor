@@ -22,7 +22,7 @@ describe('units', () => {
 });
 
 describe('cells', () => {
-  it.each([['abc', 3], ['💾5m', 4], ['漢字', 4], [`e${ACUTE}`, 1], [`${ESC}[1;97mab${ESC}[0m`, 2], ['_⎽⎼', 3], ['', 0]])('counts %j as %i cells', (text, width) => {
+  it.each([['abc', 3], ['💾5m', 4], ['漢字', 4], [`e${ACUTE}`, 1], [`${ESC}[1;97mab${ESC}[0m`, 2], ['▰▱·•●↓', 6], ['', 0]])('counts %j as %i cells', (text, width) => {
     expect(cells(text)).toBe(width);
   });
 

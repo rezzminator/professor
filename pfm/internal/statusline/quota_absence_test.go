@@ -37,8 +37,8 @@ func TestAWindowThePlanDroppedStaysHiddenThroughTheDoorsCycle(t *testing.T) {
 	week := start.Add(5 * 24 * time.Hour)
 	for _, payload := range []struct{ name, body, want string }{
 		{"harness reports seven_day only", `{"model":{"id":"claude-opus-4"},"rate_limits":{"seven_day":` +
-			`{"used_percentage":11,"resets_at":` + strconv.FormatInt(week.Unix(), 10) + `}}}`, "0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻5d0h │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻5d0h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n30s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2h0m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:— │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d22h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n"},
-		{"harness reports nothing yet", `{"model":{"id":"claude-opus-4"}}`, "0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻5d0h │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻5d0h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n30s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2h0m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:— │ ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:—\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n"},
+			`{"used_percentage":11,"resets_at":` + strconv.FormatInt(week.Unix(), 10) + `}}}`, "0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻5d0h │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻5d0h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n30s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2h0m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:— │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d22h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n"},
+		{"harness reports nothing yet", `{"model":{"id":"claude-opus-4"}}`, "0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻5d0h │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻5d0h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n30s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:3% ↻4d23h │ ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:11% ↻4d23h\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n2h0m0s: 🥈 ◆ opus·effort unknown │ ~ │ · ·\n🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools\n▱▱▱▱▱ 7d-fable-used:— │ ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:—\n▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data\n\n"},
 	} {
 		t.Run(payload.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -111,16 +111,16 @@ func TestAFailureShowsERROnlyForWindowsTheLastAnswerCarried(t *testing.T) {
 	for _, after := range []time.Duration{0, 20 * time.Minute, 2 * time.Hour} {
 		plain := renderPlain(t, runtime, start.Add(after), `{"model":{"id":"claude-opus-4"}}`)
 		if plain != `🥈 ◆ opus·effort unknown │ ~ │ · ·
-🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
-▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:ERR
-▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:ERR
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 			t.Fatalf("+%s: the failed window must read ERR, got %q", after, plain)
 		}
 		if plain != `🥈 ◆ opus·effort unknown │ ~ │ · ·
-🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
-▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:ERR
-▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
+🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:ERR
+▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d: no data
 ` {
 			t.Fatalf("+%s: windows the last answer left out must stay hidden, got %q", after, plain)
 		}
@@ -140,7 +140,7 @@ func TestAnAccountWithNoWindowsShowsNoLimitRow(t *testing.T) {
 	weeklyCache(t, runtime, `{"credits":"120.5","planType":"pro","primary":null,"secondary":null}`, time.Minute)
 	plain := renderPlain(t, runtime, now, `{"model":{"id":"claude-opus-4"}}`)
 	if plain != `🥈 ◆ opus·effort unknown │ ~ │ · ·
-🟢_______________      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
+🟢 ▱▱▱▱▱▱▱▱ ······      +0   ?%      ?/? ctx unknown │ ⏳ 0s │ Σ $? · ? in · ? out · ? tools
 ` {
 		t.Fatalf("no window answered, so no limit row may show: %q", plain)
 	}

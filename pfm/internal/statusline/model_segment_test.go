@@ -26,7 +26,7 @@ func TestEffortBarWearsItsLevelsColourAndOnlyItsFilledBlocks(t *testing.T) {
 	for _, want := range levels {
 		data.Effort.Level = want.level
 		paint := want.colour + want.bar + reset + cEffort + " " + want.level + reset
-		got := effortSuffix(data, autoEffortState{})
+		got := effortSuffix(data, autoEffortState{}, true)
 		if wantLine := cMuted + "·" + reset + paint; got != wantLine {
 			t.Errorf("main line at %s = %q, want %q", want.level, got, wantLine)
 		}
@@ -41,7 +41,7 @@ func TestEffortBarWearsItsLevelsColourAndOnlyItsFilledBlocks(t *testing.T) {
 		seen[want.colour] = want.level
 	}
 	data.Effort.Level = "turbo"
-	if got, want := effortSuffix(data, autoEffortState{}),
+	if got, want := effortSuffix(data, autoEffortState{}, true),
 		cMuted+"·"+reset+cEffort+"effort turbo (unknown)"+reset; got != want {
 		t.Errorf("an unknown level = %q, want %q: no bar, no level colour", got, want)
 	}

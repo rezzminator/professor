@@ -1,7 +1,7 @@
 package modelglyph
 
-// SparkLevels is the ladder every one-cell sparkline draws with, lowest to
-// highest: the scan lines (Miscellaneous Technical U+23BA–U+23BD between _ and
+// SparkLevels is the ladder the picker's one-cell sparklines (ui/render.go)
+// draw with, lowest to highest: the scan lines (Miscellaneous Technical U+23BA–U+23BD between _ and
 // ¯) rather than Block Elements ▁…█ or Braille, both of which are WebGL "custom
 // glyphs" in VS Code's terminal, drawn from its atlas instead of the font, and
 // painted stale or blank cells on live refresh (2026-09-11).

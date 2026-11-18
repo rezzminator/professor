@@ -37,6 +37,14 @@ set -euo pipefail
 # exits 0 and says so only on stderr, and a leak in such a file would pass the gate. Every git diff carries
 # --text, or git prints "Binary files … differ" for a NUL-byte file and no line of it is ever judged. With no
 # UTF-8 locale the scan refuses.
+#
+# THAT GREP READS ONLY WELL-FORMED UTF-8 WITHOUT A NUL: every line it judges passes utf8_clean first, every
+# NUL and every byte of an undecodable sequence becoming U+FFFD. macOS's BSD grep 2.6 under a UTF-8 locale
+# stops matching a NUL-free line at its first undecodable byte (a term after it is no hit, exit 1, no word
+# on stderr), and reads input holding a NUL anywhere as bytes, where -i folds no non-ASCII letter. GNU grep
+# does neither, so a hit in a binary file failed one platform and passed the other. A replaced byte is a
+# non-word character no literal term matches, as an undecodable byte is to GNU grep; only a '.' or a negated
+# bracket may now match where GNU's would not, flagging more, never less. The cleaner is proven at load.
 caller_locale="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
 export LC_ALL=C
 
@@ -66,19 +74,51 @@ match_grep() {
   LC_ALL="$match_locale" grep --binary-files=text "$@"
 }
 
+# utf8_clean: stdin to stdout, each NUL and each byte of an undecodable UTF-8 sequence replaced by U+FFFD
+# (the well-formed table of Unicode §3.9; possessive and \G-anchored, so a valid letter is never split).
+UTF8_CLEAN='s/\G(?:[\x01-\x7F]|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}|\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF]{2}|[\xF1-\xF3][\x80-\xBF]{3}|\xF4[\x80-\x8F][\x80-\xBF]{2})*+\K[\x00\x80-\xFF]/\xEF\xBF\xBD/g'
+utf8_clean() {
+  perl -pe "$UTF8_CLEAN"
+}
+
+# mark_nul: stdin to stdout, each NUL replaced by U+FFFD, the character utf8_clean makes of it. Every diff passes it
+# before bash reads a line: bash 3.2's read ends the line at a NUL and the term after it is never judged, and
+# bash 5's drops the NUL and joins its neighbours into one word.
+MARK_NUL='s/\0/\xEF\xBF\xBD/g'
+mark_nul() {
+  perl -pe "$MARK_NUL"
+}
+
+# clean_grep <grep args>: match_grep over stdin made well-formed by utf8_clean. A match stands even when grep
+# stopped reading early and the cleaner took SIGPIPE; any other answer needs the cleaner's whole output, so a
+# failed cleaner is rc 2, never "no match".
+clean_grep() {
+  local -a status
+  utf8_clean | match_grep "$@" && status=("${PIPESTATUS[@]}") || status=("${PIPESTATUS[@]}")
+  (( status[1] == 0 )) && return 0
+  (( status[0] == 0 )) || return 2
+  return "${status[1]}"
+}
+
 # True when the line still matches PATTERN after benign tokens and the configured
 # ignore tokens are removed. Ignore tokens are lowercase regexes (the terms-file
 # convention), so they are applied to the lowercased line; PATTERN matches with -i.
+# The space appended for the benign token's trailing-character match is removed again, so a term anchored
+# with '$' still sees the line's own end. A line that no longer matches although nothing was removed from it
+# was never judged (the matcher disagrees with itself): rc 2, the caller's SCAN-ERROR, never a suppression.
 line_is_real_hit() {
-  local line tok
-  line="$(printf '%s ' "$1" | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g")" || return 2
+  local line tok rc
+  line="$(printf '%s ' "$1" | sed -E -e "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g" -e 's# $##')" || return 2
   if (( ${#ignore_tokens[@]} > 0 )); then
     line="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')" || return 2
     for tok in "${ignore_tokens[@]}"; do
       line="$(printf '%s' "$line" | sed -E "s#${tok}#<IGNORED>#g")" || return 2
     done
   fi
-  match_grep -qiE "$PATTERN" <<<"$line"
+  clean_grep -qiE "$PATTERN" <<<"$line" && return 0 || rc=$?
+  (( rc >= 2 )) && return 2
+  [[ "$line" == *'<BENIGN>'* || "$line" == *'<benign>'* || "$line" == *'<IGNORED>'* ]] || return 2
+  return 1
 }
 
 usage() {
@@ -183,6 +223,12 @@ for candidate in "$caller_locale" C.UTF-8 UTF-8; do
 done
 if [[ -z "$match_locale" ]]; then
   echo "leak-check: FAILED — no UTF-8 locale for grep (tried: $tried_locales); under a byte locale a term's '.' or bracket misses a multibyte letter; refusing to scan" >&2
+  exit 1
+fi
+# The cleaner keeps a valid letter and replaces a lone high byte and a NUL, or the scan refuses: without it
+# BSD grep silently misses a term after an undecodable byte.
+if [[ "$(printf 'a\377b\000c\303\251\n' | utf8_clean)" != $'a\357\277\275b\357\277\275c\303\251' ]]; then
+  echo "leak-check: FAILED — utf8_clean (perl) did not turn undecodable bytes into U+FFFD; BSD grep misses a term after such a byte; refusing to scan" >&2
   exit 1
 fi
 
@@ -329,7 +375,7 @@ scan_diff_stream() {
     done
 
     local matches rc
-    matches="$(printf '%s\n' "${contents[@]}" | match_grep -niE "$PATTERN")" && rc=0 || rc=$?
+    matches="$(printf '%s\n' "${contents[@]}" | clean_grep -niE "$PATTERN")" && rc=0 || rc=$?
     if (( rc >= 2 )); then
       local error_seen=$'\n'
       for f in "${files[@]}"; do
@@ -341,8 +387,10 @@ scan_diff_stream() {
       return 1
     fi
     if [[ -n "$matches" ]]; then
+      # grep printed the cleaned line; the raw added line is judged and reported.
       local idx content
-      while IFS=: read -r idx content; do
+      while IFS=: read -r idx _; do
+        content="${contents[idx-1]}"
         if line_is_real_hit "$content"; then
           printf 'LEAK %s: %s\n' "${files[idx-1]}" "$content"
         else
@@ -373,7 +421,30 @@ scan_diff_stream() {
 hits_file="$(mktemp)"
 coverage_file="$(mktemp)"
 commits_file="$(mktemp)"
-trap 'rm -f "$hits_file" "$coverage_file" "$commits_file"' EXIT
+# --files mode's derived scratch: the cleaned copies of NUL-bearing or undecodable files, and the judge's stages.
+clean_dir="$coverage_file.clean"
+stripped_file="$coverage_file.stripped"
+normalized_file="$coverage_file.normalized"
+lower_file="$coverage_file.lower"
+real_file="$coverage_file.real"
+trap 'rm -f "$hits_file" "$coverage_file" "$commits_file" "$stripped_file" "$normalized_file" "$lower_file" "$real_file"; rm -rf "$clean_dir"' EXIT
+
+# hit_source <grepped path> <lnum> <grepped line>: sets hit_file and hit_content to the scanned file and its
+# hit line. A cleaned copy's line is read back raw from the file it came from, each NUL marked as mark_nul
+# marks it; if that read fails, the cleaned line is reported — a hit is never lost to its display.
+hit_source() {
+  local raw
+  hit_file="$1"
+  hit_content="$3"
+  [[ "$1" == "$clean_dir/"* ]] || return 0
+  hit_file="${regular[${1#"$clean_dir"/}]}"
+  raw="$(perl -e '
+    my ($n, $f) = @ARGV;
+    open(my $in, "<:raw", $f) or die "leak-check: cannot read $f: $!\n";
+    while (<$in>) { next if $. != $n; chomp; '"$MARK_NUL"'; print; exit 0 }
+    exit 1' "$2" "$hit_file")" && hit_content="$raw"
+  return 0
+}
 
 range_diff_stream() {
   local old_type commit count=0 empty_tree remote_list known remote_name
@@ -463,10 +534,10 @@ range_diff_stream() {
 case "$mode" in
   staged)
     repo_git diff --cached --text -U0 --no-color -- . "${diff_excludes[@]}" \
-      | scan_diff_stream > "$hits_file"
+      | mark_nul | scan_diff_stream > "$hits_file"
     ;;
   range)
-    if ! range_diff_stream | scan_diff_stream > "$hits_file"; then
+    if ! range_diff_stream | mark_nul | scan_diff_stream > "$hits_file"; then
       echo 'leak-check: FAILED — reachable-commit scan failed; refusing to report clean' >&2
       exit 1
     fi
@@ -502,16 +573,49 @@ case "$mode" in
       fi
     done
     if (( ${#regular[@]} > 0 )); then
-      match_grep -niEH --null -e "$PATTERN" -- "${regular[@]}" > "$coverage_file" 2>/dev/null && rc=0 || rc=$?
-      if (( rc >= 2 )); then
+      # A NUL-bearing or undecodable file is grepped as its cleaned copy, $clean_dir/{index}, in its own place
+      # in the list (see utf8_clean); a hit in a copy is reported with the raw line read back from the file.
+      grep_paths=("${regular[@]}")
+      mkdir "$clean_dir"
+      if cleaned="$(perl -e '
+        my $dir = shift;
+        for my $i (0 .. $#ARGV) {
+          my $in;
+          # An unreadable file keeps its own path: the grep below fails on it and names it.
+          unless (open($in, "<:raw", $ARGV[$i])) { warn "leak-check: cannot read $ARGV[$i] to clean it: $!\n"; next }
+          local $/;
+          $_ = <$in>;
+          close $in;
+          next unless defined $_ && '"$UTF8_CLEAN"';
+          open(my $out, ">:raw", "$dir/$i") or die "leak-check: cannot write $dir/$i: $!\n";
+          print {$out} $_ or die "leak-check: cannot write $dir/$i: $!\n";
+          close $out or die "leak-check: cannot write $dir/$i: $!\n";
+          print "$i\n";
+        }' "$clean_dir" "${regular[@]}")"; then
+        while IFS= read -r i; do
+          [[ -n "$i" ]] && grep_paths[i]="$clean_dir/$i"
+        done <<< "$cleaned"
+        rc=0
+      else
+        rc=$?
         for f in "${regular[@]}"; do
-          matches="$(match_grep -niE -e "$PATTERN" -- "$f")" && rc=0 || rc=$?
+          printf 'SCAN-ERROR %s: leak-check could NOT clean the scanned files to well-formed UTF-8 (perl rc=%d) — treated as FAILURE, never as clean\n' "$f" "$rc" >> "$hits_file"
+        done
+      fi
+    fi
+    if (( ${#regular[@]} > 0 && rc == 0 )); then
+      match_grep -niEH --null -e "$PATTERN" -- "${grep_paths[@]}" > "$coverage_file" 2>/dev/null && rc=0 || rc=$?
+      if (( rc >= 2 )); then
+        for (( i=0; i<${#regular[@]}; i++ )); do
+          f="${regular[i]}"
+          matches="$(match_grep -niE -e "$PATTERN" -- "${grep_paths[i]}")" && rc=0 || rc=$?
           if (( rc >= 2 )); then
             printf 'SCAN-ERROR %s: leak-check could NOT read this file (grep rc=%d) — treated as FAILURE, never as clean\n' "$f" "$rc" >> "$hits_file"
           elif [[ -n "$matches" ]]; then
             while IFS=: read -r lnum content; do
-              if line_is_real_hit "$content"; then
-                printf 'LEAK %s: %s\n' "$f" "$content" >> "$hits_file"
+              hit_source "${grep_paths[i]}" "$lnum" "$content"
+              if line_is_real_hit "$hit_content"; then
+                printf 'LEAK %s: %s\n' "$f" "$hit_content" >> "$hits_file"
               else
                 rc=$?
                 if (( rc >= 2 )); then
@@ -527,27 +631,25 @@ case "$mode" in
         matched_files=()
         matched_contents=()
         while IFS= read -r -d '' f && IFS=: read -r lnum content; do
-          matched_files+=("$f")
-          matched_contents+=("$content")
+          hit_source "$f" "$lnum" "$content"
+          matched_files+=("$hit_file")
+          matched_contents+=("$hit_content")
         done < "$coverage_file"
         if (( ${#matched_files[@]} > 0 )); then
           # Apply line_is_real_hit's substitutions to the candidate lines together;
           # forking its sed and grep pipeline per line dominates a whole-tree scan.
-          normalized_file="$coverage_file.normalized"
-          lower_file="$coverage_file.lower"
-          real_file="$coverage_file.real"
-          trap 'rm -f "$hits_file" "$coverage_file" "$commits_file" "$normalized_file" "$lower_file" "$real_file"' EXIT
           printf '%s \n' "${matched_contents[@]}" \
-            | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g" > "$normalized_file"
+            | sed -E -e "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g" -e 's# $##' > "$stripped_file"
           if (( ${#ignore_tokens[@]} > 0 )); then
-            tr '[:upper:]' '[:lower:]' < "$normalized_file" > "$lower_file"
+            tr '[:upper:]' '[:lower:]' < "$stripped_file" > "$lower_file"
             sed_args=()
             for tok in "${ignore_tokens[@]}"; do
               sed_args+=(-e "s#${tok}#<IGNORED>#g")
             done
-            sed -E "${sed_args[@]}" "$lower_file" > "$normalized_file"
+            sed -E "${sed_args[@]}" "$lower_file" > "$stripped_file"
           fi
-          match_grep -niE "$PATTERN" "$normalized_file" > "$real_file" && rc=0 || rc=$?
+          utf8_clean < "$stripped_file" > "$normalized_file" \
+            && match_grep -niE "$PATTERN" "$normalized_file" > "$real_file" && rc=0 || rc=$?
           if (( rc >= 2 )); then
             # The matched lines could not be judged: name every source file they came from,
             # once each, never the temp file the judge read. First-seen order, same
@@ -556,7 +658,7 @@ case "$mode" in
             for f in "${matched_files[@]}"; do
               if [[ "$judge_seen" != *$'\n'"$f"$'\n'* ]]; then
                 judge_seen+="$f"$'\n'
-                printf "SCAN-ERROR %s: leak-check could NOT judge this file's matched lines (grep rc=%d) — treated as FAILURE, never as clean\n" "$f" "$rc" >> "$hits_file"
+                printf "SCAN-ERROR %s: leak-check could NOT judge this file's matched lines (judge rc=%d) — treated as FAILURE, never as clean\n" "$f" "$rc" >> "$hits_file"
               fi
             done
           else
@@ -564,11 +666,18 @@ case "$mode" in
             while IFS=: read -r lnum content; do
               real_indices[lnum]=1
             done < "$real_file"
+            normalized_lines=()
+            while IFS= read -r line; do
+              normalized_lines+=("$line")
+            done < "$normalized_file"
             for (( i=0; i<${#matched_files[@]}; i++ )); do
               if [[ -n "${real_indices[i+1]:-}" ]]; then
                 printf 'LEAK %s: %s\n' "${matched_files[i]}" "${matched_contents[i]}" >> "$hits_file"
-              else
+              elif [[ "${normalized_lines[i]}" == *'<BENIGN>'* || "${normalized_lines[i]}" == *'<benign>'* || "${normalized_lines[i]}" == *'<IGNORED>'* ]]; then
                 suppressed=$((suppressed + 1))
+              else
+                # Nothing was removed from the line, yet the judge no longer matches it: never judged.
+                printf 'SCAN-ERROR %s: matched line lost its match with nothing removed from it (the matcher disagrees with itself) — refusing clean\n' "${matched_files[i]}" >> "$hits_file"
               fi
             done
           fi

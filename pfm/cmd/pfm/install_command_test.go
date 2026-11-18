@@ -434,6 +434,10 @@ func TestInstallOfflineReachesInstallerAndDefaultFailureStaysLoud(t *testing.T) 
 	if code := runInstall([]string{"--yes", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip apply code=%d stdout=%q stderr=%q, want success", code, stdout.String(), stderr.String())
 	}
+	// The test jail sets PFM_INSTALL_PING_OFFLINE=1, which turns every ping off and outranks --offline.
+	if want := "pfm: install ping off (PFM_INSTALL_PING_OFFLINE)\n"; !strings.HasSuffix(stdout.String(), want) {
+		t.Fatalf("offline apply stdout=%q, want it to end with the install ping line %q", stdout.String(), want)
+	}
 }
 
 func TestInstallOfflinePreviewPreservesTheConfirmationFlag(t *testing.T) {

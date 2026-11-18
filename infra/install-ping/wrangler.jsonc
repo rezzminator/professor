@@ -1,0 +1,17 @@
+// The install-ping Worker: POST /v1/ping counts one install per UTC day in D1.
+// No account_id here: the deploy passes CLOUDFLARE_ACCOUNT_ID (README.md § Deploy).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "install-ping",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "install_ping",
+      "database_name": "install-ping",
+      "database_id": "585e6b29-9ffd-4ba0-b747-0765c8a51983",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

@@ -138,10 +138,10 @@ func Run(m *testing.M) int {
 	// No test fetches a source-fetched global skill from its public repo: an
 	// install run in the jail skips the fetch and doctor reports OFFLINE; no
 	// price refresh fetches a publisher's pricing page; no update check asks
-	// GitHub and no usage fetch calls the provider.
+	// GitHub, no usage fetch calls the provider and no install ping is sent.
 	for _, name := range []string{
 		paths.EnvSkillSourcesOffline, paths.EnvThemesOffline, paths.EnvPricesOffline,
-		paths.EnvUpdateCheckOffline, paths.EnvUsageOffline,
+		paths.EnvUpdateCheckOffline, paths.EnvUsageOffline, paths.EnvInstallPingOffline,
 	} {
 		if err := os.Setenv(name, "1"); err != nil {
 			warnSetup("set %s: %v", name, err)

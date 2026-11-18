@@ -645,6 +645,17 @@ checks_templates_engine_sync_action_tests() {
 
 }
 
+checks_templates_install_ping_tests() {
+  head_ "templates — install-ping Worker tests"
+  node_test_suite "install-ping Worker" "$TMP_BASE/templates/install-ping.tap" \
+    infra/install-ping/src/ping.test.mjs infra/install-ping/src/index.test.mjs infra/install-ping/src/stats.test.mjs
+  if bash "$REPO_ROOT/infra/install-ping/stats_test.sh"; then
+    ok "install-ping stats.sh runs each stats.sql query in order and refuses a non-SELECT"
+  else
+    fail_step "install-ping stats.sh regression FAILED — its query split, order or non-SELECT refusal broke (see output)"
+  fi
+}
+
 # skill_unittest_sharded <out> <test file…>: the files' test ids split round-robin over
 # SKILL_TEST_SHARDS parallel unittest processes (default: the cores, at most 8), so a skill suite's
 # serial CPU time no longer sets the step's wall. <out> holds each `SHARD {i}` block, then one
@@ -774,7 +785,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1
   done
-  checks_named_template_steps "$add" engine-sync-action-tests skill-tests
+  checks_named_template_steps "$add" engine-sync-action-tests install-ping-tests skill-tests
 }
 
 checks_templates_step_serial() { shift; "$@"; }

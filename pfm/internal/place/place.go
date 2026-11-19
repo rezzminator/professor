@@ -8,6 +8,7 @@
 package place
 
 import (
+	"cmp"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,10 +16,33 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
-// Place is one top-level place: a root no other root holds, and its label.
+// Place is one top-level place: a root no other root holds, and its label. A
+// space (`pfm chat space`) is a place too: its Root is SpaceRoot(label), a key
+// no directory can be, and Dir the directory a chat filed there ran in.
 type Place struct {
 	Root  string
 	Label string
+	Dir   string
+}
+
+// spaceRootPrefix starts a space's Root; an absolute path never does.
+const spaceRootPrefix = "space:"
+
+// SpaceRoot is the Root a space files under: the key of the place every chat
+// recorded in that space shares, whatever its folder.
+func SpaceRoot(label string) string { return spaceRootPrefix + label }
+
+// IsSpaceRoot reports whether root is a SpaceRoot rather than a directory.
+func IsSpaceRoot(root string) bool { return strings.HasPrefix(root, spaceRootPrefix) }
+
+// Directory is the directory a chat started in this place runs in: the place's
+// own root, or for a space the folder its chats ran in ("" when none is known:
+// a space's root is a key, never a directory).
+func (place Place) Directory() string {
+	if place.Dir == "" && IsSpaceRoot(place.Root) {
+		return ""
+	}
+	return cmp.Or(place.Dir, place.Root)
 }
 
 // Index is rows filed under their places.
@@ -132,8 +156,10 @@ func RootLabel(root, home string) string {
 	return base
 }
 
-// Build files rows under their places. extra roots join the fold with no row
-// of their own (the project a picker was opened in).
+// Build files rows under their places: a row with a Space under that space, any
+// other under the place its root folds into. A spaced row's root still joins
+// the fold, so the chats filed by folder keep the places they had. extra roots
+// join the fold with no row of their own (the project a picker was opened in).
 func Build(rows []compose.Row, projectDirs map[string]string, home string, extra ...string) Index {
 	home = Clean(home)
 	index := Index{RowRoot: make([]string, len(rows)), RowPlace: make([]string, len(rows))}
@@ -148,17 +174,21 @@ func Build(rows []compose.Row, projectDirs map[string]string, home string, extra
 		if root == "" {
 			continue
 		}
-		owner := index.Folded[root]
-		index.RowPlace[position] = owner
-		if _, found := at[owner]; !found {
-			at[owner] = len(index.Places)
-			index.Places = append(index.Places, Place{Root: owner, Label: RootLabel(owner, home)})
+		entry := Place{Root: index.Folded[root]}
+		entry.Label = RootLabel(entry.Root, home)
+		if space := rows[position].Space; space != "" {
+			entry = Place{Root: SpaceRoot(space), Label: space, Dir: root}
+		}
+		index.RowPlace[position] = entry.Root
+		if _, found := at[entry.Root]; !found {
+			at[entry.Root] = len(index.Places)
+			index.Places = append(index.Places, entry)
 		}
 	}
 	// A place wears the label compose gave the rows filed at its root, so a
 	// rail chip and its group header read the same. Home stays ~.
 	for position, root := range index.RowRoot {
-		if root == "" || root == home || index.Folded[root] != root {
+		if root == "" || root == home || index.Folded[root] != root || rows[position].Space != "" {
 			continue
 		}
 		if entry := &index.Places[at[root]]; entry.Label == RootLabel(root, home) && rows[position].Project != "" {

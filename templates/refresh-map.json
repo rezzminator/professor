@@ -78,6 +78,9 @@
     "global/commands/pfm/schedule.md": {
       "curated": true
     },
+    "global/commands/pfm/space.md": {
+      "curated": true
+    },
     "global/commands/pfm/workbench.md": {
       "curated": true
     },

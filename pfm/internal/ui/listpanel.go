@@ -29,10 +29,7 @@ func (model Model) countProjects() map[string]projectTally {
 	tallies := make(map[string]projectTally)
 	for _, rowIndex := range model.filtered {
 		row := model.rows[rowIndex]
-		project := cleanField(row.Project)
-		if project == "" {
-			project = "?"
-		}
+		project := groupName(row)
 		tally := tallies[project]
 		switch {
 		case row.Kind.IsAddressable():
@@ -118,10 +115,7 @@ func (model Model) renderListPanel(width, height int) string {
 		for position := start; position < len(model.filtered) &&
 			len(lines) < rowsHeight; position++ {
 			row := model.rows[model.filtered[position]]
-			project := cleanField(row.Project)
-			if project == "" {
-				project = "?"
-			}
+			project := groupName(row)
 			nameGroup, grouped := model.nameGroups[model.filtered[position]]
 			groupKey, _, _ := workbenchNameGroup(row)
 			// A name group folded across projects (rebuildOrder already placed

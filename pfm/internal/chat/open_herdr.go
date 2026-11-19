@@ -445,7 +445,7 @@ func opensInPlace(
 	if err != nil {
 		return false, err
 	}
-	inPlace, err := spawn.HerdrOpensInPlace(ctx, runtime.Paths, choice, run.CWD)
+	inPlace, err := spawn.HerdrOpensInPlace(ctx, runtime.Paths, choice, run.CWD, seat.SessionID)
 	if err != nil {
 		return false, fmt.Errorf("place the open of chat %s: %w", seat.SessionID, err)
 	}

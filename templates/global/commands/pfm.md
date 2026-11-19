@@ -12,12 +12,14 @@ $ARGUMENTS
 
 For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`.
 
+For moving this chat into a named Herdr space or back to its project space, load `/pfm:space`.
+
 ## Verb map
 
 Operator verbs:
 
 - ls: list or pick fleet chats (`--killed` for the graveyard)
-- chat: operate on one chat — new, open, status, last, read, stream, call, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, schedule
+- chat: operate on one chat — new, open, status, last, read, stream, call, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, schedule, space
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
 - index: refresh the transcript index
 - whoami: this chat's own tmux session name

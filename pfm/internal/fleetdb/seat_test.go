@@ -298,10 +298,13 @@ func TestReadSeatsPreOwnershipV6(t *testing.T) {
 	for _, added := range []string{"", "ALTER TABLE seat ADD COLUMN herdr_terminal_id TEXT NOT NULL DEFAULT '';"} {
 		t.Run(fmt.Sprintf("partial=%t", added != ""), func(t *testing.T) {
 			values := paths.Values{StateDB: filepath.Join(t.TempDir(), "legacy.db")}
-			seedSharedState(t, values.StateDB, migrationV6+added+`
-PRAGMA user_version=6;
+			seedSharedState(
+				t,
+				values.StateDB,
+				migrationV6+migrationV7+added+fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)+`
 INSERT INTO seat(seat_id,session_id,engine,backend,tmux_socket,tmux_pane,herdr_socket,herdr_pane,herdr_workspace,name,state,reload_pending,lost_note,updated_at)
-VALUES('legacy','session','claude','herdr','','','fixture.sock','w1:p2','w1','OLD','live',0,'',42);`)
+VALUES('legacy','session','claude','herdr','','','fixture.sock','w1:p2','w1','OLD','live',0,'',42);`,
+			)
 			before, err := os.ReadFile(values.StateDB)
 			if err != nil {
 				t.Fatal(err)

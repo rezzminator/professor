@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -1181,14 +1182,16 @@ func (model *Model) adjustKilledCount(killed bool) {
 	}
 }
 
-// searchText is what a typed find matches a row against: its project, then
-// its name.
+// groupName is the name the list files a row under: its space when it has one,
+// as the rail does, else its project; "?" for neither.
+func groupName(row compose.Row) string {
+	return cmp.Or(cleanField(row.Space), cleanField(row.Project), "?")
+}
+
+// searchText is what a typed find matches a row against: its group, then its
+// name.
 func searchText(row compose.Row) string {
-	project := cleanField(row.Project)
-	if project == "" {
-		project = "?"
-	}
-	return strings.ToLower(project + " " + cleanField(row.Name))
+	return strings.ToLower(groupName(row) + " " + cleanField(row.Name))
 }
 
 func (model *Model) rebuild(follow string, fallback int) {
@@ -1198,10 +1201,7 @@ func (model *Model) rebuild(follow string, fallback int) {
 	model.groups = model.groups[:0]
 	for index := range model.rows {
 		row := &model.rows[index]
-		project := cleanField(row.Project)
-		if project == "" {
-			project = "?"
-		}
+		project := groupName(*row)
 		model.search[index] = searchText(*row)
 		groupIndex, found := byProject[project]
 		if !found {

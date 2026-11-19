@@ -128,6 +128,8 @@ func runChatWithRuntime(
 		return runChatSchedule(rest, stdout, stderr, runtime)
 	case "reload":
 		return runChatReloadWithRuntime(ctx, rest, stdout, stderr, runtime, paths.OSEnv{})
+	case "space":
+		return runChatSpace(ctx, rest, stdout, stderr, runtime)
 	case whoamiCommand:
 		// Compatibility alias for the public `pfm whoami` command.
 		return runWhoami(rest, stdout, stderr, runtime)
@@ -174,6 +176,7 @@ func printChatUsage(w io.Writer) {
 	fmt.Fprintln(w, "  end         end a chat's tmux server")
 	fmt.Fprintln(w, "  schedule    recurring alarms that wake a chat: set | ls | rm")
 	fmt.Fprintln(w, "  reload      reboot a Claude chat in place under another configured account/cache mode")
+	fmt.Fprintln(w, "  space       move this chat into a named Herdr space; no name returns it to its folder's place")
 	fmt.Fprintln(w, "  find/save/branch/history/ls/resolve")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "targets: seat:<id> is an exact durable native seat, never a label or pane fallback")

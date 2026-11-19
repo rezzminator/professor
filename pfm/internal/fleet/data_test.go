@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -42,5 +43,31 @@ func TestEnrichLiveLeavesCompleteDataUntouched(t *testing.T) {
 	}
 	if len(got.Transcripts) != 1 || len(got.Rollouts) != 1 {
 		t.Fatalf("EnrichLive() = %+v, want the data unchanged", got)
+	}
+}
+
+// TestLoadDataCarriesEveryChatSpace pins that both loads hand compose the
+// spaces `pfm chat space` recorded, the default view's capped load included.
+func TestLoadDataCarriesEveryChatSpace(t *testing.T) {
+	database, err := store.OpenMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	ctx := context.Background()
+	for _, id := range []string{"glass-a", "glass-b"} {
+		if err := database.Shared().SetSpace(ctx, id, "glass", 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, load := range map[string]func(context.Context, *store.Store) (Data, error){
+		"all":     LoadData,
+		"default": LoadDefaultData,
+	} {
+		data, err := load(ctx, database)
+		want := map[string]string{"glass-a": "glass", "glass-b": "glass"}
+		if err != nil || !reflect.DeepEqual(data.Spaces, want) {
+			t.Fatalf("%s: spaces = %v, %v; want %v", name, data.Spaces, err, want)
+		}
 	}
 }

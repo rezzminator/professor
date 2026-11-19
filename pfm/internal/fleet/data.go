@@ -18,6 +18,8 @@ type Data struct {
 	OpenCodeSessions []store.OpenCodeSession
 	CxNames          map[string]string
 	Killed           []store.Killed
+	// Spaces is each chat's recorded space by chat id (`pfm chat space`).
+	Spaces map[string]string
 	// CachedCounts, when set, carries the default view's killed/suppressed
 	// totals — LoadDefaultData reads capped candidates, so compose cannot
 	// count them from the rows it was given.
@@ -46,12 +48,17 @@ func LoadData(ctx context.Context, database *store.Store) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
+	spaces, err := database.Shared().Spaces(ctx)
+	if err != nil {
+		return Data{}, err
+	}
 	return Data{
 		Transcripts:      transcripts,
 		Rollouts:         rollouts,
 		OpenCodeSessions: openCodeSessions,
 		CxNames:          cxNames,
 		Killed:           killed,
+		Spaces:           spaces,
 	}, nil
 }
 
@@ -76,12 +83,17 @@ func LoadDefaultData(ctx context.Context, database *store.Store) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
+	spaces, err := database.Shared().Spaces(ctx)
+	if err != nil {
+		return Data{}, err
+	}
 	return Data{
 		Transcripts:      transcripts,
 		Rollouts:         rollouts,
 		OpenCodeSessions: openCodeSessions,
 		CxNames:          cxNames,
 		Killed:           killed,
+		Spaces:           spaces,
 		CachedCounts:     &counts,
 	}, nil
 }

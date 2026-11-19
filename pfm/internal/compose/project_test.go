@@ -3,9 +3,11 @@ package compose
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -74,5 +76,36 @@ func TestLiveWorktreeChatLeadsUnderTheRepoProject(t *testing.T) {
 		if output.Rows[index].Project == "test-junk" {
 			t.Fatalf("a row is still filed under the worktree's basename: %#v", output.Rows[index])
 		}
+	}
+}
+
+func TestRecordedSpaceFilesTheChatAndLeavesOthersFolderPlaced(t *testing.T) {
+	chat := func(id string) store.Transcript {
+		return transcript(
+			id,
+			testjail.Place("/accounts/1/projects/atlas/"+id+".jsonl"),
+			testjail.Place("/work/atlas"),
+			id,
+			100,
+			5,
+			900,
+		)
+	}
+	output := Compose(Input{
+		Transcripts: []store.Transcript{chat("in-glass"), chat("in-folder")},
+		Spaces:      map[string]string{"in-glass": "glass", "gone-chat": "epic"},
+		ClaudeSeats: fixtureClaudeSeats(),
+		Options:     Options{View: DefaultView, PrimaryAccount: 1},
+	})
+	got := map[string]string{}
+	for _, row := range output.Rows {
+		got[row.ID] = row.Space
+	}
+	if want := (map[string]string{"in-glass": "glass", "in-folder": ""}); got["in-glass"] != want["in-glass"] ||
+		got["in-folder"] != want["in-folder"] {
+		t.Fatalf("row spaces = %v, want %v", got, want)
+	}
+	if want := (map[string]string{"in-glass": "glass", "gone-chat": "epic"}); !reflect.DeepEqual(output.Spaces, want) {
+		t.Fatalf("output spaces = %v, want every recorded space %v", output.Spaces, want)
 	}
 }

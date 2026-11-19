@@ -90,8 +90,15 @@ func TestPickerOpensOnThePlaceWearingItsHerdrSpaceLabel(t *testing.T) {
 		{space: "ops", place: "/src/ops", launch: "/src/ops"},
 		{space: "nowhere", place: "/src/app", launch: "/src/app"}, // no such place: compose's choice stands
 		{space: "", place: "/src/app", launch: "/src/app"},
+		// A picker in a space opens on the space's folder, where its new chat
+		// runs: a chat is in a space only by `pfm chat space`.
+		{space: "glass", place: "/src/app", launch: "/src/app"},
 	} {
 		rows, dirs := placeFixtureRows()
+		rows = append(rows, compose.Row{
+			Kind: compose.LiveClaude, ID: "epic", Name: "epic", Project: "app", Space: "glass", CWD: "/src/app",
+			ActivityNS: 20,
+		})
 		model := NewModel(Snapshot{
 			Rows: rows, ProjectDirs: dirs, Home: "/jail/me", MergeNewChat: true, HerdrSpace: test.space,
 			PrimaryAccount: 1, AccountIDs: []int{1}, NowNS: fixtureNowNS, Width: 120, Height: 30,
@@ -99,6 +106,17 @@ func TestPickerOpensOnThePlaceWearingItsHerdrSpaceLabel(t *testing.T) {
 		if model.place != test.place || launchRow(t, model).CWD != test.launch {
 			t.Fatalf("space %q: place %q launch %q, want %q and %q",
 				test.space, model.place, launchRow(t, model).CWD, test.place, test.launch)
+		}
+		if test.space == "glass" {
+			// Stopping on the space's chip names it, and a chat started there runs in its folder.
+			model.place = "space:glass"
+			model.retargetLaunchRows()
+			if row := launchRow(t, model); row.Project != "glass" || row.CWD != "/src/app" {
+				t.Fatalf("space chip launch row = %s (%s), want glass in /src/app", row.CWD, row.Project)
+			}
+			if root := model.effectivePlaceRootForPaths(); root != "/src/app" {
+				t.Fatalf("a typed path on the space chip is read from %q, want its folder /src/app", root)
+			}
 		}
 	}
 }

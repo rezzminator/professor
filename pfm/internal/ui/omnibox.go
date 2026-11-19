@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -109,11 +110,11 @@ func (model Model) resolveGo(text string) (place, bool, error) {
 // place, else the opening place, else the directory the picker was opened in
 // (a picker opened in ~ opens on the everywhere stop).
 func (model Model) effectivePlaceRootForPaths() string {
-	if model.place != allPlaceRoot && model.place != "" {
-		return model.place
-	}
-	if model.openPlace != allPlaceRoot && model.openPlace != "" {
-		return model.openPlace
+	for _, root := range []string{model.place, model.openPlace} {
+		// A space stands for the folder its chats run in.
+		if entry, _ := model.placeByRoot(root); root != allPlaceRoot && root != "" {
+			return cmp.Or(entry.dir, root)
+		}
 	}
 	return fleetplace.Clean(model.launchHome.cwd)
 }
@@ -201,7 +202,7 @@ func (model *Model) retargetLaunchRows() {
 		if current.root == allPlaceRoot {
 			row.Project, row.CWD = model.launchHome.project, model.launchHome.cwd
 		} else {
-			row.Project, row.CWD = current.label, current.root
+			row.Project, row.CWD = current.label, cmp.Or(current.dir, current.root)
 		}
 		if index < len(model.search) {
 			model.search[index] = searchText(*row) // a find matches the place it now names
@@ -310,8 +311,8 @@ func (model *Model) indexPlaces() {
 				break
 			}
 		}
-		if entry, found := model.herdrSpacePlace(); found {
-			model.launchHome.project, model.launchHome.cwd = entry.Label, entry.Root
+		if entry, found := model.herdrSpacePlace(); found && entry.Directory() != "" {
+			model.launchHome.project, model.launchHome.cwd = entry.Label, entry.Directory()
 		}
 	}
 	built := model.buildPlaces()

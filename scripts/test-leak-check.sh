@@ -130,6 +130,16 @@ else
   bad 'F14: required public licenses stay excluded while hooks are scanned in files mode' "rc=$rc; out=$out; err=$err"
 fi
 
+mkdir -p "$T/repo/docs/img"
+printf 'syntheticsecret\n' > "$T/repo/docs/img/card.webp"
+printf 'syntheticsecret\n' > "$T/repo/docs/img/shot.PNG"
+run_check docs/img/card.webp docs/img/shot.PNG clean-1.txt
+if [[ "$rc" -eq 0 && "$out" == 'leak-check: clean' && "$err" == *'scanned 1 file(s) (2 excluded by design, 0 not a regular file)'* ]]; then
+  ok 'raster images are excluded by design in files mode, any extension case'
+else
+  bad 'raster images are excluded by design in files mode, any extension case' "rc=$rc; out=$out; err=$err"
+fi
+
 run_check missing.txt hit.txt
 if [[ "$rc" -eq 1 && "$out" == 'LEAK hit.txt: syntheticsecret' && "$err" == *'NOT-SCANNED missing.txt: not a regular file (deleted or misnamed) — examined by nothing, counted as clean by nothing'* ]]; then
   ok 'missing path is named while a regular file is scanned'
@@ -453,12 +463,13 @@ mkdir -p "$pushed/.githooks" "$pushed/.opencode"
 printf 'syntheticsecret\n' > "$pushed/.githooks/merged"
 printf 'syntheticsecret\n' > "$pushed/LICENSE"
 printf 'syntheticsecret\n' > "$pushed/.opencode/LICENSE"
-pgit add .githooks/merged LICENSE .opencode/LICENSE && pgit commit -q -m merged
+printf 'syntheticsecret\n' > "$pushed/.githooks/card.Webp"
+pgit add .githooks/merged .githooks/card.Webp LICENSE .opencode/LICENSE && pgit commit -q -m merged
 real_range "$merge_from" HEAD
-if [[ "$rc" -eq 1 && "$out" == *'LEAK .githooks/merged: syntheticsecret'* && "$out" != *'LEAK LICENSE:'* && "$out" != *'LEAK .opencode/LICENSE:'* ]]; then
-  ok 'F7/F14: merge-only hooks are scanned while required public licenses stay excluded'
+if [[ "$rc" -eq 1 && "$out" == *'LEAK .githooks/merged: syntheticsecret'* && "$out" != *'LEAK LICENSE:'* && "$out" != *'LEAK .opencode/LICENSE:'* && "$out" != *'card.Webp'* ]]; then
+  ok 'F7/F14: merge-only hooks are scanned while required public licenses and images stay excluded'
 else
-  bad 'F7/F14: merge-only hooks are scanned while required public licenses stay excluded' "rc=$rc; out=$out; err=$err"
+  bad 'F7/F14: merge-only hooks are scanned while required public licenses and images stay excluded' "rc=$rc; out=$out; err=$err"
 fi
 
 GIT_ENUM_FAIL=1 run_range

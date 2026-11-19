@@ -292,6 +292,12 @@ diff_excludes=(
 for glob in ${ignore_paths[@]+"${ignore_paths[@]}"}; do
   diff_excludes+=(":(exclude,glob)$glob")
 done
+# Raster images are excluded by design: their compressed bytes hold no text a reader sees, and a
+# short private term once matched by chance inside two WebP cards and failed one host's gate.
+image_extensions=(webp png jpg jpeg gif ico avif)
+for ext in "${image_extensions[@]}"; do
+  diff_excludes+=(":(exclude,glob,icase)**/*.$ext")
+done
 
 is_excluded_path() {
   local p="$1" glob
@@ -299,6 +305,11 @@ is_excluded_path() {
     LICENSE|.opencode/LICENSE|scripts/placeholder-map.tsv|scripts/leak-terms.txt) return 0 ;;
   esac
   [[ -n "$terms_rel" && "$p" == "$terms_rel" ]] && return 0
+  local lower ext
+  lower="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
+  for ext in "${image_extensions[@]}"; do
+    [[ "$lower" == *."$ext" ]] && return 0
+  done
   for glob in ${ignore_paths[@]+"${ignore_paths[@]}"}; do
     # shellcheck disable=SC2053 — the configured glob is matched as a pattern on purpose
     [[ "$p" == $glob ]] && return 0

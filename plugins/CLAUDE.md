@@ -12,7 +12,7 @@ Professor tracks only each submodule plugin's commit: an edit under `{name}/` be
 - cache-live-control: `/cache` sets the prompt-cache TTL of the main chat and its sub-agents · `cache-live-control/`
 - cache-keepwarm: keeps the prompt cache of the main chat and waiting sub-agents warm through background waits with visible pokes, capped per wait and each admitted by a budget against the rewrite it saves · `cache-keepwarm/`
 - callmeter: records every tool call, request, agent and turn into SQLite through a Go binary behind every hook · `callmeter/`
-- forward-compaction: compaction where the model writes its own frontier — the main chat and every sub-agent through one tool — installed with the person's standing orders and the newest messages after the call that fit, verbatim · `forward-compaction/`
+- forward-compaction: compaction where the model writes its own frontier — the main chat and every sub-agent through one tool — installed with the user's standing orders and the newest messages after the call that fit, verbatim · `forward-compaction/`
 - engine-sync: the Codex and OpenCode mirror writer pfm execs · `engine-sync/`
 - harvester: shared engine MCP daemon and one-shot web/document CLI; its own plugin registers the MCP server `harvester` (`mcp__plugin_harvester_harvester__*` in Claude Code), pfm none · `harvester/`
 - gpt-gateway: a local passthrough between Claude Code and the Anthropic API, with a middleware hook API and an opt-in ChatGPT route; a tracked submodule the marketplace does not list · `gpt-gateway/`

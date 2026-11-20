@@ -82,17 +82,7 @@ func runConfigClaude(args []string, stdout, stderr io.Writer, runtime commandRun
 			return 2
 		}
 	}
-	for _, row := range claudelaunch.Resolve(runtime.Config, *account) {
-		fmt.Fprintf(
-			stdout,
-			"%s wire=%s target=%s value=%s source=%s\n",
-			row.Knob.Name,
-			row.Knob.Wire,
-			row.Knob.Target,
-			row.Value,
-			row.Won,
-		)
-	}
+	claudelaunch.WriteResolved(stdout, runtime.Config, *account)
 	return 0
 }
 
@@ -153,6 +143,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
 	fmt.Fprint(stdout, config.ChatSummary())
+	fmt.Fprint(stdout, config.HerdrSummary())
 	for index, value := range []string{runtime.Paths.StateDB, runtime.Paths.CacheDB} {
 		source := config.Source([]string{"state.db", "state.cacheDb"}[index])
 		if (paths.OSEnv{}).Get([]string{paths.EnvStateDB, paths.EnvCacheDB}[index]) != "" {
@@ -177,11 +168,6 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("binary", config.Claude.Binary)
 	printClaude("remoteControl", config.Claude.RemoteControl)
 	printClaude("theme", config.Claude.Theme)
-	printClaude("webSearchesPerSession", config.Claude.WebSearchesPerSession)
-	printClaude("autoCompactWindow", config.Claude.AutoCompactWindow)
-	printClaude("helperModel", config.Claude.HelperModel)
-	printClaude("tmuxTruecolor", config.Claude.TmuxTruecolor)
-	printClaude("cleanupPeriodDays", config.Claude.CleanupPeriodDays)
 	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)
 	printClaude("pluginCheckoutRoot", config.Claude.PluginCheckoutRoot)
 	plugins := make([]string, 0, len(config.Claude.Plugins))

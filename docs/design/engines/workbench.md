@@ -6,7 +6,7 @@
 - [Discovery and ownership](#discovery-and-ownership)
 - [Persona precedence](#persona-precedence)
 - [Launch doors](#launch-doors)
-- [pfm.settings.json](#pfmsettingsjson)
+- [Project pfm.config.json](#project-pfmconfigjson)
 - [Mirrors](#mirrors)
 - [Picker rows](#picker-rows)
 - [Cache](#cache)
@@ -71,14 +71,19 @@ An omitted engine in `chat new` / MCP `new` keeps the current engine when enable
 
 Attaching to an already live seat does not relaunch it. Bare non-session administrative commands pass through. `pfm headless exec`, `PurposeQuery` probes (`reap/busy.go`, agent-open queries, `chat_call_resume.go`) and `internal/ask` one-shot runs are outside this rule. OpenCode `chat new` and registered MCP `new` support native Herdr seats only; `--agent-role`, reload and branch remain refused.
 
-## pfm.settings.json
+## Project pfm.config.json
 
-A `pfm.settings.json` at a project's managed root (the directory holding `.professor/baseline.json`; a linked git worktree reads its own copy) applies to every Claude, Codex and OpenCode chat pfm opens in the project (`pfm/internal/workbench/persona.go`: `ForLaunch`, `settingsPersona`, `readRootSettings`).
+pfm has one config file name, `pfm.config.json`, one schema and one parser (`pfm/internal/config`). Machine scope is `{clone}/pfm.config.json` (gitignored; `PFM_CONFIG` overrides; seeded from `example.pfm.config.json`, which lists every key at its default). Project scope is `{root}/pfm.config.json` at a project's managed root (the directory holding `.professor/baseline.json`, workbench roots included; a linked git worktree reads its own copy): tracked in the adopter, sparse, and it applies to every Claude, Codex and OpenCode chat pfm opens in the project (`pfm/internal/workbench/persona.go`: `ForLaunch`, `settingsPersona`, `readRootSettings`).
 
+- **Layering is per key, never whole-file:** shipped defaults < machine file < project file < a caller's flags and `--settings`. `claude.settings` deep-merges per key; `envs` per name; `harnessPrompt` is replaced by the project's.
+- **Accepted keys:** project scope accepts only `envs`, `harnessPrompt` and `claude.settings`. Any other key there is ignored with a launch warning and a `pfm doctor` warning. When the project root's file is the machine file (the Professor clone root), it is read once, as the machine file.
+- **`pfm.settings.json` is gone:** a leftover file is not read; launch and `pfm doctor` warn `pfm.settings.json is no longer read: move its keys into pfm.config.json`.
 - **`harnessPrompt`:** optional. `{"harnessPrompt": {"extend": "path"}}` sends the fleet prompt, a blank line, then the project's file; `{"harnessPrompt": {"replace": "path"}}` sends the file alone.
-- **`envs`:** `{NAME: value}` set on each such chat. A file holding only `envs` is valid.
+- **`envs`:** `{NAME: value}` set on each such chat, every engine, engine-sync calls included (`ENGINE_SYNC_DISABLE` is set here). A file holding only `envs` is valid. It is a different mechanic from the machine key `claude.env`, which `pfm install` writes into each account's `settings.json` for Claude only.
+- **`claude.settings`:** optional, `{"claude": {"settings": {…any Claude settings…}}}`. `readRootSettings` decodes it through `claudelaunch.DecodeOwnerSettings`: it must be a JSON object, its `hooks` and `env`, when present, objects; `null` counts as absent; any other key under `claude` is a fault. It is carried as `workbench.Persona.ClaudeSettings` into `claudelaunch.Request.Settings` at every Claude launch door that carries the file's envs (new chats, resume and agent open, the launcher wrapper including Herdr seats, reload, a restored chat via `pfm chat open`, `pfm chat new`, the picker) and merges between pfm's computed keys and the caller's own `--settings` ([claude-launch.md](claude-launch.md#knobs)). Codex and OpenCode ignore it; `pfm headless exec` does not read it.
 - **Precedence:** a nested workbench's prompt wins over the root file's `harnessPrompt`; the `envs` still apply. A restored chat (`pfm chat open`, `pfm/internal/chat/restored_recipe.go`) and a reload carry the `envs`.
-- **Refused names:** `PFM_*`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` (`settingsEnvReserved`).
+- **Refused names:** `PFM_*`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` (`config.EnvReserved`, `pfm/internal/config/scope.go`), in `envs` and in `claude.settings.env` alike: Claude applies its settings `env` to its own process and every hook it runs.
+- **Scaffolded template:** `pfm init` writes `templates/project/pfm.config.json` to the project root as `pfm.config.json` (`initTemplatePaths` in `pfm/internal/professor/scaffold.go`) and pins it in `.professor/baseline.json`; JSON takes no scaffold marker. A project initialised earlier sees it as a `NEW` row of `pfm doctor --project-updates`. The file is the adopter's after init. The template sets every project-scope key empty: `"envs": {}`, `"harnessPrompt": null` (null counts as absent) and `"claude": {"settings": {}}`, so a scaffolded project overrides nothing until it sets a key: a project file layers per key over the machine file, and a copy of the shipped launch defaults there would re-impose them over the machine file's own `claude.settings`. `TestProjectTemplateKeepsTheMachineSettings` (`pfm/internal/claudelaunch/defaults_test.go`) layers the template over a machine file that changes a default and turns another off, and fails when the template overrides either. A new project-scope key lands in the template, empty, in the same change. Outside the file: values pfm computes at launch (hooks, statusLine, theme, `CLAUDE_CODE_NO_FLICKER`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`, cost-ledger, hygiene and shell process env); a project overrides any default through `claude.settings`.
 - **Faults:** a faulty file never blocks a launch; the chat opens without the whole file and a warning names the fault.
 
 ## Mirrors

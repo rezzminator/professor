@@ -90,6 +90,7 @@ func buildSnapshot(
 		ThemePalette:           palette,
 		Home:                   environment.Paths.Home,
 		ProjectDirs:            output.ProjectDirs,
+		Spaces:                 output.Spaces,
 		DirExists:              isDirectory,
 		Cache1H:                machine.EffectiveClaude(environment.Primary).Cache1H,
 		Cache1HByAccount:       cacheByAccount,

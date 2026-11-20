@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -109,11 +110,12 @@ func (model Model) resolveGo(text string) (place, bool, error) {
 // place, else the opening place, else the directory the picker was opened in
 // (a picker opened in ~ opens on the everywhere stop).
 func (model Model) effectivePlaceRootForPaths() string {
-	if model.place != allPlaceRoot && model.place != "" {
-		return model.place
-	}
-	if model.openPlace != allPlaceRoot && model.openPlace != "" {
-		return model.openPlace
+	for _, root := range []string{model.place, model.openPlace} {
+		// A space stands for the folder its chats run in; one gone from the rail, for none.
+		entry, found := model.placeByRoot(root)
+		if root != allPlaceRoot && root != "" && (found || !fleetplace.IsSpaceRoot(root)) {
+			return cmp.Or(entry.dir, root)
+		}
 	}
 	return fleetplace.Clean(model.launchHome.cwd)
 }
@@ -201,7 +203,9 @@ func (model *Model) retargetLaunchRows() {
 		if current.root == allPlaceRoot {
 			row.Project, row.CWD = model.launchHome.project, model.launchHome.cwd
 		} else {
-			row.Project, row.CWD = current.label, current.root
+			landing := model.placeFleet().
+				Landing(fleetplace.Place{Root: current.root, Label: current.label, Dir: current.dir})
+			row.Project, row.CWD = landing.Label, cmp.Or(current.dir, current.root)
 		}
 		if index < len(model.search) {
 			model.search[index] = searchText(*row) // a find matches the place it now names
@@ -310,8 +314,11 @@ func (model *Model) indexPlaces() {
 				break
 			}
 		}
-		if entry, found := model.herdrSpacePlace(); found {
-			model.launchHome.project, model.launchHome.cwd = entry.Label, entry.Root
+		// A picker opened in ~ has no project of its own: it starts where a new
+		// chat from its Herdr space's workspace lands, not in compose's busiest.
+		fleet := model.placeFleet()
+		if entry, found := fleet.Wearing(model.herdrSpace); found && entry.Directory() != "" {
+			model.launchHome.project, model.launchHome.cwd = fleet.Landing(entry).Label, entry.Directory()
 		}
 	}
 	built := model.buildPlaces()
@@ -344,21 +351,13 @@ func (model *Model) indexPlaces() {
 	model.places, model.rowDir, model.rowPlace = built.places, built.rowDir, built.rowPlace
 }
 
-// herdrSpacePlace is the place wearing the Herdr space's label, as Herdr
-// placement labels a place's space (place.Fleet.Labeled): a picker opened in ~
-// has no project of its own, and compose's launch row would start in the
-// busiest project instead of the one the space holds.
-func (model Model) herdrSpacePlace() (fleetplace.Place, bool) {
-	if model.herdrSpace == "" {
-		return fleetplace.Place{}, false
+// placeFleet is the picker's rows as Herdr placement reads a fleet, the
+// recorded spaces included: the one door every place.Fleet the picker builds
+// goes through, so the picker files a chat where placement puts it.
+func (model Model) placeFleet() fleetplace.Fleet {
+	return fleetplace.Fleet{
+		Rows: model.rows, ProjectDirs: model.projectDirs, Home: model.deck.home, Spaces: model.spaces,
 	}
-	fleet := fleetplace.Fleet{Rows: model.rows, ProjectDirs: model.projectDirs, Home: model.deck.home}
-	for _, entry := range fleet.Labeled().Places {
-		if entry.Label == model.herdrSpace && entry.Root != fleetplace.Clean(model.deck.home) {
-			return entry, true
-		}
-	}
-	return fleetplace.Place{}, false
 }
 
 // buildPlaces derives the rail from the rows the Model holds now.
@@ -395,7 +394,8 @@ type placeState struct {
 	projectDirs map[string]string
 	dirExists   func(string) (bool, error)
 	launchHome  struct{ project, cwd string }
-	herdrSpace  string // Snapshot.HerdrSpace
+	herdrSpace  string            // Snapshot.HerdrSpace
+	spaces      map[string]string // Snapshot.Spaces
 }
 
 // omniKey takes the keys the rail and the omnibox own before the picker's own

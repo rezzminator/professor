@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,12 +63,25 @@ func TestSpawnAuditHookDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	reasons := map[int64]string{
-		50:  "hook set differs from the registry (born 50s before the current spawn door)",
-		200: "hook set differs from the registry — some spawn site bypassed the door",
+		50:  "registry hooks missing (born 50s before the current spawn door)",
+		200: "registry hooks missing — some spawn site bypassed the door",
+	}
+	// A project's or caller's own hook runs after the registry's: no drift.
+	added := parsed
+	added.Hooks = append(append([]claudelaunch.Hook(nil), parsed.Hooks...),
+		claudelaunch.Hook{Event: "Stop", Command: "project-stop"})
+	if verdict, reason := classifySpawn(
+		added,
+		spawnObservation{StartedUnix: 200},
+		machine.EffectiveClaude(1),
+		home,
+		100,
+		nil,
+	); verdict != spawnInjected {
+		t.Errorf("an added hook: %s: %s, want %s", verdict, reason, spawnInjected)
 	}
 	for name, change := range map[string]func([]claudelaunch.Hook) []claudelaunch.Hook{
 		"missing": func(hooks []claudelaunch.Hook) []claudelaunch.Hook { return hooks[1:] },
-		"extra":   func(hooks []claudelaunch.Hook) []claudelaunch.Hook { return append(hooks, hooks[0]) },
 		"moved":   func(hooks []claudelaunch.Hook) []claudelaunch.Hook { hooks[0].Matcher = "other"; return hooks },
 		"async flipped": func(hooks []claudelaunch.Hook) []claudelaunch.Hook {
 			hooks[0].Async = !hooks[0].Async
@@ -95,6 +109,53 @@ func TestSpawnAuditHookDrift(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A project's claude.settings may change a launch default's value but a launch without the key
+// bypassed the door.
+func TestSpawnAuditLaunchDefaultKeys(t *testing.T) {
+	home := t.TempDir()
+	machine := config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}}
+	launch, err := claudelaunch.Render(
+		claudelaunch.Request{Home: home, Settings: map[string]any{"outputStyle": "Explanatory"}},
+		machine,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := claudelaunch.Parse(append([]string{launch.Binary}, launch.Argv...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed.Settings["outputStyle"]; got != "Explanatory" {
+		t.Fatalf("rendered outputStyle = %v, want Explanatory", got)
+	}
+	verdict, reason := classifySpawn(
+		parsed,
+		spawnObservation{StartedUnix: 200},
+		machine.EffectiveClaude(1),
+		home,
+		100,
+		nil,
+	)
+	if verdict != spawnInjected {
+		t.Errorf("a changed default: %s: %s, want %s", verdict, reason, spawnInjected)
+	}
+	dropped := parsed
+	dropped.Settings = maps.Clone(parsed.Settings)
+	delete(dropped.Settings, "showThinkingSummaries")
+	verdict, reason = classifySpawn(
+		dropped,
+		spawnObservation{StartedUnix: 200},
+		machine.EffectiveClaude(1),
+		home,
+		100,
+		nil,
+	)
+	want := "missing --settings showThinkingSummaries from the launch defaults — some spawn site bypassed the door"
+	if verdict != spawnViolation || reason != want {
+		t.Errorf("a dropped default: %s: %q, want %s: %q", verdict, reason, spawnViolation, want)
 	}
 }
 
@@ -183,10 +244,11 @@ func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
 }
 
 func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
-	home := t.TempDir()
 	for _, test := range []struct {
 		name      string
 		prefs     config.ClaudePrefs
+		loaded    string // a machine file whose effective prefs replace prefs
+		clone     bool   // a Professor clone is recorded in home
 		started   int64
 		promptErr error
 		verdict   spawnVerdict
@@ -201,19 +263,50 @@ func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
 			reason:    "no --system-prompt-file prompt material — composed prompt unavailable (resolve composed harness prompt: no source repository recorded); every door omits the flag until it exists: update or restore the clone, then reload",
 		},
 		{
+			name:    "mode unset in the machine file",
+			loaded:  `{"version":2,"claude":{"systemPrompt":null}}`,
+			clone:   true,
+			started: 200,
+			verdict: spawnViolation,
+			reason:  "no --system-prompt-file prompt material — some spawn site bypassed the door",
+		},
+		{
+			name:    "mode unset with no clone recorded is production",
+			loaded:  `{"version":2,"claude":{"systemPrompt":null}}`,
+			started: 200,
+			verdict: spawnViolation,
+			reason:  "missing --settings cleanupPeriodDays from the launch defaults — some spawn site bypassed the door",
+		},
+		{
 			name:    "age carried",
 			prefs:   config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction},
 			started: 50,
 			verdict: spawnPredatesLayer,
-			reason:  "missing --settings outputStyle default (born 50s before the current spawn door)",
+			reason:  "missing --settings cleanupPeriodDays from the launch defaults (born 50s before the current spawn door)",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			if test.clone {
+				if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prefs := test.prefs
+			if test.loaded != "" {
+				path := filepath.Join(t.TempDir(), config.FileName)
+				writeDoctorBenchFile(t, path, test.loaded)
+				machine, err := config.Load(path, t.TempDir(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prefs = machine.EffectiveClaude(1)
+			}
 			observation := spawnObservation{Argv: []string{"claude"}, StartedUnix: test.started}
 			verdict, reason := classifySpawn(
 				mustParseSpawn(t, observation.Argv),
 				observation,
-				test.prefs,
+				prefs,
 				home,
 				100,
 				test.promptErr,

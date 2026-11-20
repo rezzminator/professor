@@ -28,6 +28,10 @@ const (
 	// harness and the fence lanes set it so no test sends a credential to
 	// the provider; the production builders read it into the fetch options.
 	EnvUsageOffline = "PFM_USAGE_OFFLINE"
+	// EnvInstallPingOffline=1 stops the anonymous install ping
+	// (internal/installping): pfm install and the daily ping send nothing.
+	// The test harness sets it so no test reaches the counter.
+	EnvInstallPingOffline = "PFM_INSTALL_PING_OFFLINE"
 )
 
 // SkillSourcesOffline reports EnvSkillSourcesOffline=1: pfm install fetches no
@@ -84,4 +88,14 @@ func UsageOffline() bool {
 // UsageOfflineIn is UsageOffline read from env, the environment a caller was handed.
 func UsageOfflineIn(env Env) bool {
 	return env.Get(EnvUsageOffline) == "1"
+}
+
+// InstallPingOffline reports EnvInstallPingOffline=1: no install ping is sent.
+func InstallPingOffline() bool {
+	return InstallPingOfflineIn(OSEnv{})
+}
+
+// InstallPingOfflineIn is InstallPingOffline read from env, the environment a caller was handed.
+func InstallPingOfflineIn(env Env) bool {
+	return env.Get(EnvInstallPingOffline) == "1"
 }

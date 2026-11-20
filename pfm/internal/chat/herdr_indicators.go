@@ -156,6 +156,14 @@ func (provider *herdrTabProvider) tabs(ctx context.Context, socket string, fresh
 			continue
 		}
 		provider.probe.track(target, row.Size)
+		if views[0].State == "" && target.Backend == spawn.BackendHerdr && row.Killed && row.Kind.IsAddressable() {
+			// A native seat's own proof (owner and engine alive) outranks its row's
+			// kill mark: /clear records the cleared conversation killed while the same
+			// engine goes on as its successor, bound to the seat a moment later, and a
+			// dead paint in between outlives the successor's rename. A killed chat's
+			// tab turns dead once its engine is gone.
+			target.Live = true
+		}
 		if !target.Live && len(scan.Unreadable) > 0 {
 			return nil, fmt.Errorf("fleet inspection incomplete, refusing dead tab status: %v", scan.Unreadable)
 		}

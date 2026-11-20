@@ -25,12 +25,21 @@ import (
 
 func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
 	plugins := []pfmconfig.ClaudePlugin{{ID: "callmeter"}, {ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}}
+	herdrKeys := &pfmconfig.HerdrKeys{
+		Actions: map[string]*pfmconfig.HerdrKeyBinding{"next_workspace": {Keys: []string{"cmd+shift+down"}}},
+	}
 	runtime := commandRuntime{
-		Paths:   paths.Values{Home: t.TempDir()},
-		Config:  pfmconfig.Config{Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins}},
+		Paths: paths.Values{Home: t.TempDir()},
+		Config: pfmconfig.Config{
+			Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins},
+			Herdr:  pfmconfig.Herdr{Keys: herdrKeys},
+		},
 		Version: "0.80.0-alpha",
 	}
 	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
+	if !reflect.DeepEqual(options.HerdrKeys, herdrKeys) {
+		t.Fatalf("installer herdr.keys = %#v, want %#v", options.HerdrKeys, herdrKeys)
+	}
 	if options.Version != "0.80.0-alpha" || options.ClaudePluginCheckoutRoot != "/opt/plugins" {
 		t.Fatalf("plugin options version=%q root=%q", options.Version, options.ClaudePluginCheckoutRoot)
 	}
@@ -433,6 +442,10 @@ func TestInstallOfflineReachesInstallerAndDefaultFailureStaysLoud(t *testing.T) 
 	stderr.Reset()
 	if code := runInstall([]string{"--yes", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip apply code=%d stdout=%q stderr=%q, want success", code, stdout.String(), stderr.String())
+	}
+	// The test jail sets PFM_INSTALL_PING_OFFLINE=1, which turns every ping off and outranks --offline.
+	if want := "pfm: install ping off (PFM_INSTALL_PING_OFFLINE)\n"; !strings.HasSuffix(stdout.String(), want) {
+		t.Fatalf("offline apply stdout=%q, want it to end with the install ping line %q", stdout.String(), want)
 	}
 }
 

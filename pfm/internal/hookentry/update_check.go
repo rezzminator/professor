@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installping"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
@@ -15,11 +17,12 @@ import (
 
 const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
-// UpdateCheck refreshes the release notice cache for the picker. An unreachable
+// UpdateCheck refreshes the release notice cache for the picker and first
+// sends the daily install ping, whatever the release lookup does. An unreachable
 // release lookup is recorded in the failure marker, logged WARN, and exits 0;
 // paths.EnvUpdateCheckOffline=1 makes no lookup, leaves the cache and marker
 // as they are, says so on stderr and exits 0.
-func UpdateCheck(args []string, stderr io.Writer) int {
+func UpdateCheck(args []string, stderr io.Writer, runtime config.Runtime) int {
 	flags := cli.NewFlagSet(
 		"internal update-check",
 		"usage: pfm internal update-check --cache PATH --current vX.Y.Z --url URL",
@@ -35,6 +38,8 @@ func UpdateCheck(args []string, stderr io.Writer) int {
 		flags.Usage()
 		return 2
 	}
+	// installping honours its own switches and logs its own failure WARN.
+	_ = installPingDaily(context.Background(), installping.ForRuntime(runtime, paths.OSEnv{}))
 	if paths.UpdateCheckOffline() {
 		fmt.Fprintf(
 			stderr,

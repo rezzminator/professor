@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,8 @@ func TestNativeSeatsAcrossFleetViews(t *testing.T) {
 					{"hidden", "_KILL_hidden", "live"},
 					{"lost", "LOST", "lost"},
 					{"failed", "FAILED", "failed"},
+					// "gone" is lost and its transcript with it: nothing to resume, so it lists nowhere.
+					{"gone", "GONE", "lost"},
 				} {
 					err := state.PutSeat(
 						ctx,
@@ -88,6 +91,9 @@ func TestNativeSeatsAcrossFleetViews(t *testing.T) {
 						t.Error(err)
 					}
 				})
+				for _, id := range []string{"lost", "failed"} {
+					seedNativeTranscript(ctx, t, db, values, id)
+				}
 				request := Request{View: tc.view, ReadOnly: true}
 				var result Result
 				if cached {
@@ -170,6 +176,9 @@ func TestNativeDurableDiagnosticsDoNotFailListing(t *testing.T) {
 					t.Error(err)
 				}
 			})
+			for _, status := range []string{"failed", "lost"} {
+				seedNativeTranscript(ctx, t, db, values, status)
+			}
 			request := Request{View: compose.DefaultView, ReadOnly: true}
 			var result Result
 			if cached {
@@ -353,6 +362,11 @@ func TestEnrichNativeKeepsTheDataPastAnUnreadableSeat(t *testing.T) {
 	if len(data.Transcripts) != 1 || data.Transcripts[0].CustomTitle != "LOADED" || data.CachedCounts == nil {
 		t.Fatalf("EnrichNative() data = %+v, want the loaded transcript and cached counts kept", data)
 	}
+	// The failed read marks only its seat: its record is unknown, never absent.
+	unread := []bool{native[0].TranscriptUnread, native[1].TranscriptUnread}
+	if !slices.Equal(unread, []bool{false, true}) {
+		t.Fatalf("TranscriptUnread of seat-claude, seat-codex = %v, want [false true]", unread)
+	}
 }
 
 func TestReadOnlyNativeScanDoesNotCreateState(t *testing.T) {
@@ -464,6 +478,10 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 						t.Error(err)
 					}
 				})
+				// Each dead seat's chat stays resumable from its transcript.
+				for _, id := range []string{"dead", "stopped"} {
+					seedNativeTranscript(ctx, t, db, values, id)
+				}
 				request := Request{View: compose.DefaultView, ReadOnly: readOnly}
 				var result Result
 				if cached {
@@ -508,6 +526,22 @@ func TestNativeDeadSeatDoesNotFailListing(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// seedNativeTranscript writes and indexes the Claude transcript of session id, recording no directory.
+func seedNativeTranscript(ctx context.Context, t *testing.T, db *store.Store, values paths.Values, id string) {
+	t.Helper()
+	transcript := filepath.Join(values.Roots["cc"][0], id+".jsonl")
+	body := "{\"type\":\"user\",\"message\":{\"content\":\"resume " + id + "\"}}\n"
+	if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertTranscript(
+		ctx,
+		store.Transcript{UUID: id, Path: transcript, Size: int64(len(body)), PromptCount: 1},
+	); err != nil {
+		t.Fatal(err)
 	}
 }
 

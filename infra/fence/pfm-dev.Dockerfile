@@ -7,6 +7,18 @@
 # is the LAST stage, so an untargeted `docker build` of this file still
 # produces pfm-dev, never the Chrome image.
 FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS pfm-base
+# A network that blocks archive.ubuntu.com names its mirror in PFM_APT_MIRROR (an
+# Ubuntu archive URL such as https://mirror.example/ubuntu); every Ubuntu archive
+# and security URI in the apt sources (deb822 ubuntu.sources on 24.04, a legacy
+# sources.list on older bases) points at it before the first apt-get. An arm64
+# base reads ports.ubuntu.com/ubuntu-ports, a separate archive: it points at the
+# mirror's ubuntu-ports beside it (https://mirror.example/ubuntu-ports).
+ARG PFM_APT_MIRROR=
+RUN if [ -n "$PFM_APT_MIRROR" ]; then \
+      for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do \
+        [ ! -f "$f" ] || sed -i -E "s#https?://[A-Za-z0-9.-]+\.ubuntu\.com/ubuntu(-ports)?/?#${PFM_APT_MIRROR%/}\1/#g" "$f"; \
+      done; \
+    fi
 # The converter sidecar's OCR stack (OpenCV) loads these system libraries on
 # import, and `pfm install` stages its models on any fence image. gcc and
 # libc6-dev are the C toolchain `go test -race` needs (the race runtime is

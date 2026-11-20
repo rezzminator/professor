@@ -25,6 +25,17 @@ func Valid(v string) bool {
 	return v != "" && modsemver.Canonical(v) == strings.TrimSuffix(v, modsemver.Build(v))
 }
 
+// WithV is value trimmed and carrying the "v" this package's versions start
+// with: release and pfm update builds stamp "v0.89.0", the clone's VERSION
+// file and a make build "0.89.0", and both name one version.
+func WithV(value string) string {
+	value = strings.TrimSpace(value)
+	if value != "" && value[0] != 'v' {
+		value = "v" + value
+	}
+	return value
+}
+
 // Compare orders two Valid versions by SemVer precedence: -1, 0 or +1.
 func Compare(v, w string) int {
 	return modsemver.Compare(v, w)

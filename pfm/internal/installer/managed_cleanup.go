@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -239,11 +240,11 @@ func ManagedCleanupFix(dir, path string, content []byte) string {
 
 func (installer *engine) installManagedCleanup(ctx context.Context) error {
 	options := installer.options
-	status := InspectManagedCleanup(
-		options.ManagedSettingsDir,
-		options.RequireManagedCleanup,
-		options.CleanupPeriodDays,
-	)
+	days, err := claudelaunch.CleanupPeriodDays(options.ClaudeSettings)
+	if err != nil {
+		return fmt.Errorf("managed-cleanup: %w", err)
+	}
+	status := InspectManagedCleanup(options.ManagedSettingsDir, options.RequireManagedCleanup, days)
 	switch status.State {
 	case ManagedCleanupOff, ManagedCleanupRelative:
 		return nil

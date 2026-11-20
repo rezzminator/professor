@@ -176,10 +176,19 @@ func TestSinkDoesNotTreatLogTraceContextAsCallIdentity(t *testing.T) {
 					logBody(apiRequest(testSession, "", "prompt_suggestion", 50)), nil)
 			}
 			sink.Drain()
+			// The sink writes the span and the log apart, never joined on the log's trace context.
+			observations := filepath.Join(costledger.ObservationsDir(dir), testSession+".jsonl")
+			written, err := os.ReadFile(observations)
+			if err != nil || !bytes.Contains(written, []byte(`"join":"span"`)) ||
+				bytes.Contains(written, []byte(`"join":"log+span"`)) {
+				t.Fatalf("%s holds %s, %v; want the span and the logs as separate observations",
+					observations, written, err)
+			}
 			ledger, err := costledger.ForSession(dir, testSession)
-			wantRows, wantMicros := 4, int64(225)
+			wantRows, wantMicros, wantSpans, wantUnknown := 4, int64(225), 1, 1
 			if requestID == "" {
-				wantRows, wantMicros = 5, 350
+				// A request-less log half and the span half of its source, tokens and stamp read as one call.
+				wantRows, wantMicros, wantSpans, wantUnknown = 4, 350, 0, 0
 			}
 			spanRows := 0
 			for _, row := range ledger.Rows {
@@ -187,10 +196,11 @@ func TestSinkDoesNotTreatLogTraceContextAsCallIdentity(t *testing.T) {
 					spanRows++
 				}
 			}
-			if err != nil || len(ledger.Rows) != wantRows || spanRows != 1 ||
+			if err != nil || len(ledger.Rows) != wantRows || spanRows != wantSpans ||
 				costledger.Sum(ledger.Rows).Micros != wantMicros ||
-				costledger.Sum(ledger.Rows).UnknownCost != 1 {
-				t.Fatalf("independent observations must remain separate = %+v, %v", ledger, err)
+				costledger.Sum(ledger.Rows).UnknownCost != wantUnknown {
+				t.Fatalf("observations = %+v, %v; want %d rows, %d micros, %d span rows, %d unknown",
+					ledger, err, wantRows, wantMicros, wantSpans, wantUnknown)
 			}
 		})
 	}

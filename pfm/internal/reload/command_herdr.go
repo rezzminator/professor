@@ -3,7 +3,6 @@ package reload
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -175,7 +174,7 @@ func RunHerdr(
 				return Result{}, err
 			}
 		}
-		if err := n.ready(ctx, true); err != nil {
+		if err := n.ready(ctx, true, false); err != nil {
 			return Result{}, err
 		}
 	}
@@ -425,103 +424,6 @@ func nativeReloadRun(request Request, name string) (fleetdb.SeatRun, error) {
 		return fleetdb.SeatRun{}, errors.New("canonical planner returned no native recipe")
 	}
 	return *plan.SeatRun, nil
-}
-
-func (n *nativeReload) ready(ctx context.Context, stash bool) error {
-	stable := 0
-	pane := n.pane()
-	// agentUnread is the last Herdr agent read that told nothing: it waits
-	// without reading the screen and names itself if the tries run out.
-	var agentUnread error
-	for attempt := 0; attempt < n.options.IdleTries; attempt++ {
-		screen, err := pane.capture(ctx)
-		if err != nil {
-			return err
-		}
-		if err := refuseSelector(ctx, pane, screen); err != nil {
-			return fmt.Errorf("native reload: %w", err)
-		}
-		if n.request.Engine == pfmengine.Claude {
-			body, err := herdr.SeatRequest(
-				ctx,
-				n.target.SocketPath,
-				"agent.get",
-				map[string]string{"target": n.target.Pane},
-			)
-			if err != nil {
-				return fmt.Errorf("native reload read agent: %w", err)
-			}
-			var state struct {
-				Type  string `json:"type"`
-				Agent *struct {
-					Status string `json:"agent_status"`
-				} `json:"agent"`
-			}
-			agentUnread = nil
-			if err := json.Unmarshal(body, &state); err != nil {
-				agentUnread = fmt.Errorf("decode native reload agent: %w", err)
-			} else if state.Type != "agent_info" || state.Agent == nil {
-				agentUnread = errors.New("native reload malformed agent_info")
-			}
-			// Herdr vetoes only a chat waiting on its user; one it has not
-			// classified yet waits; idleness is the screen's call, as on the tmux path.
-			// Claude stays working while background shells or sub-agents run
-			// behind an idle composer, and only the footer shows a live turn.
-			// An unread or unrecognized state polls without reading the screen.
-			settled := false
-			if agentUnread == nil {
-				switch status := state.Agent.Status; status {
-				case "blocked":
-					return fmt.Errorf("native reload target is %s", status)
-				case "unknown":
-					// Herdr holds a Claude it has just found in "unknown" through its
-					// startup grace (3 s); a reload typed then waits it out.
-					agentUnread = errors.New("native reload target is unknown")
-				case "idle", "done", "working":
-					settled = true
-				default:
-					agentUnread = fmt.Errorf("native reload unknown agent state %q", status)
-				}
-			}
-			if !settled {
-				stable = 0
-				if err := n.options.Clock.Sleep(ctx, n.options.Poll); err != nil {
-					return err
-				}
-				continue
-			}
-		}
-		if !composerDrawn(screen) || pfmcall.IsFooterBusy(n.request.Engine, screen) {
-			stable = 0
-		} else {
-			empty, draft, err := reloadComposerEmpty(screen, pane.styled(ctx))
-			if err != nil {
-				return err
-			}
-			if !empty {
-				if !stash {
-					return fmt.Errorf("native reload: %w", composerDraftError(draft))
-				}
-				if err := pane.key(ctx, "C-s"); err != nil {
-					return fmt.Errorf("stash native reload draft: %w", err)
-				}
-				stash = false
-				stable = 0
-			} else {
-				stable++
-				if stable >= 2 {
-					return nil
-				}
-			}
-		}
-		if err := n.options.Clock.Sleep(ctx, n.options.Poll); err != nil {
-			return err
-		}
-	}
-	if agentUnread != nil {
-		return fmt.Errorf("native reload: Herdr never reported the chat's state (%w); /exit was not typed", agentUnread)
-	}
-	return errors.New("native reload: chat still busy or input box not ready; /exit was not typed")
 }
 
 var errEngineUnprovable = errors.New("native reload engine process lacks a valid pid/argv; startup cannot be proved")

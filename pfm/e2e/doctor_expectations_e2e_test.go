@@ -38,6 +38,25 @@ func schedulerRowWarnings(output string) int {
 	return 0
 }
 
+// cloneRowWarnings counts the warnings of the professor-clone rows: the e2e
+// source is a fresh copy of the tree, so it lacks the gitignored
+// scripts/leak-terms.txt, and its binaries carry the stamps each test gives
+// them against the copy's VERSION. A row warns when its verdict word is upper
+// case (ABSENT, BEHIND, UNSTAMPED, …); ok and "does not apply" rows do not.
+func cloneRowWarnings(output string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		for _, row := range []string{"pfm_build", "git_push", "leak_terms", "professor_clone"} {
+			verdict, found := strings.CutPrefix(line, "doctor: "+row+" ")
+			word, _, _ := strings.Cut(verdict, " ")
+			if found && word != "" && word == strings.ToUpper(word) && strings.ToLower(word) != word {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 // The target-shape home has no legitimate host-check WARN rows: its store
 // and account entries are classified, and no legacy files are staged. A row
 // a test planted is counted by plantedRowWarnings instead.
@@ -119,7 +138,7 @@ func (h *e2eHarness) requireInstalledDoctorWarnings(result commandResult, plante
 	}
 	// Warnings exit 1 and print their tally; none (a healthy service manager,
 	// as on macOS) exits 0 and prints clean.
-	warnings := schedulerRowWarnings(output) + h.hostCheckRowWarnings(output, planted) +
+	warnings := schedulerRowWarnings(output) + cloneRowWarnings(output) + h.hostCheckRowWarnings(output, planted) +
 		h.plantedRowWarnings(output, planted)
 	wantSummary := fmt.Sprintf("doctor: warnings=%d", warnings)
 	if warnings == 0 {

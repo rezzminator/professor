@@ -39,15 +39,19 @@ func TestFullscreenDoctorNamesEachAccount(t *testing.T) {
 	}
 	write(5, "", "")
 	write(6, "settings.json", `{"tui":`)
-	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{
-		{ID: 1, ConfigDir: dirs[1]},
-		{ID: 2, ConfigDir: dirs[2]},
-		{ID: 3, ConfigDir: dirs[3]},
-		{ID: 4, ConfigDir: dirs[4]},
-		{ID: 5, ConfigDir: dirs[5]},
-		{ID: 6, ConfigDir: dirs[6]},
-		{ID: 7, ConfigDir: dirs[1]},
-	}}
+	// A null tui in claude.settings leaves the renderer to each account's settings.json.
+	machine := pfmconfig.Config{
+		Claude: pfmconfig.ClaudePrefs{Settings: map[string]any{"tui": nil}},
+		Accounts: []pfmconfig.Account{
+			{ID: 1, ConfigDir: dirs[1]},
+			{ID: 2, ConfigDir: dirs[2]},
+			{ID: 3, ConfigDir: dirs[3]},
+			{ID: 4, ConfigDir: dirs[4]},
+			{ID: 5, ConfigDir: dirs[5]},
+			{ID: 6, ConfigDir: dirs[6]},
+			{ID: 7, ConfigDir: dirs[1]},
+		},
+	}
 	var output bytes.Buffer
 	tally := &doctorTally{}
 	printFullscreenDoctor(&output, home, machine, tally)

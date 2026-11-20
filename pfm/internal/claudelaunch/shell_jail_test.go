@@ -5,8 +5,6 @@ package claudelaunch
 import (
 	"slices"
 	"testing"
-
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestRenderShellUnsetTakesBashFromPATH(t *testing.T) {
@@ -17,7 +15,7 @@ func TestRenderShellUnsetTakesBashFromPATH(t *testing.T) {
 		t.Fatalf("shell env = %q, want %q", got, want)
 	}
 	bash = shellPATH(t)
-	if got := SessionEnv(pfmconfig.ClaudePrefs{}); !slices.Contains(got, "CLAUDE_CODE_SHELL="+bash) {
+	if got := SessionEnv(nil); !slices.Contains(got, "CLAUDE_CODE_SHELL="+bash) {
 		t.Fatalf("SessionEnv = %q, want CLAUDE_CODE_SHELL=%s", got, bash)
 	}
 }

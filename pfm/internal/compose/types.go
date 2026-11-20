@@ -189,12 +189,14 @@ type Input struct {
 	OpenCodeSessions []store.OpenCodeSession
 	CxNames          map[string]string
 	Killed           []store.Killed
-	ClaudeSeats      []ClaudeSeat
-	CodexHomes       []AccountRoot
-	Launches         *fleetdb.Launches
-	LaunchError      error
-	Context          context.Context
-	Options          Options
+	// Spaces is each chat's recorded space (fleetdb chat_space) by chat id.
+	Spaces      map[string]string
+	ClaudeSeats []ClaudeSeat
+	CodexHomes  []AccountRoot
+	Launches    *fleetdb.Launches
+	LaunchError error
+	Context     context.Context
+	Options     Options
 }
 
 // Row is one live, resumable, agent, or new-chat choice.
@@ -257,6 +259,9 @@ type Row struct {
 	AgentsWorking int
 	Accounts      []int
 	Killed        bool
+	// Space is the space the operator moved this chat into (`pfm chat space`),
+	// empty for a chat filed by its folder.
+	Space string
 	// NameKilled marks a row killed by its "_KILL…" label rather than by a
 	// store row: the picker's kill key cannot toggle it, because the label —
 	// not the killed table — is what keeps it out of the list.
@@ -295,23 +300,4 @@ func LiveSeatKey(row Row) string {
 		return row.Socket + "\x00" + row.PaneID
 	}
 	return row.Socket
-}
-
-// Output contains the rows plus project metadata. Composition reads the kill
-// list; the store owns persistence and expiry of /clear prompt baselines.
-type Output struct {
-	Rows            []Row
-	ProjectDirs     map[string]string
-	ProjectOrder    []string
-	KilledCount     int
-	SuppressedCount int
-
-	includeNewClaude   bool
-	includeNewCodex    bool
-	includeNewOpenCode bool
-	primaryAccount     int
-	primaryCodex       int
-	primaryOpenCode    int
-	fallbackDir        string
-	projects           projectNames
 }

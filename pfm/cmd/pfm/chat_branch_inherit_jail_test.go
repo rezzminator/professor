@@ -490,7 +490,10 @@ func TestChatBranchUnresolvableParentAccountRefuses(t *testing.T) {
 
 	// With one configured account there is no choice to guess: the fork
 	// lands on it, with no refusal.
-	single := fmt.Sprintf(`{"version":1,"accounts":[{"id":1,"configDir":%q}]}`, jail.primaryDir)
+	single := fmt.Sprintf(
+		`{"version":1,"claude":{"systemPrompt":"production"},"accounts":[{"id":1,"configDir":%q}]}`,
+		jail.primaryDir,
+	)
 	if err := os.WriteFile(jail.configPath, []byte(single), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +521,7 @@ func TestChatBranchLiveParentAccountWithoutALaunchRecord(t *testing.T) {
 	}
 	jail := newBranchInheritJail(t)
 	config := fmt.Sprintf(
-		`{"version":1,"claude":{"cache1h":false},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q,"claude":{"cache1h":true}}]}`,
+		`{"version":1,"claude":{"cache1h":false,"systemPrompt":"production"},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q,"claude":{"cache1h":true}}]}`,
 		jail.primaryDir,
 		jail.parentDir,
 	)

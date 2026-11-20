@@ -58,7 +58,7 @@ func barRow(row quotaRow, columns int) string {
 	}
 	bar := makeBar(row.percent, width)
 	if !row.hasData {
-		bar = dim + strings.Repeat("▱", width) + reset
+		bar = dim + strings.Repeat(gaugeOff, width) + reset
 	}
 	return bar + " " + row.label
 }
@@ -73,7 +73,9 @@ func compactRow(row quotaRow) string {
 // With a 7d reading, 5h and fable take 25% of the cells the separators leave and 7d
 // the remainder; without one the readings split equally. A 5h or fable segment never
 // draws below its compact width: the cells it lacks come out of 7d, else out of the
-// other segment's cells above its own floor. A row the floors overflow is cut to fit.
+// other segment's cells above its own floor. No segment draws below its label, and
+// where the compact floors overflow the bars give way to whole labels first. A row
+// whose labels overflow is cut to fit.
 func splitQuotaRow(five, fable, week quotaRow, columns int) string {
 	var rows []quotaRow
 	for _, row := range []quotaRow{five, fable, week} {
@@ -88,8 +90,20 @@ func splitQuotaRow(five, fable, week quotaRow, columns int) string {
 	last := len(rows) - 1
 	widths, floors := make([]int, len(rows)), make([]int, len(rows))
 	cells := total
+	// A segment never draws below its label: 5h and fable (every segment
+	// without a 7d reading) keep a 5-cell bar besides while the floors fit,
+	// and every bar shrinks to nothing before a label is cut.
+	compact := 0
 	for i, row := range rows {
+		floors[i] = ansi.StringWidth(row.label)
 		if i < last || week.label == "" {
+			compact += ansi.StringWidth(compactRow(row))
+		} else {
+			compact += floors[i]
+		}
+	}
+	for i, row := range rows {
+		if compact <= total && (i < last || week.label == "") {
 			floors[i] = ansi.StringWidth(compactRow(row))
 		}
 		if i == last {

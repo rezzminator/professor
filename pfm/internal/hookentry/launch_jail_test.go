@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -314,8 +315,10 @@ func TestLaunchWorkbench(t *testing.T) {
 	}
 }
 
-// Jail: the subject is a real tmux server exiting before the done waiter connects.
-func TestLaunchReadsCompletedStatusAfterServerExit(t *testing.T) {
+// Jail: the subject is a real tmux server dropping a done signal sent before a
+// separate waiter connected (the launch hung for good); the client that
+// releases the pane is the one waiting for done, so no signal precedes its wait.
+func TestLaunchReleasesThePaneFromItsDoneWaiter(t *testing.T) {
 	realTmux, err := exec.LookPath("tmux")
 	if err != nil {
 		t.Fatal(err)
@@ -327,14 +330,10 @@ func TestLaunchReadsCompletedStatusAfterServerExit(t *testing.T) {
 			if err := os.MkdirAll(binDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			// Force the done waiter to connect only after the last pane exited.
-			// The signal cannot survive that server, but the recorded status must.
-			wrapper := "#!/bin/sh\n" +
-				"if [ \"$3\" = wait-for ] && [ \"$4\" != -S ]; then\n" +
-				"  case \"$4\" in pfm-launch-done-*)\n" +
-				"    n=0; while " + cmdparse.Quote(realTmux) + " -S \"$2\" has-session 2>/dev/null; do\n" +
-				"      n=$((n + 1)); [ \"$n\" -lt 500 ] || exit 99; sleep 0.01\n" +
-				"    done;; esac\nfi\nexec " + cmdparse.Quote(realTmux) + " \"$@\"\n"
+			// Record every tmux client's argv, then run the real tmux.
+			calls := filepath.Join(root, "tmux.calls")
+			wrapper := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + cmdparse.Quote(calls) +
+				"\nexec " + cmdparse.Quote(realTmux) + " \"$@\"\n"
 			if err := testjail.WriteExecutable(filepath.Join(binDir, "tmux"), []byte(wrapper), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -369,6 +368,29 @@ func TestLaunchReadsCompletedStatusAfterServerExit(t *testing.T) {
 				&paths.MapEnv{},
 			); got != exitStatus {
 				t.Fatalf("completed launch = %d, want %d: %s", got, exitStatus, stderr.String())
+			}
+			socket, _, _ := strings.Cut(strings.TrimPrefix(stdout.String(), "pfm launch: "), " ")
+			socketPath := filepath.Join(root, "tmux", socket)
+			start, done := "pfm-launch-start-"+socket, "pfm-launch-done-"+socket
+			want := []string{
+				"-S " + socketPath + " wait-for " + start,
+				"-S " + socketPath + " wait-for -S " + done,
+				"-S " + socketPath + " wait-for -S " + start + " ; wait-for " + done,
+			}
+			recorded, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var waits []string
+			for _, line := range strings.Split(strings.TrimSpace(string(recorded)), "\n") {
+				if fields := strings.Fields(line); len(fields) > 2 && fields[2] == "wait-for" {
+					waits = append(waits, line)
+				}
+			}
+			slices.Sort(waits)
+			slices.Sort(want)
+			if !reflect.DeepEqual(waits, want) {
+				t.Fatalf("tmux wait-for clients (%s):\n got %q\nwant %q", calls, waits, want)
 			}
 		})
 	}

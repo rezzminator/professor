@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -98,10 +99,10 @@ func TestReloadWorkbench(t *testing.T) {
 				settings := `{"envs":{"TEAM_MODE":"strict","API_REGION":"eu"}}`
 				if name == "settings reserved name" {
 					settings = `{"envs":{"TEAM_MODE":"strict","CODEX_HOME":"/adopter/codex"}}`
-					wantStderr = "pfm chat reload: " + paths.Settings(root) +
-						": envs.CODEX_HOME is set by pfm itself on launch; launching without the settings\n"
+					wantStderr = "pfm chat reload: config " + pfmconfig.PathIn(root) +
+						": envs.CODEX_HOME is set by pfm itself on launch; launching without that file\n"
 				}
-				if err := atomicfile.Write(paths.Settings(root), []byte(settings), 0o600); err != nil {
+				if err := atomicfile.Write(pfmconfig.PathIn(root), []byte(settings), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				request.Engine, request.CWD = pfmengine.Codex, filepath.Join(root, "src")

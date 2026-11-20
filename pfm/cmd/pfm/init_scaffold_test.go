@@ -31,7 +31,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load deployed baseline: %v", err)
 	}
-	if got, want := len(baseline.Files), 11; got != want {
+	if got, want := len(baseline.Files), 12; got != want {
 		t.Fatalf("pin count=%d, want %d: %#v", got, want, baseline.Files)
 	}
 	if _, ok := baseline.Files[".claude/commands/per-project/testing-manual.md"]; ok {
@@ -43,6 +43,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	for _, relative := range []string{
 		".claude/settings.json",
 		".rumdl.toml",
+		"pfm.config.json",
 		".claude/commands/dev.md",
 		".claude/agents/gitter.md",
 		".claude/scripts/worktree.sh",
@@ -98,7 +99,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	) + " § Install interview — it records your answers in .professor/manifest.json, " +
 		"runs pfm init --render and deploys the per-project files"
 	next := "\nnext: write CLAUDE.md with /law:claude-md write CLAUDE.md\n"
-	if !strings.Contains(stdout.String(), "deployed 11 project files") || !strings.Contains(stdout.String(), handoff) ||
+	if !strings.Contains(stdout.String(), "deployed 12 project files") || !strings.Contains(stdout.String(), handoff) ||
 		!strings.HasSuffix(stdout.String(), next) {
 		t.Fatalf("init output=%q", stdout.String())
 	}
@@ -338,8 +339,9 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		content string
 		mode    os.FileMode
 	}{
-		"VERSION":                         {content: "0.65.0\n", mode: 0o600},
-		"templates/project/settings.json": {content: "{}\n", mode: 0o600},
+		"VERSION":                           {content: "0.65.0\n", mode: 0o600},
+		"templates/project/settings.json":   {content: "{}\n", mode: 0o600},
+		"templates/project/pfm.config.json": {content: "{}\n", mode: 0o600},
 		"templates/project/rumdl-policy.toml": {
 			content: "# fixture rumdl policy\n[global]\n",
 			mode:    0o600,

@@ -210,7 +210,7 @@ internal/reload/adapter_herdr.go 537
 internal/reload/command_herdr.go 661
 internal/reload/exit_render.go 268
 internal/reload/newname.go 295
-internal/reload/reload.go 865
+internal/reload/reload.go 866
 internal/reload/transcript.go 242
 internal/resolve/directory.go 312
 internal/resolve/ladder.go 262
@@ -224,7 +224,7 @@ internal/schedule/command.go 445
 internal/schedule/deliver.go 316
 internal/servicemanager/launchd.go 259
 internal/spawn/herdr.go 295
-internal/spawn/herdr_place.go 489
+internal/spawn/herdr_place.go 534
 internal/spawn/spawn.go 796
 internal/spawn/tmux.go 366
 internal/stale/stale.go 508

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
@@ -28,6 +29,33 @@ func ContinuedSegment(row *Row) string {
 // seatLive is the state of a native seat an engine runs in.
 const seatLive = "live"
 
+// seatLost and seatFailed are the states of a native seat whose engine is gone: its chat died with no end, or
+// its birth failed. Only its record (transcript, rollout) leaves anything to resume.
+const (
+	seatLost   = "lost"
+	seatFailed = "failed"
+)
+
+// seatResumable reports whether native's seat leaves a chat to list: a live seat always does; a lost or failed
+// one only while its transcript or rollout is indexed, or while the read of that record failed
+// (gather.HerdrSeat.TranscriptUnread), since a lookup that could not run never reads as absence. An engine with
+// no indexed record here (OpenCode, an unknown one) keeps its row.
+func (current *composer) seatResumable(native *gather.HerdrSeat) bool {
+	seat := &native.Seat
+	if seat.State != seatLost && seat.State != seatFailed || native.TranscriptUnread {
+		return true
+	}
+	switch pfmengine.ID(seat.Engine) {
+	case pfmengine.Claude:
+		_, found := current.transcriptByID[cmp.Or(native.Continued, seat.SessionID)]
+		return found
+	case pfmengine.Codex:
+		_, found := current.rolloutByID[seat.SessionID]
+		return found
+	}
+	return true
+}
+
 // herdrRows joins native seats before the shared kill and view eligibility pass.
 // Seats are distinct addresses even when they share one transcript; they must
 // not participate in tmux's newest-server collapse.
@@ -36,7 +64,7 @@ func (current *composer) herdrRows() []Row {
 	for index := range current.input.HerdrSeats {
 		native := &current.input.HerdrSeats[index]
 		seat := &native.Seat
-		if seat.Backend != herdrBackend {
+		if seat.Backend != herdrBackend || !current.seatResumable(native) {
 			continue
 		}
 		row := Row{ID: seat.SessionID}

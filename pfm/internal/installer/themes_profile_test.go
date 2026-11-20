@@ -335,7 +335,10 @@ func TestRetireKeepsTheThemeWhenAnAccountCannotBeRead(t *testing.T) {
 func TestByteIdenticalUnownedThemeIsAdoptedAndADifferingOneIsKept(t *testing.T) {
 	t.Parallel()
 	host := newProfileHost(t)
-	host.seed(map[string]string{"plain-lagoon": plainProfile, "pinned-night": pinnedProfile, "stranger": plainProfile})
+	host.seed(map[string]string{
+		"plain-lagoon": plainProfile, "pinned-night": pinnedProfile, "stranger": plainProfile,
+		"older-night": pinnedProfile, "tweaked": plainProfile,
+	})
 	pinned := []byte(host.document("pinned-night"))
 	profile, err := themesync.ParseProfile(pinned)
 	if err != nil {
@@ -348,8 +351,42 @@ func TestByteIdenticalUnownedThemeIsAdoptedAndADifferingOneIsKept(t *testing.T) 
 	writeFixture(t, host.claudeFile("plain-lagoon"), host.document("plain-lagoon"))
 	writeFixture(t, host.claudeFile("pinned-night"), string(palette))
 	writeFixture(t, host.claudeFile("stranger"), "somebody else's theme\n")
+	// A stale copy: every key it holds matches the shipped profile, which has
+	// since gained a key and an override; a tweaked copy changed one value.
+	writeFixture(t, host.claudeFile("older-night"), `{"base": "dark", "overrides": {"claude": "#ff5fa2"}}`)
+	tweaked := `{"name": "Plain Lagoon", "base": "dark", "overrides": {"claude": "#000000"}}`
+	writeFixture(t, host.claudeFile("tweaked"), tweaked)
 
 	report, output := host.run(ModeApply)
+
+	olderPalette := func() string {
+		olderDoc := []byte(host.document("older-night"))
+		olderProfile, err := themesync.ParseProfile(olderDoc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := olderProfile.ClaudeFile(olderDoc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}()
+	wantOutputLines(t, output, []string{
+		"  change  write theme older-night -> " + host.claudeFile("older-night") +
+			" (adopted a stale copy: every key it held matches the shipped profile)",
+		"  skip    theme tweaked already exists but is not installer-owned; left in place at " + host.claudeFile(
+			"tweaked",
+		),
+	}, host.claudeFile("older-night"), host.claudeFile("tweaked"))
+	if got := readFixture(t, host.claudeFile("older-night")); got != olderPalette {
+		t.Errorf("stale copy not rewritten to the shipped palette:\n%s\nwant\n%s", got, olderPalette)
+	}
+	if record, owned := host.ledger()["older-night"]; !owned || record.Path != host.claudeFile("older-night") {
+		t.Errorf("ledger[older-night] = %+v (owned %v), want the adopted stale copy", record, owned)
+	}
+	if got := readFixture(t, host.claudeFile("tweaked")); got != tweaked {
+		t.Errorf("a tweaked unowned copy was overwritten: %q", got)
+	}
 
 	for _, name := range []string{"plain-lagoon", "pinned-night"} {
 		if !strings.Contains(output, "ok      theme "+name+" adopted: "+host.claudeFile(name)) {
@@ -387,7 +424,7 @@ func TestPreviewNamesAnUnownedProfileCopyTheApplySkipsOver(t *testing.T) {
 	_, preview := host.run(ModeDryRun)
 
 	if !strings.Contains(preview, "ok      theme plain-lagoon profile copy exists at "+copyPath+
-		" and is not installer-owned; apply adopts it only when byte-identical to the install, else skips the theme") {
+		" and is not installer-owned; apply adopts it only when byte-identical to the install or a stale copy of the shipped profile, else skips the theme") {
 		t.Fatalf("the preview did not name the unowned profile copy the apply will skip over:\n%s", preview)
 	}
 	_, output := host.run(ModeApply)

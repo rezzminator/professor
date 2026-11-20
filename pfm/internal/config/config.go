@@ -1,4 +1,10 @@
-// Package config owns pfm's versioned machine configuration.
+// Package config owns pfm's versioned configuration, pfm.config.json: the machine file every key may
+// set and, at a managed root, a project's, which sets only the scope keys (scope.go).
+//
+// name_sync.go: nameSync.interval, the window-name convergence schedule.
+// herdr.go: herdr.keys, the user's Herdr keymap pfm install merges over its own.
+// scope_unread.go: the keys a file sets that its scope never reads, retired or machine-only.
+// runtime_reload.go: Runtime.Reload, the machine file read again for a long-lived process.
 package config
 
 import (
@@ -12,7 +18,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -82,30 +87,25 @@ type AccountSkip struct {
 type ClaudePrefs struct {
 	PermissionMode        string
 	Binary, Theme         string
-	WebSearchesPerSession int64
-	AutoCompactWindow     int64
-	TmuxTruecolor         bool
-	CleanupPeriodDays     int
 	RequireManagedCleanup bool
-	HelperModel           string // Claude Code's helper-call model; never empty after Load
-	// SystemPrompt is one of the SystemPrompt* values; empty means
-	// SystemPromptProduction.
+	// SystemPrompt is one of the SystemPrompt* values. Defaults and Load
+	// resolve an unset or null claude.systemPrompt to SystemPromptProfessor;
+	// a hand-built zero value means SystemPromptProduction.
 	SystemPrompt string
+	// SystemPromptDefault is true while SystemPrompt is the shipped default:
+	// neither the machine file nor the account set claude.systemPrompt.
+	// claudelaunch.PromptMode drops a default professor to production on a
+	// host with no Professor clone recorded; an explicit one stays.
+	SystemPromptDefault bool
 	// Cache1H is the main chat's starting prompt-cache TTL: true hands 1h,
 	// false 5m, to the cache-live-control plugin as CACHE_LIVE_CONTROL_MAIN_TTL
 	// in the launch's process environment; the plugin owns the TTL from then on,
 	// and sub-agents are the plugin's (and their frontmatter's) to decide.
 	// Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
-	Cache1H      bool
-	NativeCursor bool
+	Cache1H bool
 	// RemoteControl starts interactive Claude sessions with Remote Control requested.
 	// Claude still enforces its login and endpoint eligibility. Defaults true.
 	RemoteControl bool
-	// MaxSubagentSpawnDepth and MaxConcurrentSubagents lift Claude Code's
-	// sub-agent ceilings on every managed launch — see subagents.go. Zero is
-	// the unset sentinel on both.
-	MaxSubagentSpawnDepth  int
-	MaxConcurrentSubagents int
 	// PluginCheckoutRoot is claude.pluginCheckoutRoot, an absolute path; empty
 	// when unset, and an -alpha install then reads the source clone's plugins/.
 	// Machine-wide: an account may not set it.
@@ -123,28 +123,9 @@ type ClaudePrefs struct {
 	// primary seat's settings.json env, owning only those names; nil when
 	// unset. Machine-wide: an account may not set it.
 	Env map[string]string
-}
-
-// NameSync is the window-name convergence schedule. Interval is rendered into
-// BOTH schedulers at install time — the launchd job's StartInterval and the
-// systemd timer's OnUnitInactiveSec — from this ONE value, so the two can
-// never drift apart on a host that runs either.
-type NameSync struct {
-	Interval time.Duration
-}
-
-// DefaultNameSyncInterval is the poll the fleet shipped with: a claude
-// /rename's backstop between picker runs.
-const DefaultNameSyncInterval = 15 * time.Minute
-
-// MinNameSyncInterval floors the poll. name-sync gathers the whole fleet and
-// captures every claude pane; below a minute the poll costs more than the
-// drift it converges.
-const MinNameSyncInterval = time.Minute
-
-// DefaultNameSync is the schedule when the file says nothing.
-func DefaultNameSync() NameSync {
-	return NameSync{Interval: DefaultNameSyncInterval}
+	// Settings is claude.settings: a Claude settings object laid over every Claude launch's
+	// --settings (scope.go); nil when unset. Machine-wide: an account may not set it.
+	Settings map[string]any
 }
 
 // Claude is retained as an alias for callers that used the v1 public shape.
@@ -220,6 +201,8 @@ func (config AskConfig) PrefsFor(id pfmengine.ID) EnginePrefs {
 // each effective value came from the machine file or from a default.
 type Config struct {
 	Chat ChatConfig
+	// Herdr is the herdr block (herdr.go).
+	Herdr Herdr
 	// SeedContent carries the validated seed bytes into installation.
 	SeedContent      []byte `json:"-"`
 	Version          int
@@ -240,6 +223,12 @@ type Config struct {
 	MCPServers       map[string]MCPServer
 	MCP              MCPConfig
 	Ask              AskConfig
+
+	// Envs and HarnessPrompt are the machine file's envs and harnessPrompt (scope.go), nil when unset.
+	Envs          map[string]string
+	HarnessPrompt *HarnessPrompt
+	// Retired is each retired key the file sets, accepted and never read (scope_unread.go).
+	Retired []RetiredKey
 
 	Path    string
 	Exists  bool
@@ -277,6 +266,10 @@ type rawConfig struct {
 	MCP      *rawMCP       `json:"mcp,omitempty"`
 	Log      *rawLog       `json:"log,omitempty"`
 	Ask      *rawAsk       `json:"ask,omitempty"`
+	Herdr    *rawHerdr     `json:"herdr,omitempty"`
+	// Envs and HarnessPrompt are scope keys (scope.go), read at both scopes.
+	Envs          json.RawMessage   `json:"envs,omitempty"`
+	HarnessPrompt *rawHarnessPrompt `json:"harnessPrompt,omitempty"`
 	// RetiredExtensions accepts the block the previous release wrote for an enabled extension; it
 	// is never read or written.
 	RetiredExtensions json.RawMessage `json:"extensions,omitempty"`
@@ -290,10 +283,6 @@ type rawTmuxTitles struct {
 	Enabled *bool `json:"enabled,omitempty"`
 }
 
-type rawNameSync struct {
-	Interval *string `json:"interval,omitempty"`
-}
-
 type rawAccount struct {
 	ID        int        `json:"id"`
 	ConfigDir string     `json:"configDir"`
@@ -304,28 +293,30 @@ type rawAccount struct {
 
 type rawClaude struct {
 	PermissionMode        *string `json:"permissionMode,omitempty"`
-	WebSearchesPerSession *int64  `json:"webSearchesPerSession,omitempty"`
-	AutoCompactWindow     *int64  `json:"autoCompactWindow,omitempty"`
-	HelperModel           *string `json:"helperModel,omitempty"`
-	TmuxTruecolor         *bool   `json:"tmuxTruecolor,omitempty"`
-	CleanupPeriodDays     *int    `json:"cleanupPeriodDays,omitempty"`
 	RequireManagedCleanup *bool   `json:"requireManagedCleanup,omitempty"`
 	Binary                *string `json:"binary,omitempty"`
 	Theme                 *string `json:"theme,omitempty"`
 	Cache1H               *bool   `json:"cache1h,omitempty"`
-	NativeCursor          *bool   `json:"nativeCursor,omitempty"`
 	RemoteControl         *bool   `json:"remoteControl,omitempty"`
 	SystemPrompt          *string `json:"systemPrompt,omitempty"`
 	// RetiredCompactNudge and RetiredSubagentStatuslineTrace accept old config files; they are
 	// never read or written.
 	RetiredCompactNudge            json.RawMessage `json:"compactNudge,omitempty"`
 	RetiredSubagentStatuslineTrace json.RawMessage `json:"subagentStatuslineTrace,omitempty"`
-	// The sub-agent ceilings — see subagents.go.
-	MaxSubagentSpawnDepth  *int    `json:"maxSubagentSpawnDepth,omitempty"`
-	MaxConcurrentSubagents *int    `json:"maxConcurrentSubagents,omitempty"`
-	PluginCheckoutRoot     *string `json:"pluginCheckoutRoot,omitempty"`
-	CostLedger             *bool   `json:"costLedger,omitempty"`
-	GptAgents              *bool   `json:"gptAgents,omitempty"`
+	// The retired launch keys (scope_unread.go retiredClaudeKeys): accepted, never read.
+	RetiredWebSearchesPerSession  json.RawMessage `json:"webSearchesPerSession,omitempty"`
+	RetiredAutoCompactWindow      json.RawMessage `json:"autoCompactWindow,omitempty"`
+	RetiredHelperModel            json.RawMessage `json:"helperModel,omitempty"`
+	RetiredTmuxTruecolor          json.RawMessage `json:"tmuxTruecolor,omitempty"`
+	RetiredCleanupPeriodDays      json.RawMessage `json:"cleanupPeriodDays,omitempty"`
+	RetiredNativeCursor           json.RawMessage `json:"nativeCursor,omitempty"`
+	RetiredMaxSubagentSpawnDepth  json.RawMessage `json:"maxSubagentSpawnDepth,omitempty"`
+	RetiredMaxConcurrentSubagents json.RawMessage `json:"maxConcurrentSubagents,omitempty"`
+	PluginCheckoutRoot            *string         `json:"pluginCheckoutRoot,omitempty"`
+	CostLedger                    *bool           `json:"costLedger,omitempty"`
+	GptAgents                     *bool           `json:"gptAgents,omitempty"`
+	// Settings is claude.settings, a scope key (scope.go).
+	Settings json.RawMessage `json:"settings,omitempty"`
 	// Plugins is claude.plugins; each entry is decoded by decodeClaudePlugins.
 	Plugins *[]json.RawMessage `json:"plugins,omitempty"`
 	// Env is claude.env; DecodeEnv validates each name and value.
@@ -475,20 +466,15 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, engineKeyBinary):   SourceDefault,
 		engineConfigKey(pfmengine.Claude, keyTheme):          SourceDefault,
 		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
-		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
 		engineConfigKey(pfmengine.Claude, "remoteControl"):   SourceDefault,
-		"claude.webSearchesPerSession":                       SourceDefault,
-		"claude.autoCompactWindow":                           SourceDefault,
-		"claude.helperModel":                                 SourceDefault,
-		"claude.tmuxTruecolor":                               SourceDefault,
-		"claude.cleanupPeriodDays":                           SourceDefault,
 		"claude.requireManagedCleanup":                       SourceDefault,
 		KeyClaudePluginCheckoutRoot:                          SourceDefault,
 		KeyClaudePlugins:                                     SourceDefault,
 		KeyClaudeCostLedger:                                  SourceDefault,
 		KeyClaudeGptAgents:                                   SourceDefault,
-		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
-		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
+		KeyClaudeSettings:                                    SourceDefault,
+		KeyEnvs:                                              SourceDefault,
+		KeyHarnessPrompt:                                     SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
@@ -497,6 +483,7 @@ func defaultsWithMCPServers(
 		"ask.engine":                                         SourceDefault,
 		"chat.backend":                                       SourceDefault,
 		"chat.herdrTabStatus":                                SourceDefault,
+		KeyHerdrKeys:                                         SourceDefault,
 		"tmux.titles.enabled":                                SourceDefault,
 		"nameSync.interval":                                  SourceDefault,
 		keyDoctorIgnoreWarnings:                              SourceDefault,
@@ -525,18 +512,13 @@ func defaultsWithMCPServers(
 		Claude: Claude{
 			PermissionMode:        PermissionBypass,
 			Binary:                pfmengine.MustLookup(pfmengine.Claude).Binary,
-			WebSearchesPerSession: 9007199254740991,
-			AutoCompactWindow:     100000,
-			HelperModel:           DefaultHelperModel,
-			TmuxTruecolor:         true,
-			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
+			SystemPrompt:          SystemPromptProfessor,
+			SystemPromptDefault:   true,
 			Cache1H:               true,
 			RemoteControl:         true,
 			CostLedger:            true,
 			Plugins:               DefaultClaudePlugins(),
-
-			MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 		},
 		Codex:      Codex{Yolo: true, Binary: pfmengine.MustLookup(pfmengine.Codex).Binary},
 		OpenCode:   OpenCode{Binary: pfmengine.MustLookup(pfmengine.OpenCode).Binary},
@@ -760,20 +742,21 @@ func loadWithMCPServers(
 		if err := applyTheme(&result.Claude, raw.Claude.Theme, name, -1, result.Sources); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 		}
-		applyNativeCursor(&result.Claude, raw.Claude.NativeCursor, false, result.Sources, -1)
 		applyRemoteControl(&result.Claude, raw.Claude.RemoteControl, true, result.Sources, -1)
 		if raw.Claude.SystemPrompt != nil {
 			result.Claude.SystemPrompt = prefs.SystemPrompt
+			result.Claude.SystemPromptDefault = false
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
 		}
 		if err := applyClaudeMachinePrefs(&result.Claude, *raw.Claude, home, result.Path, result.Sources); err != nil {
 			return Config{}, err
 		}
-		if err := applySubagentCaps(
-			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
-		); err != nil {
-			return Config{}, err
-		}
+	}
+	if err := applyScope(&result, raw); err != nil {
+		return Config{}, err
+	}
+	if err := applyHerdr(&result, raw.Herdr); err != nil {
+		return Config{}, err
 	}
 	if raw.Accounts != nil {
 		accounts, err := validateAccounts(*raw.Accounts, home)
@@ -812,7 +795,6 @@ func loadWithMCPServers(
 				if err := applyTheme(&prefs, value.Claude.Theme, "accounts", index, result.Sources); err != nil {
 					return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 				}
-				applyNativeCursor(&prefs, value.Claude.NativeCursor, result.Claude.NativeCursor, result.Sources, index)
 				applyRemoteControl(
 					&prefs,
 					value.Claude.RemoteControl,
@@ -820,11 +802,6 @@ func loadWithMCPServers(
 					result.Sources,
 					index,
 				)
-				if err := applySubagentCaps(
-					&prefs, *value.Claude, result.Claude, result.Path, "accounts", index, result.Sources,
-				); err != nil {
-					return Config{}, err
-				}
 				result.Accounts[index].Claude = &prefs
 			}
 			if value.Codex != nil {
@@ -936,29 +913,6 @@ func loadWithMCPServers(
 		}
 	}
 	return result, nil
-}
-
-// parseNameSyncInterval refuses invalid nameSync.interval values rather than
-// silently substituting a default for the scheduler installed from this value.
-func parseNameSyncInterval(value, path string) (time.Duration, error) {
-	interval, err := time.ParseDuration(strings.TrimSpace(value))
-	if err != nil {
-		return 0, fmt.Errorf(
-			"config %s: nameSync.interval must be a Go duration such as %q, got %q",
-			path,
-			DefaultNameSyncInterval.String(),
-			value,
-		)
-	}
-	if interval < MinNameSyncInterval {
-		return 0, fmt.Errorf(
-			"config %s: nameSync.interval must be at least %s, got %s",
-			path,
-			MinNameSyncInterval,
-			interval,
-		)
-	}
-	return interval, nil
 }
 
 // multipleJSONValues is the machine config's refusal of a second value.
@@ -1167,15 +1121,12 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// Unconditional, like EffectiveCodex's Yolo: Load already seeded an
 		// unset account-level Cache1H with the resolved top-level value, so
 		// there is no false-zero ambiguity left to guard against here.
-		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
+		result.Cache1H = account.Claude.Cache1H
 		result.RemoteControl = account.Claude.RemoteControl
 		copyClaudeLaunchPrefs(&result, *account.Claude)
-		// Zero is unset on both caps, so Load's inheritance already put the
-		// resolved top-level value here — same unconditional copy as Cache1H.
-		result.MaxSubagentSpawnDepth = account.Claude.MaxSubagentSpawnDepth
-		result.MaxConcurrentSubagents = account.Claude.MaxConcurrentSubagents
 		if account.Claude.SystemPrompt != "" {
 			result.SystemPrompt = account.Claude.SystemPrompt
+			result.SystemPromptDefault = false
 		}
 	}
 	return result
@@ -1421,9 +1372,13 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	if chat := marshalChat(config); len(chat) != 0 {
 		value["chat"] = chat
 	}
+	if herdr := marshalHerdr(config); herdr != nil {
+		value[KeyHerdr] = herdr
+	}
 	if doctor := marshalDoctor(config); len(doctor) != 0 {
 		value["doctor"] = doctor
 	}
+	marshalScope(config, value, value[claudeName].(map[string]any))
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return nil, err

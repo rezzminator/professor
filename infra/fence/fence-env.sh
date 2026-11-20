@@ -27,7 +27,7 @@ case "$git_dir" in
   *) echo "$FENCE_CALLER: git dir $git_dir is outside common dir $git_common" >&2; exit 1 ;;
 esac
 export PFM_DEV_WORKTREE="$ROOT" PFM_DEV_GIT_COMMON="$git_common" PFM_DEV_GIT_DIR_REL="$git_dir_rel"
-# This machine's network overrides (PFM_GOPROXY, PFM_NPM_REGISTRY), from the
+# This machine's network overrides (PFM_GOPROXY, PFM_NPM_REGISTRY, PFM_APT_MIRROR), from the
 # main checkout's gitignored infra/fence/.env, before any image key is derived.
 # shellcheck source=local-env.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/local-env.sh"

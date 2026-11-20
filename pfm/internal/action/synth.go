@@ -130,6 +130,7 @@ func LauncherLaunchAs(
 		Name:              name,
 		PromptFile:        persona.Prompt,
 		Envs:              persona.Envs,
+		ClaudeSettings:    persona.ClaudeSettings,
 		Effort:            persona.Effort,
 		Model:             persona.Model,
 		Machine:           pfmconfig.Config{Claude: claude, MCPServers: machine.MCPServers, MCP: machine.MCP},
@@ -288,7 +289,7 @@ func Synthesize(request Request) (Plan, error) {
 			Account: request.PrimaryAccount, Cache1H: &request.Cache1H,
 			SessionID: id, Args: arguments, Machine: machine,
 			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort, Envs: request.Persona.Envs,
-			Model: request.Persona.Model, Name: request.LaunchName,
+			ClaudeSettings: request.Persona.ClaudeSettings, Model: request.Persona.Model, Name: request.LaunchName,
 		}
 		run, err := spawn.ShellCommand()
 		if err != nil {

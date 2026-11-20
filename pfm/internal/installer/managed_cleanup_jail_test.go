@@ -25,7 +25,6 @@ func TestInstallManagedCleanupDeclinedSudo(t *testing.T) {
 			Mode:                  ModeApply,
 			ManagedSettingsDir:    dir,
 			RequireManagedCleanup: true,
-			CleanupPeriodDays:     36500,
 			Runner:                stateRunner{err: os.ErrPermission},
 			Stdout:                &output,
 			writeManaged:          func(string, []byte) error { return os.ErrPermission },

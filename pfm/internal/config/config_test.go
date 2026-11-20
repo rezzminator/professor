@@ -142,16 +142,12 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		Plugins:               DefaultClaudePlugins(),
 		PermissionMode:        PermissionBypass,
 		Binary:                "claude",
-		WebSearchesPerSession: 9007199254740991,
-		AutoCompactWindow:     100000,
-		TmuxTruecolor:         true,
-		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
-		HelperModel:           DefaultHelperModel,
+		SystemPrompt:          SystemPromptProfessor,
+		SystemPromptDefault:   true,
 		Cache1H:               true,
 		RemoteControl:         true,
 		CostLedger:            true,
-		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
 		t.Fatalf("Claude = %#v, want bypass/claude defaults", got.Claude)
 	}
@@ -311,16 +307,12 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		Plugins:               DefaultClaudePlugins(),
 		PermissionMode:        PermissionPrompt,
 		Binary:                "claude-custom",
-		WebSearchesPerSession: 9007199254740991,
-		AutoCompactWindow:     100000,
-		TmuxTruecolor:         true,
-		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
-		HelperModel:           DefaultHelperModel,
+		SystemPrompt:          SystemPromptProfessor,
+		SystemPromptDefault:   true,
 		Cache1H:               true,
 		RemoteControl:         true,
 		CostLedger:            true,
-		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
 		t.Fatalf("Claude = %#v, want configured values", got.Claude)
 	}
@@ -439,12 +431,6 @@ func TestLoadRefusesAnUnusableConfig(t *testing.T) {
 		{"state db relative", `{"version":2,"state":{"db":"relative.db"}}`, "config {path}: state.db: must be absolute or start with ~/ or $HOME/, got \"relative.db\""},
 		{"remoteControl string", `{"version":2,"claude":{"remoteControl":"on"}}`, "parse config {path} at byte 43: json: cannot unmarshal string into Go struct field rawConfig.claude.remoteControl of type bool"},
 		{"account remoteControl number", `{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"remoteControl":1}}]}`, "parse config {path} at byte 80: json: cannot unmarshal number into Go struct field rawConfig.accounts.0.claude.remoteControl of type bool"},
-		{"zero spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": 0}}`, "config {path}: claude.maxSubagentSpawnDepth must be a positive integer, got 0"},
-		{"negative spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": -3}}`, "config {path}: claude.maxSubagentSpawnDepth must be a positive integer, got -3"},
-		{"zero concurrency", `{"version": 2, "claude": {"maxConcurrentSubagents": 0}}`, "config {path}: claude.maxConcurrentSubagents must be a positive integer, got 0"},
-		{"string spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": "5"}}`, "parse config {path} at byte 54: json: cannot unmarshal string into Go struct field rawConfig.claude.maxSubagentSpawnDepth of type int"},
-		{"fractional spawn depth", `{"version": 2, "claude": {"maxSubagentSpawnDepth": 5.5}}`, "parse config {path} at byte 54: json: cannot unmarshal number 5.5 into Go struct field rawConfig.claude.maxSubagentSpawnDepth of type int"},
-		{"negative account concurrency", `{"version": 2, "accounts": [{"id": 1, "configDir": "~/one", "claude": {"maxConcurrentSubagents": -1}}]}`, "config {path}: accounts[0].maxConcurrentSubagents must be a positive integer, got -1"},
 		{"empty theme", `{"version": 2, "claude": {"theme": ""}}`, "config {path}: claude.theme must be a non-empty string"},
 		{"blank theme", `{"version": 2, "claude": {"theme": "   "}}`, "config {path}: claude.theme must be a non-empty string"},
 		{"blank account theme", `{"version": 2, "accounts": [{"id": 3, "configDir": "~/three", "claude": {"theme": "  "}}]}`, "config {path}: accounts[0].theme must be a non-empty string"},
@@ -464,6 +450,27 @@ func TestLoadRefusesAnUnusableConfig(t *testing.T) {
 		{"nameSync: {interval: -5m}", `{"version": 2, "nameSync": {"interval": "-5m"}}`, "config {path}: nameSync.interval must be at least 1m0s, got -5m0s"},
 		{"nameSync: {interval: 15}", `{"version": 2, "nameSync": {"interval": "15"}}`, "config {path}: nameSync.interval must be a Go duration such as \"15m0s\", got \"15\""},
 		{"nameSync: {interval: quarter hour}", `{"version": 2, "nameSync": {"interval": "quarter hour"}}`, "config {path}: nameSync.interval must be a Go duration such as \"15m0s\", got \"quarter hour\""},
+		{"herdr keys not an object", `{"version":2,"herdr":{"keys":"prefix+a"}}`, "config {path}: herdr.keys must be an object of Herdr actions"},
+		{"herdr keys an array", `{"version":2,"herdr":{"keys":[]}}`, "config {path}: herdr.keys must be an object of Herdr actions"},
+		{"herdr action a number", `{"version":2,"herdr":{"keys":{"close_pane":1}}}`, "config {path}: herdr.keys.close_pane must be a key, an array of keys or null"},
+		{"herdr action an object", `{"version":2,"herdr":{"keys":{"close_pane":{"key":"x"}}}}`, "config {path}: herdr.keys.close_pane must be a key, an array of keys or null"},
+		{"herdr action list item a number", `{"version":2,"herdr":{"keys":{"next_workspace":["prefix+m",2]}}}`, "config {path}: herdr.keys.next_workspace[1] must be a string"},
+		{"herdr action list item null", `{"version":2,"herdr":{"keys":{"next_workspace":[null]}}}`, "config {path}: herdr.keys.next_workspace[0] must be a string"},
+		{"herdr action blank", `{"version":2,"herdr":{"keys":{"close_pane":" "}}}`, "config {path}: herdr.keys.close_pane must not be blank: null removes the binding"},
+		{"herdr action list item empty", `{"version":2,"herdr":{"keys":{"next_workspace":["prefix+m",""]}}}`, "config {path}: herdr.keys.next_workspace[1] must not be blank"},
+		{"herdr command key empty", `{"version":2,"herdr":{"keys":{"command":[{"key":"","type":"shell","command":"x"}]}}}`, "config {path}: herdr.keys.command[0].key must not be blank"},
+		{"herdr command command blank", `{"version":2,"herdr":{"keys":{"command":[{"key":"a","type":"shell","command":"  "}]}}}`, "config {path}: herdr.keys.command[0].command must not be blank"},
+		{"herdr command an object", `{"version":2,"herdr":{"keys":{"command":{"key":"x"}}}}`, "config {path}: herdr.keys.command must be an array of command tables"},
+		{"herdr command null", `{"version":2,"herdr":{"keys":{"command":null}}}`, "config {path}: herdr.keys.command must be an array of command tables"},
+		{"herdr command entry a string", `{"version":2,"herdr":{"keys":{"command":["prefix+a"]}}}`, "config {path}: herdr.keys.command[0] must be an object"},
+		{"herdr command entry missing type", `{"version":2,"herdr":{"keys":{"command":[{"key":"a","type":"shell","command":"x"},{"key":"b","type":"shell","command":"y"},{"key":"c","command":"z"}]}}}`, "config {path}: herdr.keys.command[2].type is required (an entry holding only key removes pfm's command of that key)"},
+		{"herdr command entry missing command", `{"version":2,"herdr":{"keys":{"command":[{"key":"a","type":"shell"}]}}}`, "config {path}: herdr.keys.command[0].command is required (an entry holding only key removes pfm's command of that key)"},
+		{"herdr command entry missing key", `{"version":2,"herdr":{"keys":{"command":[{"type":"shell","command":"x"}]}}}`, "config {path}: herdr.keys.command[0].key is required"},
+		{"herdr command entry unknown field", `{"version":2,"herdr":{"keys":{"command":[{"key":"a","type":"shell","command":"x","env":"y"}]}}}`, "config {path}: herdr.keys.command[0].env is not a command field: use key, type, description or command"},
+		{"herdr command entry type a number", `{"version":2,"herdr":{"keys":{"command":[{"key":"a","type":1,"command":"x"}]}}}`, "config {path}: herdr.keys.command[0].type must be a string"},
+		{"herdr command key repeated", `{"version":2,"herdr":{"keys":{"command":[{"key":"a","type":"shell","command":"x"},{"key":"a"}]}}}`, "config {path}: herdr.keys.command[1].key \"a\" repeats herdr.keys.command[0]"},
+		{"unknown herdr key", `{"version":2,"herdr":{"mystery":1}}`, "parse config {path}: json: unknown field \"mystery\""},
+		{"herdr keys at account scope", `{"version":2,"accounts":[{"id":1,"configDir":"~/one","herdr":{"keys":{}}}]}`, "parse config {path}: json: unknown field \"herdr\""},
 	} {
 		path := filepath.Join(t.TempDir(), "config.json")
 		if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
@@ -485,6 +492,13 @@ func TestMarshalKeepsWhatLoadRead(t *testing.T) {
 		{"herdrTabStatus off", `{"version":2,"chat":{"herdrTabStatus":"off"}}`, "chat", "{\"chat\":{\"herdrTabStatus\":\"off\"}}"},
 		{"nameSync interval", `{"version": 2, "nameSync": {"interval": "5m"}}`, "nameSync", "{\"nameSync\":{\"interval\":\"5m0s\"}}"},
 		{"tmux titles", `{"version": 2, "tmux": {"titles": {"enabled": false}}}`, "tmux", "{\"tmux\":{\"titles\":{\"enabled\":false}}}"},
+		{
+			"herdr keys",
+			`{"version":2,"herdr":{"keys":{"previous_workspace":"cmd+shift+up","next_workspace":["cmd+shift+down","prefix+m"],"toggle_sidebar":null,"command":[{"key":"prefix+a"},{"key":"cmd+\\","type":"shell","description":"","command":"pfm"}]}}}`,
+			"herdr",
+			`{"herdr":{"keys":{"command":[{"key":"prefix+a"},{"command":"pfm","key":"cmd+\\","type":"shell"}],"next_workspace":["cmd+shift+down","prefix+m"],"previous_workspace":"cmd+shift+up","toggle_sidebar":null}}}`,
+		},
+		{"herdr keys null is unset", `{"version":2,"herdr":{"keys":null}}`, "herdr", `{"herdr":null}`},
 		{
 			"claude theme top and per account",
 			`{"version": 2, "accounts": [{"id": 3, "configDir": "~/three", "claude": {"theme": "light"}}], "claude": {"theme": "dark"}}`,
@@ -780,9 +794,6 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "\"level\": \"info\"") {
 		t.Fatalf("default config carries no log.level default: %s", content)
-	}
-	if !strings.Contains(string(content), "\"autoCompactWindow\": 100000") {
-		t.Fatalf("default config carries no auto compact window: %s", content)
 	}
 	if _, err := Load(path, home, nil); err != nil {
 		// The strict loader check below needs the bytes on disk; this assertion

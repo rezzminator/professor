@@ -13,9 +13,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+// stageDoctorHerdrShell stages an installed Herdr host: pfm's shell wiring
+// and its keymap block.
 func stageDoctorHerdrShell(t *testing.T, home string) {
 	t.Helper()
-	t.Setenv("HERDR_CONFIG_PATH", testjail.StageHerdrShell(t, home))
+	config := testjail.StageHerdrShell(t, home)
+	t.Setenv("HERDR_CONFIG_PATH", config)
 }
 
 func TestHerdrShellDoctor(t *testing.T) {

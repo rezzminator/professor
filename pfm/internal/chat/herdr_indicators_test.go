@@ -109,6 +109,50 @@ func TestHerdrTabProviderMissedHooksAndNewPrompt(t *testing.T) {
 	}
 }
 
+func TestHerdrTabProviderNativeSeatKilledRow(t *testing.T) {
+	// /clear records the cleared conversation killed while the same engine goes
+	// on in the seat's pane, its successor bound moments later: only the pane's
+	// own liveness proof paints a native tab dead, never the row's kill mark.
+	for _, tc := range []struct {
+		name       string
+		killed     bool
+		proof      string
+		unreadable map[string]string
+		want       string
+	}{
+		{"cleared conversation over a live engine", true, "", nil, headless.StateIdle},
+		{"cleared conversation in an incomplete fleet scan", true, "", map[string]string{"s9": "locked"}, headless.StateIdle},
+		{"killed chat whose engine is gone", true, headless.StateDead, nil, headless.StateDead},
+		{"live chat over a live engine", false, "", nil, headless.StateIdle},
+		{"live row whose engine is gone", false, headless.StateDead, nil, headless.StateDead},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := herdrTabProvider{
+				scan: func(context.Context) (FleetScan, error) {
+					return FleetScan{Rows: []compose.Row{{
+						Backend: "herdr", ID: "s1", Socket: "endpoint", PaneID: "w1:p1",
+						Name: "Chat", Kind: compose.LiveClaude, Killed: tc.killed,
+					}}, Unreadable: tc.unreadable}, nil
+				},
+				inspect: func(_ context.Context, c headless.Chat, _ time.Time) (headless.Status, error) {
+					if !c.Live {
+						return headless.Status{State: headless.StateDead}, nil
+					}
+					return headless.Status{State: headless.StateIdle}, nil
+				},
+				views: func(_ context.Context, c headless.Chat, _ string) ([]herdr.TabDecoration, error) {
+					return []herdr.TabDecoration{{Pane: "w1:p1", Identity: "seat:" + c.ID, State: tc.proof}}, nil
+				},
+				mode: func() (string, error) { return "emoji", nil }, warn: &bytes.Buffer{},
+			}
+			got, err := provider.tabs(context.Background(), "endpoint", true)
+			if err != nil || len(got) != 1 || got[0].State != tc.want {
+				t.Fatalf("tabs=%+v err=%v, want one tab in state %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestHerdrTabProviderReadFailureIsVisible(t *testing.T) {
 	warnings := &bytes.Buffer{}
 	provider := herdrTabProvider{

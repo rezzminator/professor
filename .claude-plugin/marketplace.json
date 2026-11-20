@@ -148,6 +148,14 @@
       "homepage": "https://github.com/rezzminator/harvester",
       "license": "MIT",
       "keywords": ["claude-code", "mcp", "documents", "search", "professor"]
+    },
+    {
+      "name": "professor",
+      "source": "./plugins/professor/plugins/professor",
+      "description": "Claude Code plugin for Professor's terminal look — each sub-agent's row drawn as an instrument strip: a pulse gauge of its context, model, effort, state, spend, cache and flags, fed by pfm",
+      "homepage": "https://github.com/rezzminator/professor",
+      "license": "MIT",
+      "keywords": ["claude-code", "subagents", "statusline", "function-hooks", "claude-code-mods", "professor"]
     }
   ]
 }

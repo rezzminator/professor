@@ -15,14 +15,19 @@ DIST := tmp/dist
 RELEASE_VERSION ?= v$(shell cat VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64
 
-.PHONY: release-check check build release-binary release
+.PHONY: release-check check plugin-check build release-binary release
 
-release-check: check build release
+release-check: check plugin-check build release
 	@echo "NOT RUN LOCALLY: ci.yml's scan job — the HOL AI Plugin Scanner is a GitHub Action (hashgraph-online/ai-plugin-scanner-action) with no local install"
 
 # ci.yml's scan job builds these first: the Codex and OpenCode mirrors the scanner scores.
 check:
 	"$(ENGINE_SYNC_BIN)" build .
+
+# ci.yml's scan job, last: the in-tree professor plugin's tests, type-check and
+# strict validation (plugins/professor/Makefile); it needs the claude CLI.
+plugin-check:
+	$(MAKE) -C plugins/professor check
 
 # Every build-job leg, one platform after another.
 build:

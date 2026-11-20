@@ -42,6 +42,7 @@ type ClaudeSpawn struct {
 	Effort            string
 	PromptFile        string
 	Envs              map[string]string
+	ClaudeSettings    map[string]any // the adopter settings' claude.settings (workbench.Persona.ClaudeSettings)
 	Args              []string
 	Home              string
 	Machine           pfmconfig.Config
@@ -56,8 +57,8 @@ func (spawn ClaudeSpawn) request() claudelaunch.Request {
 		Purpose: spawn.Purpose, Account: spawn.Account, Cache1H: spawn.Cache1H,
 		SessionID: spawn.SessionID, Resume: spawn.Resume, Fork: spawn.Fork,
 		Name: spawn.Name, RemoteControlName: spawn.RemoteControlName, Model: spawn.Model, Effort: spawn.Effort,
-		PromptFile: spawn.PromptFile, Envs: spawn.Envs, Args: spawn.Args, Home: spawn.Home,
-		Binary: spawn.binary, ConfigDir: spawn.explicitConfigDir,
+		PromptFile: spawn.PromptFile, Envs: spawn.Envs, Settings: spawn.ClaudeSettings, Args: spawn.Args,
+		Home: spawn.Home, Binary: spawn.binary, ConfigDir: spawn.explicitConfigDir,
 	}
 }
 
@@ -262,5 +263,6 @@ func claudePersonaSpawn(
 		Purpose: purpose, Home: home, Account: account, Cache1H: &cache1H,
 		Machine: machine, Name: name, Args: args,
 		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model, Envs: persona.Envs,
+		ClaudeSettings: persona.ClaudeSettings,
 	}
 }

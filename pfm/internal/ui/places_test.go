@@ -74,6 +74,55 @@ func TestBuildPlacesInHomeOpensEverywhere(t *testing.T) {
 	}
 }
 
+// A chat recorded in a space is filed under the space's label, as Herdr names
+// the workspace, standing for the folder it runs in; the folder place keeps
+// every other chat, and a folder place wearing the space's label gives way.
+func TestBuildPlacesFilesASpacedChatUnderItsSpaceLabel(t *testing.T) {
+	rows, dirs := placeFixtureRows()
+	rows = append(rows,
+		compose.Row{
+			Kind: compose.LiveClaude, ID: "epic", Name: "epic", Project: "app", Space: "glass", CWD: "/src/app",
+			ActivityNS: 100,
+		},
+		compose.Row{
+			Kind: compose.LiveClaude, ID: "twin", Name: "twin", Project: "glass", CWD: "/work/glass",
+			ActivityNS: 10,
+		},
+	)
+	dirs["glass"] = "/work/glass"
+	built := buildPlaces(rows, dirs, "/jail/me", "/src/app", "app", nil, nil)
+	labels := make([]string, 0, len(built.places))
+	for _, entry := range built.places {
+		labels = append(labels, entry.label+" "+placeTally(entry))
+	}
+	want := []string{"app ●1 ↻1", "glass ●1", "ops ●1 ↻1", "work/glass ●1", "✱ all ●4 ↻2"}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("rail = %q, want %q", labels, want)
+	}
+	spaced := built.places[1]
+	if spaced.root != "space:glass" || spaced.dir != "/src/app" || built.rowPlace[len(rows)-2] != "space:glass" ||
+		built.rowPlace[1] != "/src/app" {
+		t.Fatalf("space = %#v, spaced row under %q, folder row under %q",
+			spaced, built.rowPlace[len(rows)-2], built.rowPlace[1])
+	}
+}
+
+func TestGroupNameFilesARowUnderItsSpaceElseItsProject(t *testing.T) {
+	for _, test := range []struct {
+		row  compose.Row
+		want string
+	}{
+		{compose.Row{Project: "app", Space: "glass"}, "glass"},
+		{compose.Row{Project: "app"}, "app"},
+		{compose.Row{Project: "app", Space: "  "}, "app"},
+		{compose.Row{}, "?"},
+	} {
+		if got := groupName(test.row); got != test.want {
+			t.Errorf("groupName(%+v) = %q, want %q", test.row, got, test.want)
+		}
+	}
+}
+
 func TestTypedPathResolvesTildeAbsoluteAndRelative(t *testing.T) {
 	for _, test := range []struct {
 		query, want string

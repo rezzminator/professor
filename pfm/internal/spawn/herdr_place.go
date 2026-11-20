@@ -77,8 +77,9 @@ func listHerdrWorkspaces(ctx context.Context, socket string) (herdrWorkspaces, e
 }
 
 // workspaceFor is the workspace target's chats sit in: the one labelled as the
-// place, else one created for it, unfocused, opening in the place's root. It
-// never renames, closes or duplicates a workspace.
+// place, else one created for it, unfocused, opening in the place's directory
+// (a space's, the folder of the chat that asked). It never renames, closes or
+// duplicates a workspace.
 func (listed herdrWorkspaces) workspaceFor(ctx context.Context, socket string, target place.Place) (string, error) {
 	if target.Root == "" || target.Label == "" {
 		return "", fmt.Errorf("herdr workspace: place %+v has no root or label", target)
@@ -86,11 +87,13 @@ func (listed herdrWorkspaces) workspaceFor(ctx context.Context, socket string, t
 	if id := listed.byLabel[target.Label]; id != "" {
 		return id, nil
 	}
-	body, err := herdr.SeatRequest(ctx, socket, "workspace.create", map[string]any{
-		"cwd": target.Root, "label": target.Label, herdrFocusKey: false,
-	})
+	params := map[string]any{"label": target.Label, herdrFocusKey: false}
+	if directory := target.Directory(); directory != "" {
+		params["cwd"] = directory // a space with no known folder lets Herdr choose
+	}
+	body, err := herdr.SeatRequest(ctx, socket, "workspace.create", params)
 	if err != nil {
-		return "", fmt.Errorf("create Herdr workspace %q at %s: %w", target.Label, target.Root, err)
+		return "", fmt.Errorf("create Herdr workspace %q at %s: %w", target.Label, target.Directory(), err)
 	}
 	var reply struct {
 		Type      string `json:"type"`
@@ -142,6 +145,7 @@ type herdrPlacement struct {
 // labelled as its place holds it, whether it sits there or must go there;
 // with none, its own workspace takes the place's label when it holds nothing
 // but the place's chats and shells, and otherwise the place gets a workspace.
+// A chat recorded in a space has the space for its place (place.Fleet.Of).
 func (listed *herdrWorkspaces) placementOf(
 	ctx context.Context,
 	socket string,
@@ -189,16 +193,16 @@ func (listed *herdrWorkspaces) holdsOnly(
 		if pane.PaneID == self {
 			continue
 		}
-		directory := pane.Directory()
+		directory, id := pane.Directory(), ""
 		for position := range fleet.Rows {
 			row := &fleet.Rows[position]
 			if row.Backend == BackendHerdr && row.Kind.IsLiveSeat() && row.Socket == socket &&
 				row.PaneID == pane.PaneID {
 				// The pane's directory is its supervisor's; the chat names its own.
-				directory = row.CWD
+				directory, id = row.CWD, row.ID
 			}
 		}
-		if fleet.Of(directory).Root != target.Root {
+		if fleet.Of(directory, id).Root != target.Root {
 			return false, nil
 		}
 	}
@@ -223,7 +227,7 @@ func (listed *herdrWorkspaces) rename(ctx context.Context, socket, workspace, la
 }
 
 // HerdrOpensInPlace decides, by the decision the reconcile makes
-// (placementOf), where an open of a chat that runs in cwd, asked from the
+// (placementOf), where an open of the chat id, which runs in cwd, asked from the
 // caller's own Herdr pane (choice), happens: in that pane when its workspace
 // is the chat's place's — renamed to the place's label first when no
 // workspace carries it and the caller's holds nothing but the place's chats
@@ -235,7 +239,7 @@ func HerdrOpensInPlace(
 	ctx context.Context,
 	values paths.Values,
 	choice *BackendChoice,
-	cwd string,
+	cwd, id string,
 ) (inPlace bool, returnErr error) {
 	if choice.Places == nil {
 		return false, errors.New("herdr open has no fleet places to file the chat under")
@@ -245,7 +249,7 @@ func HerdrOpensInPlace(
 		return false, fmt.Errorf("scan the fleet's places: %w", err)
 	}
 	choice.Places = func(context.Context) (*place.Fleet, error) { return fleet, nil }
-	target := fleet.Of(cwd)
+	target := fleet.Of(cwd, id)
 	if target.Root == "" {
 		// A chat filed under no place has no workspace of its own to open in.
 		return true, nil
@@ -290,6 +294,40 @@ func ReconcileHerdr(ctx context.Context, values paths.Values, socket string, fle
 	return moveMisplacedHerdr(ctx, values, socket, fleet, skip)
 }
 
+// PlaceHerdrChat is ReconcileHerdr for the one live native chat id on socket,
+// the chat that just recorded a space: it goes where placementOf says, every
+// other chat stays where it sits, and the place it was filed under comes back
+// (the zero Place, nothing moved, for a chat filed under no place, as
+// moveMisplacedHerdr skips one). A chat that is no such seat is an error, never a quiet success.
+func PlaceHerdrChat(ctx context.Context, values paths.Values, socket string, fleet place.Fleet, id string) (
+	target place.Place, returnErr error,
+) {
+	unlock, err := lockHerdrPlaces(ctx, values, socket)
+	if err != nil {
+		return place.Place{}, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+	listed, err := listHerdrWorkspaces(ctx, socket)
+	if err != nil {
+		return place.Place{}, err
+	}
+	for position := range fleet.Rows {
+		row := fleet.Rows[position]
+		if row.ID == id && row.Backend == BackendHerdr && row.Kind.IsLiveSeat() && row.Socket == socket &&
+			row.SeatID != "" {
+			if target = fleet.Of(row.CWD, id); target.Root == "" {
+				return target, nil // filed under no place: no workspace of its own to move into
+			}
+			err = placeHerdrSeat(ctx, values, socket, "", fleet, row, target, &listed)
+			if errors.Is(err, errHerdrSeatUnplaced) {
+				err = fmt.Errorf("chat %s: %w", id, err)
+			}
+			return target, err
+		}
+	}
+	return place.Place{}, fmt.Errorf("chat %s is not a live native Herdr chat on %s", id, socket)
+}
+
 // moveMisplacedHerdr is ReconcileHerdr under a placement lock already held.
 func moveMisplacedHerdr(ctx context.Context, values paths.Values, socket string, fleet place.Fleet, skip string) error {
 	var listed herdrWorkspaces
@@ -304,7 +342,7 @@ func moveMisplacedHerdr(ctx context.Context, values paths.Values, socket string,
 			skip != "" && row.PaneID == skip {
 			continue
 		}
-		target := fleet.Of(row.CWD)
+		target := fleet.Of(row.CWD, row.ID)
 		if target.Root == "" {
 			continue
 		}
@@ -317,7 +355,8 @@ func moveMisplacedHerdr(ctx context.Context, values paths.Values, socket string,
 		if row.HerdrWorkspace != "" && listed.byLabel[target.Label] == row.HerdrWorkspace {
 			continue
 		}
-		if err := placeHerdrSeat(ctx, values, socket, skip, fleet, *row, target, &listed); err != nil {
+		if err := placeHerdrSeat(ctx, values, socket, skip, fleet, *row, target, &listed); err != nil &&
+			!errors.Is(err, errHerdrSeatUnplaced) {
 			failures = append(
 				failures,
 				fmt.Errorf("chat %s stays out of workspace %q: %w", row.Name, target.Label, err),
@@ -327,13 +366,19 @@ func moveMisplacedHerdr(ctx context.Context, values paths.Values, socket string,
 	return errors.Join(failures...)
 }
 
+// errHerdrSeatUnplaced is placeHerdrSeat's answer for a seat it left alone: one
+// that ended since the scan, or that does not prove to be a movable chat. A
+// reconcile over the whole fleet skips such a seat; a move of one chat fails.
+var errHerdrSeatUnplaced = errors.New("the seat ended, or does not prove to be this Herdr chat's")
+
 // placeHerdrSeat puts row's proved live seat where placementOf says: its
 // workspace renamed, or the seat moved into target's workspace and rewritten
 // to the pane id Herdr gives it there, through the seat's CAS: a pane moved
 // across workspaces takes a new id, and every reader finds the chat by its
 // seat. A seat that ended since the scan, already sits right, or proves to be
 // the pane skip names stays. The workspace is created only once the seat
-// proved movable, so a place gets one only for a chat it holds.
+// proved movable, so a place gets one only for a chat it holds. A seat it
+// leaves alone for ending or failing its proof is errHerdrSeatUnplaced.
 func placeHerdrSeat(
 	ctx context.Context,
 	values paths.Values,
@@ -351,7 +396,7 @@ func placeHerdrSeat(
 		return fmt.Errorf("read seat %s: %w", seatID, err)
 	}
 	if !found || seat.Backend != BackendHerdr || seat.State != seatLiveState {
-		return nil
+		return errHerdrSeatUnplaced
 	}
 	lockCtx, cancel := context.WithTimeout(ctx, herdrSeatLockWait)
 	unlock, err := fleetdb.LockSeat(lockCtx, values, fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID))
@@ -365,7 +410,7 @@ func placeHerdrSeat(
 		return fmt.Errorf("prove seat %s: %w", seatID, err)
 	}
 	if !owned || skip != "" && proved.HerdrPane == skip {
-		return nil
+		return errHerdrSeatUnplaced
 	}
 	placement, err := listed.placementOf(ctx, socket, fleet, target, proved.HerdrWorkspace, proved.HerdrPane)
 	if err != nil {
@@ -484,6 +529,6 @@ func placeHerdrBirth(
 	if err != nil {
 		return "", unmoved, err
 	}
-	workspace, err = listed.workspaceFor(ctx, socket, fleet.Of(request.Run.CWD))
+	workspace, err = listed.workspaceFor(ctx, socket, fleet.Of(request.Run.CWD, request.Seat.SessionID))
 	return workspace, unmoved, err
 }

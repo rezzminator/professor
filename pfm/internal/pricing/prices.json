@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "fetched_at": "2026-11-11T13:15:11Z",
+  "fetched_at": "2026-11-17T22:42:31Z",
   "sources": [
     {"provider":"anthropic","url":"https://platform.claude.com/docs/en/about-claude/pricing.md"},
     {"provider":"openai","url":"https://developers.openai.com/api/docs/pricing.md"}
@@ -59,6 +59,8 @@
     {"key":"gpt-6-sol","engine":"codex","in":2,"out":10,"cached":0.2,"long":{"above":272000,"in":4,"out":15,"cached":0.4}},
     {"key":"gpt-6.1-sol","engine":"codex","in":2,"out":10,"cached":0.1,"long":{"above":272000,"in":4,"out":15,"cached":0.2}},
     {"key":"gpt-6.1-terra","engine":"codex","in":1,"out":5,"cached":0.05,"long":{"above":272000,"in":2,"out":7.5,"cached":0.1}},
+    {"key":"gpt-6.2-astra","engine":"codex","in":8,"out":40,"cached":0.4,"long":{"above":272000,"in":16,"out":60,"cached":0.8}},
+    {"key":"gpt-6.2-sol","engine":"codex","in":2,"out":10,"cached":0.1,"long":{"above":272000,"in":4,"out":15,"cached":0.2}},
     {"key":"gpt-rosalind-discovery","engine":"codex","in":5,"out":25,"cached":0.5},
     {"key":"gpt-rosalind-research","engine":"codex","in":5,"out":25,"cached":0.5},
     {"key":"o3","engine":"codex","in":2,"out":8,"cached":0.5},

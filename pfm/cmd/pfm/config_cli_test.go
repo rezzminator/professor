@@ -334,9 +334,9 @@ func TestConfigCLIInitShowValidateAndBrokenDiagnostics(t *testing.T) {
 		[]string{"--config", path, "config", "validate"},
 		&stdout,
 		&stderr,
-	); code != 1 ||
-		!strings.Contains(stderr.String(), "claude.helperModel must be a non-empty model name without whitespace") {
-		t.Fatalf("empty helperModel validate code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	); code != 0 || stdout.String() != "config valid: "+path+"\n" || stderr.Len() != 0 {
+		// claude.helperModel is retired: an existing file setting it keeps loading, whatever its value.
+		t.Fatalf("retired helperModel validate code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 
@@ -362,7 +362,7 @@ func TestConfigShowReportsClaudePlugins(t *testing.T) {
 	for _, test := range []struct{ name, content, want string }{
 		{
 			"unset", `{"version":2}`,
-			"config claude.plugins=cache-live-control,forward-compaction,auto-effort,tool-visibility-controller,engine-sync,flights (default)",
+			"config claude.plugins=cache-live-control,forward-compaction,auto-effort,tool-visibility-controller,engine-sync,flights,professor (default)",
 		},
 		{
 			"listed",
@@ -390,7 +390,7 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	path := writeConfigFixture(
 		t,
 		root,
-		`{"version":2,"claude":{"remoteControl":false,"webSearchesPerSession":17,"autoCompactWindow":250000,"helperModel":"claude-sonnet-5-5","tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins"}}`,
+		`{"version":2,"claude":{"remoteControl":false,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins"}}`,
 	)
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
@@ -398,11 +398,6 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	}
 	for _, want := range []string{
 		"config claude.remoteControl=false (file)",
-		"config claude.webSearchesPerSession=17 (file)",
-		"config claude.autoCompactWindow=250000 (file)",
-		"config claude.helperModel=claude-sonnet-5-5 (file)",
-		"config claude.tmuxTruecolor=false (file)",
-		"config claude.cleanupPeriodDays=31 (file)",
 		"config claude.requireManagedCleanup=false (file)",
 		"config claude.pluginCheckoutRoot=/opt/plugins (file)",
 	} {
@@ -420,12 +415,6 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "config claude.remoteControl=true (default)") {
 		t.Fatalf("default config show lacks Remote Control: %s", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "config claude.autoCompactWindow=100000 (default)") {
-		t.Fatalf("default config show lacks auto compact window: %s", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "config claude.helperModel=claude-haiku-5-5 (default)") {
-		t.Fatalf("default config show lacks helper model: %s", stdout.String())
 	}
 }
 

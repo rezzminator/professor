@@ -473,6 +473,24 @@ func resumeLadderJail(t *testing.T, id string) (home, transcript string) {
 	return home, transcript
 }
 
+// deadCodexRollout gives resumeLadderJail a Codex home (the machine config's one Codex account) holding the
+// rollout of a Codex chat that ended before its first turn: a dead native seat lists only while its transcript
+// exists, so the registry keeps this one as a dead chat with nothing to resume or read.
+func deadCodexRollout(t *testing.T, transcript, id string) {
+	t.Helper()
+	root := filepath.Dir(filepath.Dir(filepath.Dir(transcript)))
+	home := filepath.Join(root, "codex")
+	t.Setenv("PFM_CONFIG", writeConfigFixture(t, root, `{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`))
+	rollout := filepath.Join(home, "sessions", "2030", "01", "02", "rollout-2030-01-02T03-04-05-"+id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(rollout), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"type":"session_meta","payload":{"id":"` + id + `","thread_source":"user","cwd":"/jail/project"}}` + "\n"
+	if err := os.WriteFile(rollout, []byte(meta), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A dead chat the registry knows by name is answered from its row, never by
 // excerpt-matching the name: a dead Codex chat exits codeDeadChat naming how
 // to revive it, and a dead Claude chat resumes into its own session.
@@ -509,6 +527,9 @@ func TestChatCallAnswersARegisteredDeadChatFromItsRow(t *testing.T) {
 				if err := os.WriteFile(transcript, []byte(testCase.transcript), 0o600); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if testCase.engine == "cx" {
+				deadCodexRollout(t, transcript, testCase.session)
 			}
 			before, err := os.ReadFile(transcript)
 			if err != nil {

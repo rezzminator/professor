@@ -39,7 +39,7 @@ fence_housekeeping() { :; }
 stub_docker() { # STUB_INSPECT: the inspect answer (empty = no container); STUB_RUN_RC, STUB_UPDATE_RC; $T/run.inuse (one in-use refusal), $T/exec.rcs (space list) — files, as docker runs in $( ) subshells
   { printf 'docker'; printf ' %q' "$@"; printf '\n'; } >>"$REC"
   case "$1" in
-    info) echo "${STUB_INFO:-Docker Desktop|10|8267812044}" ;;
+    info) echo "${STUB_INFO:-linux|Docker Desktop|10|8267812044}" ;;
     inspect) # $T/gone: while it exists, the container has stopped and gone (`run --rm`)
       [ ! -e "$T/gone" ] || return 1
       local insp="${STUB_INSPECT:-}"; [ ! -e "$T/inspect.after" ] || insp="$(cat "$T/inspect.after")"
@@ -320,11 +320,17 @@ _fence_sh_reap_runs > "$T/reap-keys.log" 2>&1
 if [[ ! -d "$dead" ]] && grep -q '^docker exec pfm-fence-old-key ' "$REC" && grep -q '^docker exec pfm-fence-new-key ' "$REC"; then ok "dead caller reservations are reaped across all image keys"; else bad "cross-key reap" "$(cat "$REC")"; fi
 
 # Detection is Docker facts, never the host name; explicit profile avoids the probe.
-for facts in 'Docker Desktop|10|8267812044|desktop' 'Docker Desktop|24|126701535232|desktop' 'Ubuntu Linux|23|126701535232|native' 'Ubuntu Linux|8|126701535232|desktop' 'Debian Linux|23|5368709120|desktop'; do
+for facts in 'linux|Docker Desktop|10|8267812044|desktop' 'linux|Docker Desktop|24|126701535232|desktop' 'linux|Ubuntu Linux|23|126701535232|native' 'linux|Ubuntu Linux|8|126701535232|desktop' 'linux|Debian Linux|23|5368709120|desktop' 'linux|CentOS Stream 9|23|126701535232|native' 'linux|CentOS Stream 9|8|126701535232|desktop' 'linux|openSUSE Leap 15.6|23|126701535232|native' 'linux|SLES 15 SP6|23|126701535232|native' 'linux|Zorin OS 17|23|126701535232|native'; do
   want="${facts##*|}"; STUB_INFO="${facts%|*}"
   # a plain assignment, not a prefix: Bash 5.3 restores a function's prefix variable on return, export or not
   if got="$(PFM_FENCE_PROFILE=auto; fence_config_init && printf '%s' "$PFM_FENCE_PROFILE")" && [[ "$got" == "$want" ]]; then ok "Docker facts select $want"; else bad "Docker facts select $want" "$got"; fi
 done
+for facts in 'windows|Docker Desktop|10|8267812044' 'windows|Windows Server 2022|23|126701535232' '|Ubuntu 24.04|23|126701535232'; do
+  STUB_INFO="$facts"; ostype="${facts%%|*}"
+  out="$(PFM_FENCE_PROFILE=auto fence_config_init 2>&1)"; rc=$?
+  [[ $rc == 1 && "$out" == "iso: PFM_FENCE_PROFILE needs a Linux Docker daemon, docker info OSType is '$ostype'" ]] && ok "OSType '$ostype' is refused naming the value" || bad "OSType '$ostype' refused" "rc=$rc $out"
+done
+STUB_INFO=
 out="$(PFM_FENCE_PROFILE=native STUB_INFO=broken fence_config_init 2>&1)"; rc=$?
 [[ $rc == 0 ]] && ok "explicit profile wins over unreadable Docker facts" || bad "explicit profile precedence" "$out"
 out="$(PFM_FENCE_PROFILE=auto STUB_INFO=broken fence_config_init 2>&1)"; rc=$?

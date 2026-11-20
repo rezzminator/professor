@@ -91,7 +91,7 @@ type Options struct {
 	// their recovery records remain on disk. Other restore failures still stop it.
 	LeaveVSCodeColors     bool
 	ManagedSettingsDir    string
-	CleanupPeriodDays     int
+	ClaudeSettings        map[string]any // machine claude.settings: the drop-in's cleanupPeriodDays source
 	RequireManagedCleanup bool
 	// themeFollowerRefresh re-applies the theme follower's launch agent for
 	// home while the theme sync is on; nil uses themesync.Sync.
@@ -173,13 +173,12 @@ type Options struct {
 	AdoptAgents bool
 	// ClaudePlugins is claude.plugins: the plugins the Claude plugin step ensures.
 	ClaudePlugins []pfmconfig.ClaudePlugin
-	// ClaudePluginsDefault says claude.plugins is unset, ClaudePlugins its
-	// default: an -alpha install then ensures every plugin the source clone's
-	// marketplace lists.
-	ClaudePluginsDefault bool
 	// ClaudeEnv is claude.env: the plugin options as environment variables
 	// pfm writes into the primary seat's settings.json env (ensureClaudeEnv).
 	ClaudeEnv map[string]string
+	// HerdrKeys is herdr.keys, the keymap the Herdr keys step merges over
+	// pfm's; nil when unset.
+	HerdrKeys *pfmconfig.HerdrKeys
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches

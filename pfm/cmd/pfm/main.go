@@ -530,7 +530,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return hookentry.TmuxTitleRenudge(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "update-check" {
-		return hookentry.UpdateCheck(args[1:], stderr)
+		return hookentry.UpdateCheck(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "primary-get" {
 		primary, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)

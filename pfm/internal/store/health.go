@@ -26,14 +26,22 @@ type RowCounts struct {
 // every caller refills that mirror first. The engine test the v1 query carried
 // is gone with the column: an id matching a lineage root is a live Codex kill
 // whatever engine anyone once recorded for it.
-const orphanedKilledSource = `
+var orphanedKilledSource = `
 FROM ` + effectiveKilled + ` h
-WHERE NOT EXISTS (SELECT 1 FROM transcripts t WHERE t.uuid=h.uuid)
-  AND NOT EXISTS (
+WHERE NOT ` + indexedChat("h.uuid")
+
+// indexedChat is the SQL test that the index holds the chat id names: a
+// transcript, a rollout or a Codex lineage rooted at it, or an OpenCode
+// session. A kill (orphanedKilledSource) and a space (ChatSpaces) of a chat it
+// fails are a chat's that no longer exists.
+func indexedChat(id string) string {
+	return `(EXISTS (SELECT 1 FROM transcripts t WHERE t.uuid=` + id + `)
+  OR EXISTS (
     SELECT 1 FROM rollouts r
-    WHERE r.id=h.uuid OR r.lineage_root=h.uuid
+    WHERE r.id=` + id + ` OR r.lineage_root=` + id + `
   )
-  AND NOT EXISTS (SELECT 1 FROM oc_sessions o WHERE o.id=h.uuid)`
+  OR EXISTS (SELECT 1 FROM oc_sessions o WHERE o.id=` + id + `))`
+}
 
 // QuickCheck runs SQLite's bounded integrity probe.
 func (s *Store) QuickCheck(ctx context.Context) (string, error) {

@@ -63,7 +63,7 @@ func TestWarningFilterHintsIgnoresAndRejectsUnknownIDs(t *testing.T) {
 			name:    "unknown id is a warning and silences nothing",
 			machine: config.Config{Path: configPath, Doctor: config.Doctor{IgnoreWarnings: []string{"vscode-lnk"}}},
 			wantFilterOut: `doctor: config doctor.ignoreWarnings has unknown warning id "vscode-lnk" in ` + configPath +
-				" — it silences nothing; known ids: vscode-index, vscode-inspect, vscode-link, vscode-settings\n",
+				" — it silences nothing; known ids: git-push, leak-terms, theme-unowned, vscode-index, vscode-inspect, vscode-link, vscode-settings, vscode-unlinked\n",
 			wantUnknown: 1,
 			wantOut:     row + hint + configPath + "\n",
 			wantCount:   1,

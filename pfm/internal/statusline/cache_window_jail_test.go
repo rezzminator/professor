@@ -51,7 +51,7 @@ func TestStatuslineLaunchReadErrorShowsWarning(t *testing.T) {
 		nil,
 		"S",
 	))
-	if want := " │ 💾⚠ 💾1h✓58m:0s 94%"; beside != want {
+	if want := " │ 💾⚠ 💾1h✓58m00s 94%"; beside != want {
 		t.Fatalf("window beside an unread launch record = %q, want %q", beside, want)
 	}
 	if err := writer.Close(); err != nil {

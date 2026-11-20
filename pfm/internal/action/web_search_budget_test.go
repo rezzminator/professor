@@ -17,7 +17,6 @@ const (
 func TestClaudeSpawnCarriesWebSearchBudget(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
-	machine.Claude.WebSearchesPerSession = 9007199254740991
 	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()

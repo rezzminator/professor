@@ -189,7 +189,7 @@ graph_order() {
 }
 static_names() { { grep -Ev '^(pfm\.(unit-proof|e2e|unit|race)|pfm\.self\..*|templates\.fence\..*|fixture\..*)$' "$T/registered" || true; } | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.skill-tests'
+templates_static='templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.install-ping-tests,templates.skill-tests'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.unit-proof,pfm.vet,pfm.vet-darwin'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -640,7 +640,7 @@ unset STUB_FAILURES_OUT
 if grep -Fq "test-shard.sh run --out $cur/unit.json --history $PFM_TEST_TIMING_DIR/run.new/unit.json -- -tags jail -race" "$T/unit.calls"; then
   ok 'unit row uses sharder with newest usable history and TESTFLAGS'
 else bad 'unit row or history selection' "$(cat "$T/unit.calls")"; fi
-if grep -Fq "$cur/profile pfm: go test -- bash $T/fx/pfm/scripts/test-shard.sh run --out" "$T/unit.calls" && [ -z "${PFM_TEST_ARTIFACT_DIR+x}" ]; then
+if grep -Fq "$cur/profile pfm: go test -- checks_tracked_view bash $T/fx/pfm/scripts/test-shard.sh run --out" "$T/unit.calls" && [ -z "${PFM_TEST_ARTIFACT_DIR+x}" ]; then
   ok 'the unit sharder runs with PFM_TEST_ARTIFACT_DIR=<run>/profile, scoped to the row'
 else bad 'unit artifact dir' "$(cat "$T/unit.calls")"; fi
 if [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$cur/unit.json" "$cur/unit.json" "$cur/profile")" ] &&
@@ -755,7 +755,7 @@ race_case() { # race_case <label> <expected FAILSTEP line or empty> <stream: "pk
     while read -r pkg test; do race_pass "$pkg" "$test"; done <<< "$stream" > "$rd/race.json"
   fi
   checks_pfm_race "$T/fx/pfm" "$rd" >"$T/race.out" 2>&1
-  if grep -Fq "$rd/profile/race pfm: go test -race (race regressions) -- bash -c" "$T/unit.calls" &&
+  if grep -Fq "$rd/profile/race pfm: go test -race (race regressions) -- checks_tracked_view bash -c" "$T/unit.calls" &&
     grep -Fq 'CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"' "$T/unit.calls" &&
     grep -Fq "_ $T/fx/pfm $race_regex $rd/race.json $race_pkgs" "$T/unit.calls" &&
     [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$rd/race.json" "$rd/race.json" "$rd/profile/race")" ] &&
@@ -790,7 +790,7 @@ else bad 'pfm.race: no gcc' "$(cat "$T/need.calls")" "$(cat "$T/unit.calls")" "$
 : > "$STUB_EVENTS"; : > "$T/unit.calls"
 PFM_TEST_TIMING_DIR="$T/serial" checks_pfm_test "$T/fx/pfm" >"$T/serial.out"
 serial_run="$(ls -d "$T/serial"/run.* | head -1)"
-if grep -Fq "$serial_run/profile pfm: go test -- bash $T/fx/pfm/scripts/test-shard.sh run --out $serial_run/unit.json" "$T/unit.calls" &&
+if grep -Fq "$serial_run/profile pfm: go test -- checks_tracked_view bash $T/fx/pfm/scripts/test-shard.sh run --out $serial_run/unit.json" "$T/unit.calls" &&
   grep -Fxq "rows $T/fx/pfm $serial_run $serial_run/profile" "$STUB_EVENTS"; then
   ok 'iso test pfm profiles its unit and e2e rows into its run dir'
 else bad 'serial test rows' "$(cat "$T/unit.calls")" "$(cat "$STUB_EVENTS")"; fi

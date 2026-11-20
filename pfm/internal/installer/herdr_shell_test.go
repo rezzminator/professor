@@ -311,7 +311,7 @@ func TestHerdrShellRefusesDamagedConfigAndPreservesEditedOwnership(t *testing.T)
 	if string(after) != edited {
 		t.Fatalf("uninstall overwrote edited ownership: %s", after)
 	}
-	if err := installer.writeHerdrShellConfig(config, nil, []byte("replacement"), false); err == nil {
+	if err := installer.writeHerdrConfig(config, nil, []byte("replacement"), false); err == nil {
 		t.Fatal("concurrent user edit was not refused")
 	}
 }

@@ -343,7 +343,8 @@ func TestSendRefreshIncludesNativeSeats(t *testing.T) {
 			nil,
 			environment,
 			scanRequest{View: compose.DefaultView},
-			fleet.Data{},
+			// The lost seat's chat stays resumable from its indexed transcript.
+			fleet.Data{Transcripts: []store.Transcript{{UUID: "sid1"}}},
 			gather.Snapshot{},
 			refreshing,
 			updates,

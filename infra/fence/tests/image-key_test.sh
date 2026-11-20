@@ -150,6 +150,28 @@ for registry in '' https://npm.example.invalid; do
   else bad "tools install registry '$registry'" "rc=$rc" "$install_out"; fi
 done
 
+# The apt-mirror RUN rewrites every Ubuntu archive, security and ports URI in the deb822 and legacy
+# sources (ports onto the mirror's -ports twin), and leaves them untouched when the mirror is empty; run as a POSIX shell, as Docker does.
+apt_run="$(awk '/^RUN / { run=$0; while (run ~ /\\$/ && getline) run=run "\n" $0; if (run ~ /PFM_APT_MIRROR/) { sub(/^RUN /, "", run); print run; exit } }' "$FENCE/pfm-dev.Dockerfile")"
+apt_run="${apt_run//\/etc\/apt\//$T/apt/}"
+sources=$'Types: deb\nURIs: http://archive.ubuntu.com/ubuntu/\nSuites: noble\n\nTypes: deb\nURIs: http://security.ubuntu.com/ubuntu/\nSuites: noble-security\n\nTypes: deb\nURIs: http://ports.ubuntu.com/ubuntu-ports\nSuites: noble-updates'
+legacy=$'deb http://archive.ubuntu.com/ubuntu focal main\ndeb [arch=amd64] https://dl.google.com/linux/chrome/deb/ stable main'
+for mirror in '' https://apt.example.invalid/ubuntu https://apt.example.invalid/ubuntu/; do
+  mkdir -p "$T/apt/sources.list.d"; printf '%s\n' "$sources" >"$T/apt/sources.list.d/ubuntu.sources"; printf '%s\n' "$legacy" >"$T/apt/sources.list"
+  apt_out="$(export PFM_APT_MIRROR="$mirror"; sh -ec "$apt_run" 2>&1)"; rc=$?
+  if [ -z "$mirror" ]; then want_src="$sources" want_leg="$legacy"
+  else want_src="${sources//http:\/\/archive.ubuntu.com\/ubuntu\//${mirror%/}/}"; want_src="${want_src//http:\/\/security.ubuntu.com\/ubuntu\//${mirror%/}/}"; want_src="${want_src//http:\/\/ports.ubuntu.com\/ubuntu-ports/${mirror%/}-ports/}"
+    want_leg="${legacy//http:\/\/archive.ubuntu.com\/ubuntu/${mirror%/}/}"; fi
+  if [ "$rc" = 0 ] && [ -z "$apt_out" ] && [ "$(cat "$T/apt/sources.list.d/ubuntu.sources")" = "$want_src" ] && [ "$(cat "$T/apt/sources.list")" = "$want_leg" ]; then ok "apt sources use optional mirror '$mirror'"
+  else bad "apt sources mirror '$mirror'" "rc=$rc" "$apt_out" "$(cat "$T/apt/sources.list.d/ubuntu.sources")" "$(cat "$T/apt/sources.list")"; fi
+done
+
+# A base image with only the legacy file (no *.sources) still builds: the last glob miss is no failure.
+rm -f "$T/apt/sources.list.d/ubuntu.sources"; printf '%s\n' "$legacy" >"$T/apt/sources.list"
+apt_out="$(export PFM_APT_MIRROR=https://apt.example.invalid/ubuntu; sh -ec "$apt_run" 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ -z "$apt_out" ] && [ "$(cat "$T/apt/sources.list")" = "${legacy//http:\/\/archive.ubuntu.com\/ubuntu/https://apt.example.invalid/ubuntu/}" ]; then ok "apt mirror rewrites a legacy-only sources.list and succeeds"
+else bad "apt mirror legacy-only" "rc=$rc" "$apt_out" "$(cat "$T/apt/sources.list")"; fi
+
 # Supplemental real Compose resolution is offline; callers supply a standalone binary.
 if [ -n "${PFM_TEST_COMPOSE_BIN:-}" ]; then
   unset -f docker

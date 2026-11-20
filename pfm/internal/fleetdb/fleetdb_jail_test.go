@@ -26,7 +26,7 @@ func TestSharedSchemaIsComplete(t *testing.T) {
 SELECT name FROM sqlite_master
 WHERE type='table' AND name NOT LIKE 'sqlite_%'
 ORDER BY name`)
-	want := []string{"chat", "children", "comms", "hidden", "launch", "meta", "schedules", "seat"}
+	want := []string{"chat", "chat_space", "children", "comms", "hidden", "launch", "meta", "schedules", "seat"}
 	if !reflect.DeepEqual(tables, want) {
 		t.Fatalf("shared tables = %v, want %v", tables, want)
 	}

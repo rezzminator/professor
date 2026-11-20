@@ -2,7 +2,11 @@ package statusline
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -279,7 +283,7 @@ func TestClaudeQuotaRowsShareOneRightEdge(t *testing.T) {
 					if widths[0] != widths[1] {
 						t.Fatalf("right edges differ %v:\n%s\n%s", widths, ansi.Strip(lines[2]), ansi.Strip(lines[3]))
 					}
-					if age > time.Hour && !strings.Contains(ansi.Strip(lines[3]), "stale 2h0m") {
+					if age > time.Hour && !strings.Contains(ansi.Strip(lines[3]), "stale 2h00m") {
 						t.Fatalf("stale suffix lost: %q", ansi.Strip(lines[3]))
 					}
 				})
@@ -290,7 +294,7 @@ func TestClaudeQuotaRowsShareOneRightEdge(t *testing.T) {
 
 // TestClaudeQuotaRowsShrinkBelowWidestSibling pins the 86% width: with room the
 // shared width is floor(0.86 x the widest sibling) but never below the compact
-// Claude line, without room the terminal cap.
+// Claude line, without room the terminal cap, the siblings fitted to it first.
 func TestClaudeQuotaRowsShrinkBelowWidestSibling(t *testing.T) {
 	for _, name := range []string{strings.Repeat("x", 120), "x"} {
 		plain := func(columns int) []string {
@@ -322,11 +326,228 @@ func TestClaudeQuotaRowsShrinkBelowWidestSibling(t *testing.T) {
 				t.Fatalf("row width %d, want max(floor(0.86 x %d), compact %d) = %d", got, widest, compact, want)
 			}
 		}
+		// At want columns line 1 is cut to fit too: the rows take 86% of the
+		// widest fitted line, never more than the terminal's cap.
 		capped := plain(want) // content columns = want-4 < want
+		fitted := max(ansi.StringWidth(capped[0]), ansi.StringWidth(capped[1]))
+		limit := min(max(fitted*86/100, compact), want-4)
 		for _, line := range capped[2:] {
-			if got := ansi.StringWidth(line); got != want-4 {
-				t.Fatalf("row width %d, want the terminal cap %d", got, want-4)
+			if got := ansi.StringWidth(line); got != limit {
+				t.Fatalf(
+					"row width %d, want min(max(floor(0.86 x %d), compact %d), the terminal cap %d) = %d",
+					got,
+					fitted,
+					compact,
+					want-4,
+					limit,
+				)
 			}
+		}
+	}
+}
+
+// fitPayload is a chat whose every line is wider than a narrow terminal: long
+// directory, worktree, branch, agent and session names, the vim mode, a
+// growing context, a spend in words and a live cache window.
+func fitPayload(t *testing.T, runtime Runtime) string {
+	t.Helper()
+	directory := filepath.Join(runtime.Home, "professor-workbench")
+	digest := md5.Sum([]byte(directory))
+	git := filepath.Join(runtime.CacheDir, "cc-sl-"+hex.EncodeToString(digest[:]))
+	transcript := filepath.Join(runtime.Home, "main.jsonl")
+	before := `[{"at":` + strconv.FormatInt(quotaNow.Add(-pulseStep).UnixMilli(), 10) + `,"tokens":168000}]`
+	for path, body := range map[string]string{
+		git: "flight/strip-look-every-width|2|5",
+		transcript: `{"type":"assistant","message":{"model":"claude-fable-5","usage":{"input_tokens":32500,` +
+			`"cache_read_input_tokens":140000,"output_tokens":32400}}}` + "\n",
+		filepath.Join(runtime.CacheDir, "cc-sl-pulse-session-1"): before,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The branch cache is fresh at the render's clock: git is never run.
+	if err := os.Chtimes(git, quotaNow, quotaNow); err != nil {
+		t.Fatal(err)
+	}
+	expires := strconv.FormatInt(quotaNow.Add(59*time.Minute+54*time.Second).Unix(), 10)
+	return strings.TrimSuffix(quotaPayload(), "}") + `,"session_id":"session-1","transcript_path":"` + transcript +
+		`","cwd":"` + directory + `","workspace":{"current_dir":"` + directory + `"},` +
+		`"worktree":{"name":"strip-look-every-width"},"model":{"id":"claude-fable-5","display_name":"Fable"},` +
+		`"effort":{"level":"xhigh"},"agent":{"name":"foreman-sonnet"},"vim":{"mode":"INSERT"},` +
+		`"cost":{"total_cost_usd":12.34,"total_duration_ms":3840000},"prompt_cache":{"ttl":"1h","expires_at":` + expires + `},` +
+		`"context_window":{"context_window_size":1000000,"current_usage":{"input_tokens":32500,"cache_read_input_tokens":140000}}}`
+}
+
+// Every line pfm draws fits the cells a terminal gives it, each shrinking in
+// the same order: shorter spellings, then the blanks around its separators,
+// then its facts, least missed first; the context block takes its form from
+// the terminal's width alone. An unknown width draws every line whole.
+func TestRenderFitsEveryLineToTheTerminal(t *testing.T) {
+	const (
+		cut1   = "🥈 ✦ Fable·▰▰▰▰ xhigh │ professor-workb… │ 🌳 strip-look-ever… │ 🌿 flight/strip-lo… +2 ~5 │ ⚡foreman-son… │ INSERT │ 🔖 A long enough session t… │ · ·"
+		tight1 = "🥈 ✦ Fable·▰▰▰▰│professor-workb…│🌳 strip-look-ever…│🌿 flight/strip-lo… +2 ~5│⚡foreman-son…│INSERT"
+		slash2 = "Σ $12.34/172.5K/32.4K/0 │ 💾1h✓59m54s 81%"
+	)
+	full := []string{
+		"🥈 ✦ Fable·▰▰▰▰ xhigh │ professor-workbench │ 🌳 strip-look-every-width │ 🌿 flight/strip-look-every-width +2 ~5 │ ⚡foreman-sonnet │ INSERT │ 🔖 A long enough session title to widen the identity row past the quota labels │ · ·",
+		"🟢 ▰▱▱▱▱▱▱▱ ·····•   +4.5K  17% 172.5K/1.0M │ ⏳ 1h04m │ Σ $12.34 · 172.5K in · 32.4K out · 0 tools │ 💾1h✓59m54s 81%",
+		"▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:62% ↻3d3h",
+		"▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d-used:52% ↻3d7h",
+	}
+	for _, tc := range []struct {
+		columns int
+		want    []string
+	}{
+		{0, full},
+		{252, full},
+		{200, []string{
+			cut1,
+			"🟢 ▰▱▱▱▱▱▱▱ ·····•   +4.5K  17% 172.5K/1.0M │ ⏳ 1h04m │ Σ $12.34 · 172.5K in · 32.4K out · 0 tools │ 💾1h✓59m54s 81%",
+			"▰▰▰▱▱▱▱▱▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:62% ↻3d3h",
+			"▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d-used:52% ↻3d7h",
+		}},
+		{160, []string{
+			cut1,
+			"🟢 ▰▱▱▱▱▱▱▱ ·····•   +4.5K  17% 172.5K/1.0M │ ⏳ 1h04m │ Σ $12.34 · 172.5K in · 32.4K out · 0 tools │ 💾1h✓59m54s 81%",
+			"▰▰▰▱▱▱▱▱▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:62% ↻3d3h",
+			"▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d-used:52% ↻3d7h",
+		}},
+		{140, []string{
+			tight1 + "│🔖 A long enough session t…│· ·",
+			"🟢 ▰▱▱▱▱▱▱▱ ·····•   +4.5K  17% 172.5K/1.0M │ ⏳ 1h04m │ Σ $12.34 · 172.5K in · 32.4K out · 0 tools │ 💾1h✓59m54s 81%",
+			"▰▰▱▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 7d-used:62% ↻3d3h",
+			"▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d-used:52% ↻3d7h",
+		}},
+		{120, []string{
+			tight1 + "│· ·",
+			"🟢 ▰▱▱▱▱▱▱▱ ·····•   +4.5K  17% 172.5K/1.0M │ ⏳ 1h04m │ " + slash2,
+			"▰▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ ▰▰▰▰▰▰▰▰▱▱▱▱▱ 7d-used:62% ↻3d3h",
+			"▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d-used:52% ↻3d7h",
+		}},
+		{100, []string{
+			"🥈 ✦ Fable·▰▰▰▰│professor-workb…│🌳 strip-look-ever…│🌿 flight/strip-lo… +2 ~5│INSERT",
+			"🟢 ▰▱▱▱▱▱▱▱ ······• 17% 172.5K/1.0M │ ⏳ 1h04m │ " + slash2,
+			"▰▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ ▰▰▰▱▱ 7d-used:62% ↻3d3h",
+			"▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d-used:52% ↻3d7h",
+		}},
+		{80, []string{
+			"🥈 ✦ Fable·▰▰▰▰│professor-workb…│🌿 flight/strip-lo… +2 ~5",
+			"🟢 ▰▱▱▱▱▱▱▱  17% │ ⏳ 1h04m │ " + slash2,
+			"▰▱▱▱▱ 5h-used:29% ↻0h39m │ ▱▱▱▱▱ 7d-fable-used:0% ↻3d3h │ 7d-used:62% ↻3d3h ",
+			"▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ codex-7d-used:52% ↻3d7h",
+		}},
+	} {
+		t.Run(fmt.Sprint(tc.columns), func(t *testing.T) {
+			runtime := fableRuntime(t.TempDir(), 2, quotaNow)
+			runtime.Columns = tc.columns
+			weeklyCache(t, runtime, quotaCodexCache, time.Minute)
+			lines := renderQuotaLines(t, runtime, fitPayload(t, runtime))
+			for i, line := range lines {
+				if i < len(tc.want) && ansi.Strip(line) != tc.want[i] {
+					t.Errorf("line %d = %q,\n          want %q", i+1, ansi.Strip(line), tc.want[i])
+				}
+				if tc.columns > 0 && ansi.StringWidth(line) > tc.columns-footerPadding {
+					t.Errorf(
+						"line %d is %d cells, over the %d a %d-column terminal gives it",
+						i+1,
+						ansi.StringWidth(line),
+						tc.columns-footerPadding,
+						tc.columns,
+					)
+				}
+			}
+			if len(lines) != len(tc.want) {
+				t.Errorf("%d lines, want %d: %q", len(lines), len(tc.want), lines)
+			}
+		})
+	}
+
+	// Every known width from 80 up: each line within the cells it is given,
+	// the facts never given up still drawn, and the context block in the
+	// width table's form for that width.
+	for columns := 80; columns <= 260; columns++ {
+		runtime := fableRuntime(t.TempDir(), 2, quotaNow)
+		runtime.Columns = columns
+		weeklyCache(t, runtime, quotaCodexCache, time.Minute)
+		lines := renderQuotaLines(t, runtime, fitPayload(t, runtime))
+		block := "🟢 ▰▱▱▱▱▱▱▱  17%"
+		switch {
+		case columns >= 120:
+			block = "🟢 ▰▱▱▱▱▱▱▱ ·····•   +4.5K  17% 172.5K/1.0M"
+		case columns >= 100:
+			block = "🟢 ▰▱▱▱▱▱▱▱ ······• 17% 172.5K/1.0M"
+		case columns >= 90:
+			block = "🟢 ▰▱▱▱▱▱▱▱  17% 172.5K/1.0M"
+		}
+		kept := [][]string{
+			{"✦ Fable·▰▰▰▰"},
+			{"💾1h✓59m54s 81%"},
+			{"5h-used:29% ↻0h39m", "7d-fable-used:0% ↻3d3h", "7d-used:62% ↻3d3h"},
+			{"codex-7d-used:52% ↻3d7h"},
+		}
+		if len(lines) != len(kept) {
+			t.Fatalf("%d columns: %d lines, want %d: %q", columns, len(lines), len(kept), lines)
+		}
+		for i, line := range lines {
+			plain := ansi.Strip(line)
+			if got := ansi.StringWidth(line); got > columns-footerPadding {
+				t.Errorf(
+					"%d columns: line %d is %d cells, over the %d it is given: %q",
+					columns,
+					i+1,
+					got,
+					columns-footerPadding,
+					plain,
+				)
+			}
+			for _, fact := range kept[i] {
+				if !strings.Contains(plain, fact) {
+					t.Errorf("%d columns: line %d gave up %q: %q", columns, i+1, fact, plain)
+				}
+			}
+		}
+		if got, _, _ := strings.Cut(ansi.Strip(lines[1]), "│"); strings.TrimSpace(got) != block {
+			t.Errorf("%d columns: line 2's context block = %q, want %q", columns, strings.TrimSpace(got), block)
+		}
+		// At rest the pulse runs over the growth figure's blank cells and the share's pad to one
+		// blank before the share, and the line keeps every cell it had while the context grew.
+		payload := fitPayload(t, runtime)
+		rest := `[{"at":` + strconv.FormatInt(quotaNow.Add(-pulseStep).UnixMilli(), 10) + `,"tokens":172500}]`
+		if err := os.WriteFile(
+			filepath.Join(runtime.CacheDir, "cc-sl-pulse-session-1"),
+			[]byte(rest),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		resting := renderQuotaLines(t, runtime, payload)
+		block = "🟢 ▰▱▱▱▱▱▱▱  17%"
+		switch {
+		case columns >= 120:
+			block = "🟢 ▰▱▱▱▱▱▱▱ ··············· 17% 172.5K/1.0M"
+		case columns >= 100:
+			block = "🟢 ▰▱▱▱▱▱▱▱ ······· 17% 172.5K/1.0M"
+		case columns >= 90:
+			block = "🟢 ▰▱▱▱▱▱▱▱  17% 172.5K/1.0M"
+		}
+		if len(resting) != len(lines) {
+			t.Fatalf("%d columns at rest: %d lines, want %d: %q", columns, len(resting), len(lines), resting)
+		}
+		if got, _, _ := strings.Cut(ansi.Strip(resting[1]), "│"); strings.TrimSpace(got) != block {
+			t.Errorf("%d columns at rest: line 2's context block = %q, want %q", columns, strings.TrimSpace(got), block)
+		}
+		if got, want := ansi.StringWidth(resting[1]), ansi.StringWidth(lines[1]); got != want {
+			t.Errorf(
+				"%d columns at rest: line 2 is %d cells, want the %d it holds growing: %q",
+				columns,
+				got,
+				want,
+				ansi.Strip(resting[1]),
+			)
 		}
 	}
 }

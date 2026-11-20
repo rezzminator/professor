@@ -645,6 +645,17 @@ checks_templates_engine_sync_action_tests() {
 
 }
 
+checks_templates_install_ping_tests() {
+  head_ "templates — install-ping Worker tests"
+  node_test_suite "install-ping Worker" "$TMP_BASE/templates/install-ping.tap" \
+    infra/install-ping/src/ping.test.mjs infra/install-ping/src/index.test.mjs infra/install-ping/src/stats.test.mjs
+  if bash "$REPO_ROOT/infra/install-ping/stats_test.sh"; then
+    ok "install-ping stats.sh runs each stats.sql query in order and refuses a non-SELECT"
+  else
+    fail_step "install-ping stats.sh regression FAILED — its query split, order or non-SELECT refusal broke (see output)"
+  fi
+}
+
 # skill_unittest_sharded <out> <test file…>: the files' test ids split round-robin over
 # SKILL_TEST_SHARDS parallel unittest processes (default: the cores, at most 8), so a skill suite's
 # serial CPU time no longer sets the step's wall. <out> holds each `SHARD {i}` block, then one
@@ -774,7 +785,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1
   done
-  checks_named_template_steps "$add" engine-sync-action-tests skill-tests
+  checks_named_template_steps "$add" engine-sync-action-tests install-ping-tests skill-tests
 }
 
 checks_templates_step_serial() { shift; "$@"; }
@@ -863,6 +874,11 @@ checks_gate_fixture() {
   checks_pfm_profile_pointers "$json" "$root" "$before"
 }
 
+# checks_tracked_view <cmd...>: the go-test steps' door to the tree under test — in the fence the
+# command sees it without its git-ignored paths and file-less untracked directories, as a CI checkout
+# holds it (infra/fence/tracked-view.sh), so no jail test passes or fails on a host-only file.
+checks_tracked_view() { bash "$REPO_ROOT/infra/fence/tracked-view.sh" "$REPO_ROOT" -- "$@"; }
+
 checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   local d="$1" run_dir="$2" flags_text="${3:-}" timing_base history before="$FAILURES"
   local testflags=() shard_args=()
@@ -879,7 +895,7 @@ checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   # The JSON is retained even on failure; timing is a separate verdict.
   # -tags jail: the gate runs the unit tier and the jail tier (*_jail_test.go) in one tagged binary
   # per package, which internal/testjail admits only in the fence or on a hosted runner.
-  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- -tags jail "${testflags[@]}"
+  run "pfm: go test" -- checks_tracked_view bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- -tags jail "${testflags[@]}"
   go_test_report "$run_dir/unit.json"
   checks_pfm_profile_pointers "$run_dir/unit.json" "$run_dir/profile" "$before"
   skip_gate "pfm: skipped tests are all listed (unit)" "$run_dir/unit.json"
@@ -942,7 +958,7 @@ checks_module_race() {
   need_tool gcc "$scope" || return 1
   regex="^($(awk '{print $2}' <<< "$tests" | paste -sd'|' -))\$"
   while read -r pkg; do pkgs+=("./$pkg/"); done < <(awk '{print $1}' <<< "$tests" | awk '!seen[$0]++')
-  run "$scope: go test -race (race regressions)" -- bash -c '
+  run "$scope: go test -race (race regressions)" -- checks_tracked_view bash -c '
     CGO_ENABLED=1 go -C "$1" test -race -count="$PFM_FENCE_TEST_COUNT" -json -timeout "$PFM_FENCE_RACE_TIMEOUT" -run "$2" "${@:4}" > "$3"
   ' _ "$d" "$regex" "$json" "${pkgs[@]}"
   go_test_report "$json"

@@ -69,7 +69,7 @@ func TestDoctorReportsEachVSCodeProductLinkAndIndexState(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	warnings := printVSCodeDoctor(&out, home, "", warningFilter{})
+	warnings := printVSCodeDoctor(&out, home, "", &paths.MapEnv{}, warningFilter{})
 	output := out.String()
 	rows := 0
 	for _, line := range strings.Split(output, "\n") {
@@ -91,12 +91,34 @@ func TestDoctorReportsEachVSCodeProductLinkAndIndexState(t *testing.T) {
 	}
 
 	var absent bytes.Buffer
-	absentWarnings := printVSCodeDoctor(&absent, t.TempDir(), "", warningFilter{})
-	if !strings.Contains(absent.String(), "doctor: vscode not managed (pfm install --vscode never ran)") {
-		t.Fatalf("ledger-absent host did not report not-managed:\n%s", absent.String())
+	absentWarnings := printVSCodeDoctor(&absent, t.TempDir(), "", &paths.MapEnv{}, warningFilter{})
+	if absent.String() != "doctor: vscode not managed (pfm install --vscode never ran; no VS Code install found)\n" {
+		t.Fatalf("ledger-absent host without VS Code did not report not-managed:\n%s", absent.String())
 	}
 	if absentWarnings != 0 {
 		t.Fatalf("ledger-absent host warnings = %d, want 0", absentWarnings)
+	}
+
+	// A host with VS Code Server installed and no ledger: the extension is
+	// missing from an editor the user has, a warning naming the flag.
+	vscodeHost := t.TempDir()
+	server := filepath.Join(vscodeHost, ".vscode-server")
+	if err := os.MkdirAll(server, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var unlinked bytes.Buffer
+	unlinkedWarnings := printVSCodeDoctor(
+		&unlinked,
+		vscodeHost,
+		"",
+		&paths.MapEnv{},
+		warningFilter{configPath: "/cfg/pfm.config.json"},
+	)
+	wantUnlinked := "doctor: vscode installed at " + server + " but the professor extension is not linked " +
+		"(pfm install --vscode never ran) — run pfm install --yes --vscode · don't want this? add \"vscode-unlinked\" " +
+		"to doctor.ignoreWarnings in /cfg/pfm.config.json\n"
+	if unlinked.String() != wantUnlinked || unlinkedWarnings != 1 {
+		t.Fatalf("got %q warnings=%d\nwant %q warnings=1", unlinked.String(), unlinkedWarnings, wantUnlinked)
 	}
 }
 
@@ -164,7 +186,13 @@ func TestDoctorVSCodeClaudeEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			warnings := printVSCodeDoctor(&out, home, tc.primary, warningFilter{configPath: "/cfg/pfm.config.json"})
+			warnings := printVSCodeDoctor(
+				&out,
+				home,
+				tc.primary,
+				&paths.MapEnv{},
+				warningFilter{configPath: "/cfg/pfm.config.json"},
+			)
 			want := "doctor: vscode settings=" + settings + " profile=PFM(" + profileState + ") default=(none)"
 			if profileFix != "" {
 				want += " — " + profileFix + settingsHint
@@ -213,7 +241,13 @@ func TestDoctorVSCodeConflictingProfileFixWorksVerbatim(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			warnings := printVSCodeDoctor(&out, home, "primary", warningFilter{configPath: "/cfg/pfm.config.json"})
+			warnings := printVSCodeDoctor(
+				&out,
+				home,
+				"primary",
+				&paths.MapEnv{},
+				warningFilter{configPath: "/cfg/pfm.config.json"},
+			)
 			got := out.String()
 			profileRow := "doctor: vscode settings=" + settings + " profile=PFM(relinquished) default=PFM"
 			wantWarnings := 1
@@ -308,7 +342,7 @@ func TestDoctorVSCodeWarningsCarryIDsAndHonourIgnoreWarnings(t *testing.T) {
 			want: func(root, settings string) []string {
 				return []string{
 					`doctor: config doctor.ignoreWarnings has unknown warning id "vscode-lnk" in ` + configPath +
-						" — it silences nothing; known ids: vscode-index, vscode-inspect, vscode-link, vscode-settings\n",
+						" — it silences nothing; known ids: git-push, leak-terms, theme-unowned, vscode-index, vscode-inspect, vscode-link, vscode-settings, vscode-unlinked\n",
 					linkRow(root) + " — run pfm install --yes" + hint("vscode-link", configPath),
 					settingsRow(settings) + " — run pfm install --yes --vscode" + hint("vscode-settings", configPath),
 				}
@@ -343,7 +377,8 @@ func TestDoctorVSCodeWarningsCarryIDsAndHonourIgnoreWarnings(t *testing.T) {
 			}
 
 			var out bytes.Buffer
-			warnings := printIgnorableDoctor(&out, test.machine, home, "primary")
+			filter, warnings := newWarningFilter(&out, test.machine)
+			warnings += printIgnorableDoctor(&out, filter, home, "primary", &paths.MapEnv{})
 			output := out.String()
 			for _, line := range test.want(root, settings) {
 				if !strings.Contains(output, line) {

@@ -1,0 +1,36 @@
+{
+  "settings": {
+    "cleanupPeriodDays": 36500,
+    "env": {
+      "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-5-5",
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000",
+      "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1",
+      "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0",
+      "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "8",
+      "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "9007199254740991",
+      "CLAUDE_CODE_NATIVE_CURSOR": "1",
+      "CLAUDE_CODE_TMUX_TRUECOLOR": "1"
+    },
+    "outputStyle": "default",
+    "showThinkingSummaries": true,
+    "tui": "fullscreen"
+  },
+  "registry": {
+    "leftArrowOpensAgents": false
+  },
+  "reasons": {
+    "settings.cleanupPeriodDays": "Keep managed transcripts.",
+    "settings.env.ANTHROPIC_SMALL_FAST_MODEL": "Run Claude Code's helper calls (page summaries, web search, titles) on Haiku 5.5, named by full model id whatever a gateway's alias table says.",
+    "settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW": "Set the auto-compact window the compaction plugin reads.",
+    "settings.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "Enable function hooks for pfm's Claude plugins.",
+    "settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "Keep experimental agent teams off.",
+    "settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "Lift the agent nesting limit from Claude Code's 3, too shallow for agents that spawn agents.",
+    "settings.env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "Lift the web search ceiling.",
+    "settings.env.CLAUDE_CODE_NATIVE_CURSOR": "Blink the terminal's own cursor at the prompt, so the cursor style a user sets in the terminal shows instead of the one Claude Code draws.",
+    "settings.env.CLAUDE_CODE_TMUX_TRUECOLOR": "Preserve color under tmux.",
+    "settings.outputStyle": "Use the managed output style.",
+    "settings.showThinkingSummaries": "Show the model's thinking summaries.",
+    "settings.tui": "Run Claude Code's fullscreen renderer; a seat carrying it also gets CLAUDE_CODE_NO_FLICKER (noFlicker), and \"tui\": \"default\" or null in claude.settings turns it off.",
+    "registry.leftArrowOpensAgents": "Keep ← on an empty prompt from opening the agents view."
+  }
+}

@@ -480,8 +480,6 @@ func evidence(c *harness.Ctx, records []string) {
 		"chats.txt":     {"pfm", "chat", "ls", "--all"},
 		"sessions.json": {"herdr", "session", "list", "--json"},
 		"panes.json":    {"herdr", "pane", "list"},
-		// Each process's state: a stopped one (T) is alive in processes.txt yet runs nothing.
-		"ps.txt": {"ps", "-A", "-o", "pid,ppid,stat,command"},
 	}
 	for name, argv := range reads {
 		r := c.Read(argv...)
@@ -492,4 +490,13 @@ func evidence(c *harness.Ctx, records []string) {
 		fmt.Fprintf(&table, "%d %d %s\n", p.Pid, p.Ppid, p.Args)
 	}
 	c.Artifact("processes.txt", []byte(table.String()))
+}
+
+// jobsAtRest waits for pfm's name-sync and schedule jobs to be at rest before a step installs or
+// uninstalls: either is refused beside a running job, and the timed name-sync job starts on its own.
+func jobsAtRest(c *harness.Ctx, before string) {
+	c.Poll("pfm's name-sync and schedule jobs at rest before "+before, 20*time.Second, func() (bool, string) {
+		running := jobsRunning(c)
+		return running == "", running
+	})
 }

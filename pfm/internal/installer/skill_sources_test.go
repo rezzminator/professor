@@ -725,13 +725,21 @@ func TestSourceFetchedSkillsRegistryWithoutTheObjectRetiresNothing(t *testing.T)
 // TestShippedSkillSourcesRegistryLoads loads the clone's real
 // templates/global/skills/sources.json the way pfm install does: a registry
 // that does not parse, or an entry without a usable repo, would pass every
-// fixture-driven test here and then fail pfm install on every host.
+// fixture-driven test here and then fail pfm install on every host. The
+// registry is loaded from a copy alone, so a template-skill directory a host
+// leaves untracked beside it never reads as a clash.
 func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
 	_, source, _, ok := goRuntime.Caller(0)
 	if !ok {
 		t.Fatal("find test source")
 	}
-	repo := filepath.Join(filepath.Dir(source), "..", "..", "..")
+	shipped := filepath.Join(filepath.Dir(source), "..", "..", "..", skillSourcesRelative)
+	body, err := os.ReadFile(shipped)
+	if err != nil {
+		t.Fatalf("read the shipped registry %s: %v", shipped, err)
+	}
+	repo := t.TempDir()
+	writeFixture(t, filepath.Join(repo, skillSourcesRelative), string(body))
 	sources, present, _, err := loadSkillSources(repo, ThemeReleaseURL(""))
 	if err != nil || !present || len(sources) == 0 {
 		t.Fatalf("load %s: present=%t sources=%d err=%v", skillSourcesRelative, present, len(sources), err)

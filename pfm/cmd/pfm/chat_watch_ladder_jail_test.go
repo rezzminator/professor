@@ -51,6 +51,7 @@ func newWatchLadder(t *testing.T) *watchLadder {
 	ladder := &watchLadder{
 		t:         t,
 		jail:      jail,
+		clock:     newLadderTime(),
 		configDir: filepath.Join(jail.root, "cc"),
 		scenario:  filepath.Join(jail.root, "scenario.json"),
 	}
@@ -85,16 +86,16 @@ func TestWatchLadderFollowsOneSeatThroughTurnsToItsExit(t *testing.T) {
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions")
-	watch.expect("SEEN lad-a idle idle_seconds=")
+	watch.expect("SEEN lad-a idle idle_seconds=0")
 	release := seat.hold()
 	watch.poll()
 	watch.expect("WORKING lad-a")
 	release()
 	watch.poll()
-	watch.expect("IDLE lad-a idle_seconds=")
+	watch.expect("IDLE lad-a idle_seconds=10")
 	seat.turn() // begins and ends between two polls
 	watch.poll()
-	watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+	watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 	watch.poll()
 	watch.expect()
 	seat.exit()
@@ -113,7 +114,7 @@ func TestWatchLadderOnceAnnouncesTheFirstIdleAndStops(t *testing.T) {
 	watch.expect()
 	release()
 	watch.poll()
-	watch.expect("IDLE lad-a idle_seconds=")
+	watch.expect("IDLE lad-a idle_seconds=10")
 	watch.expectEnded(0)
 }
 
@@ -123,9 +124,9 @@ func TestWatchLadderCompactionIsNotAnEnd(t *testing.T) {
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
 	watch := ladder.watch("lad-a", "--transitions")
-	watch.expect("SEEN lad-a idle")
+	watch.expect("SEEN lad-a idle idle_seconds=0")
 	seat.typeLine("/compact")
-	seat.waitTranscript("compact_boundary")
+	seat.waitTranscript(`"isCompactSummary":true`) // the last record a compaction writes
 	watch.poll()
 	lines := strings.Fields(watch.stdout.String())
 	for _, word := range []string{"EXIT", "DEAD", "ERROR"} {
@@ -138,7 +139,7 @@ func TestWatchLadderCompactionIsNotAnEnd(t *testing.T) {
 	watch.read = len(strings.Split(strings.TrimSuffix(watch.stdout.String(), "\n"), "\n"))
 	seat.turn()
 	watch.poll()
-	watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+	watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 }
 
 // Rung: the tmux socket vanishing. A server killed with it is the seat's
@@ -151,7 +152,7 @@ func TestWatchLadderASocketThatVanishes(t *testing.T) {
 		ladder := newWatchLadder(t)
 		seat := ladder.start("lad-a")
 		watch := ladder.watch("lad-a", "--transitions")
-		watch.expect("SEEN lad-a idle")
+		watch.expect("SEEN lad-a idle idle_seconds=0")
 		if output, err := seat.tmux("kill-server"); err != nil {
 			t.Fatalf("kill-server: %v: %s", err, output)
 		}
@@ -164,7 +165,7 @@ func TestWatchLadderASocketThatVanishes(t *testing.T) {
 		ladder := newWatchLadder(t)
 		seat := ladder.start("lad-a")
 		watch := ladder.watch("lad-a", "--transitions")
-		watch.expect("SEEN lad-a idle")
+		watch.expect("SEEN lad-a idle idle_seconds=0")
 		release := seat.hold()
 		watch.poll()
 		watch.expect("WORKING lad-a")
@@ -180,7 +181,7 @@ func TestWatchLadderASocketThatVanishes(t *testing.T) {
 		watch.expect()
 		release()
 		watch.poll()
-		watch.expect("IDLE lad-a idle_seconds=")
+		watch.expect("IDLE lad-a idle_seconds=10")
 		seat.signalServer(syscall.SIGTERM)
 		seat.waitGone()
 		watch.poll()
@@ -198,19 +199,19 @@ func TestWatchLadderARenameKeepsTheNamedWatchAndMovesTheGlob(t *testing.T) {
 	seat := ladder.start("lad-a")
 	named := ladder.watch("lad-a", "--transitions")
 	glob := ladder.watch("lad-*", "--transitions")
-	named.expect("SEEN lad-a idle")
-	glob.expect("SEEN lad-a idle")
+	named.expect("SEEN lad-a idle idle_seconds=0")
+	glob.expect("SEEN lad-a idle idle_seconds=0")
 	seat.typeLine("/rename lad-b")
 	seat.waitTranscript(`"customTitle":"lad-b"`)
 	named.poll()
 	named.expect()
 	glob.poll()
-	glob.expect("DEAD lad-a", "SEEN lad-b idle")
+	glob.expect("DEAD lad-a", "SEEN lad-b idle idle_seconds=10")
 	seat.turn()
 	named.poll()
-	named.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+	named.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 	glob.poll()
-	glob.expect("WORKING lad-b", "IDLE lad-b idle_seconds=")
+	glob.expect("WORKING lad-b", "IDLE lad-b idle_seconds=10")
 }
 
 // Rung: a respawn under the same name between two polls is the old seat's
@@ -221,15 +222,15 @@ func TestWatchLadderARespawnUnderTheSameNameIsTheOldSeatsExit(t *testing.T) {
 	first := ladder.start("lad-a")
 	named := ladder.watch("lad-a", "--transitions")
 	glob := ladder.watch("lad-*", "--transitions")
-	named.expect("SEEN lad-a idle")
-	glob.expect("SEEN lad-a idle")
+	named.expect("SEEN lad-a idle idle_seconds=0")
+	glob.expect("SEEN lad-a idle idle_seconds=0")
 	first.exit()
 	ladder.start("lad-a")
 	named.poll()
 	named.expect("EXIT lad-a")
 	named.expectEnded(codeDeadChat)
 	glob.poll()
-	glob.expect("EXIT lad-a", "SEEN lad-a idle")
+	glob.expect("EXIT lad-a", "SEEN lad-a idle idle_seconds=10")
 }
 
 // Rung: two seats with one name. A named watch refuses the ambiguity; a glob
@@ -240,18 +241,20 @@ func TestWatchLadderTwoSeatsWithOneName(t *testing.T) {
 	first := ladder.start("lad-a")
 	second := ladder.start("lad-a")
 	named := ladder.watch("lad-a", "--transitions")
-	named.expect("ERROR lad-a ")
+	named.expect(`ERROR lad-a "lad-a" matches 2 chats in the roster; address by thread id: ` +
+		`thread id c1a00000-0000-4000-8000-000000000001 (socket cc-1700000000-1-1, pane %0, name "lad-a") ` +
+		`thread id c1a00000-0000-4000-8000-000000000002 (socket cc-1700000000-2-1, pane %0, name "lad-a")`)
 	named.expectEnded(1)
 	hooks := filepath.Join(ladder.jail.root, "hooks.log")
 	hook := `echo "$CC_CHAT_STATE $CC_CHAT_SESSION_ID" >> ` + hooks
 	glob := ladder.watch("lad-*", "--transitions", "--on-idle", hook, "--on-exit", hook)
-	glob.expect("SEEN lad-a idle", "SEEN lad-a idle")
+	glob.expect("SEEN lad-a idle idle_seconds=0", "SEEN lad-a idle idle_seconds=0")
 	release := second.hold()
 	glob.poll()
 	glob.expect("WORKING lad-a")
 	release()
 	glob.poll()
-	glob.expect("IDLE lad-a idle_seconds=")
+	glob.expect("IDLE lad-a idle_seconds=10")
 	first.exit()
 	glob.poll()
 	glob.expect("EXIT lad-a")
@@ -271,13 +274,13 @@ func TestWatchLadderAGlobAdoptsASeatBornLater(t *testing.T) {
 	ladder := newWatchLadder(t)
 	ladder.start("lad-a")
 	glob := ladder.watch("lad-*", "--transitions")
-	glob.expect("SEEN lad-a idle")
+	glob.expect("SEEN lad-a idle idle_seconds=0")
 	born := ladder.start("lad-b")
 	glob.poll()
-	glob.expect("SEEN lad-b idle")
+	glob.expect("SEEN lad-b idle idle_seconds=10")
 	born.turn()
 	glob.poll()
-	glob.expect("WORKING lad-b", "IDLE lad-b idle_seconds=")
+	glob.expect("WORKING lad-b", "IDLE lad-b idle_seconds=10")
 }
 
 // Rung: a transcript rotated (/clear) or truncated never ends the watch, and
@@ -289,11 +292,11 @@ func TestWatchLadderARotatedOrTruncatedTranscriptKeepsTheWatch(t *testing.T) {
 			ladder := newWatchLadder(t)
 			seat := ladder.start("lad-a")
 			watch := ladder.watch("lad-a", "--transitions")
-			watch.expect("SEEN lad-a idle")
+			watch.expect("SEEN lad-a idle idle_seconds=0")
 			switch fault {
 			case "clear":
 				seat.typeLine("/clear")
-				seat.waitPane("❯")
+				seat.waitProject(`"customTitle":"lad-a"`, seat.transcript) // the successor's title
 			case "truncate-to-title":
 				content, err := os.ReadFile(seat.transcript)
 				if err != nil {
@@ -311,6 +314,7 @@ func TestWatchLadderARotatedOrTruncatedTranscriptKeepsTheWatch(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			seat.pin() // a truncation stamps the file with the wall clock
 			watch.poll()
 			for _, line := range strings.Split(watch.stdout.String(), "\n") {
 				for _, word := range []string{"EXIT ", "DEAD ", "ERROR "} {
@@ -325,38 +329,26 @@ func TestWatchLadderARotatedOrTruncatedTranscriptKeepsTheWatch(t *testing.T) {
 				}
 			}
 			// The fault itself may read as a turn (the newest answer changed);
-			// what must hold is that the next real turn is announced, once.
+			// what must hold is that the next real turn is announced, once, last.
 			before := watch.stdout.String()
 			seat.ladder.replies++
 			reply := fmt.Sprintf("reply-%d", seat.ladder.replies)
 			seat.typeLine(`mock-engine: [{"type":"turn","reply":"` + reply + `","busy_ms":0}]`)
-			waitForReply(t, filepath.Dir(seat.transcript), reply)
+			seat.waitProject(answered(reply), "")
 			watch.poll()
-			after := strings.TrimPrefix(watch.stdout.String(), before)
-			if strings.Count(after, "IDLE lad-a idle_seconds=") != 1 || !strings.HasPrefix(
-				after[strings.LastIndex(strings.TrimSuffix(after, "\n"), "\n")+1:], "IDLE lad-a") {
-				t.Fatalf("after %s the next turn was not announced once, last: %q (all %q, stderr %q)",
-					fault, after, watch.stdout.String(), watch.stderr.String())
+			after := strings.Split(strings.TrimSuffix(strings.TrimPrefix(watch.stdout.String(), before), "\n"), "\n")
+			const idle = "IDLE lad-a idle_seconds=10"
+			idles := 0
+			for _, line := range after {
+				if line == idle {
+					idles++
+				}
+			}
+			if idles != 1 || after[len(after)-1] != idle {
+				t.Fatalf("after %s the next turn was not announced once, last, as %q: %q (all %q, stderr %q)",
+					fault, idle, after, watch.stdout.String(), watch.stderr.String())
 			}
 		})
-	}
-}
-
-// waitForReply waits until any transcript in a project directory holds reply.
-func waitForReply(t *testing.T, project, reply string) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		matches, _ := filepath.Glob(filepath.Join(project, "*.jsonl"))
-		for _, path := range matches {
-			if content, err := os.ReadFile(path); err == nil && strings.Contains(string(content), answered(reply)) {
-				return
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no transcript in %s ever held %q", project, reply)
-		}
-		time.Sleep(25 * time.Millisecond)
 	}
 }
 
@@ -369,7 +361,7 @@ func TestWatchLadderAFrozenTmuxServerIsNeverAnExit(t *testing.T) {
 		ladder := newWatchLadder(t)
 		seat := ladder.start("lad-a")
 		watch := ladder.watch("lad-a", "--transitions")
-		watch.expect("SEEN lad-a idle")
+		watch.expect("SEEN lad-a idle idle_seconds=0")
 		seat.signalServer(syscall.SIGSTOP)
 		thawed := false
 		t.Cleanup(func() {
@@ -385,14 +377,14 @@ func TestWatchLadderAFrozenTmuxServerIsNeverAnExit(t *testing.T) {
 		watch.expect()
 		seat.turn()
 		watch.poll()
-		watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+		watch.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 	})
 	t.Run("stays frozen", func(t *testing.T) {
 		ladder := newWatchLadder(t)
 		seat := ladder.start("lad-a")
 		bystander := ladder.start("lad-b")
 		watch := ladder.watch("lad-a", "lad-b", "--transitions")
-		watch.expect("SEEN lad-a idle", "SEEN lad-b idle")
+		watch.expect("SEEN lad-a idle idle_seconds=0", "SEEN lad-b idle idle_seconds=0")
 		release := seat.hold()
 		watch.poll()
 		watch.expect("WORKING lad-a")
@@ -404,7 +396,7 @@ func TestWatchLadderAFrozenTmuxServerIsNeverAnExit(t *testing.T) {
 		seat.signalServer(syscall.SIGSTOP)
 		t.Cleanup(func() { seat.signalServer(syscall.SIGCONT) })
 		watch.poll()
-		watch.expect("IDLE lad-a idle_seconds=")
+		watch.expect("IDLE lad-a idle_seconds=10")
 		// Now nothing about the seat can be read: no line, then an ERROR —
 		// never an EXIT nobody saw — while the bystander is still followed.
 		seat.killEngine()
@@ -418,10 +410,10 @@ func TestWatchLadderAFrozenTmuxServerIsNeverAnExit(t *testing.T) {
 		if got != `SEEN lad-a idle idle_seconds=0
 SEEN lad-b idle idle_seconds=0
 WORKING lad-a
-IDLE lad-a idle_seconds=0
+IDLE lad-a idle_seconds=10
 ERROR lad-a tmux server unreadable, so whether the chat lives is unknown: cc-1700000000-1-1: tmux server did not answer within 2s: cc-1700000000-1-1 (3 polls in a row)
 WORKING lad-b
-IDLE lad-b idle_seconds=2
+IDLE lad-b idle_seconds=10
 ` {
 			t.Fatalf(
 				"a server unreadable for %d polls: lines %q, want lad-a's ERROR (never EXIT) and lad-b still followed",
@@ -439,13 +431,13 @@ func TestWatchLadderTwoWatchersOnOneTargetBothHearEveryEvent(t *testing.T) {
 	seat := ladder.start("lad-a")
 	first := ladder.watch("lad-a", "--transitions")
 	second := ladder.watch("lad-a", "--transitions")
-	first.expect("SEEN lad-a idle")
-	second.expect("SEEN lad-a idle")
+	first.expect("SEEN lad-a idle idle_seconds=0")
+	second.expect("SEEN lad-a idle idle_seconds=0")
 	seat.turn()
 	first.poll()
 	second.poll()
-	first.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
-	second.expect("WORKING lad-a", "IDLE lad-a idle_seconds=")
+	first.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
+	second.expect("WORKING lad-a", "IDLE lad-a idle_seconds=10")
 	seat.exit()
 	second.poll()
 	first.poll()
@@ -453,24 +445,25 @@ func TestWatchLadderTwoWatchersOnOneTargetBothHearEveryEvent(t *testing.T) {
 	second.expect("EXIT lad-a")
 }
 
-// Rung: --quiet-after announces a hung turn once, and its end.
+// Rung: --quiet-after announces a hung turn once, and its end. The turn's
+// transcript sits unchanged one poll (10 s, under the 20 s), then two (20 s,
+// at it).
 func TestWatchLadderQuietAfterAnnouncesAHungTurnOnce(t *testing.T) {
 	testjail.TmuxServer(t)
 	ladder := newWatchLadder(t)
 	seat := ladder.start("lad-a")
-	watch := ladder.watch("lad-a", "--transitions", "--quiet-after", "1")
-	watch.expect("SEEN lad-a idle")
+	watch := ladder.watch("lad-a", "--transitions", "--quiet-after", "20")
+	watch.expect("SEEN lad-a idle idle_seconds=0")
 	release := seat.hold()
 	watch.poll()
 	watch.expect("WORKING lad-a")
-	time.Sleep(1100 * time.Millisecond)
 	watch.poll()
-	watch.expect("QUIET lad-a quiet_seconds=")
+	watch.expect("QUIET lad-a quiet_seconds=20")
 	watch.poll()
 	watch.expect()
 	release()
 	watch.poll()
-	watch.expect("IDLE lad-a idle_seconds=")
+	watch.expect("IDLE lad-a idle_seconds=10")
 }
 
 // Rung: --on-idle and --on-exit run once per event, with the event's seat.
@@ -481,7 +474,7 @@ func TestWatchLadderHooksRunOncePerEvent(t *testing.T) {
 	hooks := filepath.Join(ladder.jail.root, "hooks.log")
 	hook := `echo "$CC_CHAT_NAME $CC_CHAT_STATE $CC_CHAT_SESSION_ID" >> ` + hooks
 	watch := ladder.watch("lad-a", "--on-idle", hook, "--on-exit", hook)
-	watch.expect("IDLE lad-a idle_seconds=")
+	watch.expect("IDLE lad-a idle_seconds=0")
 	watch.poll()
 	watch.expect()
 	seat.exit()
@@ -503,7 +496,7 @@ func TestWatchLadderCancelEndsTheWatchWithoutAnEvent(t *testing.T) {
 	ladder := newWatchLadder(t)
 	ladder.start("lad-a")
 	watch := ladder.watch("lad-*", "--transitions")
-	watch.expect("SEEN lad-a idle")
+	watch.expect("SEEN lad-a idle idle_seconds=0")
 	watch.cancel()
 	select {
 	case watch.code = <-watch.done:

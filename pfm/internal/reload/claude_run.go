@@ -36,16 +36,17 @@ func claudeSpawn(request Request) (action.ClaudeSpawn, error) {
 		return action.ClaudeSpawn{}, fmt.Errorf("resolve claude respawn effort: %w", err)
 	}
 	spawn := action.ClaudeSpawn{
-		Purpose:    action.PurposeResume,
-		Account:    request.Account,
-		Cache1H:    &request.Cache1H,
-		Home:       request.Home,
-		Machine:    request.Machine,
-		Model:      request.Model,
-		Effort:     effort,
-		PromptFile: request.PromptChannel,
-		Envs:       request.Envs,
-		Name:       request.Name,
+		Purpose:        action.PurposeResume,
+		Account:        request.Account,
+		Cache1H:        &request.Cache1H,
+		Home:           request.Home,
+		Machine:        request.Machine,
+		Model:          request.Model,
+		Effort:         effort,
+		PromptFile:     request.PromptChannel,
+		Envs:           request.Envs,
+		ClaudeSettings: request.ClaudeSettings,
+		Name:           request.Name,
 	}
 	if request.fresh {
 		spawn.Purpose, spawn.SessionID = action.PurposeInteractive, request.SessionID

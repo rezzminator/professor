@@ -111,16 +111,36 @@ func TestConfigClaude(t *testing.T) {
 			t.Errorf("machine output lacks %q", want)
 		}
 	}
+	if !strings.HasSuffix(stdout.String(), "\nextra claude.settings: none\n") {
+		t.Errorf("machine output does not end with the empty extra section:\n%s", stdout.String())
+	}
 	stdout.Reset()
 	stderr.Reset()
+	// claude.settings keys no knob names reach every launch, so the view lists them after the rows.
+	runtime.Config.Claude.Settings = map[string]any{
+		"env": map[string]any{
+			"MY_TOOL_FLAG":               "on",
+			"MY_TOOL_OFF":                nil,
+			"CLAUDE_CODE_TMUX_TRUECOLOR": nil,
+		},
+		"spinnerTipsEnabled": false,
+	}
 	if code := runConfig([]string{"claude", "--account", "2"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("account code=%d stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(
-		stdout.String(),
-		"configDir wire=env target=CLAUDE_CONFIG_DIR value="+machine.Accounts[1].ConfigDir+" source=account",
-	) {
-		t.Errorf("account output=%s", stdout.String())
+	for _, want := range []string{
+		"configDir wire=env target=CLAUDE_CONFIG_DIR value=" + machine.Accounts[1].ConfigDir + " source=account\n",
+		"\nenv.CLAUDE_CODE_TMUX_TRUECOLOR wire=settings target=env.CLAUDE_CODE_TMUX_TRUECOLOR value=unset source=config\n",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("account output lacks %q:\n%s", want, stdout.String())
+		}
+	}
+	wantExtra := "\nextra claude.settings: 2 (no knob above; every launch carries them)\n" +
+		"env.MY_TOOL_FLAG wire=settings target=env.MY_TOOL_FLAG value=on source=config\n" +
+		"spinnerTipsEnabled wire=settings target=spinnerTipsEnabled value=false source=config\n"
+	if !strings.HasSuffix(stdout.String(), wantExtra) {
+		t.Errorf("account output does not end with %q:\n%s", wantExtra, stdout.String())
 	}
 	stdout.Reset()
 	stderr.Reset()

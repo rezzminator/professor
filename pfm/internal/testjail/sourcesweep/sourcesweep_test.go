@@ -17,6 +17,9 @@ func TestSkipDirLeavesDotAndGeneratedDirectories(t *testing.T) {
 		{"harness-prompts/generatedx", false},
 		{"internal/harness-prompts/generated", false},
 		{"testdata", false},
+		{"tmp", true},
+		{"internal/tmp", false},
+		{"tmpx", false},
 	} {
 		if got := SkipDir(tc.rel); got != tc.want {
 			t.Errorf("SkipDir(%q) = %t, want %t", tc.rel, got, tc.want)

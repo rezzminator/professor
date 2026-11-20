@@ -86,19 +86,52 @@ func TestPickerOpensOnItsPlaceWithNestedChatsAndNothingElse(t *testing.T) {
 }
 
 func TestPickerOpensOnThePlaceWearingItsHerdrSpaceLabel(t *testing.T) {
-	for _, test := range []struct{ space, place, launch string }{
+	for _, test := range []struct {
+		space, place, launch string
+		spaces               map[string]string
+	}{
 		{space: "ops", place: "/src/ops", launch: "/src/ops"},
+		// A space whose chats the rows do not list still owns its label, as
+		// Herdr placement reads it: the folder place namesake is not it.
+		{space: "ops", place: "/src/app", launch: "/src/app", spaces: map[string]string{"capped": "ops"}},
 		{space: "nowhere", place: "/src/app", launch: "/src/app"}, // no such place: compose's choice stands
 		{space: "", place: "/src/app", launch: "/src/app"},
+		// A picker in a space opens on the space's folder, where its new chat
+		// runs: a chat is in a space only by `pfm chat space`.
+		{space: "glass", place: "/src/app", launch: "/src/app"},
 	} {
 		rows, dirs := placeFixtureRows()
+		rows = append(rows, compose.Row{
+			Kind: compose.LiveClaude, ID: "epic", Name: "epic", Project: "app", Space: "glass", CWD: "/src/app",
+			ActivityNS: 20,
+		})
 		model := NewModel(Snapshot{
 			Rows: rows, ProjectDirs: dirs, Home: "/jail/me", MergeNewChat: true, HerdrSpace: test.space,
-			PrimaryAccount: 1, AccountIDs: []int{1}, NowNS: fixtureNowNS, Width: 120, Height: 30,
+			Spaces: test.spaces, PrimaryAccount: 1, AccountIDs: []int{1}, NowNS: fixtureNowNS, Width: 120, Height: 30,
 		})
 		if model.place != test.place || launchRow(t, model).CWD != test.launch {
 			t.Fatalf("space %q: place %q launch %q, want %q and %q",
 				test.space, model.place, launchRow(t, model).CWD, test.place, test.launch)
+		}
+		if test.space == "glass" {
+			// A new chat never joins a space: started from the space's
+			// workspace, the everywhere stop or the space's chip, it runs in
+			// the space's folder and its row sits under the folder's place.
+			for _, stop := range []string{allPlaceRoot, "space:glass"} {
+				model.place = stop
+				model.retargetLaunchRows()
+				if row := launchRow(t, model); row.Project != "app" || row.CWD != "/src/app" {
+					t.Fatalf("launch row on %s = %s (%s), want app in /src/app", stop, row.CWD, row.Project)
+				}
+			}
+			if root := model.effectivePlaceRootForPaths(); root != "/src/app" {
+				t.Fatalf("a typed path on the space chip is read from %q, want its folder /src/app", root)
+			}
+			// A space the rail no longer holds stands for no folder: the opening place anchors.
+			model.place = "space:gone"
+			if root := model.effectivePlaceRootForPaths(); root != "/src/app" {
+				t.Fatalf("a typed path on a vanished space is read from %q, want the opening place /src/app", root)
+			}
 		}
 	}
 }

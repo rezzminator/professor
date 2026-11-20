@@ -127,6 +127,7 @@ func newProjectUpdatesStore(t *testing.T) string {
 		"VERSION":                             "0.1.0\n",
 		"templates/project/settings.json":     "{}\n",
 		"templates/project/rumdl-policy.toml": "[global]\n",
+		"templates/project/pfm.config.json":   "{}\n",
 	} {
 		writeProjectUpdatesFixture(t, store, relative, content)
 	}

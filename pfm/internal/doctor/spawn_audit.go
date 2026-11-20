@@ -90,7 +90,7 @@ func classifySpawn(
 		return spawnUnverified, reason + " — original launch payload unverified"
 	}
 	missing := ""
-	switch promptPolicyName(prefs.SystemPrompt) {
+	switch claudelaunch.PromptMode(home, prefs) {
 	case config.SystemPromptProfessor:
 		if parsed.PromptFile == "" {
 			missing = "no --system-prompt-file prompt material"
@@ -106,14 +106,17 @@ func classifySpawn(
 			missing = "lean prompt missing from the --settings payload"
 		}
 	}
-	if missing == "" && (parsed.Settings == nil || parsed.Settings["outputStyle"] != "default") {
-		missing = "missing --settings outputStyle default"
+	// A project's or caller's own settings may change a default's value, never drop it.
+	for _, key := range claudelaunch.DefaultSettingKeys() {
+		if _, present := parsed.Settings[key]; missing == "" && !present {
+			missing = "missing --settings " + key + " from the launch defaults"
+		}
 	}
-	if missing == "" && !sameSpawnHooks(parsed.Hooks, claudelaunch.HookTemplates(home)) {
-		missing = "hook set differs from the registry"
+	if missing == "" && !carriesSpawnHooks(parsed.Hooks, claudelaunch.HookTemplates(home)) {
+		missing = "registry hooks missing"
 	}
 	if missing == "" {
-		switch promptPolicyName(prefs.SystemPrompt) {
+		switch claudelaunch.PromptMode(home, prefs) {
 		case config.SystemPromptProfessor:
 			return spawnInjected, "argv carries --system-prompt-file and registry payload"
 		case config.SystemPromptLean:
@@ -129,10 +132,9 @@ func classifySpawn(
 	return spawnViolation, missing + " — some spawn site bypassed the door"
 }
 
-func sameSpawnHooks(actual, expected []claudelaunch.Hook) bool {
-	if len(actual) != len(expected) {
-		return false
-	}
+// carriesSpawnHooks reports whether actual holds every expected hook as often as expected does: a
+// project's or caller's own settings add hooks after the registry's, never in place of them.
+func carriesSpawnHooks(actual, expected []claudelaunch.Hook) bool {
 	type key struct {
 		event, matcher, command string
 		async                   bool
@@ -145,7 +147,7 @@ func sameSpawnHooks(actual, expected []claudelaunch.Hook) bool {
 		counts[key{hook.Event, hook.Matcher, hook.Command, hook.Async}]--
 	}
 	for _, count := range counts {
-		if count != 0 {
+		if count > 0 {
 			return false
 		}
 	}
@@ -262,9 +264,9 @@ func printSpawnAuditDoctorWithClock(
 	clk clock.Clock,
 ) int {
 	prefs := machine.EffectiveClaude(primary)
-	policy := promptPolicyName(prefs.SystemPrompt)
+	policy := claudelaunch.PromptMode(resolved.Home, prefs)
 	for _, account := range machine.Accounts {
-		if promptPolicyName(machine.EffectiveClaude(account.ID).SystemPrompt) != policy {
+		if claudelaunch.PromptMode(resolved.Home, machine.EffectiveClaude(account.ID)) != policy {
 			policy = "per-account"
 			break
 		}
@@ -394,13 +396,6 @@ func spawnAuditUnreadWarnings(stdout io.Writer, unread []string) int {
 		strings.Join(unread, "; "),
 	)
 	return 1
-}
-
-func promptPolicyName(value string) string {
-	if value == "" {
-		return config.SystemPromptProduction
-	}
-	return value
 }
 
 // spawnDoorExecutable locates the pfm binary whose spawn doors the audit

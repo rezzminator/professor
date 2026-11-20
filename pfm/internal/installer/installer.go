@@ -4,6 +4,16 @@
 // herdr_claude.go: Herdr's own Claude integration, once per Claude settings store.
 // claude_plugins_unwire.go: uninstall takes back what install wrote into the Claude settings and plugin records.
 // log_root.go: install moves the logs pfm wrote before the log root into it, once.
+// claude_registry_defaults.go: install sets the launch defaults' registry values in each account's .claude.json.
+// claude_registry_keys.go: byte-preserving splices of one top-level key in a .claude.json.
+// install_config_seed.go: the config a first install seeds, less the new keys an older pfm refuses.
+// claude_plugins_submodule.go: whether a plugin's checkout is a submodule the source clone never initialised.
+// optional_deps.go: the record of the optional dependencies the last install found, which pfm doctor compares.
+// herdr_keys.go: pfm's Herdr keymap block (space walk, new chat in this space), adopting an identical hand-written table.
+// herdr_keymap.go: pfm's Herdr keymap, herdr.keys merged over it, and its one TOML render.
+// herdr_keys_status.go: the Herdr config's keymap as read from disk, each pfm mapping it lacks.
+// themes_unowned.go: shipped themes install left alone as the user's, and the stale copies it adopts instead.
+// vscode_presence.go: the VS Code product roots present on the host, and the window-reload line install --vscode ends on.
 package installer
 
 import (
@@ -277,6 +287,7 @@ func (installer *engine) install(ctx context.Context) error {
 	}
 	installer.deferFailure(installer.ensureClaudeEnv(false))
 	installer.deferFailure(installer.clearFullscreenAutoDisable())
+	installer.deferFailure(installer.wireClaudeRegistryDefaults())
 	installer.deferFailure(installer.wireCodexHooks())
 	installer.retireStateDirs()
 	installer.expireStateBackups()
@@ -288,10 +299,12 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireLogDefault())
 	installer.deferFailure(installer.wireShell(false))
 	installer.deferFailure(installer.wireHerdrShell(false))
+	installer.deferFailure(installer.wireHerdrKeys(false))
 	installer.deferFailure(installer.wireHerdrClaudeIntegration(ctx))
 	installer.deferFailure(installer.convergeHerdrIndicators(ctx))
 	installer.deferFailure(installer.wireVSCode())
 	installer.deferFailure(errors.Join(installer.writeUpdateMetadata(), installer.moveLogsToRoot()))
+	installer.deferFailure(installer.writeOptionalDepsRecord())
 	// Like a failed plugin install, a refused login default is reported at
 	// once and fails the run after every other step has landed.
 	installer.deferFailure(installer.wireLoginDefault(false))
@@ -663,6 +676,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.wireHerdrShell(true); err != nil {
+		return err
+	}
+	if err := installer.wireHerdrKeys(true); err != nil {
 		return err
 	}
 	installer.deferFailure(installer.wireLoginDefault(true))

@@ -56,7 +56,6 @@ internal/installer/files.go
 internal/installer/mcp.go
 internal/installer/settings.go
 internal/installer/settings_ownership.go
-internal/kill/doc.go
 internal/kill/lineage.go
 internal/kill/manager.go
 internal/kill/spawn.go

@@ -8,7 +8,7 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 - machine-global tier: agents, commands, rules and skills symlinked into `~/.claude/{agents,commands,rules,skills}` by `pfm install`, except `templates/global/codex/config.toml` (Codex defaults merged into each Codex home, existing settings winning), `templates/global/engine-sync.json` (engine-sync's policy, rendered with this host's targets into `~/.claude/engine-sync.json`), `templates/global/pcm/` (the global `pcm` agent's references, read through its link), `templates/global/plugin-ci/` (the workflow pair each plugin copies) and `templates/global/retired.json` (the retired lists every retirement step and the `RETIRED-NAME` scan read from the clone); a `from:` declaration renders into `templates/generated/agents/`, the fence gate holding it equal to a fresh render · `templates/global/`, `templates/generated/README.md`
 - project tier: templates `pfm init` scaffolds into an adopter once and pins in `{adopter}/.professor/baseline.json`; the adopter's local file is the truth, and pfm never rewrites it after init · `templates/project/`
-- project-tier update: `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / MOVED / LOCAL-DELETED`, each `UPDATED` with its upstream diff, plus a `RETIRED-NAME` section for project-file references to the retired lists' `names` (`templates/global/retired.json`), including CURRENT pins; non-CURRENT pins are left to their report rows; the adopter's session ports what applies, keeping its own edits, and closes every row with `pfm update {adopt|pin|ignore|drop|accept}` (`pin --keep` records a deliberate non-port, `accept` a retired-name hit that stays) until the report ends `clean` · `pfm/internal/professor/`, `pfm/internal/update/`
+- project-tier update: the adopter's session ports what `pfm doctor --project-updates` reports, keeping its own edits, and closes every row with a `pfm update` verb until the report ends `clean` · `pfm/internal/professor/`, `pfm/internal/update/`, rows and verbs `templates/global/commands/pfm.md`
 - host update: this host's pfm build, `pfm install` and plugin repoint, never the project-tier update · `.claude/commands/pfm/update.md`
 - placeholder: the registered token for a project-specific value in a template · `docs/PLACEHOLDERS.md`
 - spec: the adopter install interview and generation law · `docs/SETUP.md`
@@ -29,7 +29,8 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by engine-sync
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
-- plugins: the plugins professor tracks, each a git submodule of its own repo on `develop`, all but gpt-gateway listed in the marketplace; edits inside one leave this repo's status clean (`ignore = dirty`); an alpha `pfm install` installs every listed one as `{plugin}@professor` from a copy of its checkout in the pfm-owned `professor` directory marketplace `~/.local/share/professor-dev` (`claude.pluginCheckoutRoot` overriding), enabling those `claude.plugins` names · `plugins/{plugin}/`, `.gitmodules`
+- plugins: the plugins professor tracks, each a git submodule of its own repo on `develop` except the in-tree `plugins/professor/`, which ships in Professor's own release, all but gpt-gateway listed in the marketplace; edits inside a submodule leave this repo's status clean (`ignore = dirty`) · `plugins/{plugin}/`, `.gitmodules`
+- professor plugin: Professor's own in-tree plugin; its mod draws each sub-agent's row through the `AgentRow` ui.render hook from `pfm statusline --agents` · `plugins/professor/plugins/professor/`
 - CI: GitHub Actions — `ci.yml`, the one check; `publish.yml` publishes the release merge; `make release-check` runs the release checks locally · `.github/workflows/`, `.claude/rules/ci-workflows.md`, `Makefile`
 
 ## Path vars
@@ -67,11 +68,11 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 
 - `.claude/scripts/dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project]`, `iso gate` or `iso {run|sim} {command…}` runs in the fence against the checkout it is invoked from (the main checkout or a `.worktrees/{flight}/` worktree), mounted read-only; it needs a reachable docker daemon.
 - Narrowest test: `.claude/scripts/test.sh <path>[::<selector>]…`, the affected tests and static checks of the paths named; full gate, what done requires: `.claude/scripts/test.sh --full`.
-- `bash infra/fence/journey/run.sh --ci-linux|--ci-mac` (or both) boots no machine: `infra/fence/journey/ci-run.sh` pushes the on-disk checkout as a snapshot commit (plugins included) to a temporary `ci-tmp/{branch}-{stamp}-{id}` branch on origin, runs that OS's journey and installer e2e jobs on CI, keeps failed-step logs and journey artifacts in `{checkout}/tmp/journey/ci/{run id}/`, and deletes every temporary branch or names its delete command; a push, so only on the owner's ask in that turn.
+- `bash infra/fence/journey/run.sh --ci-linux|--ci-mac` runs that OS's journey and installer e2e jobs on CI from a temporary snapshot branch on origin; a push, so only on the owner's ask in that turn.
 
 ## CI
 
-- `.github/workflows/ci.yml` runs on a pull request into `main`: `gate ({unit|e2e|race|mirrors|rest})`, the fence gate's step list sliced by `PFM_GATE_ONLY`/`PFM_GATE_SKIP` and run natively on the runner; `macos ({unit|e2e})`; `journey ({linux|macos})`, pfm's end-to-end suite; `fresh-install ({ubuntu-latest|macos-15})`; `build`; `scan` (the HOL plugin scan, then every plugin's workflow shape, `scripts/check-plugin-workflows.py`); `release` (`make release`).
+- `.github/workflows/ci.yml` runs on a pull request into `main`: `gate ({unit|e2e|race|mirrors|rest})`, the fence gate's step list sliced by `PFM_GATE_ONLY`/`PFM_GATE_SKIP` and run natively on the runner; `macos ({unit|e2e})`; `journey ({linux|macos})`, pfm's end-to-end suite; `fresh-install ({ubuntu-latest|macos-15})`; `build`; `scan` (the HOL plugin scan, every plugin's workflow shape, `scripts/check-plugin-workflows.py`, then the in-tree professor plugin's checks, `make plugin-check`); `release` (`make release`).
 - Its `ci` job fails unless every other job succeeded and is `main`'s only required status check: no release merges or publishes until it is green.
 - `ci.yml` also runs on `workflow_dispatch` from any branch: `gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'` skips the named jobs (macOS alone: `gate journey fresh-install build scan release`), and `-f only='{job or entry},…'` runs just the jobs and matrix entries it names (`journey (linux),gate (e2e)`); no workflow runs on a push.
 - `.github/workflows/publish.yml` runs only when a pull request into `main` closes: on a merge, `publish` tags `v{VERSION}` on the merge commit and creates the GitHub release, and `verify` checks the published assets against `SHA256SUMS`, the binary's version and the note.
@@ -120,6 +121,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 - Every `catch` and `if err != nil` logs full context and handles or returns the error.
 - Validate at data entry.
+- Dependency runs one way: pfm and Professor may depend on a plugin; no plugin depends on pfm, Professor or another plugin, the professor plugin alone calling pfm.
 - Follow the package's existing naming and structure; a new directory or pattern only when the task requires it.
 
 ## Process

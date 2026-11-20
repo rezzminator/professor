@@ -9,126 +9,6 @@ import (
 	"testing"
 )
 
-func TestClaudeLaunchPreferencesMergeAndValidateByScope(t *testing.T) {
-	home := t.TempDir()
-	path := filepath.Join(t.TempDir(), FileName)
-	content := `{"version":2,"claude":{"webSearchesPerSession":7,"autoCompactWindow":50000,"helperModel":"claude-haiku-4-5","tmuxTruecolor":false,"cleanupPeriodDays":30,"requireManagedCleanup":false},"accounts":[{"id":1,"configDir":"~/one","claude":{"webSearchesPerSession":9,"autoCompactWindow":250000,"helperModel":"claude-sonnet-5-5","tmuxTruecolor":true,"cleanupPeriodDays":14,"requireManagedCleanup":true}},{"id":2,"configDir":"~/two"},{"id":3,"configDir":"~/three","claude":{"helperModel":"claude-haiku-4-5"}}]}`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		id        int
-		web       int64
-		window    int64
-		helper    string
-		truecolor bool
-		cleanup   int
-		managed   bool
-	}{
-		{1, 9, 250000, "claude-sonnet-5-5", true, 14, true},
-		{2, 7, 50000, "claude-haiku-4-5", false, 30, false},
-		{3, 7, 50000, "claude-haiku-4-5", false, 30, false},
-	} {
-		prefs := loaded.EffectiveClaude(tc.id)
-		if prefs.WebSearchesPerSession != tc.web || prefs.AutoCompactWindow != tc.window ||
-			prefs.HelperModel != tc.helper || prefs.TmuxTruecolor != tc.truecolor ||
-			prefs.CleanupPeriodDays != tc.cleanup || prefs.RequireManagedCleanup != tc.managed {
-			t.Fatalf("account %d launch preferences = %+v", tc.id, prefs)
-		}
-	}
-	if loaded.Source("claude.autoCompactWindow") != SourceFile ||
-		loaded.Source("accounts[0].claude.autoCompactWindow") != SourceFile {
-		t.Fatalf("auto compact window sources = %#v", loaded.Sources)
-	}
-	if loaded.Source("claude.helperModel") != SourceFile ||
-		loaded.Source("accounts[0].claude.helperModel") != SourceFile {
-		t.Fatalf("helper model sources = %#v", loaded.Sources)
-	}
-	encoded, err := Marshal(loaded, false)
-	if err != nil || strings.Count(string(encoded), `"autoCompactWindow"`) != 3 ||
-		strings.Count(string(encoded), `"helperModel"`) != 3 {
-		t.Fatalf("marshal auto compact window and helper model: err=%v config=%s", err, encoded)
-	}
-	if err := os.WriteFile(path, encoded, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.Source("accounts[2].claude.helperModel") != SourceFile {
-		t.Fatalf("explicit equal account helper model lost file provenance: %#v", reloaded.Sources)
-	}
-	// A later machine preference change must not retarget an explicit account preference.
-	reloaded.Claude.HelperModel = "claude-sonnet-5-5"
-	reloaded.Claude.PermissionMode = PermissionPrompt
-	reloaded.Claude.Binary = "claude-new"
-	if got := reloaded.EffectiveClaude(3); got.PermissionMode != PermissionPrompt || got.Binary != "claude-new" {
-		t.Fatalf("round trip materialized inherited account posture: %+v", got)
-	}
-	if got := reloaded.EffectiveClaude(3).HelperModel; got != "claude-haiku-4-5" {
-		t.Fatalf("machine edit changed explicit account helper model to %q", got)
-	}
-	for _, tc := range []struct{ content, want string }{
-		{`{"version":2,"claude":{"webSearchesPerSession":0}}`, "claude.webSearchesPerSession"},
-		{`{"version":2,"claude":{"autoCompactWindow":0}}`, "claude.autoCompactWindow must be at least 1"},
-		{`{"version":2,"claude":{"cleanupPeriodDays":0}}`, "claude.cleanupPeriodDays"},
-		{`{"version":2,"claude":{"helperModel":""}}`, "claude.helperModel must be a non-empty model name without whitespace"},
-		{`{"version":2,"claude":{"helperModel":"  "}}`, "claude.helperModel must be a non-empty model name without whitespace"},
-		{`{"version":2,"claude":{"helperModel":"claude haiku"}}`, "claude.helperModel must be a non-empty model name without whitespace"},
-		{`{"version":2,"claude":{"helperModel":5}}`, "helperModel"},
-		{`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"webSearchesPerSession":0}}]}`, "accounts[0].webSearchesPerSession"},
-		{`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"autoCompactWindow":0}}]}`, "accounts[0].autoCompactWindow must be at least 1"},
-		{`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"cleanupPeriodDays":0}}]}`, "accounts[0].cleanupPeriodDays"},
-		{`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"helperModel":""}}]}`, "accounts[0].helperModel must be a non-empty model name without whitespace"},
-	} {
-		if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := Load(path, home, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Fatalf("invalid %s error = %v", tc.want, err)
-		} else if (strings.Contains(tc.want, "autoCompactWindow") || strings.Contains(tc.want, "helperModel must be")) &&
-			err.Error() != "config "+path+": "+tc.want {
-			t.Fatalf("invalid %s error = %v, want exact scope and path", tc.want, err)
-		}
-	}
-}
-
-// An unset claude.helperModel is Haiku 5.5, for the top level, for an account
-// that overrides other keys, and for an account the roster does not know.
-func TestClaudeHelperModelDefaultsToHaiku(t *testing.T) {
-	home := t.TempDir()
-	path := filepath.Join(t.TempDir(), FileName)
-	if err := os.WriteFile(
-		path,
-		[]byte(
-			`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"permissionMode":"prompt"}},{"id":2,"configDir":"~/two"}]}`,
-		),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Source("claude.helperModel") != SourceDefault {
-		t.Fatalf("default helper model source = %q", loaded.Source("claude.helperModel"))
-	}
-	for _, id := range []int{0, 1, 2, 99} {
-		if got := loaded.EffectiveClaude(id).HelperModel; got != "claude-haiku-5-5" {
-			t.Errorf("account %d helper model = %q, want claude-haiku-5-5", id, got)
-		}
-	}
-	if got := Defaults(home, nil).Claude.HelperModel; got != "claude-haiku-5-5" {
-		t.Errorf("Defaults helper model = %q, want claude-haiku-5-5", got)
-	}
-}
-
 func TestClaudePluginCheckoutRoot(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(t.TempDir(), FileName)
@@ -247,7 +127,6 @@ var v079ClaudeKeys = map[string]bool{
 // releaseClaudeKeys are the claude.* keys added after v0.79.0.
 var releaseClaudeKeys = []string{
 	"remoteControl",
-	"helperModel",
 	"pluginCheckoutRoot",
 	"plugins",
 	"costLedger",
@@ -270,7 +149,7 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 		defaults := Defaults(home, nil)
 		defaults.Accounts = []Account{{
 			ID: 1, ConfigDir: filepath.Join(home, ".cc", "1"),
-			Claude: &ClaudePrefs{HelperModel: DefaultHelperModel, RemoteControl: true},
+			Claude: &ClaudePrefs{RemoteControl: true},
 		}}
 		for name, build := range map[string]func() ([]byte, error){
 			"MarshalDefault":                  func() ([]byte, error) { return MarshalDefault(home, nil) },
@@ -303,20 +182,20 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 	}{
 		{
 			"every key set to a non-default",
-			`{"version":2,"claude":{"helperModel":"claude-sonnet-5-5","pluginCheckoutRoot":"/opt/plugins",` +
+			`{"version":2,"claude":{"pluginCheckoutRoot":"/opt/plugins",` +
 				`"plugins":["auto-effort"],"costLedger":false}}`,
 			map[string]any{
-				"helperModel": "claude-sonnet-5-5", "pluginCheckoutRoot": "/opt/plugins",
-				"plugins": []any{"auto-effort"}, "costLedger": false,
+				"pluginCheckoutRoot": "/opt/plugins",
+				"plugins":            []any{"auto-effort"}, "costLedger": false,
 			},
 		},
 		{
 			"keys the user set to their defaults",
-			`{"version":2,"claude":{"helperModel":"` + DefaultHelperModel + `","costLedger":true,` +
+			`{"version":2,"claude":{"costLedger":true,` +
 				`"plugins":["cache-live-control","forward-compaction","auto-effort","tool-visibility-controller"]}}`,
 			map[string]any{
-				"helperModel": DefaultHelperModel, "costLedger": true,
-				"plugins": []any{"cache-live-control", "forward-compaction", "auto-effort", "tool-visibility-controller"},
+				"costLedger": true,
+				"plugins":    []any{"cache-live-control", "forward-compaction", "auto-effort", "tool-visibility-controller"},
 			},
 		},
 		{"an explicitly empty list", `{"version":2,"claude":{"plugins":[]}}`, map[string]any{"plugins": []any{}}},
@@ -358,7 +237,7 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 				t.Errorf("round trip changed the claude block:\n%#v\n%#v", loaded.Claude, reloaded.Claude)
 			}
 			for _, key := range []string{
-				KeyClaudePlugins, KeyClaudePluginCheckoutRoot, KeyClaudeCostLedger, "claude.helperModel",
+				KeyClaudePlugins, KeyClaudePluginCheckoutRoot, KeyClaudeCostLedger,
 			} {
 				if loaded.Source(key) != reloaded.Source(key) {
 					t.Errorf(

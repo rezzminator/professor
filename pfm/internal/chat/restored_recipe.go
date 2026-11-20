@@ -25,26 +25,28 @@ func restoredRecipe(
 	engineID := compose.EngineForKind(row.Kind)
 	var recipe *fleetdb.SeatRun
 	var envs map[string]string
+	var claudeSettings map[string]any
 	if engineID == pfmengine.Claude || engineID == pfmengine.Codex {
-		// The managed root's settings envs ride a restore as every launch;
-		// OpenCode reads them through action.Synthesize.
+		// The managed root's settings envs and Claude settings ride a restore
+		// as every launch; OpenCode reads them through action.Synthesize.
 		persona, warnings, err := action.LaunchPersona(row.CWD, runtime.Paths.Home, engineID, workbench.Resume)
 		if err != nil {
 			return nil, err
 		}
 		launchnotice.Print(stderr, "pfm chat open", warnings)
-		envs = persona.Envs
+		envs, claudeSettings = persona.Envs, persona.ClaudeSettings
 	}
 	switch engineID {
 	case pfmengine.Claude:
 		spawnPlan := action.ClaudeSpawn{
-			Purpose: action.PurposeResume,
-			Home:    runtime.Paths.Home,
-			Account: account,
-			Cache1H: &row.C1H,
-			Resume:  id,
-			Machine: runtime.Config,
-			Envs:    envs,
+			Purpose:        action.PurposeResume,
+			Home:           runtime.Paths.Home,
+			Account:        account,
+			Cache1H:        &row.C1H,
+			Resume:         id,
+			Machine:        runtime.Config,
+			Envs:           envs,
+			ClaudeSettings: claudeSettings,
 		}
 		run, err := spawnPlan.SeatRun(row.CWD)
 		if err != nil {

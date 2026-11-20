@@ -14,23 +14,17 @@ import (
 )
 
 // sessionEffortRecord is the effort the main statusline last showed for a
-// session, with the model it was resolved for. Claude Code 2.1.281 runs a
-// sub-agent whose definition names no effort at its parent's live session
-// effort (the agent context's effort is its own effort layer, else
-// Il(parent app state, the sub-agent's model)), and its meta file then names
-// no effort (its effort is the definition's), so the agent's row reads this
-// record instead. Il resolves per model — a
-// per-model settings table, max and xhigh clamped where unsupported — so the
-// level is exact only for the model it was recorded with.
+// session, with the model it was resolved for: the picker's rows read it
+// (ReadSession).
 type sessionEffortRecord struct {
 	Level string `json:"level"`
 	Model string `json:"model"`
 }
 
 // RecordSession persists what the main statusline payload says about its
-// session. Its effort feeds the agent rows of the same session. Fail-open
-// like the rest of the statusline: a record that cannot be written goes to warn
-// and costs one row's effort, never the status line.
+// session, for the picker's rows. Fail-open like the rest of the statusline: a
+// record that cannot be written goes to warn and costs the picker that
+// session's effort, never the status line.
 func RecordSession(raw []byte, sidDir string, warn io.Writer) {
 	var sample struct {
 		SessionID      string `json:"session_id"`
@@ -67,7 +61,7 @@ func sessionIDOf(sessionID, transcriptPath string) string {
 	return strings.TrimSuffix(filepath.Base(transcriptPath), filepath.Ext(transcriptPath))
 }
 
-// writeSessionEffort replaces the session's record whole, so a row reading it
+// writeSessionEffort replaces the session's record whole, so a reader of it
 // mid-write sees the old record or the new one; an empty level is recorded
 // too, so a session that dropped its effort never keeps a stale one.
 func writeSessionEffort(sidDir, sessionID string, record sessionEffortRecord) error {

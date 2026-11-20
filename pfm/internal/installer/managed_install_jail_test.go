@@ -26,7 +26,6 @@ func TestInstallManagedCommandsQuoteSpacedPath(t *testing.T) {
 		apply: true,
 		options: Options{
 			ManagedSettingsDir:    dir,
-			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
 			Runner:                stateRunner{err: os.ErrPermission},
 			Stdout:                &output,

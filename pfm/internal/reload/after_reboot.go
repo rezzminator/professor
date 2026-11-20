@@ -12,7 +12,7 @@ import (
 // then sends the --then turn to the reborn native chat once its composer is
 // ready.
 func (n *nativeReload) then(ctx context.Context) error {
-	if err := n.ready(ctx, false); err != nil {
+	if err := n.ready(ctx, false, true); err != nil {
 		return fmt.Errorf("native reload --then: %w", err)
 	}
 	if err := n.refreshTarget(ctx); err != nil {

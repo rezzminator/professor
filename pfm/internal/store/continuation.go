@@ -56,9 +56,15 @@ func (s *Store) CarryContinuedSchedules(ctx context.Context) {
 // chat pfm can show; an id the index lacks is its own tail. A cycle stops at
 // the last new segment.
 func (s *Store) ContinuationTail(ctx context.Context, start string) (string, error) {
+	return walkContinuation(start, func(id string) (Transcript, bool, error) { return s.Transcript(ctx, id) })
+}
+
+// walkContinuation is ContinuationTail over transcripts read through lookup,
+// so a caller holding every transcript (ChatSpaces) walks them without a query.
+func walkContinuation(start string, lookup func(string) (Transcript, bool, error)) (string, error) {
 	id, seen := start, map[string]struct{}{start: {}}
 	for {
-		transcript, found, err := s.Transcript(ctx, id)
+		transcript, found, err := lookup(id)
 		if err != nil {
 			return "", fmt.Errorf("from %s at %s: %w", start, id, err)
 		}

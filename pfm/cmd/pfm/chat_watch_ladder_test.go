@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,13 +29,26 @@ import (
 // then is a hung watch, which is the failure a frozen tmux server causes.
 const ladderRoundLimit = 20 * time.Second
 
-// ladderClock is the ladder's poll clock: Now is the real clock, and a poll
-// timer fires only when the test fires it.
-type ladderClock struct{ armed chan chan time.Time }
+// newLadderTime is a ladder's time: a fake clock every watch of the ladder
+// polls on and every transcript of it is pinned to, so a second a watch prints
+// is true by construction, never the wall clock's. It starts on a whole minute
+// just behind the wall clock, so each poll timer is due a whole poll later and
+// the transcripts stay inside the fleet scan's recency caps, which are real.
+func newLadderTime() *clock.Fake { return clock.NewFake(time.Unix(time.Now().Unix()/60*60, 0)) }
 
-func newLadderClock() *ladderClock { return &ladderClock{armed: make(chan chan time.Time, 1)} }
+// ladderClock is one watch's poll clock: Now reads the ladder's time, and a
+// poll timer fires only when the test fires it (poll). Sleep, After and
+// tickers stay real: they time waits on other processes, never an instant.
+type ladderClock struct {
+	fake  *clock.Fake
+	armed chan ladderTimer
+}
 
-func (*ladderClock) Now() time.Time { return time.Now() }
+func newLadderClock(fake *clock.Fake) *ladderClock {
+	return &ladderClock{fake: fake, armed: make(chan ladderTimer, 1)}
+}
+
+func (ladder *ladderClock) Now() time.Time { return ladder.fake.Now() }
 
 func (*ladderClock) Sleep(ctx context.Context, duration time.Duration) error {
 	return clock.Real.Sleep(ctx, duration)
@@ -46,15 +60,20 @@ func (*ladderClock) NewTicker(duration time.Duration) clock.Ticker {
 	return clock.Real.NewTicker(duration)
 }
 
-func (ladder *ladderClock) NewTimer(time.Duration) clock.Timer {
-	fire := make(chan time.Time, 1)
-	ladder.armed <- fire
-	return ladderTimer(fire)
+func (ladder *ladderClock) NewTimer(duration time.Duration) clock.Timer {
+	timer := ladderTimer{fire: make(chan time.Time, 1), due: ladder.fake.Now().Add(duration)}
+	ladder.armed <- timer
+	return timer
 }
 
-type ladderTimer chan time.Time
+// ladderTimer is one armed poll timer: the instant it is due on the ladder's
+// time, and the channel poll fires it on.
+type ladderTimer struct {
+	fire chan time.Time
+	due  time.Time
+}
 
-func (timer ladderTimer) C() <-chan time.Time { return timer }
+func (timer ladderTimer) C() <-chan time.Time { return timer.fire }
 func (ladderTimer) Stop() bool                { return true }
 func (ladderTimer) Reset(time.Duration) bool  { return true }
 
@@ -75,10 +94,11 @@ func (locked *lockedBuffer) String() string {
 	return locked.buffer.String()
 }
 
-// watchLadder is one run jail holding mock Claude seats.
+// watchLadder is one run jail holding mock Claude seats, on its own time.
 type watchLadder struct {
 	t         *testing.T
 	jail      *runJail
+	clock     *clock.Fake
 	configDir string
 	scenario  string
 	seats     int
@@ -118,7 +138,7 @@ func (ladder *watchLadder) start(name string) *ladderSeat {
 		}
 	}
 	seat.transcript = filepath.Join(project, seat.sid+".jsonl")
-	stamp := time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
+	stamp := ladder.clock.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
 	records := []map[string]any{
 		{"type": "custom-title", "customTitle": name, "sessionId": seat.sid},
 		{
@@ -171,6 +191,7 @@ func (ladder *watchLadder) start(name string) *ladderSeat {
 	}
 	seat.waitPane("❯")
 	ladder.waitRow(name, seat.socket, true)
+	seat.pin()
 	return seat
 }
 
@@ -248,6 +269,24 @@ func (seat *ladderSeat) waitPane(want string) {
 	}
 }
 
+// pin sets every transcript in the seat's project directory to the ladder's
+// time, so the idle and quiet seconds a watch prints count the ladder's time
+// since the last write. Each wait for a write pins once the write is on disk.
+func (seat *ladderSeat) pin() {
+	seat.ladder.t.Helper()
+	project := filepath.Dir(seat.transcript)
+	transcripts, err := filepath.Glob(filepath.Join(project, "*.jsonl"))
+	if err != nil || len(transcripts) == 0 {
+		seat.ladder.t.Fatalf("pin seat %s: no transcript in %s (%v)", seat.name, project, err)
+	}
+	now := seat.ladder.clock.Now()
+	for _, path := range transcripts {
+		if err := os.Chtimes(path, now, now); err != nil {
+			seat.ladder.t.Fatalf("pin %s to the ladder's time: %v", path, err)
+		}
+	}
+}
+
 // waitTranscript waits until the seat's current transcript holds want.
 func (seat *ladderSeat) waitTranscript(want string) {
 	seat.ladder.t.Helper()
@@ -255,10 +294,34 @@ func (seat *ladderSeat) waitTranscript(want string) {
 	for {
 		content, _ := os.ReadFile(seat.transcript)
 		if strings.Contains(string(content), want) {
+			seat.pin()
 			return
 		}
 		if time.Now().After(deadline) {
 			seat.ladder.t.Fatalf("seat %s transcript never held %q", seat.name, want)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// waitProject waits until a transcript in the seat's project directory other
+// than skip holds want: a reply that may land in a /clear successor, or the
+// successor's title.
+func (seat *ladderSeat) waitProject(want, skip string) {
+	seat.ladder.t.Helper()
+	project := filepath.Dir(seat.transcript)
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		matches, _ := filepath.Glob(filepath.Join(project, "*.jsonl"))
+		for _, path := range matches {
+			if content, err := os.ReadFile(path); err == nil && path != skip &&
+				strings.Contains(string(content), want) {
+				seat.pin()
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			seat.ladder.t.Fatalf("no transcript in %s besides %q ever held %q", project, skip, want)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -372,7 +435,7 @@ type ladderWatch struct {
 	stderr *lockedBuffer
 	cancel context.CancelFunc
 	done   chan int
-	fire   chan time.Time
+	timer  ladderTimer
 	read   int
 	code   int
 	ended  bool
@@ -383,7 +446,7 @@ func (ladder *watchLadder) watch(args ...string) *ladderWatch {
 	ladder.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	watch := &ladderWatch{
-		t: ladder.t, clock: newLadderClock(), stdout: &lockedBuffer{}, stderr: &lockedBuffer{},
+		t: ladder.t, clock: newLadderClock(ladder.clock), stdout: &lockedBuffer{}, stderr: &lockedBuffer{},
 		cancel: cancel, done: make(chan int, 1),
 	}
 	go func() {
@@ -399,7 +462,7 @@ func (ladder *watchLadder) watch(args ...string) *ladderWatch {
 func (watch *ladderWatch) settle() {
 	watch.t.Helper()
 	select {
-	case watch.fire = <-watch.clock.armed:
+	case watch.timer = <-watch.clock.armed:
 	case watch.code = <-watch.done:
 		watch.ended = true
 	case <-time.After(ladderRoundLimit):
@@ -422,13 +485,17 @@ func pfmFrames() string {
 	return strings.Join(kept, "\n\n")
 }
 
-// poll runs exactly one more poll round.
+// poll runs exactly one more poll round: the ladder's time moves on to the
+// instant the armed timer is due, as the wall clock would, and it fires.
 func (watch *ladderWatch) poll() {
 	watch.t.Helper()
 	if watch.ended {
 		watch.t.Fatalf("poll after the watch returned rc %d: stdout %q", watch.code, watch.stdout.String())
 	}
-	watch.fire <- time.Now()
+	if gap := watch.timer.due.Sub(watch.clock.fake.Now()); gap > 0 {
+		watch.clock.fake.Advance(gap)
+	}
+	watch.timer.fire <- watch.clock.fake.Now()
 	watch.settle()
 }
 
@@ -445,8 +512,8 @@ func (watch *ladderWatch) stop() {
 	}
 }
 
-// expect checks the event lines written since the last check: one per want,
-// in order, each starting with its want.
+// expect checks the event lines written since the last check are exactly
+// want, in order.
 func (watch *ladderWatch) expect(want ...string) {
 	watch.t.Helper()
 	all := strings.Split(strings.TrimSuffix(watch.stdout.String(), "\n"), "\n")
@@ -455,12 +522,8 @@ func (watch *ladderWatch) expect(want ...string) {
 	}
 	got := all[watch.read:]
 	watch.read = len(all)
-	match := len(got) == len(want)
-	for index := 0; match && index < len(want); index++ {
-		match = strings.HasPrefix(got[index], want[index])
-	}
-	if !match {
-		watch.t.Fatalf("event lines = %q, want lines starting %q (stderr %q)", got, want, watch.stderr.String())
+	if !slices.Equal(got, want) {
+		watch.t.Fatalf("event lines = %q, want %q (stderr %q)", got, want, watch.stderr.String())
 	}
 }
 

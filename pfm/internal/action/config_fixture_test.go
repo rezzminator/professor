@@ -16,6 +16,9 @@ func testMachineConfig(home string) pfmconfig.Config {
 		pfmconfig.DefaultAccountDir(home, 2) + "/projects",
 		pfmconfig.DefaultAccountDir(home, 3) + "/projects",
 	})
+	// The fixture home records no clone, so the default professor prompt cannot be located; the
+	// prompt policy is system_prompt_test.go's subject, and every other launch here holds production.
+	machine.Claude.SystemPrompt = pfmconfig.SystemPromptProduction
 	for _, account := range machine.Accounts {
 		if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
 			panic(fmt.Sprintf("fixture account dir %s: %v", account.ConfigDir, err))

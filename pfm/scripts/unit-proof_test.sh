@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for scripts/unit-proof.sh's filter and verdict: each trace record the spec
-# names is judged allowed or a reach row of its kind, a started program's own records drop after its
+# names is judged allowed or a reach row of its kind (a planted git-ignored file, an untracked
+# directory holding no tracked file), a started program's own records drop after its
 # exec row, a record the filter cannot read and an allow row without a reason are errors, the
 # verdict's three outcomes print their line and exit 0, 1 or 2, the exec wrapper runs a binary as one
 # traced process or as the parts its split table names, and the run's go test takes its package
@@ -44,6 +45,8 @@ openat(AT_FDCWD, "$SYSTMP/j41/u7/T", O_RDONLY|O_DIRECTORY|O_CLOEXEC) = 11<$SYSTM
 unlinkat(11, "dddddddddddd", AT_REMOVEDIR) = 0
 openat(AT_FDCWD, "$CO/pfm/internal/x/x.go", O_RDONLY|O_CLOEXEC) = 7
 openat(AT_FDCWD, "$CO/pfm.config.json", O_RDONLY|O_CLOEXEC) = 6
+openat(AT_FDCWD<$CO/pfm/internal/x>, "$CO/pfm/tmp", O_RDONLY|O_CLOEXEC|O_DIRECTORY) = 5<$CO/pfm/tmp>
+openat(AT_FDCWD, "$CO/pfm/harness-prompts/generated/claude.md", O_RDONLY|O_CLOEXEC) = 6
 openat(AT_FDCWD, "/root/.cc/3/.credentials.json", O_RDONLY) = -1 ENOENT (No such file or directory)
 openat(AT_FDCWD, "/dev/null", O_WRONLY|O_CLOEXEC) = 8
 openat(AT_FDCWD<$CO/pfm/internal/x>, "[vdso]", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
@@ -81,7 +84,9 @@ eq 'filter: each record is allowed or one reach row of its kind; a started progr
     "read	/root/.cc/3/.credentials.json	1" \
     "read	$SYSTMP/cc-sid/9	1" \
     "read	{checkout}/pfm.config.json	1" \
+    "read	{checkout}/pfm/harness-prompts/generated/claude.md	1" \
     "read	{checkout}/pfm/internal/x/[other]	1" \
+    "read	{checkout}/pfm/tmp	1" \
     "socket	$SYSTMP/tmux-1000/default	1" \
     "write	/dev/tty	1")" \
   "$(cut -f1-3 "$OUT/reach/internal%x.tsv")"
@@ -172,7 +177,7 @@ printf 'git\tstatus\n' > "$OUT/tripwire.log"
 bash "$SUT" --verdict "$OUT" > "$T/verdict.out" 2>&1
 rc=$?
 eq 'verdict FAIL: exit 1 and the line counts tests and reach rows by kind' \
-  "1|UNIT-PROOF FAIL · tests 1 pass 1 fail 1 skip · reach 8 rows (1 exec · 4 read · 1 write · 1 socket · 1 tripwire) · syscalls traced · $OUT" \
+  "1|UNIT-PROOF FAIL · tests 1 pass 1 fail 1 skip · reach 10 rows (1 exec · 6 read · 1 write · 1 socket · 1 tripwire) · syscalls traced · $OUT" \
   "$rc|$(tail -n 1 "$T/verdict.out")"
 eq 'verdict FAIL: the reach rows print first' 'exec herdr integration install claude ×2 (internal/x)' "$(head -n 1 "$T/verdict.out")"
 eq 'verdict FAIL: each failing test prints by package and name with its first output line, before the summary' \

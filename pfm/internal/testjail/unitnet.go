@@ -44,7 +44,7 @@ func NotOnPath(name string) string {
 // the variable it came through, and never reaches the machine's own.
 var unitNetDirs = []string{
 	"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
-	paths.EnvTmuxTmpDir, "PATH", "PFM_SOURCE_REPO",
+	paths.EnvTmuxTmpDir, "PATH",
 }
 
 // unitNetKeep is every name of the starting environment an armed unit binary keeps, each with the

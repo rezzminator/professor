@@ -152,6 +152,8 @@ func TestDoctorCallmeterUsesClaudeEnvHome(t *testing.T) {
 	}
 	runtime.Version = "0.82.0-alpha"
 	runtime.Config.Claude.PluginCheckoutRoot = root
+	// Listed, so callmeter is a checked plugin, never an install-only one.
+	runtime.Config.Claude.Plugins = []config.ClaudePlugin{{ID: "callmeter"}}
 	runtime.Config.Claude.Env = map[string]string{"CALLMETER_HOME": filepath.Join(home, "configured")}
 	writePluginLogsFile(
 		t,

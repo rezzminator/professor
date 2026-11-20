@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -48,6 +49,7 @@ func PrintConfig(stdout io.Writer, runtime config.Runtime) (int, int) {
 		runtime.Config.Claude.Binary,
 		runtime.Config.Source("claude.binary"),
 	)
+	warnings += printSystemPromptDoctor(stdout, runtime.Paths.Home, runtime.Config)
 	fmt.Fprintf(
 		stdout,
 		"doctor: config codex.yolo=%t (%s)\n",
@@ -170,11 +172,9 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 		found := true
 		for _, part := range parts {
 			values, ok := current.(map[string]any)
-			if !ok {
-				found = false
-				break
+			if ok {
+				current, ok = values[part]
 			}
-			current, ok = values[part]
 			if !ok {
 				found = false
 				break
@@ -189,7 +189,11 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 			)
 		}
 	}
-	return 0, 0
+	for _, warning := range runtime.Config.RetiredKeyWarnings(claudelaunch.RetiredKnobChangesLaunch) {
+		fmt.Fprintf(stdout, "doctor: config: %s (%s)\n", warning, path)
+		warnings++
+	}
+	return warnings, 0
 }
 
 // printDuplicateSeatLogins reads the user-scope Claude registries that the

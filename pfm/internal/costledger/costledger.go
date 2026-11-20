@@ -1,6 +1,9 @@
 // Package costledger owns the per-call cost ledger: {dir}/{session_id}.jsonl, one JSON line per
 // Anthropic API call of one Claude Code session, appended by the cost sink and read by the status
 // line, `pfm tokens` and (as optional data, never imported) callmeter.
+//
+//   - before.go: BeforeLedger, what a session spent before its ledger began, from its cost-state lines.
+//   - fold.go: the two halves of a request-less call, a log and a span row, read as one row.
 package costledger
 
 import (
@@ -172,7 +175,8 @@ func ledgerPath(dir string, row Row) (string, error) {
 }
 
 // Unattributed reads observations for which telemetry provided no session. They are not
-// assigned to a chat; rows without correlation remain separate, potentially overlapping observations.
+// assigned to a chat; rows without correlation remain separate, potentially overlapping observations,
+// save the two halves of one request-less call, which read as one row (foldHalves).
 func Unattributed(dir string) (Ledger, error) {
 	return readLedger(filepath.Join(dir, "unattributed", "records.jsonl"), "")
 }
@@ -221,7 +225,7 @@ func joinRank(join string) int {
 }
 
 // ForSession parses and dedupes one session's ledger by request_id: the best join wins, the later line
-// among equals. A line that is not a JSON object is a counted fault, a missing file is
+// among equals; a request-less call's log and span halves read as one row (foldHalves). A line that is not a JSON object is a counted fault, a missing file is
 // Present == false with no error.
 func ForSession(dir, sessionID string) (Ledger, error) {
 	path, err := Path(dir, sessionID)
@@ -283,6 +287,7 @@ func readLedger(path, sessionID string) (Ledger, error) {
 	if err := scanner.Err(); err != nil {
 		return Ledger{}, fmt.Errorf("cost ledger: read %s: %w", path, err)
 	}
+	ledger.Rows = foldHalves(ledger.Rows)
 	return ledger, nil
 }
 

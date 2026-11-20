@@ -26,7 +26,6 @@ const (
 	knobMCP                        = "mcp"
 	knobHooks                      = "hooks"
 	knobStatusLine                 = "statusLine"
-	knobOutputStyle                = "outputStyle"
 	knobConfigDir                  = "configDir"
 	knobModel                      = "model"
 	knobEffort                     = "effort"
@@ -36,6 +35,7 @@ const (
 	knobName                       = "name"
 	defaultWord                    = "default"
 	accountWord                    = "account"
+	configWord                     = "config"
 	productionMode                 = "production"
 	unsetWord                      = "unset"
 	commandWord                    = "command"
@@ -67,7 +67,6 @@ const (
 	envConcurrentSubagents         = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
 	envWebSearches                 = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
 	envTmuxTruecolor               = "CLAUDE_CODE_TMUX_TRUECOLOR"
-	envAgentTeams                  = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 	envFunctionHooks               = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
 	flagSettings                   = "--settings"
 	flagMCPConfig                  = "--mcp-config"
@@ -214,7 +213,7 @@ var Knobs = func() []Knob {
 		EnvCostLedgerPID, WireWrapperEnv, EnvCostLedgerPID, SourceConstant, "{pid}",
 		"Name the process the armed sink serves, so a second pass of the same process reuses it.",
 	})
-	return append(
+	rows = append(
 		rows,
 		Knob{
 			knobBinary, WireFlag, knobBinary, SourceConfig,
@@ -250,68 +249,12 @@ var Knobs = func() []Knob {
 			WireFlag,
 			flagPromptFile + "|env." + envSimplePrompt,
 			SourceConfig,
-			productionMode,
+			pfmconfig.SystemPromptProfessor,
 			"Choose the managed system prompt.",
 		},
 		Knob{
 			knobRemoteControl, WireFlag, flagRemoteControl, SourceConfig, true,
 			"Request Remote Control for every interactive session; Claude enforces eligibility.",
-		},
-		Knob{
-			knobNativeCursor,
-			WireSettings,
-			"env." + envNativeCursor,
-			SourceConfig,
-			false,
-			"Enable Claude's native cursor when configured.",
-		},
-		Knob{
-			knobMaxSubagentSpawnDepth,
-			WireSettings,
-			"env." + envSpawnDepth,
-			SourceConfig,
-			8,
-			"Lift the agent nesting limit.",
-		},
-		Knob{
-			knobMaxConcurrentSubagents,
-			WireSettings,
-			"env." + envConcurrentSubagents,
-			SourceConfig,
-			nil,
-			"Set the agent concurrency limit when configured.",
-		},
-		Knob{
-			knobWebSearchesPerSession,
-			WireSettings,
-			"env." + envWebSearches,
-			SourceConfig,
-			int64(9007199254740991),
-			"Set the web search ceiling.",
-		},
-		Knob{
-			knobAutoCompactWindow,
-			WireSettings,
-			"env." + envAutoCompactWindow,
-			SourceConfig,
-			int64(100000),
-			"Set the auto-compact window the compaction plugin reads.",
-		},
-		Knob{
-			knobHelperModel,
-			WireSettings,
-			"env." + envAnthropicSmallFastModel,
-			SourceConfig,
-			pfmconfig.DefaultHelperModel,
-			"Run Claude Code's helper calls (page summaries, web search, titles) on a small model, Haiku 5.5 unless configured.",
-		},
-		Knob{
-			knobTmuxTruecolor,
-			WireSettings,
-			"env." + envTmuxTruecolor,
-			SourceConfig,
-			true,
-			"Preserve color under tmux.",
 		},
 		Knob{
 			knobNoFlicker,
@@ -321,30 +264,10 @@ var Knobs = func() []Knob {
 			nil,
 			"Keep a fullscreen seat's renderer past Claude's boot canary.",
 		},
-		Knob{
-			"agentTeams",
-			WireSettings,
-			"env." + envAgentTeams,
-			SourceConstant,
-			"0",
-			"Keep experimental agent teams off.",
-		},
-		Knob{
-			"functionHooks",
-			WireSettings,
-			"env." + envFunctionHooks,
-			SourceConstant,
-			"1",
-			"Enable function hooks for pfm's Claude plugins.",
-		},
-		Knob{
-			knobOutputStyle,
-			WireSettings,
-			knobOutputStyle,
-			SourceConstant,
-			defaultWord,
-			"Use the managed output style.",
-		},
+	)
+	rows = append(rows, defaultKnobs()...)
+	return append(
+		rows,
 		Knob{
 			knobTheme,
 			WireSettings,
@@ -352,14 +275,6 @@ var Knobs = func() []Knob {
 			SourceConfig,
 			nil,
 			"Carry the selected Claude theme unless theme sync owns it.",
-		},
-		Knob{
-			knobCleanupPeriodDays,
-			WireSettings,
-			knobCleanupPeriodDays,
-			SourceConfig,
-			36500,
-			"Keep managed transcripts.",
 		},
 		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "24 registrations", "Attach the fleet hook set."},
 		Knob{knobStatusLine, WireSettings, knobStatusLine, SourceConstant, "pfm-statusline", "Show fleet status."},

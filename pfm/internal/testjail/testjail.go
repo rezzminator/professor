@@ -9,7 +9,9 @@
 // fence.go: runsHere, the guard Run asks first; ChildOutput, a re-exec's output; tier_unit.go and
 // tier_machine.go, the build-tag pair telling a unit binary from a jail (or e2e, journey) one.
 // unitnet.go: the unit net an armed unit binary runs inside, and its one switch.
+// source_repo.go: the run's empty source repository and StageSourceRepoMarker, the installed clone.
 // jail_dir.go: RunInJail, Run starting a package's tests in the jail directory.
+// seed_config.go: seedConfig, every jail home's pfm.config.json, and its variants.
 // place.go: Place, an invented fixture path's root in the jail directory; TempPath, a path under Run's temp root.
 // profile.go: the step profiler of every package process; profile_place.go names the process and holds
 // ModuleRoot; profile_run.go, profile_run_summary.go: the run directory a plain go test records into.
@@ -137,10 +139,10 @@ func Run(m *testing.M) int {
 	// No test fetches a source-fetched global skill from its public repo: an
 	// install run in the jail skips the fetch and doctor reports OFFLINE; no
 	// price refresh fetches a publisher's pricing page; no update check asks
-	// GitHub and no usage fetch calls the provider.
+	// GitHub, no usage fetch calls the provider and no install ping is sent.
 	for _, name := range []string{
 		paths.EnvSkillSourcesOffline, paths.EnvThemesOffline, paths.EnvPricesOffline,
-		paths.EnvUpdateCheckOffline, paths.EnvUsageOffline,
+		paths.EnvUpdateCheckOffline, paths.EnvUsageOffline, paths.EnvInstallPingOffline,
 	} {
 		if err := os.Setenv(name, "1"); err != nil {
 			warnSetup("set %s: %v", name, err)
@@ -259,7 +261,7 @@ func jailHome(base string) (func(), error) {
 		return cleanup, fmt.Errorf("set %s to %s: %w", paths.EnvHome, home, err)
 	}
 	configPath := filepath.Join(home, "pfm.config.json")
-	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(seedConfig), 0o600); err != nil {
 		warnSetup("seed config %s: %v", configPath, err)
 	}
 	if err := os.Setenv(paths.EnvConfig, configPath); err != nil {
@@ -274,8 +276,8 @@ func jailHome(base string) (func(), error) {
 	if err := os.Setenv(paths.EnvManagedSettingsDir, managedDir); err != nil {
 		warnSetup("set %s: %v", paths.EnvManagedSettingsDir, err)
 	}
-	if err := paths.WriteSourceRepoMarker(home, checkoutRoot()); err != nil {
-		warnSetup("write source repository marker: %v", err)
+	if err := pinRunSourceRepo(home); err != nil {
+		return cleanup, err
 	}
 	if err := pinXDGConfigHome(home); err != nil {
 		return cleanup, err
@@ -378,7 +380,7 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	// pfm run from that home marks its children: never the operator's.
 	setenv(paths.EnvInstallMark, paths.InstallMark(filepath.Join(root, "home")))
 	configPath := filepath.Join(root, "home", "pfm.config.json")
-	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(seedConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	setenv(paths.EnvConfig, configPath)
@@ -394,8 +396,8 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 		t.Fatal(err)
 	}
 	setenv(paths.EnvManagedSettingsDir, managedDir)
-	if err := paths.WriteSourceRepoMarker(filepath.Join(root, "home"), checkoutRoot()); err != nil {
-		t.Fatal(err)
+	if err := paths.WriteSourceRepoMarker(filepath.Join(root, "home"), runSourceRepo); err != nil {
+		t.Fatalf("point the fleet's source repository marker at the run's empty source repository: %v", err)
 	}
 	setenv("HOME", filepath.Join(root, "home"))
 	// Keep child tools' XDG files inside this fleet.
@@ -412,6 +414,7 @@ func InstalledHome(t *testing.T) string {
 
 	root := Fleet(t)
 	jailedHome := filepath.Join(root, "home")
+	StageSourceRepoMarker(t, jailedHome)
 	claudeBinary := pfmengine.MustLookup(pfmengine.Claude).Binary
 	if err := os.MkdirAll(filepath.Join(jailedHome, ".local", "bin"), 0o700); err != nil {
 		t.Fatal(err)
@@ -454,9 +457,7 @@ func InstalledHome(t *testing.T) string {
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	content, err := json.Marshal(
-		map[string]any{"version": 2, "accounts": []map[string]any{{"id": 1, "configDir": account}}},
-	)
+	content, err := seedConfigWith(map[string]any{"accounts": []map[string]any{{"id": 1, "configDir": account}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,14 +517,6 @@ func stageCloneZshrc(t *testing.T, home string) {
 func checkoutRoot() string {
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file))))
-}
-
-// StageSourceRepoMarker points a jail at this checkout's tracked prompts.
-func StageSourceRepoMarker(t *testing.T, home string) {
-	t.Helper()
-	if err := paths.WriteSourceRepoMarker(home, checkoutRoot()); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // ShippedHarnessPrompt returns the reviewed baseline carried by this build.
@@ -637,7 +630,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	t.Setenv(paths.EnvHome, home)
 	t.Setenv(paths.EnvInstallMark, paths.InstallMark(home)) // as fleetSetenv: the jail home's mark
 	configPath := filepath.Join(home, "pfm.config.json")
-	if err := os.WriteFile(configPath, []byte("{\"version\":2,\"ask\":{\"engine\":\"claude\"}}\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(cleanHomeConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(paths.EnvConfig, configPath)

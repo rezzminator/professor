@@ -150,3 +150,4 @@ Over the usage store's past landings of 1000 or more changed lines.
 - A rung in a second repository: not run.
 - A real long gate: the Professor gate took 64 minutes at host load 24 and was never run in the bench.
 - The Sonnet diff-checker on the shipped review: not run.
+- The cap of 4 waits of 170 s on the lander's and reviewer's checker waits, and the foremen's whole-unit-suite step before the return: field data only (an adopter's landing on 2026-11-16; 338 past checker runs measured 2026-11-18); no bench run has measured their cost.

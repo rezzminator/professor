@@ -134,16 +134,16 @@ func MarketplacePluginNames(sourceRepo string) (string, []string, error) {
 }
 
 // WithMarketplacePlugins resolves an -alpha build's plugins against the source
-// clone's marketplace, {SourceRepo}/.claude-plugin/marketplace.json: with
-// claude.plugins unset (PluginsDefault) Plugins becomes every plugin it lists,
-// in its order, and Unlisted every plugin it lists that claude.plugins names in
-// no form, bare or name@marketplace. A release, and a build with no source
-// clone, is returned as it is; so is an explicit list beside a clone with no
-// marketplace file. A file that cannot be read, parsed or validated, a source
-// clone that could not be resolved, and a default list with no file to read
-// return the build unchanged with the error: install and doctor name it as a
-// failure and still plan the list, never an empty one. Entries the file lists
-// badly are named in the error beside the build derived from the valid ones.
+// clone's marketplace, {SourceRepo}/.claude-plugin/marketplace.json: Unlisted
+// becomes every plugin it lists that Plugins, the effective claude.plugins,
+// names in no form, bare or name@marketplace. Plugins is never widened: an
+// unset claude.plugins is its default list and plans exactly like the key set
+// to it. A release, a build with no source clone and a clone with no
+// marketplace file are returned as they are. A file that cannot be read, parsed
+// or validated and a source clone that could not be resolved return the build
+// unchanged with the error: install and doctor name it as a failure and still
+// plan the list, never an empty one. Entries the file lists badly are named in
+// the error beside the build derived from the valid ones.
 func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, error) {
 	if !obs.AlphaBuild(build.Version) {
 		return build, nil
@@ -155,17 +155,11 @@ func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, erro
 		return build, nil
 	}
 	_, names, err := MarketplacePluginNames(build.SourceRepo)
-	if errors.Is(err, fs.ErrNotExist) && !build.PluginsDefault {
+	if errors.Is(err, fs.ErrNotExist) {
 		return build, nil
 	}
 	if err != nil && len(names) == 0 {
 		return build, err
-	}
-	if build.PluginsDefault {
-		build.Plugins = make([]pfmconfig.ClaudePlugin, 0, len(names))
-		for _, name := range names {
-			build.Plugins = append(build.Plugins, pfmconfig.ClaudePlugin{ID: name})
-		}
 	}
 	listed := map[string]bool{}
 	for _, plugin := range build.Plugins {

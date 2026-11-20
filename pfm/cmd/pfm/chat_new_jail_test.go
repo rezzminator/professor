@@ -124,7 +124,7 @@ func newRunJail(t *testing.T) *runJail {
 	}
 	if err := os.WriteFile(
 		filepath.Join(configDir, pfmconfig.FileName),
-		[]byte(`{"version":2,"ask":{"engine":"claude"}}`),
+		[]byte(`{"version":2,"ask":{"engine":"claude"},"claude":{"systemPrompt":"production"}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)

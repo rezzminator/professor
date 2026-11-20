@@ -21,7 +21,14 @@ const testShareKey = "test-key"
 
 func newTestShare(t *testing.T, path string) *ScanShare {
 	t.Helper()
-	return &ScanShare{path: path, lock: path + ".lock", key: testShareKey, clock: clock.Real, noted: map[string]bool{}}
+	return &ScanShare{
+		path:    path,
+		lock:    path + ".lock",
+		key:     testShareKey,
+		clock:   clock.Real,
+		elapsed: clock.Real,
+		noted:   map[string]bool{},
+	}
 }
 
 // filledRow sets every field of a row to a non-zero value, so a field the
@@ -232,8 +239,10 @@ func holdLock(t *testing.T, path string, started time.Time) func() {
 
 // TestScanShareALockedSnapshotNeverStallsAWatch: a holder that never
 // publishes delays a poll by at most ShareLockWait, and one already scanning
-// for longer than that (stopped mid-scan) delays it not at all.
+// for longer than that (stopped mid-scan) delays it not at all. The stamps
+// sit on the watch's poll clock, here one that never moves; the wait is real.
 func TestScanShareALockedSnapshotNeverStallsAWatch(t *testing.T) {
+	poll := clock.NewFake(time.Unix(1_700_000_000, 0))
 	for _, test := range []struct {
 		name      string
 		started   time.Duration // the holder's stamp, relative to now
@@ -247,15 +256,20 @@ func TestScanShareALockedSnapshotNeverStallsAWatch(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "watch-snapshot.json")
-			holdLock(t, path, time.Now().Add(test.started))
+			holdLock(t, path, poll.Now().Add(test.started))
 			if test.unstamped {
 				if err := os.Truncate(path+".lock", 0); err != nil {
 					t.Fatal(err)
 				}
 			}
 			scan := &countingScan{result: sampleScan(t, "own")}
+			share := newTestShare(t, path)
+			share.clock = poll
+			// The bound only ends a wait that hangs; took judges it.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*ShareLockWait)
+			defer cancel()
 			began := time.Now()
-			got, err := newTestShare(t, path).Scan(context.Background(), began, scan.run)
+			got, err := share.Scan(ctx, poll.Now(), scan.run)
 			took := time.Since(began)
 			if err != nil {
 				t.Fatal(err)

@@ -58,7 +58,8 @@ func rereadFacts(ctx context.Context, environment fleet.Env, request scanRequest
 // per socket: a question answered while the picker is parked drops its mark
 // within a park poll, as a finished turn drops its working state. A socket
 // that could not be read keeps its rows' composed marks and is named in the
-// returned error text, never read as "not blocked".
+// returned error text, never read as "not blocked". A dead seat's row (lost or
+// failed, so not addressable) has no pane to wait in: its socket is never read.
 func rereadBlocked(ctx context.Context, request scanRequest, rows []compose.Row) ([]compose.Row, string) {
 	if request.HerdrBlocked == nil {
 		return rows, ""
@@ -68,7 +69,7 @@ func rereadBlocked(ctx context.Context, request scanRequest, rows []compose.Row)
 	out := slices.Clone(rows)
 	for index := range out {
 		row := &out[index]
-		if !compose.NativeHerdr(*row) || row.Socket == "" || row.PaneID == "" {
+		if !compose.NativeHerdr(*row) || !row.Kind.IsAddressable() || row.Socket == "" || row.PaneID == "" {
 			continue
 		}
 		panes, seen := read[row.Socket]

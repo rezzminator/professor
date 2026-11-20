@@ -763,7 +763,7 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
     for (const line of [
       "SEAMS 2 removed paths, 1 removed roles swept",
       "README 3 commands checked",
-      "PLUGINS 1 checked, 0 unlistable",
+      "PLUGINS 1 checked, 0 unlistable, 0 in-tree",
     ])
       assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
   });
@@ -822,6 +822,28 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
     const r = await f.check({ ".claude-plugin/marketplace.json": JSON.stringify(market) });
     assertFail(r, "T1");
     assert.match(r.out, /^FAIL T1: plugins\/q — plugin q has no submodule gitlink at /m, r.out);
+  });
+  test("T1 and D1 an in-tree plugin is checked at its path, its commands live", async () => {
+    const f = await fixture();
+    const market = {
+      name: "professor",
+      plugins: [
+        { name: "p", source: { source: "git-subdir", url: f.plugin, path: "./plugins/p", ref: "main" } },
+        { name: "ip", source: "./plugins/ip/plugins/ip" },
+      ],
+    };
+    const r = await f.check({
+      ".claude-plugin/marketplace.json": JSON.stringify(market),
+      "plugins/ip/plugins/ip/.claude-plugin/plugin.json": '{"name":"ip"}\n',
+      "plugins/ip/plugins/ip/commands/doc.md": "d\n",
+      "README.md": "Run `/prompt:use check`, `/handy`, `/reload --account 2` or `/ip:doc`.\n",
+    });
+    assertClean(r, "preflight");
+    for (const line of ["README 4 commands checked", "PLUGINS 1 checked, 0 unlistable, 1 in-tree"])
+      assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
+    const gone = await f.check({ "plugins/ip/plugins/ip/.claude-plugin/plugin.json": null });
+    assertFail(gone, "T1");
+    assert.match(gone.out, /^FAIL T1: \.claude-plugin\/marketplace\.json — in-tree plugin ip has no plugins\/ip\/plugins\/ip\/\.claude-plugin\/plugin\.json at [0-9a-f]{7}$/m, gone.out);
   });
   test("ERROR, not FAIL, when a plugin's tags cannot be listed", async () => {
     const f = await fixture({ url: "/nonexistent/plugin-repo" });

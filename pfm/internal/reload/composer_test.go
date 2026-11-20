@@ -81,3 +81,28 @@ func TestComposerDrawnNeedsAnInputBoxOnThePane(t *testing.T) {
 		}
 	}
 }
+
+// A menu stands in front of the composer, so only the last marker row can be
+// one: a numbered prompt the chat echoes above its input box is transcript.
+func TestSelectorOpenReadsTheRowInFrontOfTheComposer(t *testing.T) {
+	rule := strings.Repeat("─", 40)
+	for _, row := range []struct {
+		name    string
+		capture string
+		want    bool
+	}{
+		{"menu with no composer", "Claude\n Proceed?\n ❯ 1. Yes\n   2. No", true},
+		{"menu below a stale composer row", "Claude\n❯ \n❯ 1. choose", true},
+		{"numbered prompt echoed above an empty composer", "❯ 1. keep the path\n  2. do it\n● Done\n❯ ", false},
+		{
+			"numbered prompt echoed above a boxed composer",
+			"❯ 1. keep the path\n  2. do it\n● Done\n" + rule + "\n❯ \n" + rule + "\n  Opus · high",
+			false,
+		},
+		{"empty composer", "Claude\n❯ ", false},
+	} {
+		if got := selectorOpen(row.capture); got != row.want {
+			t.Errorf("%s: selectorOpen(%q) = %t, want %t", row.name, row.capture, got, row.want)
+		}
+	}
+}

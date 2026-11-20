@@ -5,85 +5,49 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/pyvalue"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
-// subagentTask is one running agent's row as its meta file names it
-// (runningAgents): its id, the name, description, model and effort it was
-// spawned with, its start, and the context window the render gives it.
+// subagentTask is one running agent as its meta file names it
+// (runningAgents): its id, the model it was spawned with ("" when it runs on
+// its definition's or the session's) and its start.
 type subagentTask struct {
-	ID                string
-	Name              string
-	Label             string
-	Model             string
-	Effort            string
-	StartTime         int64 // Unix milliseconds
-	ContextWindowSize int64
-	capacityState     string
+	ID        string
+	Model     string
+	StartTime int64 // Unix milliseconds
 }
 
-// agentActivity is what a sub-agent's own files add to the payload: its role
-// from agent-<id>.meta.json, the rest from agent-<id>.jsonl. cacheHit is -1
+// agentActivity is what a sub-agent's own transcript, agent-<id>.jsonl, says. cacheHit is -1
 // until the first model turn lands; effort is the level its latest request
 // went out at, "" until one records it; err means the transcript could not be
-// read and roleErr the meta file, each rendering "?" — never as zero or empty.
-// spend is its own billing plus every agent's below it. noCacheWindow is set
-// for an agent whose provider names no cache lifetime (a gpt- model through the
-// gateway's chatgpt route): its row shows the hit share and no countdown.
+// read, told as a failure, never as zero or empty.
+// spend is its own billing plus every agent's below it.
 type agentActivity struct {
-	role        string
-	roleErr     error
 	effort      string
 	tools       int
 	errors      int
 	compactions int
 	cacheHit    int
 	model       string
-	cwd         string
-	transcript  string
 	last        time.Time
 	err         error
 	nest        agentNesting
 	spend       agentSpend
 	// turn is its last message entry.
-	turn agentTurn
-
-	noCacheWindow bool
-	context       int64 // newest completed call's last executor request: input + cache read + cache creation; 0 until one lands, and after a compaction
+	turn    agentTurn
+	context int64 // newest completed call's last executor request: input + cache read + cache creation; 0 until one lands, and after a compaction
 }
 
 const (
-	subagentBarWidth = 8
-	taskRunning      = "running"
-	entryAssistant   = "assistant"
-	entryUser        = "user"
-	entryCostState   = "cost-state"
-	blockToolUse     = "tool_use"
-	// stallAfter is the quiet time before a running agent's row says idle:
-	// shorter gaps are ordinary model latency.
-	stallAfter = time.Minute
-	// rowSep joins a row's segments tight: a row holds many.
-	rowSep = dim + "│" + reset
-)
-
-// Drop ranks, in the order a row too wide for the status line gives parts up: the
-// cwd, the cache, the compactions, then the effort (the model
-// family stays). Unranked parts — nesting, gauge and spend, identity, status,
-// idle, errors, label — always stay; the label is last, so Claude Code's own
-// truncation cuts only it.
-const (
-	_ = iota // 0: a part that always stays
-	dropCwd
-	dropCache
-	dropCompactions
-	dropEffort
+	entryAssistant = "assistant"
+	entryUser      = "user"
+	entryCostState = "cost-state"
+	blockToolUse   = "tool_use"
 )
 
 // LoadServedPrices is the machine's served price table (pricing.LoadPrices:
@@ -114,193 +78,6 @@ func LoadServedPrices(home, pfmConfigPath string, stderr io.Writer, who string) 
 	return &table
 }
 
-// agentRowsInput is what a render of the agent rows reads beside each task:
-// the session's transcript, id and directory, the width to fit, and the
-// session's own model and window, which an agent on that model shares.
-type agentRowsInput struct {
-	SessionID      string
-	TranscriptPath string
-	Cwd            string
-	Columns        int
-	SessionModel   string
-	SessionWindow  int64
-	Tasks          []subagentTask
-}
-
-// renderAgentRows renders one row body per task, in order, even before its
-// model or token counters arrive: unknown context stays visible as "?". live
-// is every agent of the session that runs, rows not shown included: it decides
-// which agents below a task count as working. A sub-agent transcript that
-// cannot be read renders "?" in its row and its cause goes to warn. A nil
-// prices leaves every row's dollars unpriced. A session with a cost ledger
-// prices each row from it: the ledger rows of that agent and every agent below
-// it (ledger_spend.go); an agent it holds no row of yet keeps its transcripts'
-// price. A row's identity is the agentType it was launched as.
-func renderAgentRows(
-	data agentRowsInput,
-	live map[string]bool,
-	now time.Time,
-	sidDir string,
-	prices *pricing.Prices,
-	home string,
-	env paths.Env,
-	scans transcriptScans,
-	warn io.Writer,
-) []string {
-	inherited, err := inheritedEffort(sidDir, data.SessionID)
-	if err != nil {
-		fmt.Fprintf(warn, "%s: session effort (rows show model alone): %v\n", agentRowsWho, err)
-	}
-	catalog := newContextCatalog(home, env.Get, now, warn)
-	tree := scanAgentTree(data.TranscriptPath, prices, scans)
-	tree.judgeLiveness(live)
-	ledger := loadLedgerView(data.SessionID, home, env, warn)
-	rows := make([]string, 0, len(data.Tasks))
-	for index := range data.Tasks {
-		task := &data.Tasks[index]
-		read := *tree.read(task.ID)
-		if read.model != "" { // the model its calls went to; the spawn model is an alias or absent
-			task.Model = read.model
-		}
-		read.noCacheWindow = openAIModel(task.Model)
-		read.nest = tree.nesting(task.ID)
-		read.spend.add(tree.nestedSpend(task.ID))
-		if ledger != nil {
-			if booked, ok := ledger.spend(task.ID, tree.children); ok && (booked.priced > 0 || read.err != nil) {
-				// a ledger that prices nothing still counts the tokens of a row whose transcript did not read
-				read.spend = read.spend.withLedger(booked)
-			}
-		}
-		for _, cause := range tree.drainWarnings() {
-			fmt.Fprintf(warn, "%s: row %s: nested agents: %s\n", agentRowsWho, task.ID, cause)
-		}
-		for index, err := range []error{read.roleErr, read.err} {
-			if err != nil && (index == 0 || err != read.roleErr) {
-				fmt.Fprintf(warn, "%s: row %s: %v\n", agentRowsWho, task.ID, err)
-			}
-		}
-		switch {
-		case openAIModel(task.Model):
-			task.ContextWindowSize, task.capacityState = catalog.capacity(task.Model)
-		case task.ContextWindowSize == 0 && task.Model != "" && modelVersion(task.Model) == modelVersion(data.SessionModel):
-			task.ContextWindowSize = data.SessionWindow
-		}
-		rows = append(rows, subagentContent(task, &read, data.Cwd, data.Columns, inherited, now))
-	}
-	return rows
-}
-
-// subagentContent renders nested → gauge and spend → name·role → model·effort → running
-// and time → idle → errors → cache → compactions → cwd → label, fitted to
-// columns; the nested count (working/all) leads because it is what a parent
-// row is read for, and the label goes last because a terminal truncates the
-// row's tail. The cwd shows only when the agent works outside the session's
-// own directory — the same one is noise.
-func subagentContent(
-	task *subagentTask,
-	activity *agentActivity,
-	sessionCwd string,
-	columns int,
-	inherited sessionEffortRecord,
-	now time.Time,
-) string {
-	return fitRow(activeContent(task, activity, sessionCwd, inherited, now), columns)
-}
-
-// activeContent is the full row's parts: see subagentContent.
-func activeContent(
-	task *subagentTask,
-	activity *agentActivity,
-	sessionCwd string,
-	inherited sessionEffortRecord,
-	now time.Time,
-) []rowPart {
-	gauge := agentContextGauge(task, activity) + " " + spendSegment(*activity)
-	parts := []rowPart{
-		{text: nestingSegment(activity.nest)},
-		{text: gauge},
-		{text: subagentIdentity(task.Name, activity)},
-		{
-			text:  subagentModel(task.Model, activity.effort, task.Effort, inherited),
-			short: subagentModel(task.Model, "", "", sessionEffortRecord{}),
-			drop:  dropEffort,
-		},
-		{text: subagentStatus(task, now)},
-	}
-	parts = append(parts, activitySegments(*activity, now)...)
-	cwd := strings.TrimSpace(activity.cwd)
-	if cwd != "" && filepath.Clean(cwd) != filepath.Clean(strings.TrimSpace(sessionCwd)) {
-		parts = append(parts, rowPart{text: cCwd + filepath.Base(cwd) + reset, drop: dropCwd})
-	}
-	if label := strings.TrimSpace(task.Label); label != "" {
-		parts = append(parts, rowPart{text: cLabel + label + reset})
-	}
-	return parts
-}
-
-// subagentIdentity renders name·role: the agent's name when it was given one,
-// and its agentType from the meta file; "role ?" when that file is unreadable.
-func subagentIdentity(name string, activity *agentActivity) string {
-	name = strings.TrimSpace(name)
-	role := cRole + activity.role + reset
-	if activity.roleErr != nil {
-		role = cWarn + "role ?" + reset
-	}
-	if name == "" {
-		return role
-	}
-	return cName + name + reset + cMuted + "·" + reset + role
-}
-
-// subagentStatus renders "running" and the time since the agent started.
-func subagentStatus(task *subagentTask, now time.Time) string {
-	segment := cRunning + taskRunning + reset
-	if task.StartTime <= 0 {
-		return segment
-	}
-	ran := time.Duration(max(now.UnixMilli()-task.StartTime, 0)) * time.Millisecond
-	return segment + " " + cElapsed + formatCacheTime(ran, false) + reset
-}
-
-// activitySegments renders idle → errors → cache → compactions from
-// the transcript; idle, errors and compactions appear only when they say
-// something. The cache segment has the main line's shape: the time left on the
-// agent's own prompt cache, then the share of its newest call's prompt read
-// from it. A transcript that could not be read shows "tools ?" and "💾!".
-func activitySegments(activity agentActivity, now time.Time) []rowPart {
-	if activity.err != nil {
-		return []rowPart{{text: cBad + "💾!" + reset}}
-	}
-	var parts []rowPart
-	if quiet := now.Sub(activity.last); !activity.last.IsZero() && quiet >= stallAfter {
-		color := cWarn
-		if quiet >= 5*stallAfter {
-			color = cBad
-		}
-		parts = append(parts, rowPart{text: color + "idle " + formatDuration(quiet.Milliseconds()) + reset})
-	}
-	if activity.errors > 0 {
-		parts = append(parts, rowPart{text: cBad + plural(activity.errors, "error") + reset})
-	}
-	cache := agentCacheText(activity.transcript, activity.cacheHit, now)
-	if activity.noCacheWindow {
-		cache = unmeasuredCacheText(activity.cacheHit)
-	}
-	parts = append(parts, rowPart{text: cache, drop: dropCache})
-	if activity.compactions > 0 {
-		compactions := cCompaction + fmt.Sprintf("⟲%d", activity.compactions) + reset
-		parts = append(parts, rowPart{text: compactions, drop: dropCompactions})
-	}
-	return parts
-}
-
-func plural(count int, noun string) string {
-	if count == 1 {
-		return "1 " + noun
-	}
-	return fmt.Sprintf("%d %ss", count, noun)
-}
-
 // readAgentActivity reads the sub-agent's own files, which Claude Code keeps
 // beside the session's: <session>/subagents/agent-<id>.{meta.json,jsonl}. It
 // counts distinct tool_use blocks, errored tool results and compact
@@ -313,12 +90,9 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices, sca
 	activity := agentActivity{cacheHit: -1}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		activity.err = errors.New("payload names no session transcript")
-		activity.roleErr = activity.err
 		return activity
 	}
 	path := transcript.SubagentTranscript(transcript.SubagentsDir(sessionTranscript), id)
-	activity.role, activity.roleErr = readAgentRole(transcript.SubagentMetaPath(path))
-	activity.transcript = path
 	fold := newActivityFold(prices)
 	done, err := scans.fold(path, "activity", fold)
 	if err != nil {
@@ -328,7 +102,7 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices, sca
 		}
 	}
 	activity.errors, activity.compactions = fold.Errors, fold.Compactions
-	activity.effort, activity.model, activity.cwd = fold.Effort, fold.Model, fold.Cwd
+	activity.effort, activity.model = fold.Effort, fold.Model
 	activity.tools = len(fold.Seen)
 	activity.spend = fold.Spend.total()
 	activity.spend.tools = activity.tools
@@ -343,19 +117,6 @@ func readAgentActivity(sessionTranscript, id string, prices *pricing.Prices, sca
 	return activity
 }
 
-// readAgentRole reads agentType from the sub-agent's meta file.
-func readAgentRole(path string) (string, error) {
-	meta, err := transcript.ReadSubagentMeta(path)
-	if err != nil {
-		return "", err
-	}
-	agentType := strings.TrimSpace(meta.AgentType)
-	if agentType == "" {
-		return "", fmt.Errorf("sub-agent meta %s names no agentType", path)
-	}
-	return agentType, nil
-}
-
 func recordTranscriptLine(line []byte, fold *activityFold) {
 	var entry struct {
 		Type      string    `json:"type"`
@@ -363,7 +124,6 @@ func recordTranscriptLine(line []byte, fold *activityFold) {
 		RequestID string    `json:"requestId"`
 		Timestamp time.Time `json:"timestamp"`
 		Effort    any       `json:"effort"`
-		Cwd       string    `json:"cwd"`
 		Message   struct {
 			ID      string           `json:"id"`
 			Model   string           `json:"model"`
@@ -376,9 +136,6 @@ func recordTranscriptLine(line []byte, fold *activityFold) {
 	}
 	if entry.Timestamp.After(fold.Last) {
 		fold.Last = entry.Timestamp
-	}
-	if cwd := strings.TrimSpace(entry.Cwd); cwd != "" {
-		fold.Cwd = cwd
 	}
 	if entry.Type == "system" && entry.Subtype == "compact_boundary" {
 		fold.Compactions++

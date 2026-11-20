@@ -123,27 +123,27 @@ else bad 'relative harvester source' "rc=$rc" "$out"; fi
 local_env() { # local_env <worktree> [VAR=value…]: the two overrides, or the resolver's error and exit
   local root="$1"; shift
   (
-    unset PFM_GOPROXY PFM_NPM_REGISTRY ENGINE_SYNC_SRC HARVESTER_SRC
+    unset PFM_GOPROXY PFM_NPM_REGISTRY PFM_APT_MIRROR ENGINE_SYNC_SRC HARVESTER_SRC
     [ $# -eq 0 ] || export "$@"
     ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
-    printf 'GOPROXY=%s\nNPM=%s\n' "${PFM_GOPROXY-unset}" "${PFM_NPM_REGISTRY-unset}"
+    printf 'GOPROXY=%s\nNPM=%s\nAPT=%s\n' "${PFM_GOPROXY-unset}" "${PFM_NPM_REGISTRY-unset}" "${PFM_APT_MIRROR-unset}"
   ) 2>&1
 }
 out="$(local_env "$T/linked")"; rc=$?
-if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=unset\nNPM=unset')" ]; then ok 'no infra/fence/.env exports nothing'
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=unset\nNPM=unset\nAPT=unset')" ]; then ok 'no infra/fence/.env exports nothing'
 else bad 'absent local env' "rc=$rc" "$out"; fi
 mkdir -p "$MAIN/infra/fence"
-printf '# this machine\n\nPFM_GOPROXY=https://go.example.invalid/api/go,direct\nPFM_NPM_REGISTRY=https://npm.example.invalid/\n' >"$MAIN/infra/fence/.env"
+printf '# this machine\n\nPFM_GOPROXY=https://go.example.invalid/api/go,direct\nPFM_NPM_REGISTRY=https://npm.example.invalid/\nPFM_APT_MIRROR=https://apt.example.invalid/ubuntu\n' >"$MAIN/infra/fence/.env"
 out="$(local_env "$T/linked")"; rc=$?
-if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=https://go.example.invalid/api/go,direct\nNPM=https://npm.example.invalid/')" ]; then
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=https://go.example.invalid/api/go,direct\nNPM=https://npm.example.invalid/\nAPT=https://apt.example.invalid/ubuntu')" ]; then
   ok "a linked worktree loads the main checkout's infra/fence/.env"
 else bad 'local env from a linked worktree' "rc=$rc" "$out"; fi
 out="$(local_env "$T/linked" PFM_GOPROXY=)"; rc=$?
-if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=\nNPM=https://npm.example.invalid/')" ]; then ok 'a set variable wins over infra/fence/.env'
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=\nNPM=https://npm.example.invalid/\nAPT=https://apt.example.invalid/ubuntu')" ]; then ok 'a set variable wins over infra/fence/.env'
 else bad 'environment wins' "rc=$rc" "$out"; fi
 printf 'PFM_GOPROX=https://go.example.invalid\n' >"$MAIN/infra/fence/.env"
 out="$(local_env "$T/linked")"; rc=$?
-if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: infra/fence/.env line 1: unknown key PFM_GOPROX (known: PFM_GOPROXY, PFM_NPM_REGISTRY): $MAIN/infra/fence/.env" ]; then
+if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: infra/fence/.env line 1: unknown key PFM_GOPROX (known: PFM_GOPROXY, PFM_NPM_REGISTRY, PFM_APT_MIRROR): $MAIN/infra/fence/.env" ]; then
   ok 'an unknown infra/fence/.env key is refused by name'
 else bad 'unknown local env key' "rc=$rc" "$out"; fi
 printf 'export PFM_GOPROXY\n' >"$MAIN/infra/fence/.env"

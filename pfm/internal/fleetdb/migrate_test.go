@@ -249,7 +249,7 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 		{name: "missing column waits for the lock", seed: v3Schema, waits: true},
 		{
 			name: "a current file opens without it",
-			seed: v3Schema + migrationV5 + migrationV6 + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion) + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
+			seed: v3Schema + migrationV5 + migrationV6 + migrationV7 + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion) + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" + scheduleOnceDDL + ";",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -297,14 +297,14 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 	}
 }
 
-// retiredIssuesSeed is a version-6 file still holding the retired issues ledger.
+// retiredIssuesSeed is a current-version file still holding the retired issues ledger.
 func retiredIssuesSeed(rows int) string {
-	seed := v3Schema + migrationV5 + migrationV6 + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" +
+	seed := v3Schema + migrationV5 + migrationV6 + migrationV7 + hiddenRevisionDDL + ";" + schedulesRenameDDL + ";" +
 		scheduleOnceDDL + ";" + `
 CREATE TABLE issues(id INTEGER PRIMARY KEY, at_ns INTEGER NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL);
 CREATE INDEX issues_at ON issues(at_ns);
 INSERT INTO hidden(uuid,hidden_at) VALUES('keep',77);
-PRAGMA user_version=6;`
+` + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)
 	for row := range rows {
 		seed += fmt.Sprintf("INSERT INTO issues(at_ns,title,detail) VALUES(%d,'filed','kept in the backup');", row)
 	}

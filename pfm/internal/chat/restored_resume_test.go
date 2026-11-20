@@ -12,6 +12,8 @@ import (
 // A `claude --resume` run in a Herdr pane, the line Herdr's restore types,
 // rebinds its session's native seat only when that seat's supervisor is gone:
 // a session with no native seat, or with a live one, births as it did before.
+// The session's transcript exists, as the restored `claude --resume` needs it:
+// a dead seat without one lists nowhere, so nothing would rebind.
 func TestResumeRestoredSeatTakesOnlyADeadSeat(t *testing.T) {
 	const session = "6fafd8a7-5059-4288-bf58-23e60c5fdb88"
 	for _, test := range []struct {
@@ -27,7 +29,7 @@ func TestResumeRestoredSeatTakesOnlyADeadSeat(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			testjail.Fleet(t)
+			seedClaudeChat(t, testjail.Fleet(t), session)
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
 				if value, code, ok := nativeChatProof(req, "w6:p3"); ok {
 					return value, code

@@ -1019,7 +1019,9 @@ function readmeRule(cwd, head, info) {
 const MARKETPLACE = ".claude-plugin/marketplace.json";
 
 // The marketplace's plugins at a commit, each with its submodule path and the
-// gitlink pinned there (null when the path holds none).
+// gitlink pinned there (null when the path holds none). A plugin whose source is
+// a relative path is in-tree: this repository tracks it at that path, its root,
+// and pins it at the commit itself.
 function marketplacePlugins(cwd, head) {
   if (!treeHas(cwd, head, MARKETPLACE)) throw new CheckError(`${MARKETPLACE} is absent at ${head}`);
   let plugins;
@@ -1031,9 +1033,11 @@ function marketplacePlugins(cwd, head) {
   }
   if (!Array.isArray(plugins)) throw new CheckError(`${MARKETPLACE} at ${head} holds no plugins list`);
   return plugins.map((p) => {
+    if (typeof p?.source === "string")
+      return { plugin: p, path: p.source.replace(/^\.\//, "").replace(/\/$/, ""), gitlink: null, inTree: true };
     const path = String(p?.source?.path ?? "").replace(/^\.\//, "").replace(/\/$/, "");
     const entry = path ? nulSplit(git(cwd, ["ls-tree", "-z", head, "--", path]))[0] ?? "" : "";
-    return { plugin: p, path, gitlink: /^160000 commit ([0-9a-f]{40})\t/.exec(entry)?.[1] ?? null };
+    return { plugin: p, path, gitlink: /^160000 commit ([0-9a-f]{40})\t/.exec(entry)?.[1] ?? null, inTree: false };
   });
 }
 
@@ -1045,11 +1049,14 @@ function marketplacePlugins(cwd, head) {
 function pluginRoles(cwd, head) {
   const roles = new Set();
   if (!treeHas(cwd, head, MARKETPLACE)) return roles;
-  for (const { plugin, path, gitlink } of marketplacePlugins(cwd, head)) {
+  for (const { plugin, path, gitlink, inTree } of marketplacePlugins(cwd, head)) {
     const name = plugin?.name;
-    if (!gitlink || typeof name !== "string") continue;
-    const dir = `plugins/${name}/`;
-    for (const p of nulSplit(git(join(cwd, path), ["ls-tree", "-r", "--name-only", "-z", gitlink, "--", dir]))) {
+    if (!(gitlink || inTree) || typeof name !== "string") continue;
+    const dir = inTree ? `${path}/` : `plugins/${name}/`;
+    const listed = inTree
+      ? git(cwd, ["ls-tree", "-r", "--name-only", "-z", head, "--", dir])
+      : git(join(cwd, path), ["ls-tree", "-r", "--name-only", "-z", gitlink, "--", dir]);
+    for (const p of nulSplit(listed)) {
       const rest = p.slice(dir.length);
       let m;
       if ((m = /^agents\/([^/]+)\.md$/.exec(rest))) roles.add(`agent ${name}-${m[1]}`).add(`agent ${m[1]}`);
@@ -1060,12 +1067,20 @@ function pluginRoles(cwd, head) {
   return roles;
 }
 
-// T1 — every plugin the marketplace lists is pinned at a published tag of its repository.
+// T1 — every plugin the marketplace lists is pinned at a published tag of its repository,
+// or, in-tree, has its plugin manifest at its path.
 function pluginRule(cwd, head, info) {
   const plugins = marketplacePlugins(cwd, head);
   const fails = [];
   const unlisted = [];
-  for (const { plugin: p, path, gitlink } of plugins) {
+  let inTreeCount = 0;
+  for (const { plugin: p, path, gitlink, inTree } of plugins) {
+    if (inTree) {
+      inTreeCount++;
+      if (!path || !treeHas(cwd, head, `${path}/.claude-plugin/plugin.json`))
+        fails.push(fail("T1", MARKETPLACE, `in-tree plugin ${p.name} has no ${path}/.claude-plugin/plugin.json at ${head.slice(0, 7)}`));
+      continue;
+    }
     const url = p?.source?.url;
     if (!path || !url) {
       fails.push(fail("T1", MARKETPLACE, `plugin ${p?.name} names no source.path and source.url`));
@@ -1087,7 +1102,7 @@ function pluginRule(cwd, head, info) {
     if (!tagged.has(gitlink))
       fails.push(fail("T1", path, `plugin ${p.name}'s gitlink ${gitlink.slice(0, 7)} is no published tag of ${url}`));
   }
-  info.push(`PLUGINS ${plugins.length - unlisted.length} checked, ${unlisted.length} unlistable`);
+  info.push(`PLUGINS ${plugins.length - unlisted.length - inTreeCount} checked, ${unlisted.length} unlistable, ${inTreeCount} in-tree`);
   return { fails, unlisted };
 }
 

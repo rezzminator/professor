@@ -68,8 +68,8 @@ func TestMainLineWearsTheSubagentPalette(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "\x1b[0m\x1b[38;5;51m● Codex\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;220meffort unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢 \x1b[1;32m▰▰▰\x1b[2m▱▱▱▱▱▱▱▱▱▱▱▱\x1b[0m \x1b[1;32m25% 68.0K\x1b[0m \x1b[38;5;117mof 272.0K\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m\n\x1b[0m\x1b[38;5;226mChatGPT quota missing\x1b[0m\n" {
-		t.Fatalf("context window: render lacks %q:\n%q", cWindow+"of 272.0K", got)
+	if got != "\x1b[0m\x1b[38;5;51m● Codex\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;220meffort unknown\x1b[0m \x1b[2m│\x1b[0m \x1b[1;34m~\x1b[0m \x1b[2m│\x1b[0m \x1b[2;90m·\x1b[m \x1b[2;90m·\x1b[m\n\x1b[0m🟢 \x1b[38;5;118m▰▰\x1b[2m▱▱▱▱▱▱\x1b[0m \x1b[38;5;245m···············\x1b[0m \x1b[38;5;118m25%\x1b[0m \x1b[1;97m 68.0K\x1b[0m\x1b[38;5;245m/\x1b[0m\x1b[38;5;117m272.0K\x1b[0m \x1b[2m│\x1b[0m \x1b[38;5;215m⏳ 0s\x1b[0m\n\x1b[0m\x1b[38;5;226mChatGPT quota missing\x1b[0m\n" {
+		t.Fatalf("context window: render lacks %q:\n%q", cWindow+"272.0K", got)
 	}
 }
 

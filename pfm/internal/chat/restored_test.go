@@ -625,7 +625,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 	// The restore lands in the fleet home; as a managed root its settings envs ride the seat.
 	for path, body := range map[string]string{
 		filepath.Join(runtime.Paths.Home, ".professor", "baseline.json"): "{}",
-		paths.Settings(runtime.Paths.Home):                               `{"envs":{"TEAM_MODE":"strict"}}`,
+		config.PathIn(runtime.Paths.Home):                                `{"envs":{"TEAM_MODE":"strict"}}`,
 	} {
 		if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -665,7 +665,7 @@ func TestOpenRestoredIDWithoutSeatUsesCurrentHerdrPane(t *testing.T) {
 		t.Fatalf(
 			"restored seat env = %q, want TEAM_MODE=strict from %s",
 			run.Env,
-			paths.Settings(runtime.Paths.Home),
+			config.PathIn(runtime.Paths.Home),
 		)
 	}
 }

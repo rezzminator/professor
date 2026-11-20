@@ -106,12 +106,11 @@ func TestPFMSettings(t *testing.T) {
 			t,
 			path,
 			fmt.Sprintf(
-				`{"hooks":{"SessionStart":[{"hooks":[{"command":%q},{"command":"pfm internal clear-hide"},{"command":"operator-hook"}]}]},"statusLine":{"command":"pfm statusline"},"subagentStatusLine":{"command":%q}}`,
+				`{"hooks":{"SessionStart":[{"hooks":[{"command":%q},{"command":"pfm internal clear-hide"},{"command":"operator-hook"}]}]},"statusLine":{"command":"pfm statusline"}}`,
 				command,
-				claudelaunch.StatusLineCommand(env.Home)+" --subagents",
 			),
 		)
-		items := fmt.Sprintf(`hook %q, hook "pfm internal clear-hide", statusLine, subagentStatusLine`, command)
+		items := fmt.Sprintf(`hook %q, hook "pfm internal clear-hide", statusLine`, command)
 		assertRows(t, detect(t, "pfm-settings", env), Row{
 			Block,
 			"pfm-settings",

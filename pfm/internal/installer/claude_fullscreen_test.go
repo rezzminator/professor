@@ -45,8 +45,12 @@ func fullscreenEngine(t *testing.T, apply bool, accounts ...pfmconfig.Account) (
 	t.Helper()
 	var output bytes.Buffer
 	return &engine{
-		options: Options{Home: t.TempDir(), Stdout: &output, ClaudeAccounts: accounts},
-		apply:   apply, stamp: "test",
+		// A null tui in claude.settings leaves the renderer to each account's settings.json.
+		options: Options{
+			Home: t.TempDir(), Stdout: &output, ClaudeAccounts: accounts,
+			ClaudeSettings: map[string]any{"tui": nil},
+		},
+		apply: apply, stamp: "test",
 	}, &output
 }
 

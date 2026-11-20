@@ -39,7 +39,7 @@ func TestGitSegmentRealRepositoryStates(t *testing.T) {
 			if tc.name == "missing directory" {
 				dir = filepath.Join(dir, "missing")
 			}
-			got := stripANSICodes(gitSegment(context.Background(), r, dir))
+			got := stripANSICodes(gitRead(context.Background(), r, dir).text(0))
 			if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) {
 				t.Fatalf("segment = %q, want %q; warnings = %q", got, tc.want, warnings.String())
 			}

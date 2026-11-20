@@ -116,7 +116,7 @@ What the tree rests on, each observed in the lab:
 - A child runs asynchronously; its completion arrives as a notification that wakes its parent.
 - Notifications that arrive during a blocking tool call are absorbed into the parent's next request and wake nothing; several completions can arrive as one wake. So the lead waits inside `tt wait`, never on wakes.
 - A child finishing after the lead's final wakes the lead, and the lead's reply replaces the final.
-- A spawn past the harness's concurrency cap fails at once with the tool result `Concurrent subagent limit reached. You can run 50 subagents at once. Do not retry.`; a spawn past the depth cap was never observed. The fleet's default depth is 8 (`pfm/internal/config/subagents.go:19`). Either way the thread never starts, so `tt wait` reports a named node not started after 120 s as `never started`, and the gap round respawns it: in the field, seven threads refused this way all started on the respawn ([Field runs](tracer-bench.md#lead-audit)).
+- A spawn past the harness's concurrency cap fails at once with the tool result `Concurrent subagent limit reached. You can run 50 subagents at once. Do not retry.`; a spawn past the depth cap was never observed. The fleet's default depth is 8 (`pfm/internal/claudelaunch/defaults.json:9`). Either way the thread never starts, so `tt wait` reports a named node not started after 120 s as `never started`, and the gap round respawns it: in the field, seven threads refused this way all started on the respawn ([Field runs](tracer-bench.md#lead-audit)).
 - Agent types load at session start: an edited agent file runs in the next session.
 
 ## Model

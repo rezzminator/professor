@@ -197,3 +197,32 @@ func TestGoRegistryInstallHintNamesTheModuleToolchainFloor(t *testing.T) {
 	}
 	t.Fatal("registry has no go entry")
 }
+
+func TestHerdrRegistryEntryNamesItsInstallRouteAndWhatItsAbsenceCosts(t *testing.T) {
+	entries := Registry(Options{Home: t.TempDir(), GOOS: "linux", GOARCH: "amd64"})
+	for _, entry := range entries {
+		if entry.Name != "herdr" {
+			continue
+		}
+		const wantHint = "curl -fsSL https://releases.herdr.dev/app/install.sh | sh (https://herdr.dev)"
+		const wantCost = "the herdr theme surface and Herdr chat panes are unavailable"
+		if entry.InstallHint != wantHint || entry.MissingCost != wantCost || entry.Required {
+			t.Errorf("herdr entry hint=%q cost=%q required=%v, want %q / %q / false",
+				entry.InstallHint, entry.MissingCost, entry.Required, wantHint, wantCost)
+		}
+		return
+	}
+	t.Fatal("registry has no herdr entry")
+}
+
+func TestOptionalCommandsAreTheFixedOptionalRowsOfThisOS(t *testing.T) {
+	names := map[string]bool{}
+	for _, entry := range OptionalCommands() {
+		names[entry.Name] = true
+	}
+	for name, want := range map[string]bool{"herdr": true, "uv": true, "git": false, "claude": false, "launchctl": false} {
+		if names[name] != want {
+			t.Errorf("OptionalCommands holds %s = %v, want %v (got %v)", name, names[name], want, names)
+		}
+	}
+}

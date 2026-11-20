@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -274,6 +275,7 @@ func NewModel(snapshot Snapshot) Model {
 		mergeNewChat: snapshot.MergeNewChat,
 		placeState: placeState{
 			projectDirs: snapshot.ProjectDirs, dirExists: snapshot.DirExists, herdrSpace: snapshot.HerdrSpace,
+			spaces: snapshot.Spaces,
 		},
 		deck: deckState{
 			home: snapshot.Home, rev: 1, agg: &deckAgg{}, freshNS: snapshot.NowNS,
@@ -1010,7 +1012,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	follow := model.selectedKey()
 	fallback := model.cursor
 	if snapshot.ProjectDirs != nil {
-		model.projectDirs = snapshot.ProjectDirs
+		model.projectDirs, model.spaces = snapshot.ProjectDirs, snapshot.Spaces
 	}
 	rows := snapshot.Rows
 	// The update and update-check failure rows are read once from the cache
@@ -1181,14 +1183,16 @@ func (model *Model) adjustKilledCount(killed bool) {
 	}
 }
 
-// searchText is what a typed find matches a row against: its project, then
-// its name.
+// groupName is the name the list files a row under: its space when it has one,
+// as the rail does, else its project; "?" for neither.
+func groupName(row compose.Row) string {
+	return cmp.Or(cleanField(row.Space), cleanField(row.Project), "?")
+}
+
+// searchText is what a typed find matches a row against: its group, then its
+// name.
 func searchText(row compose.Row) string {
-	project := cleanField(row.Project)
-	if project == "" {
-		project = "?"
-	}
-	return strings.ToLower(project + " " + cleanField(row.Name))
+	return strings.ToLower(groupName(row) + " " + cleanField(row.Name))
 }
 
 func (model *Model) rebuild(follow string, fallback int) {
@@ -1198,10 +1202,7 @@ func (model *Model) rebuild(follow string, fallback int) {
 	model.groups = model.groups[:0]
 	for index := range model.rows {
 		row := &model.rows[index]
-		project := cleanField(row.Project)
-		if project == "" {
-			project = "?"
-		}
+		project := groupName(*row)
 		model.search[index] = searchText(*row)
 		groupIndex, found := byProject[project]
 		if !found {

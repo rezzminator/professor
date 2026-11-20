@@ -217,6 +217,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			Offline:    paths.PricesOffline(),
 			Clock:      clock.Real,
 		})
+		hookentry.InstallPing(context.Background(), stdout, *offline, runtime, paths.OSEnv{})
 	}
 	return code
 }
@@ -241,7 +242,7 @@ func newInstallerOptions(
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]
 		options.ManagedSettingsDir = runtime.Paths.ManagedSettingsDir
-		options.CleanupPeriodDays = runtime.Config.Claude.CleanupPeriodDays
+		options.ClaudeSettings = runtime.Config.Claude.Settings
 		options.RequireManagedCleanup = runtime.Config.Claude.RequireManagedCleanup
 		options.Home = runtime.Paths.Home
 		options.StateDB = runtime.Paths.StateDB
@@ -257,6 +258,7 @@ func newInstallerOptions(
 		options.Version = runtime.Version
 		options.ClaudePluginCheckoutRoot = runtime.Config.Claude.PluginCheckoutRoot
 		installer.ConfigureClaudePlugins(&options, runtime.Config)
+		options.HerdrKeys = runtime.Config.Herdr.Keys
 		options.CodexBinary = runtime.Config.Codex.Binary
 		if options.CodexBinary == "" {
 			options.CodexBinary = pfmengine.MustLookup(pfmengine.Codex).Binary

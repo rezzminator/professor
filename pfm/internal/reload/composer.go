@@ -2,7 +2,6 @@ package reload
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
@@ -59,14 +58,12 @@ func composerShowsExit(capture string) bool {
 	return pfmcall.ComposerDraftText(capture) == "/exit"
 }
 
+// selectorOpen asks pfmcall's selector door, which reads the row in front of
+// the composer alone: a numbered prompt the chat echoes above its input box
+// ("❯ 1. …") is transcript, and a whole-frame scan refused every reload of a
+// chat whose last prompt opened with a list.
 func selectorOpen(capture string) bool {
-	selector := regexp.MustCompile(`❯[\s\v]*\d+\.`)
-	for _, line := range strings.Split(capture, "\n") {
-		if selector.MatchString(line) {
-			return true
-		}
-	}
-	return false
+	return pfmcall.SelectorLine(capture) != ""
 }
 
 // composerText returns the ACTIVE composer's WHOLE draft: the marker line plus

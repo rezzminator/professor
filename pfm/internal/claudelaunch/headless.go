@@ -7,8 +7,9 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"strings"
+	"unicode"
 
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -74,7 +75,7 @@ func checkValue(key, kind string, value any) error {
 		return fmt.Errorf("%s: expected positive int", key)
 	}
 	if key == knobHelperModel {
-		if text, ok := value.(string); ok && pfmconfig.ValidHelperModel(text) {
+		if text, ok := value.(string); ok && validHelperModel(text) {
 			return nil
 		}
 		return fmt.Errorf("%s: expected a non-empty model name without whitespace", key)
@@ -115,16 +116,7 @@ func integer(value any) (int64, bool) {
 
 // RenderHeadless turns supported per-run Claude preferences into --settings JSON.
 func RenderHeadless(settings map[string]any) (string, error) {
-	result := map[string]any{knobOutputStyle: defaultWord}
-	env := map[string]string{envFunctionHooks: "1"}
-	for _, knob := range Knobs {
-		switch knob.Name {
-		case knobAutoCompactWindow:
-			env[envAutoCompactWindow] = strconv.FormatInt(knob.Default.(int64), 10)
-		case knobHelperModel:
-			env[envAnthropicSmallFastModel] = knob.Default.(string)
-		}
-	}
+	result, env := defaultSettings()
 	for key, value := range settings {
 		kind, ok := headlessKeys[key]
 		if !ok {
@@ -145,9 +137,7 @@ func RenderHeadless(settings map[string]any) (string, error) {
 				return "", fmt.Errorf("systemPrompt: only lean or production is supported")
 			}
 		case knobNativeCursor:
-			if value.(bool) {
-				env[envNativeCursor] = "1"
-			}
+			setFlagEnv(env, envNativeCursor, value.(bool))
 		case knobMaxSubagentSpawnDepth:
 			env[envSpawnDepth] = strconv.FormatInt(mustInteger(value), 10)
 		case knobMaxConcurrentSubagents:
@@ -161,9 +151,7 @@ func RenderHeadless(settings map[string]any) (string, error) {
 		case knobHelperModel:
 			env[envAnthropicSmallFastModel] = value.(string)
 		case knobTmuxTruecolor:
-			if value.(bool) {
-				env[envTmuxTruecolor] = "1"
-			}
+			setFlagEnv(env, envTmuxTruecolor, value.(bool))
 		case knobTheme:
 			if theme, _ := themeForLaunch(value.(string)); theme != "" {
 				result[knobTheme] = theme
@@ -183,3 +171,42 @@ func RenderHeadless(settings map[string]any) (string, error) {
 }
 
 func mustInteger(value any) int64 { number, _ := integer(value); return number }
+
+// RetiredKnobChangesLaunch reports whether a retired claude key's raw value, rendered as the knob it was,
+// launches differently from the shipped defaults alone. null and a value the defaults already carry
+// change nothing; a value the knob cannot render changes the launch, so its warning stays.
+func RetiredKnobChangesLaunch(name string, value json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return true
+	}
+	if decoded == nil {
+		return false
+	}
+	with, err := RenderHeadless(map[string]any{name: decoded})
+	if err != nil {
+		return true
+	}
+	without, err := RenderHeadless(nil)
+	return err != nil || with != without
+}
+
+// setFlagEnv sets name to "1" when on, else removes it, a default's value included: Claude Code reads
+// any non-empty value of these as on.
+func setFlagEnv(env map[string]string, name string, on bool) {
+	if on {
+		env[name] = "1"
+		return
+	}
+	delete(env, name)
+}
+
+// validHelperModel reports whether value can be a helper model: a model id or alias, non-empty,
+// without a space or control character, so it reaches Claude Code's environment as one word.
+func validHelperModel(value string) bool {
+	return value != "" && !strings.ContainsFunc(value, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	})
+}

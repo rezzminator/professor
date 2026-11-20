@@ -123,3 +123,28 @@ func TestRefuseAmbientConfigHomeFromAlias(t *testing.T) {
 		t.Fatal("alias marker allowed ambient config")
 	}
 }
+
+// MachinePath names the file the runtime pinned, a --config override included, ahead of PFM_CONFIG.
+func TestMachinePathFollowsThePin(t *testing.T) {
+	home := t.TempDir()
+	fromEnv, pinned := filepath.Join(home, "env.json"), filepath.Join(home, "pinned.json")
+	t.Setenv(paths.EnvConfig, fromEnv)
+	for _, row := range []struct {
+		pin  *string
+		want string
+	}{
+		{nil, fromEnv},
+		{&pinned, pinned},
+		{new(string), ""},
+	} {
+		restore := func() {}
+		if row.pin != nil {
+			restore = UseConfigPath(*row.pin)
+		}
+		got, err := MachinePath(home)
+		restore()
+		if err != nil || got != row.want {
+			t.Errorf("MachinePath = %q, %v; want %q", got, err, row.want)
+		}
+	}
+}

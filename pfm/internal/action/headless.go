@@ -52,6 +52,8 @@ type HeadlessRequest struct {
 	Effort string
 	// Envs are the adopter settings' envs the persona read carried.
 	Envs map[string]string
+	// ClaudeSettings are the adopter settings' claude.settings the persona read carried.
+	ClaudeSettings map[string]any
 }
 
 // claudeEfforts is the roster claude's own --help states. An unknown value is
@@ -205,6 +207,7 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 		Cache1H: request.Cache1H, SessionID: id, Name: request.Name,
 		Model: request.Model, Effort: effort, Args: arguments, Home: request.Home,
 		Machine: machine, PromptFile: request.PromptChannel, Envs: request.Envs,
+		ClaudeSettings: request.ClaudeSettings,
 	}
 	run, err := spawn.ShellCommand()
 	if err != nil {

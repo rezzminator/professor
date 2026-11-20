@@ -7,6 +7,8 @@
 // writes a Claude file; only `pfm theme use` (UseTheme) sets the `theme` key of
 // each account's settings.json, through the editor it is handed. Nothing here runs until `pfm theme on` writes the state
 // file: every door other packages call is a no-op without it.
+//
+// herdr_table.go: HerdrTableSpan, where a Herdr config holds a table; the theme block and install's keys block both place through it.
 package themesync
 
 import (
@@ -116,6 +118,22 @@ const (
 	VerdictRestored Verdict = "RESTORED"
 	VerdictSource   Verdict = "SOURCE"
 )
+
+// AbsentCost names what the user goes without while surface is ABSENT, the
+// line pfm theme status prints under its matrix; "" for a surface with none.
+func AbsentCost(surface string) string {
+	switch surface {
+	case surfaceTmux:
+		return "no pfm chat is open to recolour; the next one starts in this theme"
+	case surfaceHerdr:
+		return "Herdr panes keep Herdr's own colours"
+	case surfaceVscode:
+		return "VS Code keeps its own colour theme"
+	case surfaceFollower:
+		return "a theme or appearance change made outside pfm is not followed"
+	}
+	return ""
+}
 
 // SurfaceResult is one surface's outcome: the generation the surface itself
 // reads back (0 when it carries none), the file or socket it lives at, and a

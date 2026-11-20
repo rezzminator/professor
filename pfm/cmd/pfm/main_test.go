@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -647,11 +648,14 @@ func TestInstallerManagedCleanupOptions(t *testing.T) {
 	var output bytes.Buffer
 	home := t.TempDir()
 	runtime := pfmconfig.Runtime{
-		Paths:  paths.Values{Home: home, ManagedSettingsDir: filepath.Join(home, "managed")},
-		Config: pfmconfig.Config{Claude: pfmconfig.Claude{CleanupPeriodDays: 123, RequireManagedCleanup: true}},
+		Paths: paths.Values{Home: home, ManagedSettingsDir: filepath.Join(home, "managed")},
+		Config: pfmconfig.Config{Claude: pfmconfig.Claude{
+			Settings: map[string]any{"cleanupPeriodDays": float64(123)}, RequireManagedCleanup: true,
+		}},
 	}
 	options := newInstallerOptions(installer.ModeDryRun, "", true, &output, &output, runtime)
-	if options.ManagedSettingsDir != runtime.Paths.ManagedSettingsDir || options.CleanupPeriodDays != 123 ||
+	if options.ManagedSettingsDir != runtime.Paths.ManagedSettingsDir ||
+		!reflect.DeepEqual(options.ClaudeSettings, runtime.Config.Claude.Settings) ||
 		!options.RequireManagedCleanup {
 		t.Fatalf("cleanup options=%+v", options)
 	}

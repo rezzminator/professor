@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -46,6 +45,7 @@ type themeFile struct {
 	label   string // names the file in a report: empty for the Claude theme file
 	path    string
 	content []byte
+	shipped []byte // the profile document the theme ships, which a stale copy is a subset of
 
 	// state read by inspect, decision made by settle
 	existing []byte
@@ -53,6 +53,7 @@ type themeFile struct {
 	record   themeOwnershipRecord
 	owned    bool
 	action   themeAction
+	stale    bool // an unowned file whose every key matches the shipped profile: rewritten, not refused
 }
 
 func profileLedgerKey(name string) string { return themeProfileKeyPrefix + name }
@@ -96,12 +97,13 @@ func themeFiles(home, name string, claude themeFile, content []byte) ([]themeFil
 	if err != nil {
 		return nil, fmt.Errorf("profile %s rejected: %w", name, err)
 	}
-	claude.content = palette
+	claude.content, claude.shipped = palette, content
 	return []themeFile{claude, {
 		key:     profileLedgerKey(name),
 		label:   " profile copy",
 		path:    themesync.ProfilePath(home, name),
 		content: content,
+		shipped: content,
 	}}, nil
 }
 
@@ -125,24 +127,6 @@ func (file *themeFile) inspect(name string, ownership map[string]themeOwnershipR
 	}
 	if file.exists && contentSHA256(file.existing) != file.record.SHA256 {
 		return "theme " + name + file.label + " locally modified; left in place at " + file.path
-	}
-	return ""
-}
-
-// settle decides an inspected file's action, or returns the skip line for an
-// unowned file that differs from what install would write.
-func (file *themeFile) settle(name string) string {
-	switch {
-	case !file.exists:
-		file.action = themeWrite
-	case bytes.Equal(file.existing, file.content) && file.owned:
-		file.action = themeUnchanged
-	case bytes.Equal(file.existing, file.content):
-		file.action = themeAdopt
-	case !file.owned:
-		return "theme " + name + file.label + " already exists but is not installer-owned; left in place at " + file.path
-	default:
-		file.action = themeWrite
 	}
 	return ""
 }
@@ -181,7 +165,7 @@ func (installer *engine) installThemeFiles(
 		file := &files[index]
 		switch file.action {
 		case themeWrite:
-			if changeErr := installer.change("write theme "+name+file.label+" -> "+file.path, nil); changeErr != nil {
+			if changeErr := installer.change(file.writeLine(name), nil); changeErr != nil {
 				installer.skip("theme " + name + " report failed after install: " + changeErr.Error())
 			}
 		case themeAdopt:

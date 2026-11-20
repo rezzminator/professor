@@ -243,40 +243,20 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		directoryName = "~"
 	}
 
-	gauge, l2, _ := renderContextLine(runtime, data, directory, now)
+	gauge, l2 := instrumentLine(runtime, data, directory, now)
 	if data.Model.ID == "" && gauge.model != "" {
 		data.Model.ID = gauge.model
 		data.Model.DisplayName = modelFamily(gauge.model)
 	}
-	l1 := badge + modelSegment(data, sessionAutoEffort(runtime, data))
-	l1 += sep + blue + directoryName + reset
-	if data.Worktree.Name != "" {
-		l1 += sep + magenta + "🌳 " + data.Worktree.Name + reset
-	} else if data.Workspace.GitWorktree != "" {
-		l1 += sep + magenta + "🌳 " + data.Workspace.GitWorktree + reset
+	worktree := data.Worktree.Name
+	if worktree == "" {
+		worktree = data.Workspace.GitWorktree
 	}
-	if git := gitSegment(ctx, runtime, directory); git != "" {
-		l1 += sep + git
-	}
-	if data.Agent.Name != "" {
-		l1 += sep + magenta + "⚡" + data.Agent.Name + reset
-	}
-	if data.Vim.Mode != "" {
-		color := green
-		if data.Vim.Mode == "NORMAL" {
-			color = cyan
-		}
-		l1 += sep + color + data.Vim.Mode + reset
-	}
-	if data.SessionName != "" {
-		l1 += sep + cLabel + "🔖 " + data.SessionName + reset
-	}
-	l1 += sep + fleetSegment(runtime)
-
-	// ⏳ (U+23F3, East-Asian-Width W) over ⏱ (U+23F1, width N): every cell
-	// model — tmux, xterm.js, the harness — sizes the hourglass at 2 cells,
-	// while the stopwatch is 1 cell wide on paper and 2 cells wide in ink.
-	l2 += sep + cElapsed + "⏳ " + formatDuration(data.Cost.TotalDurationMS) + reset
+	l1 := identityLine(runtime, identityFacts{
+		badge: badge, data: data, effort: sessionAutoEffort(runtime, data), directory: directoryName,
+		worktree: worktree, git: gitRead(ctx, runtime, directory), agent: data.Agent.Name, vim: data.Vim.Mode,
+		session: data.SessionName, fleet: fleetSegment(runtime),
+	})
 
 	l3 := ""
 	switch runtime.Engine {
@@ -291,19 +271,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	if l3 != "" {
 		l2 += "\n" + reset + l3
 	}
-	return reset + l1 + "\n" + reset + l2 + "\n" + agentRowLines(runtime, data, directory, now), nil
-}
-
-func formatDuration(milliseconds int64) string {
-	seconds := milliseconds / 1000
-	switch {
-	case seconds >= 3600:
-		return fmt.Sprintf("%dh%dm", seconds/3600, seconds%3600/60)
-	case seconds >= 60:
-		return fmt.Sprintf("%dm%ds", seconds/60, seconds%60)
-	default:
-		return fmt.Sprintf("%ds", seconds)
-	}
+	return reset + l1 + "\n" + reset + l2 + "\n", nil
 }
 
 func urgencyEmoji(percent int) string {
@@ -337,19 +305,20 @@ func makeBar(percent, width int) string {
 	if filled < 0 {
 		filled = 0
 	}
-	// ▰▱ (U+25B0/U+25B1) on purpose — block elements ▓░ are WebGL custom
-	// glyphs in VS Code's terminal and render stale under repaint; the
-	// pfm-statusline patcher's GAUGE regex matches these runs.
-	return percentColor(percent) + strings.Repeat("▰", filled) + dim +
-		strings.Repeat("▱", width-filled) + reset
+	return fillBar(filled, width, percentColor(percent))
 }
 
+// formatContextTokens writes a token count to one decimal, rounded half up: 1,950 is 2.0K,
+// 1,874,214 is 1.9M, and a count that rounds to 1000.0K is written in the next unit, 1.0M.
+// The professor plugin's agent rows write the same figure (plugins/professor's text.ts tokens).
 func formatContextTokens(tokens int64) string {
 	switch {
-	case tokens >= 1_000_000:
-		return fmt.Sprintf("%d.%dM", tokens/1_000_000, tokens%1_000_000/100_000)
+	case tokens >= 999_950:
+		tenths := (tokens + 50_000) / 100_000
+		return fmt.Sprintf("%d.%dM", tenths/10, tenths%10)
 	case tokens >= 1_000:
-		return fmt.Sprintf("%d.%dK", tokens/1_000, tokens%1_000/100)
+		tenths := (tokens + 50) / 100
+		return fmt.Sprintf("%d.%dK", tenths/10, tenths%10)
 	default:
 		return strconv.FormatInt(tokens, 10)
 	}
@@ -781,23 +750,6 @@ func unchangedSince(
 		return now.Unix()
 	}
 	return previous.TS
-}
-
-func formatCacheTime(duration time.Duration, expired bool) string {
-	seconds := int64(duration / time.Second)
-	if seconds < 0 {
-		seconds = -seconds
-	}
-	if seconds >= 3600 {
-		if expired {
-			return fmt.Sprintf("%dh:%dm", seconds/3600, seconds%3600/60)
-		}
-		return fmt.Sprintf("%dh:%dm:%ds", seconds/3600, seconds%3600/60, seconds%60)
-	}
-	if seconds >= 60 {
-		return fmt.Sprintf("%dm:%ds", seconds/60, seconds%60)
-	}
-	return fmt.Sprintf("%ds", seconds)
 }
 
 func statuslineFileAge(path string, now time.Time) time.Duration {

@@ -59,6 +59,7 @@ func uninstall(c *harness.Ctx, s State) State {
 			c.Failf("herdr server stop exited %d:\n%s", code, term.Screen())
 		}
 	}
+	jobsAtRest(c, "the uninstall")
 	if code := shellRun(term, "uninstall", "pfm uninstall", 60*time.Second); code != 0 {
 		c.Failf("pfm uninstall exited %d:\n%s", code, term.Screen())
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/theme"
@@ -511,28 +512,23 @@ func usageSpark(deltas []int64) string {
 	if len(deltas) == 0 {
 		return "…"
 	}
-	// Scan-line ladder (Misc Technical U+23BA–U+23BD between _ and ¯) rather
-	// than block elements ▁…█ or braille: both of those ranges are WebGL
-	// "custom glyphs" in VS Code's terminal, drawn from its atlas instead of
-	// the font, and painted stale/blank cells on live refresh (2026-09-11).
-	// cmd/pfm/webgl_glyph_guard_test.go pins the banned ranges.
-	blocks := []rune("_⎽⎼⎻⎺¯")
+	blocks := modelglyph.SparkLevels
 	busiest := deltas[0]
 	for _, delta := range deltas[1:] {
 		if delta > busiest {
 			busiest = delta
 		}
 	}
-	runes := make([]rune, 0, len(deltas))
+	out := make([]string, 0, len(deltas))
 	for _, delta := range deltas {
 		if delta <= 0 || busiest <= 0 {
-			runes = append(runes, blocks[0])
+			out = append(out, blocks[0])
 			continue
 		}
 		height := int(float64(delta)/float64(busiest)*float64(len(blocks)-1) + 0.5)
-		runes = append(runes, blocks[min(height, len(blocks)-1)])
+		out = append(out, blocks[min(height, len(blocks)-1)])
 	}
-	return string(runes)
+	return strings.Join(out, "")
 }
 
 func formatTokenRate(tokens float64) string {

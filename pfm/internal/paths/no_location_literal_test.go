@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep"
@@ -136,8 +137,13 @@ func TestNoLocationLiteralOutsidePaths(t *testing.T) {
 		t.Fatal("locate location sweep source")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
-	seen := map[string]map[string]bool{}
-	var hits []string
+	// The walk only lists the files; parsing them is the cost (about 2,800 files),
+	// so it runs on every core, each file's findings kept in its own slot.
+	type sweepFile struct {
+		rel, path  string
+		production bool
+	}
+	var files []sweepFile
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -153,49 +159,89 @@ func TestNoLocationLiteralOutsidePaths(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(rel, ".go") {
-			return nil
+		if strings.HasSuffix(rel, ".go") {
+			files = append(files, sweepFile{rel: rel, path: path, production: !strings.HasSuffix(rel, "_test.go")})
 		}
-		production := !strings.HasSuffix(rel, "_test.go")
-		positions := token.NewFileSet()
-		file, err := parser.ParseFile(positions, path, nil, 0)
-		if err != nil {
-			return err
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			switch node := node.(type) {
-			case *ast.CallExpr:
-				if call := locationCall(node, production); call != "" {
-					hits = append(hits, fmt.Sprintf("%s:%d: %s", rel, positions.Position(node.Pos()).Line, call))
-				}
-			case *ast.BasicLit:
-				if !production || node.Kind != token.STRING {
-					return true
-				}
-				line := positions.Position(node.Pos()).Line
-				value, err := strconv.Unquote(node.Value)
-				if err != nil {
-					hits = append(hits, fmt.Sprintf("%s:%d: unquote: %v", rel, line, err))
-					return true
-				}
-				for _, found := range locationTokens(value) {
-					if allowance, allowed := locationTokenReaders[rel]; allowed &&
-						strings.TrimSpace(allowance.reason) != "" && slices.Contains(allowance.tokens, found) {
-						if seen[rel] == nil {
-							seen[rel] = map[string]bool{}
-						}
-						seen[rel][found] = true
-						continue
-					}
-					hits = append(hits, fmt.Sprintf("%s:%d: %q in %q", rel, line, found, value))
-				}
-			}
-			return true
-		})
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("location literal sweep of %s failed — a failure to look, not a clean result: %v", root, err)
+	}
+	type sweepResult struct {
+		hits, allowed []string
+		err           error
+	}
+	results := make([]sweepResult, len(files))
+	next := make(chan int)
+	var workers sync.WaitGroup
+	for range runtime.GOMAXPROCS(0) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for i := range next {
+				f, result := files[i], &results[i]
+				positions := token.NewFileSet()
+				file, err := parser.ParseFile(positions, f.path, nil, parser.SkipObjectResolution)
+				if err != nil {
+					result.err = err
+					continue
+				}
+				ast.Inspect(file, func(node ast.Node) bool {
+					switch node := node.(type) {
+					case *ast.CallExpr:
+						if call := locationCall(node, f.production); call != "" {
+							result.hits = append(
+								result.hits,
+								fmt.Sprintf("%s:%d: %s", f.rel, positions.Position(node.Pos()).Line, call),
+							)
+						}
+					case *ast.BasicLit:
+						if !f.production || node.Kind != token.STRING {
+							return true
+						}
+						line := positions.Position(node.Pos()).Line
+						value, err := strconv.Unquote(node.Value)
+						if err != nil {
+							result.hits = append(result.hits, fmt.Sprintf("%s:%d: unquote: %v", f.rel, line, err))
+							return true
+						}
+						for _, found := range locationTokens(value) {
+							if allowance, allowed := locationTokenReaders[f.rel]; allowed &&
+								strings.TrimSpace(allowance.reason) != "" && slices.Contains(allowance.tokens, found) {
+								result.allowed = append(result.allowed, found)
+								continue
+							}
+							result.hits = append(result.hits, fmt.Sprintf("%s:%d: %q in %q", f.rel, line, found, value))
+						}
+					}
+					return true
+				})
+			}
+		}()
+	}
+	for i := range files {
+		next <- i
+	}
+	close(next)
+	workers.Wait()
+	seen := map[string]map[string]bool{}
+	var hits []string
+	for i, result := range results {
+		if result.err != nil {
+			t.Fatalf(
+				"location literal sweep of %s failed — a failure to look, not a clean result: parse %s: %v",
+				root,
+				files[i].rel,
+				result.err,
+			)
+		}
+		hits = append(hits, result.hits...)
+		for _, found := range result.allowed {
+			if seen[files[i].rel] == nil {
+				seen[files[i].rel] = map[string]bool{}
+			}
+			seen[files[i].rel][found] = true
+		}
 	}
 	for file, allowance := range locationTokenReaders {
 		for _, found := range allowance.tokens {

@@ -42,11 +42,17 @@ func guardsProject(c *harness.Ctx, s State) State {
 
 // newChatSelected moves the picker's cursor to its new-chat row, as the owner does before Enter: the picker
 // opens on it unless a chat is pinned above it (one whose schedule fired unseen, from any branch of the day),
-// and then he steps down to it. A row is told from the next by its mark and name, the cells before its
-// first gap: its age cell ticks every second.
+// and then he steps down to it.
 func newChatSelected(term *harness.Terminal) {
 	const row = "✦ New chat → "
 	term.WaitFor(row, 20*time.Second)
+	pickerSelect(term, "new chat", func(cells string) bool { return strings.HasPrefix(cells, row) })
+}
+
+// pickerSelect steps the picker's cursor down, a row at a time, until the selected row is the one is
+// accepts, what naming it in a failure. A row is told from the next by its mark and name, the cells before
+// its first gap: its age cell ticks every second.
+func pickerSelect(term *harness.Terminal, what string, is func(cells string) bool) {
 	selected := func(screen string) string {
 		cells, _, _ := strings.Cut(selectedRow(screen), "  ")
 		return cells
@@ -59,7 +65,7 @@ func newChatSelected(term *harness.Terminal) {
 			last, on = on, selected(screen)
 			return on != "" && on == last
 		})
-		if strings.HasPrefix(on, row) {
+		if is(on) {
 			return
 		}
 		walked = append(walked, on)
@@ -69,8 +75,8 @@ func newChatSelected(term *harness.Terminal) {
 			return now != "" && now != on
 		})
 	}
-	term.WaitScreen(fmt.Sprintf("the picker's new chat selected (the cursor walked %q)", walked), stepBound,
-		func(screen string) bool { return strings.HasPrefix(selectedRow(screen), row) })
+	term.WaitScreen(fmt.Sprintf("the picker's %s selected (the cursor walked %q)", what, walked), stepBound,
+		func(screen string) bool { return is(selected(screen)) })
 }
 
 // newChatSelectedIn waits for the picker to select the new chat of the group of project name. The pane

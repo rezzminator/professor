@@ -108,7 +108,7 @@ func LaunchPersona(cwd, home string, engine pfmengine.ID, mode workbench.Mode) (
 		!bench.Enables(engine) {
 		return workbench.Persona{}, nil, err
 	}
-	return workbench.Persona{Envs: raw.Envs}, append(raw.Warnings,
+	return workbench.Persona{Envs: raw.Envs, ClaudeSettings: raw.ClaudeSettings}, append(raw.Warnings,
 		"workbench persona not applied ("+err.Error()+"); launching without it",
 	), nil
 }

@@ -329,7 +329,7 @@ func TestEnsureClaudeEnv(t *testing.T) {
 			}, apply: test.apply, managedRoot: managedRoot}
 			if test.unreadPlugins {
 				inst.options.Version, inst.options.SourceRepo = "0.80.0-alpha", home
-				inst.options.ClaudePluginsDefault = true
+				writeFixture(t, filepath.Join(home, ".claude-plugin", "marketplace.json"), "{")
 			}
 			err := inst.ensureClaudeEnv(test.uninstall)
 			if test.wantErr != "" {

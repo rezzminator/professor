@@ -21,6 +21,13 @@ func TestStageHerdrShell(t *testing.T) {
 		Terminal struct {
 			DefaultShell string `toml:"default_shell"`
 		}
+		Keys struct {
+			PreviousWorkspace string `toml:"previous_workspace"`
+			NextWorkspace     string `toml:"next_workspace"`
+			Command           []struct {
+				Key string `toml:"key"`
+			} `toml:"command"`
+		}
 	}
 	if _, err := toml.Decode(string(raw), &parsed); err != nil {
 		t.Fatal(err)
@@ -28,6 +35,10 @@ func TestStageHerdrShell(t *testing.T) {
 	wrapper := paths.HerdrShellWrapper(home)
 	if parsed.Terminal.DefaultShell != wrapper || !strings.Contains(string(raw), "# >>> pfm herdr shell >>>") {
 		t.Fatalf("fixture is not marked wrapper wiring: %s", raw)
+	}
+	if parsed.Keys.PreviousWorkspace != "prefix+i" || parsed.Keys.NextWorkspace != "prefix+m" ||
+		len(parsed.Keys.Command) != 1 || parsed.Keys.Command[0].Key != "prefix+a" {
+		t.Fatalf("fixture lacks pfm's keys block: %+v in %s", parsed.Keys, raw)
 	}
 	info, err := os.Stat(wrapper)
 	if err != nil || info.Mode().Perm()&0o111 == 0 {

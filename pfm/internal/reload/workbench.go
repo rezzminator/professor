@@ -34,6 +34,7 @@ func applyReloadWorkbench(request Request, engineSync deps.Runner, stderr io.Wri
 	request.Effort = persona.EffortOr(request.Effort)
 	request.Model = persona.ModelOr(request.Model)
 	request.Envs = persona.Envs
+	request.ClaudeSettings = persona.ClaudeSettings
 	if request.Engine == pfmengine.Codex && persona.Applies() {
 		if err := workbench.EnsureMirror(persona.Bench, pfmengine.Codex, request.Home, engineSync); err != nil {
 			return request, err

@@ -80,12 +80,12 @@ func Read(path, current string) (Notice, bool, error) {
 	if err := json.Unmarshal(raw, &notice); err != nil {
 		return Notice{}, false, fmt.Errorf("decode update cache: %w", err)
 	}
-	installed, latest := normalizeVersion(current), normalizeVersion(notice.Latest)
+	installed, latest := semver.WithV(current), semver.WithV(notice.Latest)
 	if _, latestOK := semver.ParseVersion(latest); !semver.Valid(installed) || !latestOK ||
 		semver.Compare(latest, installed) <= 0 {
 		return Notice{}, false, nil
 	}
-	notice.Current = normalizeVersion(current)
+	notice.Current = semver.WithV(current)
 	return notice, true, nil
 }
 
@@ -100,7 +100,7 @@ func Read(path, current string) (Notice, bool, error) {
 // alone, to a machine that genuinely has no update — see ReadFailure.
 func CheckForUpdate(ctx context.Context, path, current, latestURL string, client *http.Client) error {
 	clk := clock.Real
-	if !semver.Valid(normalizeVersion(current)) {
+	if !semver.Valid(semver.WithV(current)) {
 		return fmt.Errorf("current version %q is not vMAJOR.MINOR.PATCH[-prerelease]", current)
 	}
 	release, err := acquire(path+".lock", clk.Now())
@@ -153,7 +153,7 @@ func performCheck(
 	if err != nil {
 		return failureNetwork, fmt.Errorf("build latest-release request: %w", err)
 	}
-	request.Header.Set("User-Agent", "pfm-update-check/"+normalizeVersion(current))
+	request.Header.Set("User-Agent", "pfm-update-check/"+semver.WithV(current))
 	// Wrap a shallow copy: the caller's client keeps its own Transport and
 	// CheckRedirect.
 	noFollow := *client
@@ -187,7 +187,7 @@ func performCheck(
 		)
 	}
 	notice := Notice{
-		Current:    normalizeVersion(current),
+		Current:    semver.WithV(current),
 		Latest:     latest,
 		ReleaseURL: resolved.String(),
 		CheckedAt:  now,
@@ -298,9 +298,9 @@ func checkedRecently(path, current string, now time.Time) (bool, error) {
 	if err := json.Unmarshal(raw, &notice); err != nil {
 		return false, nil
 	}
-	_, latestOK := semver.ParseVersion(normalizeVersion(notice.Latest))
+	_, latestOK := semver.ParseVersion(semver.WithV(notice.Latest))
 	if notice.CheckedAt.IsZero() ||
-		notice.Current != normalizeVersion(current) ||
+		notice.Current != semver.WithV(current) ||
 		!latestOK ||
 		strings.TrimSpace(notice.ReleaseURL) == "" {
 		return false, nil
@@ -423,13 +423,5 @@ func pathVersion(location *url.URL) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return normalizeVersion(parts[len(parts)-1])
-}
-
-func normalizeVersion(value string) string {
-	value = strings.TrimSpace(value)
-	if value != "" && value[0] != 'v' {
-		value = "v" + value
-	}
-	return value
+	return semver.WithV(parts[len(parts)-1])
 }

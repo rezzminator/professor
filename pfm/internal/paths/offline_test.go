@@ -12,6 +12,7 @@ func TestOfflineSwitchesReadOnlyTheirOwnVariableSetToOne(t *testing.T) {
 		{EnvPricesOffline, PricesOfflineIn},
 		{EnvUpdateCheckOffline, UpdateCheckOfflineIn},
 		{EnvUsageOffline, UsageOfflineIn},
+		{EnvInstallPingOffline, InstallPingOfflineIn},
 	}
 	for _, under := range switches {
 		for _, row := range []struct {
@@ -30,5 +31,9 @@ func TestOfflineSwitchesReadOnlyTheirOwnVariableSetToOne(t *testing.T) {
 	t.Setenv(EnvUpdateCheckOffline, "1")
 	if !UpdateCheckOffline() {
 		t.Errorf("UpdateCheckOffline() with %s=1 in the process environment = false, want true", EnvUpdateCheckOffline)
+	}
+	t.Setenv(EnvInstallPingOffline, "1")
+	if !InstallPingOffline() {
+		t.Errorf("InstallPingOffline() with %s=1 in the process environment = false, want true", EnvInstallPingOffline)
 	}
 }

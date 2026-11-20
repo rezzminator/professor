@@ -179,6 +179,25 @@ jobs:
               done
           done
 
+      # A step past its bound prints only its command: what names the hung test is the
+      # step's process-tree snapshot (steps/{step}.hang/) and the goroutine dump each test
+      # process's watchdog writes before the step deadline (profile/**/goroutines.txt),
+      # both on the runner, so a red slice uploads them with the go test event streams.
+      - name: Upload the failed gate's evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gate-${{ matrix.slice }}
+          path: |
+            /tmp/professor/timing/run.*/gate.tsv
+            /tmp/professor/timing/run.*/*.json
+            /tmp/professor/timing/run.*/steps/
+            /tmp/professor/timing/run.*/profile/INDEX.txt
+            /tmp/professor/timing/run.*/profile/**/goroutines.txt
+            /tmp/professor/timing/run.*/profile/**/errors.txt
+          if-no-files-found: warn
+          retention-days: 7
+
   macos:
     name: macos (${{ matrix.part }})
     needs: plan
@@ -398,6 +417,26 @@ jobs:
           git submodule update --init
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml; }
           python3 scripts/check-plugin-workflows.py
+
+      # The in-tree professor plugin (plugins/professor/) has no CI of its own: it
+      # ships in this repository's release. Its tests, type-check and strict
+      # validation run here, after the scanner, so the scanner never scores the
+      # node_modules its install leaves; the validation runs on the Claude Code
+      # its agent-row mod is written against.
+      - name: Set up Node for the professor plugin
+        if: ${{ !cancelled() }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: The professor plugin passes its tests, type-check and validation
+        if: ${{ !cancelled() }}
+        env:
+          CLAUDE_CODE_VERSION: "2.1.326"
+        run: |
+          set -euo pipefail
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          make plugin-check
 
   # main takes only release pull requests: VERSION moved past main's, and its
   # authored notes releases/v{VERSION}.md exist and pass the grammar.

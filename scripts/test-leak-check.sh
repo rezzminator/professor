@@ -28,9 +28,10 @@ fi
 EOF
 cat > "$T/bin/grep" <<'EOF'
 #!/usr/bin/env bash
-if [[ -n "${GREP_FAIL_STDIN:-}" && "$*" == *syntheticsecret* ]]; then
+if [[ -n "${GREP_FAIL_STDIN:-}${GREP_MISS_STDIN:-}" && "$*" == *syntheticsecret* ]]; then
   input=$(cat)
-  if [[ -n "$input" && " $* " == *" $GREP_FAIL_STDIN "* ]]; then exit 2; fi
+  if [[ -n "$input" && -n "${GREP_FAIL_STDIN:-}" && " $* " == *" $GREP_FAIL_STDIN "* ]]; then exit 2; fi
+  if [[ -n "$input" && -n "${GREP_MISS_STDIN:-}" && " $* " == *" $GREP_MISS_STDIN "* ]]; then exit 1; fi
   exec /usr/bin/grep "$@" <<<"$input"
 fi
 for arg in "$@"; do
@@ -39,6 +40,9 @@ for arg in "$@"; do
   fi
   if [[ -n "${GREP_FAIL_SUFFIX:-}" && "$arg" == *"$GREP_FAIL_SUFFIX" ]]; then
     exit 2
+  fi
+  if [[ -n "${GREP_MISS_SUFFIX:-}" && "$arg" == *"$GREP_MISS_SUFFIX" ]]; then
+    exit 1
   fi
 done
 # GREP_NOFOLD_LOCALE names a caller locale whose -i misses a case pair, as GNU grep 3.11 does on a real host:
@@ -68,14 +72,15 @@ chmod +x "$T/bin/git" "$T/bin/grep"
 
 # leak_run <leak-check args>: LC_ALL=C.UTF-8 is the fence image's own locale (LEAK_LC_ALL names another
 # caller locale), and stdin is /dev/null so a grep that reads a file name as an option fails instead of hanging.
-# TERMS names a second terms file; GREP_FAIL_FILE and GREP_FAIL_SUFFIX drive the grep stub, and GREP_FORCE_C
+# TERMS names a second terms file; GREP_FAIL_FILE and GREP_FAIL_SUFFIX drive the grep stub (GREP_MISS_SUFFIX and
+# GREP_MISS_STDIN make it answer "no match" where GREP_FAIL_SUFFIX and GREP_FAIL_STDIN fail it), and GREP_FORCE_C
 # makes the stub run every grep under LC_ALL=C (no UTF-8 locale reaches it); GREP_NOFOLD_LOCALE and
 # GREP_NOFOLD_SCOPE make it drop -i under one caller locale.
 leak_run() {
   local terms="${TERMS:-$T/terms}"
   env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE \
     TEST_REPO="$T/repo" GREP_FAIL_FILE="${GREP_FAIL_FILE:-}" GREP_FAIL_SUFFIX="${GREP_FAIL_SUFFIX:-}" \
-    GREP_FAIL_STDIN="${GREP_FAIL_STDIN:-}" GREP_FORCE_C="${GREP_FORCE_C:-}" GREP_NOFOLD_LOCALE="${GREP_NOFOLD_LOCALE:-}" GREP_NOFOLD_SCOPE="${GREP_NOFOLD_SCOPE:-}" \
+    GREP_FAIL_STDIN="${GREP_FAIL_STDIN:-}" GREP_MISS_SUFFIX="${GREP_MISS_SUFFIX:-}" GREP_MISS_STDIN="${GREP_MISS_STDIN:-}" GREP_FORCE_C="${GREP_FORCE_C:-}" GREP_NOFOLD_LOCALE="${GREP_NOFOLD_LOCALE:-}" GREP_NOFOLD_SCOPE="${GREP_NOFOLD_SCOPE:-}" \
     GIT_ENUM_FAIL="${GIT_ENUM_FAIL:-}" GIT_DIFF_FILE="$T/diff" LEAK_TERMS="$terms" LC_ALL="${LEAK_LC_ALL:-C.UTF-8}" \
     PATH="$T/bin:$PATH" \
     bash "$ROOT/scripts/leak-check.sh" "$@" > "$T/out" 2> "$T/err" < /dev/null
@@ -123,6 +128,16 @@ if [[ "$rc" -eq 1 && "$out" == 'LEAK .githooks/guard: syntheticsecret' && "$err"
   ok 'F14: required public licenses stay excluded while hooks are scanned in files mode'
 else
   bad 'F14: required public licenses stay excluded while hooks are scanned in files mode' "rc=$rc; out=$out; err=$err"
+fi
+
+mkdir -p "$T/repo/docs/img"
+printf 'syntheticsecret\n' > "$T/repo/docs/img/card.webp"
+printf 'syntheticsecret\n' > "$T/repo/docs/img/shot.PNG"
+run_check docs/img/card.webp docs/img/shot.PNG clean-1.txt
+if [[ "$rc" -eq 0 && "$out" == 'leak-check: clean' && "$err" == *'scanned 1 file(s) (2 excluded by design, 0 not a regular file)'* ]]; then
+  ok 'raster images are excluded by design in files mode, any extension case'
+else
+  bad 'raster images are excluded by design in files mode, any extension case' "rc=$rc; out=$out; err=$err"
 fi
 
 run_check missing.txt hit.txt
@@ -182,6 +197,16 @@ else
   bad 'a binary file beside a text hit keeps both hit lines paired with their files' "rc=$rc; out=$out; err=$err"
 fi
 
+# A NUL-bearing file whose hit line holds an undecodable byte before the term: macOS's BSD grep finds it in
+# the file (NUL input reads as bytes) and missed it in the NUL-free judged line, a hit counted as suppressed.
+printf 'head\0\nx\227 syntheticsecret\n' > "$T/repo/nul-undecodable.bin"
+run_check nul-undecodable.bin
+if [[ "$rc" -eq 1 && "$out" == "LEAK nul-undecodable.bin: x"$'\x97'" syntheticsecret" && "$err" == *'; 0 benign-token line(s) suppressed'* ]]; then
+  ok 'a hit after an undecodable byte in a NUL-bearing file is reported, never suppressed'
+else
+  bad 'a hit after an undecodable byte in a NUL-bearing file is reported, never suppressed' "rc=$rc; out=$out; err=$err"
+fi
+
 gm_addr="$(printf 'someone@%s.com' gmail)"
 printf '%s\n' "$gm_addr" > "$T/repo/gm.txt"
 run_check gm.txt
@@ -237,6 +262,39 @@ else
   bad 'a judging failure names each source file once, never a temp path' "rc=$rc; out=$out; err=$err"
 fi
 
+# A judge that loses a match although nothing was removed from the line never judged it: SCAN-ERROR, not a suppression.
+printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+syntheticsecret\n' > "$T/diff"
+for mode in files range; do
+  case "$mode" in
+    files) GREP_MISS_SUFFIX=.normalized run_check hit.txt
+      expected='SCAN-ERROR hit.txt: matched line lost its match with nothing removed from it (the matcher disagrees with itself) — refusing clean' ;;
+    range) GREP_MISS_STDIN=-qiE run_range
+      expected='SCAN-ERROR r.txt: matched line could not be judged (rc=2) — refusing clean' ;;
+  esac
+  # --files names its suppression count on every run, --range only when it is not zero.
+  if [[ "$rc" -eq 1 && "$out" == "$expected" && "$err" != *' 1 benign'* ]]; then
+    ok "$mode: a judge that loses a match with nothing removed refuses clean"
+  else
+    bad "$mode: a judge that loses a match with nothing removed refuses clean" "rc=$rc; out=$out; err=$err"
+  fi
+done
+
+# A term anchored at the line's end still hits once the judge strips the benign tokens.
+printf 'syntheticsecret$\n' > "$T/terms-anchor"
+printf 'x syntheticsecret\n' > "$T/repo/anchored.txt"
+printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+x syntheticsecret\n' > "$T/diff"
+for mode in files range; do
+  case "$mode" in
+    files) TERMS="$T/terms-anchor" run_check anchored.txt; expected='LEAK anchored.txt: x syntheticsecret' ;;
+    range) TERMS="$T/terms-anchor" run_range; expected='LEAK r.txt: x syntheticsecret' ;;
+  esac
+  if [[ "$rc" -eq 1 && "$out" == "$expected" && "$err" != *' 1 benign'* ]]; then
+    ok "$mode: a term anchored at the line end hits"
+  else
+    bad "$mode: a term anchored at the line end hits" "rc=$rc; out=$out; err=$err"
+  fi
+done
+
 printf 'syntheticsecret\n' > "$T/repo/-i"
 GREP_FAIL_FILE=bad.txt run_check bad.txt -i
 if [[ "$rc" -eq 1 ]] && grep -q '^SCAN-ERROR bad\.txt:' <<<"$out" && grep -Fxq 'LEAK -i: syntheticsecret' <<<"$out"; then
@@ -251,13 +309,15 @@ fi
 printf 'syntheticsecret\njos\303\251\n\303\251t\303\251\n' > "$T/terms-utf8"
 
 printf 'JOS\303\211 here\n' > "$T/repo/upper.txt"
+printf 'head\0\nJOS\303\211 here\n' > "$T/repo/upper-nul.bin"
 upper_text="$(printf 'JOS\303\211 here')"
 printf '\303\211T\303\251\n' > "$T/repo/mixed.txt"
 mixed_text="$(printf '\303\211T\303\251')"
 printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+JOS\303\211 here\n' > "$T/diff"
-for form in upper-files mixed-files upper-range; do
+for form in upper-files upper-nul-files mixed-files upper-range; do
   case "$form" in
     upper-files) TERMS="$T/terms-utf8" run_check upper.txt; expected="LEAK upper.txt: $upper_text" ;;
+    upper-nul-files) TERMS="$T/terms-utf8" run_check upper-nul.bin; expected="LEAK upper-nul.bin: $upper_text" ;;
     mixed-files) TERMS="$T/terms-utf8" run_check mixed.txt; expected="LEAK mixed.txt: $mixed_text" ;;
     upper-range) TERMS="$T/terms-utf8" run_range; expected="LEAK r.txt: $upper_text" ;;
   esac
@@ -403,12 +463,13 @@ mkdir -p "$pushed/.githooks" "$pushed/.opencode"
 printf 'syntheticsecret\n' > "$pushed/.githooks/merged"
 printf 'syntheticsecret\n' > "$pushed/LICENSE"
 printf 'syntheticsecret\n' > "$pushed/.opencode/LICENSE"
-pgit add .githooks/merged LICENSE .opencode/LICENSE && pgit commit -q -m merged
+printf 'syntheticsecret\n' > "$pushed/.githooks/card.Webp"
+pgit add .githooks/merged .githooks/card.Webp LICENSE .opencode/LICENSE && pgit commit -q -m merged
 real_range "$merge_from" HEAD
-if [[ "$rc" -eq 1 && "$out" == *'LEAK .githooks/merged: syntheticsecret'* && "$out" != *'LEAK LICENSE:'* && "$out" != *'LEAK .opencode/LICENSE:'* ]]; then
-  ok 'F7/F14: merge-only hooks are scanned while required public licenses stay excluded'
+if [[ "$rc" -eq 1 && "$out" == *'LEAK .githooks/merged: syntheticsecret'* && "$out" != *'LEAK LICENSE:'* && "$out" != *'LEAK .opencode/LICENSE:'* && "$out" != *'card.Webp'* ]]; then
+  ok 'F7/F14: merge-only hooks are scanned while required public licenses and images stay excluded'
 else
-  bad 'F7/F14: merge-only hooks are scanned while required public licenses stay excluded' "rc=$rc; out=$out; err=$err"
+  bad 'F7/F14: merge-only hooks are scanned while required public licenses and images stay excluded' "rc=$rc; out=$out; err=$err"
 fi
 
 GIT_ENUM_FAIL=1 run_range

@@ -3,6 +3,7 @@
 // arguments.go: the /reload flags, their cache-spelling normalization and the worker's parse.
 // owner_exit.go: the pane mutex, the exit mark and the yield to an owner's /exit.
 // after_reboot.go: once the reborn chat is up, its native --then turn and the "(before --new)" label.
+// ready.go: the native chat's idle-and-empty-composer wait, before /exit and before --then.
 package reload
 
 import (
@@ -109,13 +110,13 @@ type Request struct {
 	// PromptChannel is already composed for the selected engine: a per-seat
 	// system-prompt file path for Claude, or the complete developer
 	// instructions value for Codex. Empty preserves an ordinary reload.
-	PromptChannel string
-	Envs          map[string]string // the adopter settings' envs (workbench.Persona.Envs)
-	// Home and Machine are the Claude respawn's whole policy: the account's
-	// config dir, its autonomy posture and its system-prompt choice all come
-	// from them through action.ClaudeSpawn. A reload used to synthesize its
-	// own launch line here, and a rebooted chat silently lost the fleet's
-	// configured system prompt because this constructor never knew about one.
+	PromptChannel  string
+	Envs           map[string]string // the adopter settings' envs (workbench.Persona.Envs)
+	ClaudeSettings map[string]any    // the adopter settings' claude.settings (workbench.Persona.ClaudeSettings)
+	// Home and Machine are the Claude respawn's whole policy: the account's config dir, its autonomy
+	// posture and its system-prompt choice all come from them through action.ClaudeSpawn. A reload used
+	// to synthesize its own launch line here, and a rebooted chat silently lost the fleet's configured
+	// system prompt because this constructor never knew about one.
 	Home    string
 	Machine pfmconfig.Config
 	fresh   bool

@@ -23,7 +23,6 @@
     "docs/references/*"
   ],
   "ignore_sources": [
-    ".claude/commands/contentor.md",
     ".claude/commands/h/",
     ".claude/commands/deploy.md",
     ".claude/commands/test.md",
@@ -77,6 +76,9 @@
       "curated": true
     },
     "global/commands/pfm/schedule.md": {
+      "curated": true
+    },
+    "global/commands/pfm/space.md": {
       "curated": true
     },
     "global/commands/pfm/workbench.md": {
@@ -197,6 +199,9 @@
       "curated": true
     },
     "project/epics/TEMPLATE.md": {
+      "curated": true
+    },
+    "project/pfm.config.json": {
       "curated": true
     },
     "project/rules/git-writes-through-gitter.md": {

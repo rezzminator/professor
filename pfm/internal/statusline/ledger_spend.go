@@ -16,8 +16,8 @@ import (
 
 // The status line prices a session from the cost ledger (internal/costledger) when one exists:
 // Claude Code's own price of every API call, the calls no transcript records included. The main
-// line shows the ledger's total as its one dollar amount; a sub-agent row shows the ledger rows of
-// its agent and every agent below it. A state the main line must flag carries one of these
+// line shows the ledger's total as its one dollar amount; Agents prices each sub-agent from the
+// ledger rows of that agent and every agent below it. A state the main line must flag carries one of these
 // markers, none with an amount in it: the amounts behind them are `pfm tokens`'.
 const (
 	// markerSinkFailed: the cost sink could not be armed for this launch.
@@ -100,7 +100,7 @@ func preLedgerUSD(rows []costledger.Row, spend agentSpend) float64 {
 // completeSpend is the session's one dollar amount when a ledger exists: the ledger's total plus
 // what came before it. Claude Code's own total leads only when it is ahead of that by more than
 // the tolerance (a call whose row has not reached the ledger yet, a launch that logged nothing);
-// within it the ledger's figure stands, so the main line adds up with the sub-agent rows and
+// within it the ledger's figure stands, so the main line adds up with the agents' spend (Agents) and
 // `pfm tokens` to the cent.
 func completeSpend(ledgerUSD, beforeUSD, claudeTotal float64) float64 {
 	complete := ledgerUSD + beforeUSD
@@ -196,7 +196,7 @@ func (spend agentSpend) withLedger(ledger agentSpend) agentSpend {
 	return ledger
 }
 
-// ledgerView is one session's ledger indexed for the sub-agent rows: the rows of each agent and
+// ledgerView is one session's ledger indexed for Agents: the rows of each agent and
 // the agent tree its parent_agent_id values draw.
 type ledgerView struct {
 	byAgent  map[string][]costledger.Row
@@ -244,8 +244,8 @@ func (view *ledgerView) spend(id string, metaChildren map[string][]string) (agen
 	return ledgerSpend(rows), true
 }
 
-// loadLedgerView reads the session's ledger for the sub-agent rows, under the home and env the
-// render is handed (the main line's readLedgerBooks reads the same one through its Runtime): nil
+// loadLedgerView reads the session's ledger for Agents, under the home and env the
+// read is handed (the main line's readLedgerBooks reads the same one through its Runtime): nil
 // when the payload names no session or the session has no ledger. A ledger that cannot be read is told on warn and leaves
 // the rows on their transcripts' pricing.
 func loadLedgerView(sessionID, home string, env paths.Env, warn io.Writer) *ledgerView {
@@ -254,7 +254,7 @@ func loadLedgerView(sessionID, home string, env paths.Env, warn io.Writer) *ledg
 	}
 	ledger, err := costledger.ForSession(paths.CostLedgerDir(env, home), sessionID)
 	if err != nil {
-		fmt.Fprintf(warn, "%s: cost ledger (rows price from transcripts): %v\n", agentRowsWho, err)
+		fmt.Fprintf(warn, "%s: cost ledger (rows price from transcripts): %v\n", agentsWho, err)
 		return nil
 	}
 	if !ledger.Present {

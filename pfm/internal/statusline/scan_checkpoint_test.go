@@ -353,11 +353,13 @@ func TestRenderMarksASpendFloorWhileTheFoldCatchesUp(t *testing.T) {
 		Env: map[string]string{paths.EnvCostLedgerDir: t.TempDir()},
 	}.normalized()
 	runtime.scans.deadline = time.Now().Add(-time.Second)
-	gauge, line, _ := renderContextLine(runtime, data, "", time.Unix(1_790_000_000, 0))
+	gauge, line := instrumentLine(runtime, data, "", time.Unix(1_790_000_000, 0))
 	if gauge.transcript || gauge.transcriptErr {
 		t.Fatalf("gauge %+v; want the harness's gauge, the transcript neither read nor failed", gauge)
 	}
-	if got := stripANSICodes(line); got != "🟢 ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ ?% ? ctx unknown │ 💰$?/0/0/0+? │ 💾1h?" {
+	const want = "🟢 ▱▱▱▱▱▱▱▱ ················ ?%      ?/? ctx unknown │ ⏳ 0s │ " +
+		"Σ $?+? · 0 in · 0 out · 0 tools │ 💾1h?"
+	if got := stripANSICodes(line); got != want {
 		t.Fatalf("line %q; want the spend shown as a floor not yet priced, +?", got)
 	}
 }
@@ -458,6 +460,12 @@ func TestAgentRowBehindItsBudgetClaimsNoTurnOrContext(t *testing.T) {
 		t.Fatalf("behind: err %v, turn %+v, last %s, context %d, hit %d, spend %s behind %v; want the turn "+
 			"unread, no last entry, context or hit, the spend a floor", activity.err, activity.turn, activity.last,
 			activity.context, activity.cacheHit, spendView(activity.spend), activity.spend.behind)
+	}
+	facts := newAgentFacts(subagentTask{ID: "a1"}, &activity, 0)
+	if want := "sub-agent transcript " + path + " not read to its end within the budget"; facts.Error != want ||
+		facts.Absent || facts.Spend == nil || !facts.Spend.Floor {
+		t.Fatalf("behind facts: error %q absent %v spend %+v; want error %q and the spend a floor",
+			facts.Error, facts.Absent, facts.Spend, want)
 	}
 }
 

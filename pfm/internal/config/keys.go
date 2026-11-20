@@ -11,11 +11,6 @@ const (
 	defaultAskLunaModel = "gpt-5.6-luna"
 )
 
-// DefaultHelperModel is the model Claude Code's helper calls run on when
-// claude.helperModel is unset: a full model id, so it names Haiku 5.5 whatever
-// the gateway's alias table says.
-const DefaultHelperModel = "claude-haiku-5-5"
-
 // KeyClaudePluginCheckoutRoot names the directory holding one checkout per
 // Claude plugin pfm install ensures ({root}/{plugin}/plugins/{plugin}): an
 // -alpha build installs each plugin from a copy of its checkout there. Unset,
@@ -56,28 +51,26 @@ func Keys() []KeyDefault {
 		{keyTheme, "default"},
 		{"chat.backend", DefaultChatBackend},
 		{"chat.herdrTabStatus", DefaultHerdrTabStatus},
+		{KeyHerdrKeys, nil},
 		{keyStateDB, "~/.local/state/pfm/pfm.db"},
 		{keyStateCacheDB, "~/.local/state/pfm/pfm-cache.db"},
 		{"claude.permissionMode", PermissionBypass},
 		{"claude.binary", pfmengine.MustLookup(pfmengine.Claude).Binary},
 		{"claude.theme", nil},
 		{"claude.cache1h", true},
-		{"claude.nativeCursor", false},
 		{"claude.remoteControl", true},
-		{"claude.systemPrompt", nil},
-		{"claude.webSearchesPerSession", int64(9007199254740991)},
-		{"claude.autoCompactWindow", int64(100000)},
-		{"claude.helperModel", DefaultHelperModel},
-		{"claude.tmuxTruecolor", true},
-		{"claude.cleanupPeriodDays", 36500},
+		{"claude.systemPrompt", SystemPromptProfessor},
 		{"claude.requireManagedCleanup", true},
-		{"claude.maxSubagentSpawnDepth", DefaultSubagentSpawnDepth},
-		{"claude.maxConcurrentSubagents", nil},
 		{KeyClaudePluginCheckoutRoot, nil},
 		{KeyClaudePlugins, defaultClaudePluginIDs()},
 		{KeyClaudeEnv, map[string]any{}},
 		{KeyClaudeCostLedger, true},
 		{KeyClaudeGptAgents, false},
+		// claude.settings defaults to the shipped launch defaults (claudelaunch's defaults.json), whose
+		// test holds the example's value to them.
+		{KeyClaudeSettings, nil},
+		{KeyEnvs, map[string]any{}},
+		{KeyHarnessPrompt, nil},
 		{"codex.yolo", true},
 		{"codex.binary", pfmengine.MustLookup(pfmengine.Codex).Binary},
 		{"opencode.binary", pfmengine.MustLookup(pfmengine.OpenCode).Binary},

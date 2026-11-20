@@ -10,6 +10,7 @@ The lander takes one worktree's whole change after every foreman on it has retur
 - [Sync to the target](#sync-to-the-target)
 - [The inventory and the computed spawn](#the-inventory-and-the-computed-spawn)
 - [The children](#the-children)
+- [Waiting for the children](#waiting-for-the-children)
 - [The lander's own hunt](#the-landers-own-hunt)
 - [Judge and report](#judge-and-report)
 - [Fix, test, gate](#fix-test-gate)
@@ -38,7 +39,7 @@ lander -> sync to TARGET's tip -> inventory (call 1) -> one spawn message (call 
 -> full gate until green -> return
 ```
 
-The lander never waits on a child: it keeps hunting, verifying and writing the report while they work, and ends its turn only when its own work is done; each child's return re-invokes it.
+The lander keeps hunting, verifying and writing the report while the children work, and waits for them inside its turn ([Waiting for the children](#waiting-for-the-children)); it never ends its turn to be woken by a child's return.
 
 ## Input
 
@@ -65,11 +66,11 @@ Call 1 runs `lander-inventory.py`, shipped as the `flights:lander-inventory` ski
 
 | PLAN row | Rule | Cap |
 | --- | --- | --- |
-| `PLAN DIFF-CHECKER` | k = min(4, ceil(production diff lines / 600)) clusters in path order, each with the tests beside its files; none at 400 production lines or fewer | 4 |
+| `PLAN DIFF-CHECKER` | k = min(4, ceil(production diff lines / 600)) clusters in path order, each with the test files beside its files, a test file in the first cluster that claims it only; none at 400 production lines or fewer | 4 |
 | `PLAN SPEC-CHECKER` | a spec file with 10 or more numbered rows gets 2 ranges, 3 past 60 rows; the largest spec first | 4 in all |
 | `PLAN USAGE-CHECKER` | inventory rows by line number: `LEFT`+`GONE` in batches of about 12, `LITERAL` of about 25 | 6 |
 
-Production lines exclude tests, docs, generated, lock and history files. Exit 2 prints `FAILED` with its cause; the lander then names it in COVERAGE, spawns diff-checkers by module by hand and cuts the removed threads in its own hunt.
+A test file sits in one `PLAN DIFF-CHECKER` row, the first cluster that claims it, so no two checkers read the same test (pinned by `tests/test_lander_inventory.py::test_a_test_file_joins_one_diff_checker`). Production lines exclude tests, docs, generated, lock and history files. Exit 2 prints `FAILED` with its cause; the lander then names it in COVERAGE, spawns diff-checkers by module by hand and cuts the removed threads in its own hunt.
 
 Call 2 is one message spawning exactly the PLAN rows in the background: no row added, dropped, merged or re-cut. The spawn is computed because a written spawn rule was disobeyed in 2 of 2 bench runs, while the computed PLAN was obeyed in 4 of 4; two runs on one change spawn alike.
 
@@ -78,6 +79,17 @@ Call 2 is one message spawning exactly the PLAN rows in the background: no row a
 - `flights:diff-checker`: one cluster's diff and the spec rows naming its files; reads every changed function whole and asks SPEC, LINES, PATHS, MANY, GUARDS, STATE, COMMENTS and TESTS at each. Budget 30 tool calls. Returns `C{n} · severity · path:line`, the line copied from its own `grep -n` output and the failure, then `GAPS`, `READ` and `NOT READ`.
 - `flights:spec-checker`: one row range of a spec; finds the line keeping each row's promise in every state the row names. Budget 30 tool calls. Returns candidates tied to a row, then `HELD`, `NOT FOUND` and `NOT READ`; a row it cannot find is `NOT FOUND`, never held.
 - `flights:usage-checker`: a range of inventory rows, or up to 3 threads the lander cut (CONTRACT, ABSENCE, HAND-OFF, CONCURRENT), each followed to its far side, 3 hops at most. Budget 25 tool calls, back within about four minutes. Returns three-line flags `UNSAFE | UNSURE` with `LOOK` and `WHY`, and one `SAFE` line naming the ranges it read; a line only grepped is `UNSURE`, never `SAFE`.
+
+## Waiting for the children
+
+- With its own work done (hunt, verified candidates, the report written with every section filled but the threads still out, outside `STOP_AT review` the verified findings fixed) and a child still out, the lander repeats one wait call of 170 s, `timeout 170 bash -c 'until [ -e "$1" ]; do sleep 15; done' _ {INV}.wait{n}`, a path nothing writes: the call is the wait and a child's return reaches the lander when a call of its own ends. Until every child has returned, 4 calls in a row at most.
+- A child still out after the fourth wait is waited for no longer: a diff-checker's cluster and a spec-checker's rows join the lander's own hunt, a usage-checker's threads stay `OPEN`, and COVERAGE names it. `flights:reviewer` follows the same rule: a checker still out leaves its rows `OPEN` in COVERAGE and the review `PARTIAL`.
+- After any compaction the lander and the reviewer take which children are out from the compaction's agent list (forward-compaction's `## Agents, listed at install`), never from their own frontier: one listed `running` is out, any other has returned, and its return is read from the wake or with `look_back`, never rerun or waited for.
+- A lander message opening with none of `PASS`, `FIXED`, `FAIL`, `REVIEWED` or `BLOCKED` is a stall: the main chat reads which children finished with `pfm transcript agents {session}` and resumes that lander by `SendMessage` at once ([flights.md](flights.md#waiting)).
+
+### Why the wait is inside the turn
+
+In an adopter's landing on 2026-11-16 a lander lost three checker returns in a compaction, ended its turn waiting for checkers that had already returned, and sat idle 297.5 minutes; its second run re-ran the three already-returned checkers (4.9 minutes, 338,162 child tokens). The cap of 4 waits of 170 s rests on 338 past checker runs measured on 2026-11-18: 140 diff-checker runs (median 132 s, longest 252 s), 174 usage-checker runs (median 99 s, longest 295 s), 24 spec-checker runs (longest 111 s). Unbenched: the cap rests on that field data; no bench run has measured its cost.
 
 ## The lander's own hunt
 
@@ -97,7 +109,8 @@ With the children out, the lander owns what no cluster owns: the seams between c
 - The affected tests of the change and the fixes run with the testing manual's command until green.
 - The full gate runs right before the merge: every suite each touched project's testing manual defines (static checks, full suite, coverage run, floors). A red inside or outside the change is fixed, its failing tests made green with the affected-test command, and that project's gate rerun until every suite is green, with no repeat cap; a red outside the change is named in TESTS and GATE. From the third rerun each round opens with one `forward_compaction`. Only a red with no honest fix, a fix needing the owner's decision, or a suite that cannot run here stops short of green.
 - No test, build or gate runs while a usage-checker is out or a finding inside the change is open.
-- **Waits:** a command runs in the foreground with a timeout of at most 270 s; one that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 270 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints.
+- **Waits:** a command runs in the foreground with a timeout of at most 170 s, its Bash `timeout` 175000 at most; one that can run longer runs in the background (`{command} > {log} 2>&1; echo $? > {log}.rc`) and is awaited by repeating `timeout 170 bash -c 'until [ -s "$1" ]; do sleep 15; done; cat "$1"' _ {log}.rc` until it prints.
+- **`rm`:** an `rm` names a literal path, never one built from a variable or a substitution (`rm -f /tmp/gate/*.rc`, not `L=/tmp/gate; rm -f $L/*.rc`). Why: `rm -f $L/*.rc` inside a multi-line command was held 52.4 minutes on Claude Code's dangerous-rm approval although permission prompts were off. Reproduced live on Claude Code 2.1.327 on 2026-11-18 with four shapes: a literal directory with a glob ran, a variable without a glob ran, a variable with a glob on one line ran, and the multi-line variable-with-glob shape was held ("Dangerous rm operation on possibly-empty variable path").
 - A critical decision goes to `SendMessage(to: "main")` with the choice it proceeds with; the lander never asks the user.
 
 ### Why the shed
@@ -108,9 +121,9 @@ In past landings the tests and the gate are 41% of a large landing's own dollars
 
 A fix needs the lines the review already read. A bench landing that shed before fixing spent 41 requests and $1.45 after the shed, re-reading each file, against 6 requests and $0.23 where the fixes came first.
 
-### Why the waits are 270 s
+### Why the waits are 170 s
 
-Past 300 s the prompt cache expires and the next request re-pays the whole context. Over 239 past landings the requests that followed one wait of 290 s or more cost $77, against $9 in 270 s slices.
+Claude Code moves a sub-agent's foreground call still running at 180 s to the background, so a 270 s wait never ended in the foreground: an adopter's landing on 2026-11-16 had 14 calls moved that way, and every move seen in six days of sub-agent transcripts was at 180 s. Past 300 s the prompt cache also expires and the next request re-pays the whole context: over 239 past landings the requests that followed one wait of 290 s or more cost $77, against $9 in 270 s slices.
 
 ## The return
 
@@ -156,7 +169,7 @@ This lander's review phase (`STOP_AT review`), two runs per flight, scored again
 The ledger [flights-lander-bench.md](flights-lander-bench.md) holds three rungs of real commit ranges with planted defects, review-only and full landings, and the replay of past landings.
 
 - **The shed** (fixes first, then one `forward_compaction`, tests and gate from the report): replayed over 95 past landings of 1000 or more changed lines it saves 19.8% / 17.3% / 14.8% of the lander's own dollars at a wake of 35k / 45k / 55k tokens. Live, the lander went from 121,000 tokens of context to 31,000 and returned `FIXED` 6 requests later.
-- **The waits:** 270 s slices against one long wait, $9 against $77 over 239 past landings.
+- **The waits:** slices under 300 s against one long wait, $9 against $77 over 239 past landings (measured in 270 s slices; shipped at 170 s because the harness backgrounds a foreground call at 180 s).
 - **The review cut by area** (diff-checker clusters by directory of about 600 changed lines, 12 at most, a `PLAN OWN` row, a diff-checker that returns `CONTRACTS`) is held, not shipped: it found more real defects and wrote no false finding, but cost $2.27 (+42%) more in a full landing of the 5,480-line rung, and lost on the price metric fixed before the first run.
 - **Sonnet diff readers** are rejected on the blind grade: 9 to 12 of 14 planted defects against 13 to 14 for Opus.
 

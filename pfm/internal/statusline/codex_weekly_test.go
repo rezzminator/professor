@@ -215,8 +215,8 @@ func TestClaudeCodexWeeklyUnavailableAndStale(t *testing.T) {
 		{name: "primary missing percent", body: `{"primary":{"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
 		{name: "primary null percent", body: `{"primary":{"usedPercent":null,"windowDurationMins":10080,"resetsAt":1787122800}}`, want: "codex-7d: error", warn: true},
 		{name: "primary unknown reset keeps the reading", body: `{"primary":{"usedPercent":42,"windowDurationMins":10080}}`, want: "codex-7d-used:42%"},
-		{name: "primary stale", body: `{"primary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1787122800},"secondary":null}`, age: 2 * time.Hour, want: "codex-7d-used:42% ↻3d7h stale 2h0m", refreshes: 1},
-		{name: "stale", body: `{"secondary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1787122800}}`, age: 2 * time.Hour, want: "codex-7d-used:42% ↻3d7h stale 2h0m", refreshes: 1},
+		{name: "primary stale", body: `{"primary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1787122800},"secondary":null}`, age: 2 * time.Hour, want: "codex-7d-used:42% ↻3d7h stale 2h00m", refreshes: 1},
+		{name: "stale", body: `{"secondary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1787122800}}`, age: 2 * time.Hour, want: "codex-7d-used:42% ↻3d7h stale 2h00m", refreshes: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := weeklyRuntime(t)
@@ -377,7 +377,7 @@ func TestClaudeCodexWeeklyLabelFitsShortSiblings(t *testing.T) {
 	}{
 		{"missing", "", 0, "codex-7d: no data"},
 		{"fresh", `{"primary":{"usedPercent":52,"windowDurationMins":10080,"resetsAt":1787122800}}`, time.Minute, "codex-7d-used:52% ↻3d7h"},
-		{"stale", `{"primary":{"usedPercent":52,"windowDurationMins":10080,"resetsAt":1787122800}}`, time.Hour, "codex-7d-used:52% ↻3d7h stale 1h0m"},
+		{"stale", `{"primary":{"usedPercent":52,"windowDurationMins":10080,"resetsAt":1787122800}}`, time.Hour, "codex-7d-used:52% ↻3d7h stale 1h00m"},
 	} {
 		for _, columns := range []int{0, -1, ansi.StringWidth(test.want) + 4, 256} {
 			t.Run(fmt.Sprintf("%s/%d", test.name, columns), func(t *testing.T) {

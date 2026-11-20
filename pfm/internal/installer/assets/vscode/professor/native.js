@@ -30,7 +30,7 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
-const { chromeTarget, withLock } = require('./theme');
+const { chromeTarget, settingsTarget, withLock } = require('./theme');
 
 const INDEX = path.join(__dirname, 'themes', 'index.json');
 const RECORD = 'vscode-native.json';
@@ -131,9 +131,7 @@ function startNativeThemes({ dir, runPfm, why, here, whyNot, index = loadIndex()
         if (workbench.get('colorTheme') !== theme.id) {
           echo = theme.id;
           try {
-            const target = vscode.env.remoteName === undefined
-              ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace;
-            await workbench.update('colorTheme', theme.id, target);
+            await workbench.update('colorTheme', theme.id, settingsTarget());
           } catch (err) {
             echo = null;
             throw new Error(`could not switch VS Code to ${theme.label}: ${err?.message ?? err}`);

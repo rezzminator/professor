@@ -19,9 +19,6 @@ func TestWorkbenchManifest(t *testing.T) {
 }
 
 func TestSettingsPaths(t *testing.T) {
-	if got := Settings("/work/acme"); got != "/work/acme/pfm.settings.json" {
-		t.Errorf("Settings = %q", got)
-	}
 	for _, test := range []struct {
 		root   string
 		engine pfmengine.ID

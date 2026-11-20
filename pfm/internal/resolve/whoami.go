@@ -524,6 +524,11 @@ func (lister CommandPaneOwners) PaneOwners(
 		if len(fields) == 0 {
 			continue
 		}
+		if len(fields) == 1 && strings.HasPrefix(fields[0], "%") {
+			// A pane with no process (tmux leaves its pid blank while another chat's pane respawns or
+			// ends) runs no caller: passed over, never a loss that fails every lookup on the box.
+			continue
+		}
 		pid := 0
 		if len(fields) == 2 {
 			pid, _ = strconv.Atoi(fields[0]) // a pid that does not parse stays 0: named below

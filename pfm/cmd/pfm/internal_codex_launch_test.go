@@ -99,7 +99,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				}[scenario]
 				for path, body := range map[string]string{
 					paths.GeneratedHarnessPromptIn(clone, pfmengine.Codex): "Codex fleet.\n",
-					paths.Settings(project):                                settings,
+					pfmconfig.PathIn(project):                              settings,
 					filepath.Join(project, "team.md"):                      "Team rules.\n",
 					filepath.Join(project, "src", "main.go"):               "package main\n",
 				} {
@@ -173,8 +173,8 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 				dir = filepath.Join(project, "src")
 				personaArgs = nil
 				mirror = false
-				wantWarning = "launch Codex: " + paths.Settings(project) +
-					`: harnessPrompt sets both "extend" and "replace": keep one; launching without the settings` + "\n"
+				wantWarning = "launch Codex: config " + pfmconfig.PathIn(project) +
+					`: harnessPrompt sets both "extend" and "replace": keep one; launching without that file` + "\n"
 			case "outside":
 				dir = root
 				personaArgs = nil

@@ -44,7 +44,7 @@ The Claude Code settings a project carries in its own tree: this repo's `.claude
 
 ## settings-global.json
 
-`templates/project/settings-global.json` ships `{"cleanupPeriodDays": 36500}`, but nothing installs that template. `cleanupPeriodDays` reaches Claude through `managed-settings.d/pfm.json`, which `pfm install` writes ([claude-config-dir.md](claude-config-dir.md#managed-settings)), and each launch's `--settings` ([claude-launch.md](claude-launch.md#how-claude-layers-its-settings)).
+`templates/project/settings-global.json` ships `{"cleanupPeriodDays": 36500}`, but nothing installs that template. `cleanupPeriodDays` (default 36500 in `pfm/internal/claudelaunch/defaults.json` `settings`) reaches Claude through `managed-settings.d/pfm.json`, which `pfm install` writes ([claude-config-dir.md](claude-config-dir.md#managed-settings)), and each launch's `--settings` ([claude-launch.md](claude-launch.md#how-claude-layers-its-settings)).
 
 ## The outputStyle gate
 

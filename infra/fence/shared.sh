@@ -189,14 +189,17 @@ fence_config_test_p() {
 }
 
 fence_config_init() {
-  local profile="${PFM_FENCE_PROFILE-auto}" facts os cpus memory native_cpu native_mem
+  local profile="${PFM_FENCE_PROFILE-auto}" facts ostype os cpus memory native_cpu native_mem
   case "$profile" in
     desktop|native) ;;
     auto)
-      facts="$(docker info --format '{{.OperatingSystem}}|{{.NCPU}}|{{.MemTotal}}' 2>&1)" || { echo "iso: PFM_FENCE_PROFILE detection failed: $facts" >&2; return 1; }
-      IFS='|' read -r os cpus memory <<<"$facts"
+      facts="$(docker info --format '{{.OSType}}|{{.OperatingSystem}}|{{.NCPU}}|{{.MemTotal}}' 2>&1)" || { echo "iso: PFM_FENCE_PROFILE detection failed: $facts" >&2; return 1; }
+      IFS='|' read -r ostype os cpus memory <<<"$facts"
       [[ "$cpus" =~ ^[1-9][0-9]*$ && "$memory" =~ ^[1-9][0-9]*$ ]] || { echo "iso: PFM_FENCE_PROFILE detection returned invalid Docker resources: $facts" >&2; return 1; }
-      case "$os" in *[Dd]esktop*) profile=desktop ;; *[Ll]inux*|Ubuntu*|Debian*|Fedora*) profile=native ;; *) echo "iso: PFM_FENCE_PROFILE unsupported Docker OperatingSystem: $os" >&2; return 1 ;; esac
+      # The fence needs a Linux daemon: Docker Desktop is the desktop baseline, any other Linux daemon
+      # (whatever its distribution names itself) is native. A non-Linux or unreadable OSType is refused.
+      [[ "$ostype" == linux ]] || { echo "iso: PFM_FENCE_PROFILE needs a Linux Docker daemon, docker info OSType is '$ostype'" >&2; return 1; }
+      case "$os" in *[Dd]esktop*) profile=desktop ;; *) profile=native ;; esac
       if [[ "$profile" == native ]]; then
         native_cpu="$(PFM_FENCE_PROFILE=native _fence_config_default PFM_FENCE_CPUS)" || return 1
         native_mem="$(_fence_sh_bytes "$(PFM_FENCE_PROFILE=native _fence_config_default PFM_FENCE_MEM)")" || return 1

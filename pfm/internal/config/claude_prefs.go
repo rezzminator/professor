@@ -4,31 +4,13 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode"
 )
 
 func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePrefs, error) {
 	prefs := ClaudePrefs{}
-	if raw.WebSearchesPerSession != nil && *raw.WebSearchesPerSession < 1 {
+	if claudeEnvSet(raw.Settings) && index >= 0 {
 		return ClaudePrefs{}, fmt.Errorf(
-			"config %s: %s.webSearchesPerSession must be at least 1", path, configScope(scope, index),
-		)
-	}
-	if raw.AutoCompactWindow != nil && *raw.AutoCompactWindow < 1 {
-		return ClaudePrefs{}, fmt.Errorf(
-			"config %s: %s.autoCompactWindow must be at least 1", path, configScope(scope, index),
-		)
-	}
-	if raw.HelperModel != nil && !ValidHelperModel(*raw.HelperModel) {
-		return ClaudePrefs{}, fmt.Errorf(
-			"config %s: %s.helperModel must be a non-empty model name without whitespace",
-			path,
-			configScope(scope, index),
-		)
-	}
-	if raw.CleanupPeriodDays != nil && *raw.CleanupPeriodDays < 1 {
-		return ClaudePrefs{}, fmt.Errorf(
-			"config %s: %s.cleanupPeriodDays must be at least 1", path, configScope(scope, index),
+			"config %s: %s.settings is machine-wide: set %s", path, configScope(scope, index), KeyClaudeSettings,
 		)
 	}
 	if raw.PermissionMode != nil {
@@ -122,24 +104,10 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 	return prefs, nil
 }
 
-// ValidHelperModel reports whether value can be a helper model: a model id or
-// alias, non-empty, without a space or control character, so it reaches Claude
-// Code's environment as one word.
-func ValidHelperModel(value string) bool {
-	return value != "" && !strings.ContainsFunc(value, func(r rune) bool {
-		return unicode.IsSpace(r) || unicode.IsControl(r)
-	})
-}
-
 // copyClaudeLaunchPrefs sets the launch values an account block carries or
 // inherits whole: Load seeds an account's from the resolved top level, and
 // EffectiveClaude reads them back from the account.
 func copyClaudeLaunchPrefs(target *ClaudePrefs, source ClaudePrefs) {
-	target.WebSearchesPerSession = source.WebSearchesPerSession
-	target.AutoCompactWindow = source.AutoCompactWindow
-	target.HelperModel = source.HelperModel
-	target.TmuxTruecolor = source.TmuxTruecolor
-	target.CleanupPeriodDays = source.CleanupPeriodDays
 	target.RequireManagedCleanup = source.RequireManagedCleanup
 }
 
@@ -189,26 +157,6 @@ func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[stri
 	if index >= 0 {
 		base = fmt.Sprintf("accounts[%d].claude.", index)
 	}
-	if raw.WebSearchesPerSession != nil {
-		target.WebSearchesPerSession = *raw.WebSearchesPerSession
-		sources[base+"webSearchesPerSession"] = SourceFile
-	}
-	if raw.AutoCompactWindow != nil {
-		target.AutoCompactWindow = *raw.AutoCompactWindow
-		sources[base+"autoCompactWindow"] = SourceFile
-	}
-	if raw.HelperModel != nil {
-		target.HelperModel = *raw.HelperModel
-		sources[base+"helperModel"] = SourceFile
-	}
-	if raw.TmuxTruecolor != nil {
-		target.TmuxTruecolor = *raw.TmuxTruecolor
-		sources[base+"tmuxTruecolor"] = SourceFile
-	}
-	if raw.CleanupPeriodDays != nil {
-		target.CleanupPeriodDays = *raw.CleanupPeriodDays
-		sources[base+"cleanupPeriodDays"] = SourceFile
-	}
 	if raw.RequireManagedCleanup != nil {
 		target.RequireManagedCleanup = *raw.RequireManagedCleanup
 		sources[base+"requireManagedCleanup"] = SourceFile
@@ -216,28 +164,20 @@ func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[stri
 }
 
 // marshalClaude is the machine claude block. The keys a pfm of the last release (v0.79.0) does
-// not know — helperModel, pluginCheckoutRoot, plugins, env, costLedger — are written only when the file
+// not know — pluginCheckoutRoot, plugins, env, costLedger — are written only when the file
 // set them or the value differs from the default, so `pfm config init` writes a file that pfm still
 // decodes: its loader refuses an unknown key. An unset value loads as its default either way.
 func marshalClaude(config Config) map[string]any {
 	value := map[string]any{
-		"webSearchesPerSession": config.Claude.WebSearchesPerSession,
-		"autoCompactWindow":     config.Claude.AutoCompactWindow,
-		"tmuxTruecolor":         config.Claude.TmuxTruecolor,
-		"cleanupPeriodDays":     config.Claude.CleanupPeriodDays,
 		"requireManagedCleanup": config.Claude.RequireManagedCleanup,
 		"permissionMode":        config.Claude.PermissionMode,
 		engineKeyBinary:         config.Claude.Binary,
 		keyTheme:                themeMarshalValue(config.Claude.Theme),
 		"cache1h":               config.Claude.Cache1H,
-		"nativeCursor":          config.Claude.NativeCursor,
 	}
 	set := func(key string) bool { return config.Source(key) == SourceFile }
 	if set("claude.remoteControl") || !config.Claude.RemoteControl {
 		value["remoteControl"] = config.Claude.RemoteControl
-	}
-	if set("claude.helperModel") || config.Claude.HelperModel != DefaultHelperModel {
-		value["helperModel"] = config.Claude.HelperModel
 	}
 	if config.Claude.PluginCheckoutRoot != "" { // an unset root is left out: null would also be an unknown key
 		value["pluginCheckoutRoot"] = config.Claude.PluginCheckoutRoot
@@ -264,14 +204,9 @@ func marshalClaude(config Config) map[string]any {
 // marshalClaudeAccount preserves explicit account switches, including false overrides.
 func marshalClaudeAccount(config Config, account Account, index int) map[string]any {
 	claude := map[string]any{
-		"webSearchesPerSession": account.Claude.WebSearchesPerSession,
-		"autoCompactWindow":     account.Claude.AutoCompactWindow,
-		"tmuxTruecolor":         account.Claude.TmuxTruecolor,
-		"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
 		"requireManagedCleanup": account.Claude.RequireManagedCleanup,
 		keyTheme:                themeMarshalValue(account.Claude.Theme),
 		"cache1h":               account.Claude.Cache1H,
-		"nativeCursor":          account.Claude.NativeCursor,
 	}
 	if config.Source(fmt.Sprintf("accounts[%d].claude.remoteControl", index)) == SourceFile ||
 		account.Claude.RemoteControl != config.Claude.RemoteControl {
@@ -284,12 +219,6 @@ func marshalClaudeAccount(config Config, account Account, index int) map[string]
 	}
 	if account.Claude.Binary != "" {
 		claude[engineKeyBinary] = account.Claude.Binary
-	}
-	// Preserve explicit account preferences, even when currently equal to the
-	// machine value: a later machine edit must not turn them into inheritance.
-	if account.Claude.HelperModel != config.Claude.HelperModel ||
-		config.Source(fmt.Sprintf("accounts[%d].claude.helperModel", index)) == SourceFile {
-		claude["helperModel"] = account.Claude.HelperModel
 	}
 	return claude
 }

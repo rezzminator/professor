@@ -1,18 +1,14 @@
 package workbench
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -28,30 +24,35 @@ const (
 	Resume
 )
 
-// Persona carries a validated workbench and the prompt read for this launch.
-// Envs are the managed root's settings envs, set on the launch whatever prompt
-// it carries; Warnings name a settings file the launch goes on without.
+// Persona carries a validated workbench and the prompt read for this launch. Envs are the layered envs of
+// pfm.config.json, machine then project, set on the launch whatever prompt it carries, and ClaudeSettings its
+// layered claude.settings, laid over a Claude launch's own --settings; Warnings name a config file the launch
+// goes on without and a project key it does not read.
 type Persona struct {
 	Bench                       Bench
 	Prompt, Body, Effort, Model string
 	Envs                        map[string]string
+	ClaudeSettings              map[string]any
 	Warnings                    []string
 }
 
 // ForLaunch refuses invalid manifests and disabled new engines before launch.
-// The managed root's settings file (paths.SettingsFile) supplies the prompt
-// where no workbench owns cwd, and its envs everywhere; a faulty settings file
-// is a warning, never a refusal. A refusal still returns the envs and warnings.
+// pfm.config.json, the machine file and the managed root's (settingsPersona), supplies the prompt where no
+// workbench owns cwd, and its envs and Claude settings everywhere, outside a managed root too; a faulty file
+// is a warning, never a refusal. A refusal still returns the envs, Claude settings and warnings.
 func ForLaunch(cwd, home string, engine pfmengine.ID, mode Mode) (Persona, error) {
 	start, root, found, err := launchRoot(cwd)
-	if err != nil || !found {
+	if err != nil {
 		return Persona{}, err
+	}
+	if !found {
+		return settingsPersona("", home, engine, true), nil
 	}
 	bench, found, err := nearestFrom(start, root)
 	// A nested workbench's prompt wins, so the settings prompt is resolved
 	// only where no workbench owns cwd.
 	settings := settingsPersona(root, home, engine, err == nil && !found)
-	base := Persona{Envs: settings.Envs, Warnings: settings.Warnings}
+	base := Persona{Envs: settings.Envs, ClaudeSettings: settings.ClaudeSettings, Warnings: settings.Warnings}
 	if err != nil {
 		return base, err
 	}
@@ -78,15 +79,9 @@ func ForLaunch(cwd, home string, engine pfmengine.ID, mode Mode) (Persona, error
 		obs.Logger(context.Background()).Error("workbench launch", "path", bench.Prompt, obs.FieldErr, wrapped)
 		return base, wrapped
 	}
-	return Persona{
-		Bench:    bench,
-		Prompt:   bench.Prompt,
-		Body:     string(body),
-		Effort:   bench.Effort,
-		Model:    bench.Model,
-		Envs:     settings.Envs,
-		Warnings: settings.Warnings,
-	}, nil
+	base.Bench, base.Prompt, base.Body = bench, bench.Prompt, string(body)
+	base.Effort, base.Model = bench.Effort, bench.Model
+	return base, nil
 }
 
 // launchRoot is the managed root above cwd, in a linked worktree the
@@ -117,101 +112,72 @@ func launchRoot(cwd string) (start, root string, found bool, err error) {
 	return start, root, true, nil
 }
 
-// settingsFile is the settings file's one shape: no other key exists.
-type settingsFile struct {
-	HarnessPrompt *struct {
-		Extend  string `json:"extend"`
-		Replace string `json:"replace"`
-	} `json:"harnessPrompt"`
-	Envs json.RawMessage `json:"envs"`
-}
-
-// settingsPersona is root's settings file as a persona; a fault is logged and
-// named in Warnings, and the launch goes on without the file.
+// settingsPersona is the scope keys of pfm.config.json as a persona: the machine file's, then the
+// project's at root ("" outside a managed root) over them, envs by name, claude.settings by key
+// (claudelaunch.LayerSettings), the project's harnessPrompt replacing the machine's; withPrompt false
+// checks the harnessPrompt shape but resolves no prompt file. A faulty file is logged and named in
+// Warnings, and the launch goes on without it; a project key the project scope does not read is a
+// warning too.
 func settingsPersona(root, home string, engine pfmengine.ID, withPrompt bool) Persona {
-	persona, err := readRootSettings(root, home, engine, withPrompt)
-	if err != nil {
-		obs.Logger(context.Background()).Error("pfm settings", "path", paths.Settings(root), obs.FieldErr, err)
-		return Persona{Warnings: []string{err.Error() + "; launching without the settings"}}
+	var persona Persona
+	fault := func(err error) {
+		obs.Logger(context.Background()).Error("pfm config scope", "root", root, obs.FieldErr, err)
+		persona.Warnings = append(persona.Warnings, err.Error()+"; launching without that file")
+	}
+	var machine, project pfmconfig.Scope
+	machinePath, err := pfmconfig.MachinePath(home)
+	switch {
+	case errors.Is(err, paths.ErrNoSourceRepoMarker), err == nil && machinePath == "":
+		// No source clone recorded, or a runtime loaded without a file: there is no machine file to read.
+	case err != nil:
+		fault(err)
+	default:
+		if machine, err = pfmconfig.ReadMachineScope(machinePath); err != nil {
+			fault(err)
+		}
+	}
+	if root != "" {
+		scope, warnings, err := pfmconfig.ReadProjectScope(root, machinePath)
+		for _, warning := range warnings {
+			obs.Logger(context.Background()).Warn("pfm config scope", "path", root, "warning", warning)
+		}
+		persona.Warnings = append(persona.Warnings, warnings...)
+		if err != nil {
+			fault(err)
+		} else {
+			project = scope
+		}
+	}
+	// The project's prompt wins; a prompt that cannot be read drops its whole file (envs and
+	// claude.settings with it, as the warning says), so the machine's prompt applies.
+	for _, scope := range []*pfmconfig.Scope{&project, &machine} {
+		if scope.HarnessPrompt == nil || !withPrompt {
+			continue
+		}
+		prompt := *scope.HarnessPrompt
+		path, body, err := settingsPromptFile(prompt.Dir, prompt.Relative)
+		if err == nil && prompt.Key == "extend" {
+			path, body, err = composeExtend(prompt.Dir, home, engine, body)
+		}
+		if err != nil {
+			fault(fmt.Errorf("config %s: harnessPrompt.%s: %w", scope.Path, prompt.Key, err))
+			*scope = pfmconfig.Scope{}
+			continue
+		}
+		persona.Prompt, persona.Body = path, body
+		break
+	}
+	if machine.Envs != nil || project.Envs != nil {
+		persona.Envs = make(map[string]string, len(machine.Envs)+len(project.Envs))
+		maps.Copy(persona.Envs, machine.Envs)
+		maps.Copy(persona.Envs, project.Envs)
+	}
+	if persona.ClaudeSettings, err = claudelaunch.LayerSettings(
+		machine.ClaudeSettings, project.ClaudeSettings,
+	); err != nil {
+		fault(fmt.Errorf("layer claude.settings: %w", err))
 	}
 	return persona
-}
-
-// settingsEnvReserved reports a name pfm assigns on some launch door,
-// several of them by inheritance (cx, the Herdr seat), where an adopter value
-// would land ahead of pfm's.
-func settingsEnvReserved(name string) bool {
-	return strings.HasPrefix(name, "PFM_") || name == "CODEX_HOME" || name == "CLAUDE_CONFIG_DIR"
-}
-
-// readRootSettings reads root's settings file; withPrompt false checks the
-// harnessPrompt shape but resolves no prompt file.
-func readRootSettings(root, home string, engine pfmengine.ID, withPrompt bool) (Persona, error) {
-	path := paths.Settings(root)
-	fault := func(err error) (Persona, error) { return Persona{}, fmt.Errorf("%s: %w", path, err) }
-	info, err := os.Lstat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return Persona{}, nil
-	}
-	if err != nil {
-		return fault(fmt.Errorf("inspect: %w", err))
-	}
-	// A FIFO would hang every launch; a link could leave the root.
-	if !info.Mode().IsRegular() {
-		return fault(errors.New("not a regular file"))
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return fault(fmt.Errorf("read: %w", err))
-	}
-	var file settingsFile
-	if err := pfmconfig.DecodeStrict(raw, &file, "trailing JSON value"); err != nil {
-		return fault(fmt.Errorf("not valid: %w", err))
-	}
-	var persona Persona
-	if len(file.Envs) != 0 && !bytes.Equal(bytes.TrimSpace(file.Envs), []byte("null")) {
-		envs, err := pfmconfig.DecodeEnv("envs", file.Envs)
-		if err != nil {
-			return fault(err)
-		}
-		for _, name := range slices.Sorted(maps.Keys(envs)) {
-			if settingsEnvReserved(name) {
-				return fault(fmt.Errorf("envs.%s is set by pfm itself on launch", name))
-			}
-			if strings.ContainsRune(envs[name], 0) {
-				return fault(fmt.Errorf("envs.%s must not contain NUL", name))
-			}
-		}
-		persona.Envs = envs
-	}
-	if file.HarnessPrompt == nil {
-		return persona, nil
-	}
-	key, relative := "extend", file.HarnessPrompt.Extend
-	switch {
-	case relative != "" && file.HarnessPrompt.Replace != "":
-		return fault(errors.New(`harnessPrompt sets both "extend" and "replace": keep one`))
-	case relative == "" && file.HarnessPrompt.Replace == "":
-		return fault(errors.New(`harnessPrompt needs "extend" or "replace"`))
-	case relative == "":
-		key, relative = "replace", file.HarnessPrompt.Replace
-	}
-	if !withPrompt {
-		return persona, nil
-	}
-	prompt, body, err := settingsPromptFile(root, relative)
-	if err != nil {
-		return fault(fmt.Errorf("harnessPrompt.%s: %w", key, err))
-	}
-	if key == "replace" {
-		persona.Prompt, persona.Body = prompt, body
-		return persona, nil
-	}
-	persona.Prompt, persona.Body, err = composeExtend(root, home, engine, body)
-	if err != nil {
-		return fault(fmt.Errorf("harnessPrompt.extend: %w", err))
-	}
-	return persona, nil
 }
 
 // Applies reports whether this launch carries a workbench prompt.

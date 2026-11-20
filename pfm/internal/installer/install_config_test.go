@@ -3,11 +3,9 @@ package installer
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -239,7 +237,7 @@ func TestSeedConfigPreservesValidatedBytesAndConcurrentTarget(t *testing.T) {
 // installSeedClaude plans a first install from example (a file body) and
 // returns the claude object of the bytes the apply would write, and the seed
 // path.
-func installSeedClaude(t *testing.T, example []byte) map[string]json.RawMessage {
+func installSeedClaude(t *testing.T, example []byte) (document, claude map[string]json.RawMessage) {
 	t.Helper()
 	home, clone := t.TempDir(), t.TempDir()
 	target := filepath.Join(home, "config", pfmconfig.FileName)
@@ -264,94 +262,11 @@ func installSeedClaude(t *testing.T, example []byte) map[string]json.RawMessage 
 			t.Errorf("seed key order %s after %s: %s", pair[0], pair[1], got.SeedContent)
 		}
 	}
-	var document map[string]json.RawMessage
 	if err := json.Unmarshal(got.SeedContent, &document); err != nil {
 		t.Fatalf("seed bytes are not JSON: %v\n%s", err, got.SeedContent)
 	}
-	var claude map[string]json.RawMessage
 	if err := json.Unmarshal(document["claude"], &claude); err != nil {
 		t.Fatalf("seed claude block: %v\n%s", err, got.SeedContent)
 	}
-	return claude
-}
-
-// The seed a first install writes leaves out the new claude keys a pfm of the
-// last release refuses (remoteControl, helperModel, pluginCheckoutRoot, plugins, costLedger)
-// while they sit at their defaults, exactly as `pfm config init` does
-// (marshalClaude); the example file itself keeps them, for its parity test.
-func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("find test source")
-	}
-	example, err := os.ReadFile(filepath.Join(filepath.Dir(source), "..", "..", "..", "example.pfm.config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	claude := installSeedClaude(t, example)
-	for _, key := range []string{"remoteControl", "helperModel", "pluginCheckoutRoot", "plugins", "costLedger"} {
-		if _, present := claude[key]; present {
-			t.Errorf("the seed keeps claude.%s at its default", key)
-		}
-	}
-	if string(claude["permissionMode"]) != `"bypass"` || string(claude["binary"]) != `"claude"` {
-		t.Errorf("the seed lost the other claude keys: %s", claude)
-	}
-}
-
-// A value the example sets away from its default is kept.
-func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
-	claude := installSeedClaude(t, []byte(`{"version":2,"claude":{"helperModel":"claude-custom-1","costLedger":false,`+
-		`"plugins":["auto-effort"],"remoteControl":false,"theme":null}}`))
-	for key, want := range map[string]string{
-		"helperModel": `"claude-custom-1"`, "costLedger": "false", "plugins": `["auto-effort"]`,
-		"remoteControl": "false",
-	} {
-		if got := strings.Join(strings.Fields(string(claude[key])), ""); got != want {
-			t.Errorf("seed claude.%s = %q, want %q", key, got, want)
-		}
-	}
-}
-
-// snapshotTree records every path under root with its mode and content, so a read-only call can be proven to leave the tree as it was.
-func snapshotTree(t *testing.T, root string) map[string]string {
-	t.Helper()
-	snapshot := make(map[string]string)
-	err := filepath.WalkDir(root, func(path string, _ os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == root {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		info, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-		switch {
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			snapshot[relative] = fmt.Sprintf("symlink:%o:%s", info.Mode().Perm(), target)
-		case info.IsDir():
-			snapshot[relative] = fmt.Sprintf("dir:%o", info.Mode().Perm())
-		default:
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			snapshot[relative] = fmt.Sprintf("file:%o:%x", info.Mode().Perm(), content)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return snapshot
+	return document, claude
 }

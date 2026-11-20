@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -18,7 +17,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
@@ -129,15 +127,11 @@ func renderHerdrShell(wrapper, realShell string) ([]byte, error) {
 
 func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 	if !uninstall {
-		binary := installer.env().Get(herdr.EnvBin)
-		if binary == "" {
-			binary = "herdr"
-		}
-		if _, err := installer.processRunner().LookPath(binary); errors.Is(err, exec.ErrNotFound) && binary == "herdr" {
-			installer.skip("herdr shell: herdr absent")
-			return nil
-		} else if err != nil {
-			return fmt.Errorf("resolve Herdr shell wiring binary %s: %w", binary, err)
+		if absent, err := installer.herdrAbsent(); err != nil || absent {
+			if absent {
+				installer.skip("herdr shell: herdr absent")
+			}
+			return err
 		}
 	}
 	home := installer.options.Home
@@ -191,7 +185,7 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 	}
 	return installer.change(
 		"wire herdr shell in "+status.Path,
-		func() error { return installer.writeHerdrShellConfig(status.Path, raw, []byte(updated), existed) },
+		func() error { return installer.writeHerdrConfig(status.Path, raw, []byte(updated), existed) },
 	)
 }
 
@@ -286,7 +280,7 @@ func extendHerdrShellConfig(original, block, wrapper string) (string, error) {
 	return "", fmt.Errorf("cannot add default_shell without rewriting the existing terminal table")
 }
 
-func (installer *engine) writeHerdrShellConfig(path string, original, updated []byte, existed bool) error {
+func (installer *engine) writeHerdrConfig(path string, original, updated []byte, existed bool) error {
 	mode := fs.FileMode(0o600)
 	if existed {
 		info, err := os.Stat(path)
@@ -311,7 +305,7 @@ func (installer *engine) unwireHerdrShell(status HerdrShellStatus, wrapper strin
 		updated := strings.Replace(string(raw), block, "", 1)
 		if err := installer.change(
 			"unwire herdr shell in "+status.Path,
-			func() error { return installer.writeHerdrShellConfig(status.Path, raw, []byte(updated), true) },
+			func() error { return installer.writeHerdrConfig(status.Path, raw, []byte(updated), true) },
 		); err != nil {
 			return err
 		}

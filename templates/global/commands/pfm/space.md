@@ -13,7 +13,7 @@ A chat joins a space only by this command; a new chat starts in its folder-deriv
 
 ## Run
 
-- `<name>`: run `pfm chat space '<name>'`, the name quoted for the shell. It records the space for this chat, creates the Herdr workspace of that name when missing, and moves this chat's tab there.
+- `<name>`: run `pfm chat space '<name>'`, the name quoted for the shell; `~`, home's place, is refused. It records the space for this chat, creates the Herdr workspace of that name when missing, and moves this chat's tab there; while the fleet scan does not hold this chat yet, it errors naming the workspace the chat stays in, and the chat moves at its next placement.
 - No argument: run `pfm chat space`. It clears the space and returns the chat to its project space.
 
 Relay the verb's one output line as printed; outside Herdr it says the chat is not in Herdr. On a non-zero exit, relay its stderr verbatim and report nothing as done.

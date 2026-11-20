@@ -78,6 +78,11 @@ func drawMatrix(out io.Writer, report themesync.Report, color bool) {
 	}
 	if report.Enabled {
 		fmt.Fprintln(out, proofLine(report, color))
+		for _, surface := range report.Surfaces {
+			if cost := themesync.AbsentCost(surface.Surface); surface.Verdict == themesync.VerdictAbsent && cost != "" {
+				fmt.Fprintf(out, "  %s absent — %s\n", surface.Surface, cost)
+			}
+		}
 	}
 	if report.LastFlip != nil {
 		fmt.Fprintln(out, flipLine(*report.LastFlip))

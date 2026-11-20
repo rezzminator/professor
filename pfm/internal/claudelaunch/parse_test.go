@@ -112,6 +112,10 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.SettingsEnv["CLAUDE_CODE_TMUX_TRUECOLOR"] != "1" {
 					t.Error("truecolor missing")
 				}
+			case "env.CLAUDE_CODE_NATIVE_CURSOR":
+				if parsed.SettingsEnv["CLAUDE_CODE_NATIVE_CURSOR"] != "1" {
+					t.Errorf("native cursor=%q, want 1", parsed.SettingsEnv["CLAUDE_CODE_NATIVE_CURSOR"])
+				}
 			case "noFlicker":
 				if parsed.SettingsEnv["CLAUDE_CODE_NO_FLICKER"] != "1" {
 					t.Error("no-flicker missing")
@@ -139,6 +143,10 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 			case "showThinkingSummaries":
 				if parsed.Settings["showThinkingSummaries"] != true {
 					t.Errorf("showThinkingSummaries=%#v, want true", parsed.Settings["showThinkingSummaries"])
+				}
+			case "tui":
+				if parsed.Settings["tui"] != "fullscreen" {
+					t.Errorf("tui=%#v, want fullscreen", parsed.Settings["tui"])
 				}
 			case "hooks":
 				var got, want []string

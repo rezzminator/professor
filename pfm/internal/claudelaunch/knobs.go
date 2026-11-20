@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -34,6 +35,7 @@ const (
 	knobName                       = "name"
 	defaultWord                    = "default"
 	accountWord                    = "account"
+	configWord                     = "config"
 	productionMode                 = "production"
 	unsetWord                      = "unset"
 	commandWord                    = "command"
@@ -247,7 +249,7 @@ var Knobs = func() []Knob {
 			WireFlag,
 			flagPromptFile + "|env." + envSimplePrompt,
 			SourceConfig,
-			productionMode,
+			pfmconfig.SystemPromptProfessor,
 			"Choose the managed system prompt.",
 		},
 		Knob{

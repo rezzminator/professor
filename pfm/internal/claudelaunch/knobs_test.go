@@ -81,7 +81,7 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("hygiene row %s missing", name)
 		}
 	}
-	for _, name := range []string{"configDir", "binary", "cache1h", "shell", "systemPrompt", "remoteControl", "env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH", "env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION", "env.CLAUDE_CODE_AUTO_COMPACT_WINDOW", "env.ANTHROPIC_SMALL_FAST_MODEL", "env.CLAUDE_CODE_TMUX_TRUECOLOR", "noFlicker", "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS", "outputStyle", "theme", "cleanupPeriodDays", "showThinkingSummaries", "hooks", "statusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
+	for _, name := range []string{"configDir", "binary", "cache1h", "shell", "systemPrompt", "remoteControl", "env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH", "env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION", "env.CLAUDE_CODE_AUTO_COMPACT_WINDOW", "env.ANTHROPIC_SMALL_FAST_MODEL", "env.CLAUDE_CODE_TMUX_TRUECOLOR", "env.CLAUDE_CODE_NATIVE_CURSOR", "tui", "noFlicker", "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS", "outputStyle", "theme", "cleanupPeriodDays", "showThinkingSummaries", "hooks", "statusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
 		if !seen[name] {
 			t.Errorf("knob %s missing", name)
 		}

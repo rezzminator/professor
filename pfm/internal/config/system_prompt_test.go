@@ -30,24 +30,51 @@ func TestSystemPromptValidValuesResolve(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load(systemPrompt=%q) error = %v", value, err)
 		}
-		if got.Claude.SystemPrompt != value {
-			t.Fatalf("Claude.SystemPrompt = %q, want %q", got.Claude.SystemPrompt, value)
+		if got.Claude.SystemPrompt != value || got.Claude.SystemPromptDefault {
+			t.Fatalf("Claude.SystemPrompt = %q default=%t, want %q default=false",
+				got.Claude.SystemPrompt, got.Claude.SystemPromptDefault, value)
 		}
 	}
 }
 
-func TestSystemPromptAbsentMeansProductionAndAccountsOverride(t *testing.T) {
-	got, err := loadSystemPromptConfig(t, `{"permissionMode": "prompted"}`)
+func TestSystemPromptUnsetMeansProfessorAndAccountsOverride(t *testing.T) {
+	for _, test := range []struct{ name, claude string }{
+		{name: "absent", claude: `{"permissionMode": "prompted"}`},
+		{name: "null", claude: `{"systemPrompt": null}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := loadSystemPromptConfig(t, test.claude)
+			if err != nil {
+				t.Fatalf("Load error = %v", err)
+			}
+			if got.Claude.SystemPrompt != SystemPromptProfessor {
+				t.Fatalf(
+					"%s systemPrompt resolved to %q, want %q",
+					test.name,
+					got.Claude.SystemPrompt,
+					SystemPromptProfessor,
+				)
+			}
+			if effective := got.EffectiveClaude(1); effective.SystemPrompt != SystemPromptProfessor ||
+				!effective.SystemPromptDefault {
+				t.Fatalf("EffectiveClaude(1) systemPrompt=%q default=%t, want %q default=true (inherit)",
+					effective.SystemPrompt, effective.SystemPromptDefault, SystemPromptProfessor)
+			}
+			if effective := got.EffectiveClaude(2); effective.SystemPrompt != SystemPromptProfessor ||
+				effective.SystemPromptDefault {
+				t.Fatalf("EffectiveClaude(2) systemPrompt=%q default=%t, want %q default=false (account sets it)",
+					effective.SystemPrompt, effective.SystemPromptDefault, SystemPromptProfessor)
+			}
+		})
+	}
+	got, err := loadSystemPromptConfig(t, `{"systemPrompt": "production"}`)
 	if err != nil {
 		t.Fatalf("Load error = %v", err)
 	}
-	if got.Claude.SystemPrompt != "" {
-		t.Fatalf("absent systemPrompt resolved to %q, want empty (production)", got.Claude.SystemPrompt)
-	}
-	if effective := got.EffectiveClaude(1).SystemPrompt; effective != "" {
-		t.Fatalf("EffectiveClaude(1).SystemPrompt = %q, want empty (inherit production)", effective)
-	}
 	if effective := got.EffectiveClaude(2).SystemPrompt; effective != SystemPromptProfessor {
 		t.Fatalf("EffectiveClaude(2).SystemPrompt = %q, want %q (account override)", effective, SystemPromptProfessor)
+	}
+	if effective := got.EffectiveClaude(1).SystemPrompt; effective != SystemPromptProduction {
+		t.Fatalf("EffectiveClaude(1).SystemPrompt = %q, want %q (explicit opt-out)", effective, SystemPromptProduction)
 	}
 }

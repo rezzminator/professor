@@ -35,7 +35,12 @@ func mcpRuntime(runtime commandRuntime, ambient bool) mcpserv.Runtime {
 				fmt.Fprintln(stderr, "pfm: MCP dispatch requires chat argv")
 				return 2
 			}
-			return runChatWithRuntime(args[1:], strings.NewReader(""), stdout, stderr, runtime, ctx)
+			fresh, err := runtime.Reload()
+			if err != nil {
+				fmt.Fprintf(stderr, "pfm: config: %v\n", err)
+				return 1
+			}
+			return runChatWithRuntime(args[1:], strings.NewReader(""), stdout, stderr, fresh, ctx)
 		},
 	}
 }

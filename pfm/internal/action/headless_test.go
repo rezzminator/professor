@@ -282,6 +282,7 @@ func TestHeadlessClaudePlansWarnWhenTheFleetPromptCannotReachTheChat(t *testing.
 				}
 				machine := testMachineConfig(home)
 				machine.Claude.SystemPrompt = entry.mode
+				machine.Claude.SystemPromptDefault = false // an explicit professor
 				var plan HeadlessPlan
 				var err error
 				if door == "new" {

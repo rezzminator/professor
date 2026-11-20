@@ -2,11 +2,14 @@ package claudelaunch
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // defaultsJSON holds the plain values pfm sets for Claude, as data: settings is a Claude settings
@@ -168,4 +171,49 @@ func RegistryDefaults() []RegistryDefault {
 		list = append(list, RegistryDefault{value.key, slices.Clone(value.value), value.reason})
 	}
 	return list
+}
+
+// EffectiveSettings is claude, the layered claude.settings, over the shipped defaults: the value a
+// launch's --settings carries for every key pfm does not compute. A consumer outside that wire (the
+// passthrough session's environment, the managed cleanup drop-in) reads its value here.
+func EffectiveSettings(claude map[string]any) map[string]any {
+	settings, env := defaultSettings()
+	settings[settingsEnvKey] = env
+	layered, err := LayerSettings(claude)
+	if err != nil {
+		// The shipped defaults stand; the launch's own --settings refuses the same layer.
+		obs.Logger(context.Background()).Error("claudelaunch: layer claude.settings", obs.FieldErr, err.Error())
+		return settings
+	}
+	mergeOwnerSettings(settings, layered)
+	dropNullSettings(settings)
+	return settings
+}
+
+// EffectiveEnv is EffectiveSettings' env block, each value as Claude reads it: a string kept, a null
+// left out, any other JSON value in its JSON text.
+func EffectiveEnv(claude map[string]any) map[string]string {
+	result := map[string]string{}
+	switch env := EffectiveSettings(claude)[settingsEnvKey].(type) {
+	case map[string]string:
+		for name, value := range env {
+			result[name] = value
+		}
+	case map[string]any:
+		for name, value := range env {
+			if text, isText := value.(string); isText {
+				result[name] = text
+				continue
+			}
+			if value == nil {
+				continue
+			}
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				continue // a value json.Unmarshal produced always marshals
+			}
+			result[name] = string(encoded)
+		}
+	}
+	return result
 }

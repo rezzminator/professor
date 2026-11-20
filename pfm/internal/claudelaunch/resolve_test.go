@@ -18,6 +18,8 @@ func TestResolveSources(t *testing.T) {
 	prefs.Theme = "light"
 	machine.Accounts[1].Claude = &prefs
 	machine.Sources["accounts[1].claude.theme"] = pfmconfig.SourceFile
+	// A null turns off the truecolor default; the row shows the launch's value and its source.
+	machine.Claude.Settings = map[string]any{"env": map[string]any{"CLAUDE_CODE_TMUX_TRUECOLOR": nil}}
 	get := func(account int, name string) Resolved {
 		for _, row := range Resolve(machine, account) {
 			if row.Knob.Name == name {
@@ -53,6 +55,15 @@ func TestResolveSources(t *testing.T) {
 	}
 	if row := get(0, "env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"); row.Won != "constant" || row.Value != "1" {
 		t.Errorf("function hooks=%#v", row)
+	}
+	if row := get(0, "env.CLAUDE_CODE_NATIVE_CURSOR"); row.Won != "constant" || row.Value != "1" {
+		t.Errorf("native cursor=%#v, want constant 1", row)
+	}
+	if row := get(0, "tui"); row.Won != "constant" || row.Value != "fullscreen" {
+		t.Errorf("tui=%#v, want constant fullscreen", row)
+	}
+	if row := get(0, "env.CLAUDE_CODE_TMUX_TRUECOLOR"); row.Won != "config" || row.Value != unsetWord {
+		t.Errorf("truecolor turned off=%#v, want config unset", row)
 	}
 	if row := get(0, "mcp"); row.Won != "default" || row.Value != unsetWord {
 		t.Errorf("mcp=%#v, want default unset", row)

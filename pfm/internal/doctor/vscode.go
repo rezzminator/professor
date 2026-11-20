@@ -6,8 +6,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const missingState = "missing"
@@ -24,7 +26,7 @@ const missingState = "missing"
 // state the installer did not derive the same way. Every warning row carries
 // a warningID and prints through filter, so doctor.ignoreWarnings can
 // silence it (warning_ids.go).
-func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warningFilter) int {
+func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, env paths.Env, filter warningFilter) int {
 	const installFix, vscodeFix = "run pfm install --yes", "run pfm install --yes --vscode"
 	report, err := installer.InspectVSCode(home)
 	if err != nil {
@@ -36,7 +38,11 @@ func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warning
 		)
 	}
 	if !report.Managed {
-		fmt.Fprintln(stdout, "doctor: vscode not managed (pfm install --vscode never ran)")
+		if roots := installer.VSCodeProductRoots(home, env); len(roots) != 0 {
+			return filter.warn(stdout, warnVSCodeUnlinked, "doctor: vscode installed at "+strings.Join(roots, ", ")+
+				" but the professor extension is not linked (pfm install --vscode never ran)", vscodeFix)
+		}
+		fmt.Fprintln(stdout, "doctor: vscode not managed (pfm install --vscode never ran; no VS Code install found)")
 		return 0
 	}
 

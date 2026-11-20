@@ -35,9 +35,32 @@ func TestStatusColoursVerdictsOnlyOnAColourTerminal(t *testing.T) {
   herdr   ABSENT   g7    /p/ABSENT  d-ABSENT
   vscode  DRIFT    g7    /p/DRIFT  d-DRIFT
 OUT OF SYNC · vscode DRIFT
+  herdr absent — Herdr panes keep Herdr's own colours
 ` {
 			t.Errorf("an escape reached a plain stream: %q", stdout.String())
 		}
+	}
+}
+
+// TestStatusNamesWhatEachAbsentSurfaceCosts pins the ruling: an absent
+// surface keeps status at exit 0, and status says what its absence costs.
+func TestStatusNamesWhatEachAbsentSurfaceCosts(t *testing.T) {
+	report := matrix(themesync.VerdictInSync, themesync.VerdictAbsent, themesync.VerdictAbsent, themesync.VerdictAbsent)
+	fake := fakeThemesync{on: true, report: report}
+	var stdout, stderr bytes.Buffer
+	code := RunVerb(context.Background(), []string{"status"}, fake.deps(false), &stdout, &stderr)
+	want := `pfm theme · custom:tokyo-night (Tokyo Night · neon pink) · dark · gen 7
+  claude  IN-SYNC  g7    /p/IN-SYNC  d-IN-SYNC
+  tmux    ABSENT   g7    /p/ABSENT  d-ABSENT
+  herdr   ABSENT   g7    /p/ABSENT  d-ABSENT
+  vscode  ABSENT   g7    /p/ABSENT  d-ABSENT
+in sync · 1 of 4 surfaces at gen 7 · 3 absent
+  tmux absent — no pfm chat is open to recolour; the next one starts in this theme
+  herdr absent — Herdr panes keep Herdr's own colours
+  vscode absent — VS Code keeps its own colour theme
+`
+	if code != 0 || stdout.String() != want {
+		t.Errorf("exit=%d stdout:\n%s\nwant exit 0 and:\n%s\nstderr=%s", code, stdout.String(), want, stderr.String())
 	}
 }
 

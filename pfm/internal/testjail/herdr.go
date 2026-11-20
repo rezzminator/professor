@@ -12,7 +12,25 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// StageHerdrShell supplies the config and wrapper of an installed Herdr host.
+// installedHerdrKeys is the keys block pfm install writes into the Herdr
+// config (installer's herdrKeysBlock, unexported and out of testjail's reach,
+// as installer's tests import testjail): a drift turns the jailed doctor's
+// herdr-keys row red.
+const installedHerdrKeys = `# >>> pfm herdr keys >>>
+[keys]
+previous_workspace = "prefix+i"
+next_workspace = "prefix+m"
+
+[[keys.command]]
+key = "prefix+a"
+type = "shell"
+description = "new pfm chat in this space"
+command = '"${HERDR_BIN_PATH:-herdr}" tab create --workspace "${HERDR_ACTIVE_WORKSPACE_ID:-$HERDR_WORKSPACE_ID}" --env PFM_AUTO_OPEN=pfm --focus'
+# <<< pfm herdr keys <<<
+`
+
+// StageHerdrShell supplies the config and wrapper of an installed Herdr host:
+// pfm's shell and keys blocks.
 func StageHerdrShell(t *testing.T, home string) string {
 	t.Helper()
 	path := filepath.Join(home, ".config", "herdr", "config.toml")
@@ -34,9 +52,9 @@ func StageHerdrShell(t *testing.T, home string) string {
 		t.Fatal(err)
 	}
 	content := fmt.Sprintf(
-		"[terminal]\n# >>> pfm herdr shell >>>\ndefault_shell = %q\n# <<< pfm herdr shell <<<\n",
+		"[terminal]\n# >>> pfm herdr shell >>>\ndefault_shell = %q\n# <<< pfm herdr shell <<<\n\n",
 		wrapper,
-	)
+	) + installedHerdrKeys
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}

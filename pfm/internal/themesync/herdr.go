@@ -28,7 +28,6 @@ const (
 var (
 	herdrOpenPattern   = regexp.MustCompile(`^# >>> pfm theme · \S+ · gen (\d+) >>>$`)
 	herdrHeaderPattern = regexp.MustCompile(`^\s*\[\[?\s*([^\]\s][^\]]*?)\s*\]\]?\s*(#.*)?$`)
-	herdrRootTheme     = regexp.MustCompile(`^\s*theme\s*[.=]`)
 	// herdrNotRunning matches the texts `herdr server reload-config` prints when no server is up.
 	herdrNotRunning = []string{
 		"not running", "no server", "no running", "connection refused", "no such file", "could not connect",
@@ -168,67 +167,31 @@ func herdrReplace(content, block string) (string, bool) {
 	return content[:start] + block + content[end:], true
 }
 
-func herdrThemeHeader(text string) bool {
-	match := herdrHeaderPattern.FindStringSubmatch(text)
-	return len(match) > 1 && (match[1] == herdrThemeTable || strings.HasPrefix(match[1], herdrThemeTable+"."))
-}
-
-// herdrInstall puts the block where the user's theme tables are (the first
-// [theme] header through the last [theme.*] section's last content line,
-// trailing blank and comment lines excluded), or appends it when there is
-// none; the snapshot is what herdrRemove needs to undo it byte for byte.
+// herdrInstall puts the block where the user's theme tables are
+// (HerdrTableSpan), or appends it when there is none; the snapshot is what
+// herdrRemove needs to undo it byte for byte.
 func herdrInstall(original, block string) (string, herdrSnapshot, error) {
-	lines := herdrLines(original)
-	var headers, themeHeaders []int
-	for index, line := range lines {
-		if herdrHeaderPattern.MatchString(line.text) {
-			headers = append(headers, index)
-			if herdrThemeHeader(line.text) {
-				themeHeaders = append(themeHeaders, index)
-			}
-		} else if len(headers) == 0 && herdrRootTheme.MatchString(line.text) {
-			return "", herdrSnapshot{}, fmt.Errorf("themesync: herdr config sets theme at the root (line %d: %q); "+
-				"move it under a [theme] table", index+1, line.text)
-		}
+	start, end, found, err := HerdrTableSpan(original, herdrThemeTable)
+	if err != nil {
+		return "", herdrSnapshot{}, err
 	}
-	if len(themeHeaders) == 0 {
-		prefix := ""
-		switch {
-		case original == "":
-		case strings.HasSuffix(original, "\n"):
-			prefix = "\n"
-		default:
-			prefix = "\n\n"
-		}
+	if !found {
+		prefix := HerdrAppendSeparator(original)
 		return original + prefix + block, herdrSnapshot{Added: prefix + block}, nil
 	}
-	first, last := themeHeaders[0], themeHeaders[len(themeHeaders)-1]
-	for _, header := range headers {
-		if header > first && header < last && !herdrThemeHeader(lines[header].text) {
-			return "", herdrSnapshot{}, fmt.Errorf(
-				"themesync: herdr config splits its theme tables around line %d (%q); "+
-					"keep [theme] and [theme.*] together",
-				header+1,
-				lines[header].text,
-			)
-		}
-	}
-	endLine := len(lines) // exclusive index of the last line the span may hold
-	for _, header := range headers {
-		if header > last {
-			endLine = header
-			break
-		}
-	}
-	for endLine-1 > last {
-		trimmed := strings.TrimSpace(lines[endLine-1].text)
-		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-			break
-		}
-		endLine--
-	}
-	start, end := lines[first].start, lines[endLine-1].end
 	return original[:start] + block + original[end:], herdrSnapshot{Span: original[start:end]}, nil
+}
+
+// HerdrAppendSeparator is what goes between a Herdr config and a block
+// appended to it: nothing for an empty file, else one blank line.
+func HerdrAppendSeparator(original string) string {
+	switch {
+	case original == "":
+		return ""
+	case strings.HasSuffix(original, "\n"):
+		return "\n"
+	}
+	return "\n\n"
 }
 
 // herdrRemove takes the pfm block out and puts the original back: the replaced

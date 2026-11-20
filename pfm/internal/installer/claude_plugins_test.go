@@ -855,9 +855,9 @@ func TestClaudePluginGapsNamesEnabledRetiredPlugins(t *testing.T) {
 	}
 }
 
-// TestConfigureClaudePluginsReadsTheMachineConfig pins the three Options the
-// plugin and env steps take from the machine config: the list, whether it is the
-// default, and claude.env with callmeter's cost ledger.
+// TestConfigureClaudePluginsReadsTheMachineConfig pins the Options the plugin
+// and env steps take from the machine config: the effective list, its default
+// when unset, and claude.env with callmeter's cost ledger.
 func TestConfigureClaudePluginsReadsTheMachineConfig(t *testing.T) {
 	machine := pfmconfig.Defaults(t.TempDir(), nil)
 	machine.Claude.Plugins = []pfmconfig.ClaudePlugin{{ID: "callmeter"}}
@@ -865,8 +865,8 @@ func TestConfigureClaudePluginsReadsTheMachineConfig(t *testing.T) {
 	machine.Sources[pfmconfig.KeyClaudePlugins] = pfmconfig.SourceFile
 	options := Options{Home: "/h", Env: &paths.MapEnv{Values: map[string]string{paths.EnvCostLedgerDir: "/ledger"}}}
 	ConfigureClaudePlugins(&options, machine)
-	if !reflect.DeepEqual(options.ClaudePlugins, machine.Claude.Plugins) || options.ClaudePluginsDefault {
-		t.Fatalf("plugins = %v default=%t", options.ClaudePlugins, options.ClaudePluginsDefault)
+	if !reflect.DeepEqual(options.ClaudePlugins, machine.Claude.Plugins) {
+		t.Fatalf("plugins = %v, want %v", options.ClaudePlugins, machine.Claude.Plugins)
 	}
 	want := map[string]string{"X": "1", pfmconfig.CallmeterCostLedgerDirEnv: "/ledger"}
 	if !reflect.DeepEqual(options.ClaudeEnv, want) {
@@ -874,7 +874,11 @@ func TestConfigureClaudePluginsReadsTheMachineConfig(t *testing.T) {
 	}
 	defaults := Options{}
 	ConfigureClaudePlugins(&defaults, pfmconfig.Defaults(t.TempDir(), nil))
-	if !defaults.ClaudePluginsDefault {
-		t.Fatal("an unset claude.plugins is not reported as the default")
+	if !reflect.DeepEqual(defaults.ClaudePlugins, pfmconfig.DefaultClaudePlugins()) {
+		t.Fatalf(
+			"unset claude.plugins = %v, want the default list %v",
+			defaults.ClaudePlugins,
+			pfmconfig.DefaultClaudePlugins(),
+		)
 	}
 }

@@ -13,10 +13,13 @@ Shortest path first.
 
 - [Runtime prerequisites](#runtime-prerequisites-for-the-pfm-install-paths)
 - [Binary install](#1-binary-install--pfm-only-2-minutes)
+- [What every Claude launch carries](#what-every-claude-launch-carries)
 - [First install after using Claude](#first-install-on-a-host-that-already-used-claude)
 - [Optional: Herdr](#optional-herdr)
 - [Build from source](#2-build-from-source--pfm-only)
 - [Full Professor adoption](#3-full-professor-adoption--the-discipline-layer)
+- [Verify the install](#verify-the-install)
+- [Contributing from a clone](#contributing-from-a-clone)
 - [What gets written where](#what-gets-written-where)
 - [Updating](#updating)
 - [Uninstall](#uninstall)
@@ -42,7 +45,7 @@ When required but unavailable, the binary produces `engine-sync binary unavailab
 2. Start a new Claude session. The plugin's `SessionStart` hook runs its wrapper, which downloads the release binary for the plugin's version, checks it against the plugin's `SHA256SUMS` and links it at the stable path above. A failed download backs off for a minute and is retried by a later session start.
 3. Confirm: `test -x ~/.local/share/engine-sync/bin/engine-sync && echo ok` (use the resolved path above if you configured another engine-sync home).
 
-An executable can still be too old: installation checks engine-sync's minimum version. If it reports `older than required`, run `claude plugin update engine-sync@professor`, then start a new Claude session so the wrapper links the newer binary. If an installed plugin's stable link is missing, a new session reruns the wrapper and repairs that link; rebuilding pfm does not produce engine-sync.
+An executable can still be too old: installation checks engine-sync's minimum version. If it reports `older than required`, run `claude plugin update engine-sync@professor`, then start a new Claude session so the wrapper links the newer binary. If an installed plugin's stable link is missing, a new session reruns the wrapper and repairs that link. A plain `go build` of pfm does not produce engine-sync; on a clone with its submodules initialised, `make -C pfm host-install` ([Building and restoring the host binary](#building-and-restoring-the-host-binary)) builds it from `plugins/engine-sync` and links it at the stable path.
 
 Once the stable binary exists, `pfm install --yes` also links it onto PATH: `~/.local/bin/engine-sync` -> `~/.local/share/engine-sync/bin/engine-sync`. It writes that link only when the path is absent or already that link; any other entry there stays as it is and `pfm doctor` warns. `pfm uninstall` removes the link only when it is pfm's.
 
@@ -96,7 +99,7 @@ pfm install --yes --skip-engine codex --skip-themes
 
 Harvester installs and provisions its own binary and conversion environment through its native plugin launcher. See the [plugin guide](plugins/harvester/README.md) for the engine commands, prerequisites and offline behavior.
 
-Theme fetch failures are visible nonfatal skips, so the rest of the install can continue. A locally modified theme is preserved and reported as drift rather than overwritten. On uninstall, only theme files recorded as installer-owned in the ownership ledger are removed.
+Theme fetch failures are visible nonfatal skips, so the rest of the install can continue. A locally modified theme is preserved and reported as drift rather than overwritten. A theme file already at `~/.claude/themes/{name}.json` that pfm did not write is adopted when it is byte-identical to the install, or a stale copy of the shipped profile (every key it holds equals the profile's value; the change line says `adopted a stale copy`). Any other is your work: install prints a `skip` line, `theme {name} already exists but is not installer-owned; left in place at {path}`, renders no VS Code colour theme for it, and `pfm doctor` warns `theme {name} is not installer-owned` until you move the file aside and rerun `pfm install --yes`. On uninstall, only theme files recorded as installer-owned in the ownership ledger are removed.
 
 Add `$HOME/.local/bin` to `PATH` if it isn't already, then:
 
@@ -106,6 +109,8 @@ pfm install --yes       # apply the preview
 pfm install --vscode    # opt-in preview: the Professor VS Code extension (Extensions view + terminal `+` dropdown entry) and the PFM default terminal; press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`.
 pfm install --yes --vscode
 ```
+
+Without `--vscode`, install leaves VS Code alone and says so in a `skip` line, `vscode — pass --vscode`; `pfm doctor` warns `vscode-unlinked` while a VS Code install exists and the extension is not linked. After `pfm install --yes --vscode`, reload every open VS Code window (**Developer: Reload Window**): VS Code reads the extension and its colour themes only when a window starts, so until then the Professor themes are missing from the Color Theme picker. `pfm install --yes --vscode` ends with that reload line.
 
 `pfm install --yes` manages eight surfaces, all under `$HOME`; `--vscode` adds a ninth:
 
@@ -117,7 +122,7 @@ pfm install --yes --vscode
 6. `~/.codex/hooks.json` — migrates surviving binary paths and removes retired clear-kill and Dream/STM hooks; it installs the Codex hooks pfm owns, `resume-unkill` and the seven Herdr reporter handlers, each trusted and recorded in the ownership ledger
 7. One source line appended to `~/.zshrc` — restart your shell (or `source ~/.zshrc`) for it to take effect
 8. `~/.claude/themes/` — the profiles in `templates/themes/`, read from the source clone (a release install fetches them at its ref), plus their VS Code colour themes inside the Professor extension; a failed profile fetch or a profile that will not parse or render is reported and skipped without aborting the other surfaces
-9. **Opt-in:** VS Code — links the Professor extension (Professor's assistant in VS Code) into `extensions/professor` of every VS Code product present (`~/.vscode`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.vscode-server`, `~/.vscode-server-insiders`, a portable install) and registers it in that product's own `extensions/extensions.json` — the file modern VS Code actually scans user extensions from, so a link alone is never loaded — and in the user or remote-machine `settings.json` adds a `PFM` terminal profile (icon `mortar-board`, colour magenta) and selects it as the platform default (the extension's own `Professor` profile stays in the + dropdown — a default an extension contributes would make every window reload drop the open terminals). After a reload, the extension is visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown. Press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`. A PFM terminal opens a login zsh, then the installed shim opens the PFM picker at the shell's first prompt; each tab carries its chat's live name. PFM edits JSONC surgically, so comments and unrelated profiles survive; later installs retain ownership, and uninstall removes only the links (and the index entries they registered) still pointing at PFM's copy, restoring the prior default unless the operator changed it after installation. Reload the VS Code window once to load a newly linked extension. `pfm doctor` reports one row per product (link, index registration, version) and per owned settings file.
+9. **Opt-in:** VS Code — links the Professor extension (Professor's assistant in VS Code) into `extensions/professor` of every VS Code product present (`~/.vscode`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.vscode-server`, `~/.vscode-server-insiders`, a portable install) and registers it in that product's own `extensions/extensions.json` — the file modern VS Code actually scans user extensions from, so a link alone is never loaded — and in the user or remote-machine `settings.json` adds a `PFM` terminal profile (icon `mortar-board`, colour magenta) and selects it as the platform default (the extension's own `Professor` profile stays in the + dropdown — a default an extension contributes would make every window reload drop the open terminals). After a reload, the extension is visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown. Press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`. A PFM terminal opens a login zsh, then the installed shim opens the PFM picker at the shell's first prompt; each tab carries its chat's live name. PFM edits JSONC surgically, so comments and unrelated profiles survive; later installs retain ownership, and uninstall removes only the links (and the index entries they registered) still pointing at PFM's copy, restoring the prior default unless the operator changed it after installation. Reload every open VS Code window once to load a newly linked extension and its themes. A theme change writes `workbench.colorCustomizations` to your user settings in a local window; in a Remote-SSH window it writes the Workspace settings instead, never the client machine's own, and with a `.code-workspace` file open that file is the Workspace layer, tracked in a repository or not. `pfm doctor` reports one row per product (link, index registration, version) and per owned settings file.
 
 `pfm install` runs read-only host checks before any write. A BLOCK row refuses preview, apply and `--check` with exit 4 and prints, under each blocking row, the same fix `pfm doctor` prints for it, so the fixes reach you even after `pfm update` rolls back to a binary whose doctor has no host checks; warnings are counted and installation continues. After the checks pass, installation creates missing shared entries in `~/.claude`, creates real account directories and links every shared entry from each account. Existing store data and real account entries are preserved. A link to existing data outside the store is kept and named for a merge; a dangling link is repointed atomically, without touching its old target, and never while that account has a live chat.
 
@@ -128,6 +133,33 @@ Use `pfm`, `pfm chat open <target>` and the picker’s account selector. Reload 
 **Known gate — read before you run it.** Host checks run before dependency provisioning or installer writes. `pfm install --check` covers host checks (a BLOCK row exits 4), existence of an explicit `--config` (missing exits 1), required dependencies (failure exits 1), and both name-sync and schedule-fire jobs. A running name-sync job exits 4 at once. A running schedule fire is waited out: the check pauses for up to 90 s and prints nothing meanwhile, then exits 4 if the fire is still running. A scheduler it cannot probe prints a `skip` line and the check still passes if the other checks pass. It stops before the config seed and the installer's own plan pass, so exit 0 is no promise that `pfm install --yes` will not refuse.
 
 A mutating install refuses a running name-sync job at once with exit 97. It waits up to 90 s for a running schedule fire, then refuses with exit 97 if the fire is still running. Wait for the job to finish, or stop it before retrying: on Linux, `systemctl --user stop pfm-name-sync.service` or `systemctl --user stop pfm-schedule.service`; on macOS, `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` or `launchctl bootout gui/$(id -u)/com.professor.pfm.schedule`. Installation does not move legacy config or databases; `pfm doctor` prints those fixes.
+
+When the install finishes, [verify it](#verify-the-install).
+
+### What every Claude launch carries
+
+A chat pfm starts carries shipped launch defaults; the machine config `pfm.config.json` in the source clone overrides them (`example.pfm.config.json` beside it lists every key). Three of them change what you see:
+
+- **The fleet prompt.** `claude.systemPrompt` unset or `null` means `professor`: every launch but a one-shot query carries Professor's main-chat system layer, `pfm/harness-prompts/generated/claude.md`, which `pfm install` builds in the clone. The default needs that clone: on a host with no Professor clone recorded (the binary install), an unset `claude.systemPrompt` launches with Claude Code's own prompt and no warning, while an explicit `"professor"` warns at every launch that the file is missing. Only `"production"` opts out, to Claude Code's own prompt; `pfm doctor`'s `system-prompt` row warns when a production account leaves a built fleet prompt unused, or a professor account has none to carry.
+- **The terminal's own cursor.** `claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR` is `"1"`, so the prompt blinks the cursor your terminal draws, with the shape and blink you set there (in VS Code, `terminal.integrated.cursorStyle` and `terminal.integrated.cursorBlinking`). Themes colour the cursor; its shape and blink stay the terminal's.
+- **The fullscreen renderer.** `claude.settings.tui` is `"fullscreen"`, which removes the empty rows under the prompt; a chat carrying it also gets `CLAUDE_CODE_NO_FLICKER`.
+
+A `null` for any key in `claude.settings` removes that shipped default; `"tui": "default"` also turns fullscreen off:
+
+```json
+{
+  "claude": {
+    "settings": {
+      "tui": null,
+      "env": { "CLAUDE_CODE_NATIVE_CURSOR": null }
+    }
+  }
+}
+```
+
+`pfm config validate` checks the file. `pfm config claude` prints the value each launch knob resolves to and where it came from, then an `extra claude.settings:` section listing every other `claude.settings` key a launch carries. An edit reaches each chat started after it, chats started through the `chat-professor` MCP server included; a running chat keeps its launch until it is reloaded.
+
+`claude.plugins` unset is the default list: cache-live-control, forward-compaction, auto-effort, tool-visibility-controller, engine-sync, flights and professor, each enabled. Set the key to choose another set; a plugin you disable by hand while the list names it is enabled again at the next install. On an alpha build, every other plugin in the clone's marketplace is installed and kept disabled. The full plugin rules are in the [plugins guide](docs/guide/plugins.md#plugins).
 
 ### First install on a host that already used Claude
 
@@ -170,12 +202,28 @@ On macOS, make the same filesystem moves, then log in once on account 1 with `CL
 
 ### Optional: Herdr
 
-[Herdr](https://herdr.dev) is a terminal multiplexer for coding agents. A pfm chat pane runs `tmux attach`, so Herdr alone sees `tmux`; inside a Herdr pane pfm reports each chat's state (working, blocked, idle), session and resume command itself, for Claude, Codex and OpenCode alike. A Claude running straight in a Herdr pane is Herdr's own: Herdr reads its state from the screen, and its bundled Claude integration reports the session and restores it. There is nothing to install: `pfm install --yes` already carries the reporter, installs Herdr's Claude integration once per Claude settings store, and outside Herdr does nothing.
+[Herdr](https://herdr.dev) is a terminal multiplexer for coding agents. A pfm chat pane runs `tmux attach`, so Herdr alone sees `tmux`; inside a Herdr pane pfm reports each chat's state (working, blocked, idle), session and resume command itself, for Claude, Codex and OpenCode alike. A Claude running straight in a Herdr pane is Herdr's own: Herdr reads its state from the screen, and its bundled Claude integration reports the session and restores it.
+
+Herdr is a separate program, and pfm never installs it. Without it, `pfm doctor` prints `dep herdr path=(none) MISSING optional — the herdr theme surface and Herdr chat panes are unavailable`, and a theme change reaches three surfaces instead of four. To add it:
+
+1. Install Herdr: `curl -fsSL https://releases.herdr.dev/app/install.sh | sh` (see [herdr.dev](https://herdr.dev)).
+2. Rerun `pfm install --yes`. Install wires what needs Herdr only when it finds Herdr: Herdr's Claude integration once per Claude settings store, the shell block, the key bindings and the Herdr theme block (`# >>> pfm theme >>>`). The pane reporter pfm always carries does nothing outside Herdr. Until then `pfm doctor` warns `deps_since_install … appeared since the last install, not yet wired: herdr — fix: pfm install --yes`.
+
+What the install then sets up:
 
 - If Herdr's own bundled Codex or OpenCode integration is installed, it competes with pfm's report for the same pane. `pfm doctor` prints a FAIL row per installed one with its fix; run each line it prints, for example `herdr integration uninstall codex`. Herdr's Claude integration must stay: `pfm doctor` prints a FAIL row with the install line when a settings store lacks it, and a WARN row when one holds it twice.
 - A plain shell pane in Herdr reports a command that ran at least 10 seconds when it finishes: the pane's title shows the command, its exit status and duration until the next command. `PFM_HERDR_LONG_COMMAND_SECS` sets the threshold; `PFM_HERDR_SHELL_REPORT=0` turns it off.
 - With Herdr present, `pfm install --yes` also sets `default_shell` under `[terminal]` in Herdr's config (`HERDR_CONFIG_PATH`, else `$XDG_CONFIG_HOME/herdr/config.toml`, else `~/.config/herdr/config.toml`) to the pfm wrapper `~/.local/share/pfm/install/bin/pfm-herdr-shell`, inside a `# >>> pfm herdr shell >>>` block. A new interactive zsh pane opens the picker once at its first prompt, and quitting it leaves your shell; other shells, command panes and agent panes stay plain. The wrapper starts your captured account login shell (looked up by user ID at each install, not taken from the process `SHELL`); if the lookup fails, install prints a `warn` line and falls back to a valid `SHELL`, else `/bin/sh`. If the captured shell is missing or not executable, the wrapper prints a diagnostic and starts `/bin/sh`; check your account login shell and rerun `pfm install`. A `default_shell` you set yourself is never overwritten: install reports the skip, and `pfm doctor`'s `herdr-shell` row shows `wired`, `user-owned` or a WARN, which includes your own `default_shell` naming the pfm wrapper while it is missing or not executable (restore pfm's marker block or choose an executable shell). A symlinked config is written through to its target with its file mode kept and a backup taken. `pfm uninstall` removes only pfm's block and the wrapper.
+- `pfm install --yes` also writes pfm's Herdr key bindings into Herdr's config, inside a `# >>> pfm herdr keys >>>` block that owns the `[keys]` table: `prefix+i` and `prefix+m` switch to the previous and next workspace (pfm's spaces), and `prefix+a` opens a new tab running the pfm picker in the active workspace. A hand-written `[keys]` table that already says exactly what the block says is adopted into it; one that differs stays yours, and when it lacks a pfm mapping `pfm doctor`'s `herdr-keys` row warns, naming each one to add to that table yourself. A running Herdr applies the new keys at `herdr server reload-config` or its next start.
 - Herdr resumes a restored pane with `pfm chat open {session id}`. To opt out, set `resume_agents_on_restore = false` under `[session]` in Herdr's own config.
+- Optional, VS Code: these bindings in VS Code's `keybindings.json` (**Preferences: Open Keyboard Shortcuts (JSON)**) send Herdr's prefix, Ctrl+B (`\u0002`), then `i` or `m` into the focused terminal, so Cmd+Shift+Up and Cmd+Shift+Down walk the Herdr workspaces. They live in the client's user keybindings, so they also reach every Remote-SSH window; off macOS, choose a free key in place of `cmd`.
+
+  ```json
+  [
+    { "key": "cmd+shift+up", "command": "workbench.action.terminal.sendSequence", "args": { "text": "\u0002i" }, "when": "terminalFocus" },
+    { "key": "cmd+shift+down", "command": "workbench.action.terminal.sendSequence", "args": { "text": "\u0002m" }, "when": "terminalFocus" }
+  ]
+  ```
 
 ---
 
@@ -189,11 +237,12 @@ TAG=$(git ls-remote --tags --sort=-v:refname "https://github.com/${REPO}.git" 'v
   | grep -v '\^{}' | head -1 | sed 's#.*/##')
 git clone "https://github.com/${REPO}.git" "$SOURCE_DIR"
 git -C "$HOME/.professor" checkout "$TAG"
+git -C "$HOME/.professor" submodule update --init
 mkdir -p "$HOME/.local/bin"
 GOPROXY=https://proxy.golang.org go -C "$HOME/.professor/pfm" build -trimpath -ldflags "-X main.version=$TAG" -o "$HOME/.local/bin/pfm" ./cmd/pfm
 ```
 
-Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.27.1 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it.
+Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.27.1 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it. `git submodule update --init` checks out the plugins under `plugins/` at the commits that tag pins, after the checkout, so they match it: a plain clone leaves every plugin directory empty, `make -C pfm host-install` builds engine-sync from `plugins/engine-sync`, and an alpha build installs every plugin from its checkout there ([Contributing from a clone](#contributing-from-a-clone)). Run it again after every later checkout or `git pull` of the clone.
 
 After the source build, run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
@@ -204,7 +253,7 @@ pfm install
 pfm install --yes
 ```
 
-Same eight base surfaces, the same optional VS Code surface, and the same rc-97 gate. The clone is what makes the [engine-sync binary](#the-engine-sync-binary) a requirement: produce it before the `pfm install --yes` above.
+Same eight base surfaces, the same optional VS Code surface, and the same rc-97 gate. The clone is what makes the [engine-sync binary](#the-engine-sync-binary) a requirement: produce it before the `pfm install --yes` above. Then [verify the install](#verify-the-install).
 
 ---
 
@@ -214,7 +263,7 @@ Everything above, plus `CLAUDE.md`, per-project agents, commands, docs scaffoldi
 
 **Prerequisites:** Claude Code CLI, logged in. The [engine-sync binary](#the-engine-sync-binary), because this path runs from a clone. A git repository — if the project isn't one, Claude asks before `git init`. `jq` — required by the host installer and several hooks (`brew install jq` / `apt install jq`). `rumdl` — the markdown lint/format engine behind `/law:markdown` and the format hook; `pfm install` provisions it, and `pfm doctor` carries its row. Optional, per opt-in: `tmux` (host fleet), `gh`/`glab` (git-host skill). Ten to fifteen minutes of your attention.
 
-Initialize the target project, then follow the path printed by `pfm init`:
+Before `pfm init`, the host install must [verify](#verify-the-install) with no FAIL row. Initialize the target project, then follow the path printed by `pfm init`:
 
 ```bash
 cd /path/to/your-project
@@ -233,13 +282,72 @@ Tell Claude to read the printed `docs/SETUP.md` path and execute its **Install i
 
 **Full protocol:** [`docs/SETUP.md`](./docs/SETUP.md) — the interview questions, pre-flight checks, existing-doc re-homing rules, generation steps, and verification. [`docs/PLACEHOLDERS.md`](./docs/PLACEHOLDERS.md) is the substitution law. Read both before writing any file.
 
+## Verify the install
+
+An install line says what the install did, never the state it reached: `ok`, `skip` and the closing `summary` line can all print over a missing capability. `pfm doctor` reads the state. Run it after every install, update and fix, from the clone (or any directory when you have none), then read the exit code and the rows:
+
+```bash
+pfm doctor; echo "doctor exit=$?"
+```
+
+| Exit | Last line | Means | Next |
+| --- | --- | --- | --- |
+| 0 | `doctor: clean` | Every check passed | Done. Inside an adopted project the last line may read `machine checks clean; project_updates warnings=N`: see [Updating](#updating). |
+| 1 | `doctor: warnings=N` | Warnings only: the host works, something on it is degraded or unchecked | Read every `WARN`, `UNVERIFIED` and `UNSTAMPED` row; each names its fix. Fix what you use, then run `pfm doctor` again. |
+| 2 | (usage text) | A flag pfm does not know | Rerun as `pfm doctor`. |
+| 3 | `doctor: failures=N` | At least one `FAIL` row: required state the install did not reach, or a required dependency unavailable | Fix every `FAIL` row before using pfm (`pfm update` rolls back on one), then run `pfm doctor` again. |
+
+The rows a fresh host most often shows, and what to do about each:
+
+- **`dep {name} path=(none) MISSING optional — install: {hint}`**: an optional tool is absent. That is neither success nor failure, and it is not counted: the host runs without what the tool unlocks, and the row's hint is how to get it. `herdr` unlocks Herdr panes and the Herdr theme surface ([Optional: Herdr](#optional-herdr)); `uv` lets `pfm install` provision `rumdl`; `rumdl` is the markdown lint and format engine behind `/law:markdown` and the format hook; `go` builds `pfm update`'s new binary; on Linux `systemctl` and `systemd-run` run the scheduler units and give chats the MCP service spawns their own scopes; `script` runs terminal-backed commands; `sudo` lets install write and clean root-owned managed files; `getent` (Linux) or `dscl` (macOS) finds your login shell for Herdr; the Claude Code, Codex and OpenCode CLIs are the engines you chat with. Install a tool only when you want what it unlocks, then rerun `pfm install --yes`.
+- **`deps_since_install WARN appeared since the last install, not yet wired: {names}`**: an optional tool arrived after the last install, which wires a tool only when it finds it. Run `pfm install --yes`.
+- **`pfm_build`**: the running pfm against the clone's `VERSION` and `HEAD`. `ok` is current, a release binary at its release `VERSION` included; `BEHIND` (the pfm you run is older than the clone, so code the clone carries is absent), `AHEAD` (the clone is older), `DIVERGED`, `UNSTAMPED` (a build with no version stamp) and `UNVERIFIED` (the comparison could not run) are warnings, never read as current: a failure here would roll back a `pfm update` that left the binary behind a clone already past its target. The row prints its fix, `make -C {clone}/pfm host-install` ([Building and restoring the host binary](#building-and-restoring-the-host-binary)); for `AHEAD`, update the clone first.
+- **`system-prompt claude[N]`**: the fleet prompt mode per account. `mode=professor ok` carries it; `mode=production ok (default professor needs a Professor clone; …)` is a host with no clone, where the default carries nothing; `WARN mode=professor` means the prompt is not there to carry: run `pfm install --yes` from the clone; `WARN mode=production: fleet prompt built but not injected` means `claude.systemPrompt` is `"production"`: set it to `"professor"` or remove it ([What every Claude launch carries](#what-every-claude-launch-carries)), then reload each running chat.
+- **`theme {name} is not installer-owned`** (`theme-unowned`): a theme file pfm did not write blocks that theme's VS Code colour theme. Move the file aside, then run `pfm install --yes`.
+- **`vscode installed at {roots} but the professor extension is not linked`** (`vscode-unlinked`): run `pfm install --yes --vscode` if you want the extension, then reload every VS Code window.
+- **`herdr-keys: WARN`**: Herdr's config lacks pfm's key bindings ([Optional: Herdr](#optional-herdr)); the row says whether `pfm install --yes` fixes it or the hand-written `[keys]` table needs the named mappings.
+- **`git_push`** (`git-push`) **and `leak_terms`** (`leak-terms`): whether this host can push to the clone's GitHub origin, and whether the pre-push leak gate has its denylist. A contributor follows [Contributing from a clone](#contributing-from-a-clone); a host that never pushes silences both by their IDs.
+
+A warning that carries an ID in parentheses above prints `don't want this? add "{id}" to doctor.ignoreWarnings in {config}`; that key silences it and the row then reads `IGNORED`.
+
+## Contributing from a clone
+
+Only a host that builds `develop` or pushes to this repository needs this section; [CONTRIBUTING.md](CONTRIBUTING.md) holds the branch, build and test rules.
+
+### Build `develop` (an alpha)
+
+`develop`'s `VERSION` ends `-alpha`, and an alpha build installs every plugin from its checkout under `plugins/` instead of from GitHub, so the submodules must be initialised. An uninitialised one is a `pfm doctor` FAIL: `submodule plugins/{p} is not initialised in {clone}: run git submodule update --init plugins/{p} there`. Path 2's clone, then:
+
+```bash
+git -C "$HOME/.professor" switch develop
+git -C "$HOME/.professor" submodule update --init
+make -C "$HOME/.professor/pfm" host-install
+cd "$HOME/.professor"
+pfm install --yes
+```
+
+`make -C pfm host-install` needs Go; it builds and links engine-sync from `plugins/engine-sync`, then builds, checks and swaps in pfm. After every `git pull` on `develop`, run the last four lines again, then [verify](#verify-the-install).
+
+### Push
+
+1. Arm the pre-push leak gate as [CONTRIBUTING.md](CONTRIBUTING.md#build-and-test) says.
+2. Let git push with `gh`'s login: `gh auth setup-git --hostname github.com`. Without a credential helper for github.com, git falls back to `GIT_ASKPASS`, which an editor may answer with another GitHub account. `pfm doctor`'s `git_push` row then reads `ok {owner}/{repo} user={login} push=true`; a `WARN` names the account git would push as and the fix.
+3. Write the leak gate's private denylist, `scripts/leak-terms.txt` in the clone. It is gitignored on purpose: a tracked file would publish the names it hunts. One lowercase regular expression per line, matched case-insensitively; `#` starts a comment. The terms are the names that must never ship from this host: ask the user for them (their username, host names, employer and client names). Arm a term only once `git -C "$HOME/.professor" grep -iE '{term}'` finds nothing, or every push is refused. `pfm doctor`'s `leak_terms` row reads `ok {path} terms=N` once it is usable; `ABSENT`, `EMPTY` (no usable term), `BROKEN` (an unknown `!` directive) and `UNREADABLE` each mean the pre-push gate refuses every push.
+
+### The fence
+
+`.claude/scripts/dev.sh iso …` and `.claude/scripts/test.sh` run builds and tests in a Docker container; [`docs/dev/isolated-dev-foundation.md`](docs/dev/isolated-dev-foundation.md) is the deep doc.
+
+- Any Linux Docker daemon works, whatever distribution it names itself: Docker Desktop gets the `desktop` profile, any other Linux daemon `native`. A daemon that is not Linux is refused.
+- On a network that blocks the upstream module proxy, npm registry or Ubuntu apt mirror, name a reachable one in `infra/fence/.env` in the main checkout (gitignored), one `KEY=value` per line, `#` comments allowed. It accepts exactly `PFM_GOPROXY`, `PFM_NPM_REGISTRY` and `PFM_APT_MIRROR`, for example `PFM_APT_MIRROR=https://mirror.example/ubuntu`; any other key stops the run with the line named. A variable already set in the environment wins over the file, and changing a value rebuilds the image. See [Mechanics](docs/dev/isolated-dev-foundation.md#mechanics).
+
 ## What gets written where
 
 One writer per surface — the law that keeps the two installers from fighting over the same file.
 
 | Surface | Written by | Paths |
 | --------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Host fleet wiring | `pfm install` — the only writer | `{clone}/pfm.config.json`, `~/.local/share/pfm/install/`, `~/.claude/commands/`, `~/.claude/skills/`, `~/.agents/skills/`, the systemd/launchd scheduler units, `~/.codex/{prompts,skills,agents,hooks.json}`, one `~/.zshrc` line, and the opt-in VS Code user/remote `settings.json`; Claude hooks, status line and MCP ride managed non-query launches; query launches omit them |
+| Host fleet wiring | `pfm install` — the only writer | `{clone}/pfm.config.json`, `~/.local/share/pfm/install/`, `~/.claude/commands/`, `~/.claude/skills/`, `~/.agents/skills/`, the systemd/launchd scheduler units, `~/.codex/{prompts,skills,agents,hooks.json}`, one `~/.zshrc` line, pfm's marked blocks in Herdr's `config.toml` when Herdr is present, and the opt-in VS Code user/remote `settings.json`; Claude hooks, status line and MCP ride managed non-query launches; query launches omit them |
 | Claude managed cleanup | `pfm install` | `/etc/claude-code/managed-settings.d/pfm.json` on Linux, `/Library/Application Support/ClaudeCode/managed-settings.d/pfm.json` on macOS; uses `sudo -n` when direct write is unavailable. Without cached credentials, install warns and prints the command to run. The drop-in holds `cleanupPeriodDays` and `"prependPlugins": []`; an existing `prependPlugins`, here or in another managed source, is left alone. |
 | State and cache databases | The operator, using `pfm doctor` fixes | `~/.local/state/pfm/pfm.db` and `pfm-cache.db` beside it; close chats and stop services before moving an old database and its WAL/SHM siblings. |
 | Claude shared store and account links | `pfm install` | Missing store entries are created in `~/.claude`; each account links every shared entry there. Existing contents are kept. |
@@ -286,7 +394,7 @@ A fresh clone of the blueprint itself carries none of these outputs — `AGENTS.
 
 ### Building and restoring the host binary
 
-`make -C pfm host-install` builds and smoke-tests the new binary, then runs its `pfm install --check` before the atomic swap. That check covers host checks, existence of an explicit `--config`, required dependencies, and the scheduler, then stops before the config seed and the installer's own plan pass; exit 0 does not promise that `pfm install --yes` will not refuse. Any refusing check keeps the installed binary untouched. A host-check refusal prints each blocking row's fix; for any other refusal, build with `make -C pfm build` and run the built binary's doctor for the fixes. Then retry. `SKIP_INSTALL_CHECK=1` explicitly skips this check; `FORCE=1` controls only the downgrade guard.
+`make -C pfm host-install`, run in the clone, first builds engine-sync from `plugins/engine-sync` and links it at its stable path, so the clone needs that submodule (`git submodule update --init`; without it the target stops with that line). It then builds and smoke-tests the new pfm binary, stamped with the clone's `VERSION`, and runs its `pfm install --check` before the atomic swap. That check covers host checks, existence of an explicit `--config`, required dependencies, and the scheduler, then stops before the config seed and the installer's own plan pass; exit 0 does not promise that `pfm install --yes` will not refuse. Any refusing check keeps the installed binary untouched. A host-check refusal prints each blocking row's fix; for any other refusal, build with `make -C pfm build` and run the built binary's doctor for the fixes. Then retry. `SKIP_INSTALL_CHECK=1` explicitly skips this check; `FORCE=1` controls only the downgrade guard.
 
 The swap keeps the previous binary as `pfm.prev`. `make -C pfm rollback` restores it atomically, reruns that restored binary's `install --yes`, then restarts the MCP daemon. It reports a failed install or restart with the next command to inspect. `make install` restarts the daemon and sweeps stale processes after the swap; a failed restart restores the previous binary before the sweep.
 

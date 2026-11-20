@@ -48,6 +48,7 @@ func PrintConfig(stdout io.Writer, runtime config.Runtime) (int, int) {
 		runtime.Config.Claude.Binary,
 		runtime.Config.Source("claude.binary"),
 	)
+	warnings += printSystemPromptDoctor(stdout, runtime.Paths.Home, runtime.Config)
 	fmt.Fprintf(
 		stdout,
 		"doctor: config codex.yolo=%t (%s)\n",

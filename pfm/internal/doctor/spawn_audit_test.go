@@ -244,10 +244,11 @@ func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
 }
 
 func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
-	home := t.TempDir()
 	for _, test := range []struct {
 		name      string
 		prefs     config.ClaudePrefs
+		loaded    string // a machine file whose effective prefs replace prefs
+		clone     bool   // a Professor clone is recorded in home
 		started   int64
 		promptErr error
 		verdict   spawnVerdict
@@ -262,6 +263,21 @@ func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
 			reason:    "no --system-prompt-file prompt material — composed prompt unavailable (resolve composed harness prompt: no source repository recorded); every door omits the flag until it exists: update or restore the clone, then reload",
 		},
 		{
+			name:    "mode unset in the machine file",
+			loaded:  `{"version":2,"claude":{"systemPrompt":null}}`,
+			clone:   true,
+			started: 200,
+			verdict: spawnViolation,
+			reason:  "no --system-prompt-file prompt material — some spawn site bypassed the door",
+		},
+		{
+			name:    "mode unset with no clone recorded is production",
+			loaded:  `{"version":2,"claude":{"systemPrompt":null}}`,
+			started: 200,
+			verdict: spawnViolation,
+			reason:  "missing --settings cleanupPeriodDays from the launch defaults — some spawn site bypassed the door",
+		},
+		{
 			name:    "age carried",
 			prefs:   config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction},
 			started: 50,
@@ -270,11 +286,27 @@ func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			if test.clone {
+				if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prefs := test.prefs
+			if test.loaded != "" {
+				path := filepath.Join(t.TempDir(), config.FileName)
+				writeDoctorBenchFile(t, path, test.loaded)
+				machine, err := config.Load(path, t.TempDir(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prefs = machine.EffectiveClaude(1)
+			}
 			observation := spawnObservation{Argv: []string{"claude"}, StartedUnix: test.started}
 			verdict, reason := classifySpawn(
 				mustParseSpawn(t, observation.Argv),
 				observation,
-				test.prefs,
+				prefs,
 				home,
 				100,
 				test.promptErr,

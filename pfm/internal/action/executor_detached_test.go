@@ -211,6 +211,7 @@ func TestOpenWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 				}
 				machine := testMachineConfig(home)
 				machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
+				machine.Claude.SystemPromptDefault = false // an explicit professor
 				request := Request{
 					Row: compose.Row{
 						Kind: compose.ResumeClaude, ID: "66666666-6666-4666-8666-666666666666",
@@ -302,6 +303,7 @@ func TestOpenHoldsForEnterOnlyWhenAWarningIsAboutToBeCovered(t *testing.T) {
 			}
 			machine := testMachineConfig(home)
 			machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
+			machine.Claude.SystemPromptDefault = false // an explicit professor
 			request := Request{
 				Row: compose.Row{
 					Kind: compose.ResumeClaude, ID: "77777777-7777-4777-8777-777777777777",
@@ -485,6 +487,7 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 				}
 				machine := testMachineConfig(home)
 				machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
+				machine.Claude.SystemPromptDefault = false // an explicit professor
 				request := Request{
 					Row: compose.Row{
 						Kind: compose.ResumeClaude, ID: "66666666-6666-4666-8666-666666666666",

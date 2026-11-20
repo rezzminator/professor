@@ -14,10 +14,12 @@ services:
       # an ordinary builder leaves an unkeyed image for the next fence start.
       labels:
         pfm.fence.inputs: ${PFM_DEV_INPUTS_KEY:-unkeyed}
-      # Empty by default: the npm mirror for a network that blocks registry.npmjs.org
-      # (infra/fence/local-env.sh loads it from the gitignored infra/fence/.env).
+      # Empty by default: the npm and apt mirrors for a network that blocks
+      # registry.npmjs.org or archive.ubuntu.com
+      # (infra/fence/local-env.sh loads them from the gitignored infra/fence/.env).
       args:
         PFM_NPM_REGISTRY: ${PFM_NPM_REGISTRY:-}
+        PFM_APT_MIRROR: ${PFM_APT_MIRROR:-}
     image: professor-pfm-dev
     # A real machine has an init that reaps orphans; a bare container does
     # not, so a double-forked descendant lingers as a zombie and the

@@ -227,6 +227,8 @@ describe('one row', () => {
     ['a window half full a warning', { ...unread, tokenCount: 50 }, {}, 0, gauge(WARN, 4, '50%', '    50')],
     ['a window under four fifths full a warning', { ...unread, tokenCount: 79 }, {}, 0, gauge(WARN, 6, '79%', '    79')],
     ['a window four fifths full bad', { ...unread, tokenCount: 80 }, {}, 0, gauge(BAD, 6, '80%', '    80')],
+    ['a stated count over the transcript\'s', { ...unread, tokenCount: 49 }, { context: 60 }, 0, gauge(GOOD, 4, '49%', '    49')],
+    ['the transcript\'s count where Claude Code states zero', { ...unread, tokenCount: 0 }, { context: 60 }, 0, gauge(WARN, 5, '60%', '    60')],
     ['a growing step and a drop in the growth figure\'s colour, a quiet or unborn step muted', { tokenSamples: [100, 100, 6_100, 5_000], tokenCount: 5_000, contextWindowSize: 100_000 }, {}, 0,
       `${COUNT} ${GOOD}▰${R}${DIM}▱▱▱▱▱▱▱${R} ${MUTED}····${R}${WINDOW}●↓${R} ${WINDOW}  −1.1K${R} ${GOOD}  5%${R} ${TOKENS}  5.0K${R}${MUTED}/${R}${WINDOW}100.0K${R}`],
     ['a count of the agents below with none working muted, one it could not read a warning', {}, { nested: { total: 3, working: 0, unknown: 2 } }, 0,

@@ -22,7 +22,7 @@ import (
 const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
 
 // ConfigureClaudePlugins hands the plugin and env steps the machine config's
-// claude.plugins, whether it is the default list, and claude.env as pfm writes it.
+// effective claude.plugins (its default list when unset) and claude.env as pfm writes it.
 func ConfigureClaudePlugins(options *Options, machine pfmconfig.Config) {
 	options.ClaudePlugins = machine.Claude.Plugins
 	env := options.Env
@@ -30,7 +30,6 @@ func ConfigureClaudePlugins(options *Options, machine pfmconfig.Config) {
 		env = paths.OSEnv{}
 	}
 	options.ClaudeEnv = machine.EffectiveClaudeEnv(env, options.Home)
-	options.ClaudePluginsDefault = machine.Source(pfmconfig.KeyClaudePlugins) == pfmconfig.SourceDefault
 }
 
 // claudePluginCommand is the claude subcommand every plugin command runs under.
@@ -68,10 +67,9 @@ type ClaudePluginBuild struct {
 	CheckoutRoot  string
 	SourceRepo    string
 	SourceRepoErr error
-	Plugins       []pfmconfig.ClaudePlugin
-	// PluginsDefault says claude.plugins is unset: an -alpha build then plans
-	// every plugin the source clone's marketplace lists (WithMarketplacePlugins).
-	PluginsDefault bool
+	// Plugins is the effective claude.plugins: the config's default list when
+	// the key is unset, planned exactly like the key set to it.
+	Plugins []pfmconfig.ClaudePlugin
 	// Unlisted is every plugin the source clone's marketplace lists that
 	// claude.plugins names in no form: an -alpha build installs each from its
 	// checkout and keeps every copy disabled (WithMarketplacePlugins).
@@ -216,13 +214,12 @@ func (installer *engine) claudePluginBuild() (ClaudePluginBuild, error) {
 	// -alpha build copies from when claude.pluginCheckoutRoot is unset.
 	sourceRepo, sourceRepoErr := installer.globalSourceRepoRoot()
 	return ClaudePluginBuild{
-		Version:        installer.options.Version,
-		Home:           installer.options.Home,
-		CheckoutRoot:   installer.options.ClaudePluginCheckoutRoot,
-		SourceRepo:     sourceRepo,
-		SourceRepoErr:  sourceRepoErr,
-		Plugins:        installer.options.ClaudePlugins,
-		PluginsDefault: installer.options.ClaudePluginsDefault,
+		Version:       installer.options.Version,
+		Home:          installer.options.Home,
+		CheckoutRoot:  installer.options.ClaudePluginCheckoutRoot,
+		SourceRepo:    sourceRepo,
+		SourceRepoErr: sourceRepoErr,
+		Plugins:       installer.options.ClaudePlugins,
 	}.WithMarketplacePlugins()
 }
 

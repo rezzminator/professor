@@ -90,9 +90,13 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 		{Name: "ps", Required: true, Platforms: []string{"darwin"}},
 		{Name: "codex", Required: true, InstallHint: "install configured Codex"},
 		{Name: "claude", Required: true},
+		{Name: "herdr", InstallHint: "install Herdr", MissingCost: "Herdr panes are unavailable"},
+		{Name: "uv", InstallHint: "install uv"},
 	}
 	DependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
 		return []deps.Result{
+			{Entry: entries[4], State: deps.StateMissing},
+			{Entry: entries[5], State: deps.StateMissing},
 			{Entry: entries[0], State: deps.StateOK, Path: "/fixture/tmux", Version: "3.4"},
 			{Entry: entries[1], State: deps.StateSkipped, Error: "not this platform"},
 			{Entry: entries[2], State: deps.StateMissing},
@@ -116,6 +120,8 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 		t.Fatalf("failures=%d, want 2\n%s", failures, output.String())
 	}
 	want := strings.Join([]string{
+		"doctor: dep herdr path=(none) MISSING optional — Herdr panes are unavailable — install: install Herdr",
+		"doctor: dep uv path=(none) MISSING optional — install: install uv",
 		"doctor: dep tmux path=/fixture/tmux version=3.4 min=1.8 ok",
 		"doctor: dep ps platform=darwin skipped (not this platform)",
 		"doctor: dep codex path=(none) MISSING required — install: install configured Codex",

@@ -81,6 +81,14 @@ func TestChatNewAgentRoleRefusalsHappenBeforeResolutionOrSpawn(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// claude.systemPrompt unset is professor; production is the opt-out a role refuses.
+	if err := os.WriteFile(
+		filepath.Join(root, "home", pfmconfig.FileName),
+		[]byte(`{"version":2,"claude":{"systemPrompt":"production"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	for _, testCase := range []struct {
 		name   string
 		engine string

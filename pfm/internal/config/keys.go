@@ -58,7 +58,7 @@ func Keys() []KeyDefault {
 		{"claude.theme", nil},
 		{"claude.cache1h", true},
 		{"claude.remoteControl", true},
-		{"claude.systemPrompt", nil},
+		{"claude.systemPrompt", SystemPromptProfessor},
 		{"claude.requireManagedCleanup", true},
 		{KeyClaudePluginCheckoutRoot, nil},
 		{KeyClaudePlugins, defaultClaudePluginIDs()},

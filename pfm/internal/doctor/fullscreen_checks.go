@@ -33,7 +33,7 @@ func printFullscreenDoctor(stdout io.Writer, home string, machine config.Config,
 			)
 			continue
 		}
-		wants, err := claudelaunch.WantsFullscreen(account.ConfigDir)
+		wants, err := claudelaunch.WantsFullscreen(account.ConfigDir, machine.EffectiveClaude(account.ID).Settings)
 		if err != nil {
 			tally.failures++
 			fmt.Fprintf(stdout, "doctor: fullscreen claude[%d] could not read %s: %v\n", account.ID, settings, err)

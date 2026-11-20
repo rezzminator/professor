@@ -11,6 +11,7 @@
 // unitnet.go: the unit net an armed unit binary runs inside, and its one switch.
 // source_repo.go: the run's empty source repository and StageSourceRepoMarker, the installed clone.
 // jail_dir.go: RunInJail, Run starting a package's tests in the jail directory.
+// seed_config.go: seedConfig, every jail home's pfm.config.json, and its variants.
 // place.go: Place, an invented fixture path's root in the jail directory; TempPath, a path under Run's temp root.
 // profile.go: the step profiler of every package process; profile_place.go names the process and holds
 // ModuleRoot; profile_run.go, profile_run_summary.go: the run directory a plain go test records into.
@@ -260,7 +261,7 @@ func jailHome(base string) (func(), error) {
 		return cleanup, fmt.Errorf("set %s to %s: %w", paths.EnvHome, home, err)
 	}
 	configPath := filepath.Join(home, "pfm.config.json")
-	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(seedConfig), 0o600); err != nil {
 		warnSetup("seed config %s: %v", configPath, err)
 	}
 	if err := os.Setenv(paths.EnvConfig, configPath); err != nil {
@@ -379,7 +380,7 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	// pfm run from that home marks its children: never the operator's.
 	setenv(paths.EnvInstallMark, paths.InstallMark(filepath.Join(root, "home")))
 	configPath := filepath.Join(root, "home", "pfm.config.json")
-	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(seedConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	setenv(paths.EnvConfig, configPath)
@@ -456,9 +457,7 @@ func InstalledHome(t *testing.T) string {
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	content, err := json.Marshal(
-		map[string]any{"version": 2, "accounts": []map[string]any{{"id": 1, "configDir": account}}},
-	)
+	content, err := seedConfigWith(map[string]any{"accounts": []map[string]any{{"id": 1, "configDir": account}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -631,7 +630,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	t.Setenv(paths.EnvHome, home)
 	t.Setenv(paths.EnvInstallMark, paths.InstallMark(home)) // as fleetSetenv: the jail home's mark
 	configPath := filepath.Join(home, "pfm.config.json")
-	if err := os.WriteFile(configPath, []byte("{\"version\":2,\"ask\":{\"engine\":\"claude\"}}\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(cleanHomeConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(paths.EnvConfig, configPath)

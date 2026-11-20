@@ -29,11 +29,26 @@ const (
 	// warnVSCodeSettings: an owned settings file lost its PFM profile or
 	// carries the wrong CLAUDE_CONFIG_DIR.
 	warnVSCodeSettings warningID = "vscode-settings"
+	// warnVSCodeUnlinked: VS Code is installed on the host but pfm install
+	// --vscode never linked the professor extension.
+	warnVSCodeUnlinked warningID = "vscode-unlinked"
+	// warnThemeUnowned: a shipped theme's file is not installer-owned, so no
+	// VS Code colour theme is rendered for it.
+	warnThemeUnowned warningID = "theme-unowned"
+	// warnGitPush: git cannot be shown to push the Professor clone's
+	// github.com origin as an account with push permission.
+	warnGitPush warningID = "git-push"
+	// warnLeakTerms: the clone's private leak denylist is absent, empty,
+	// broken or unreadable, so its pre-push leak gate refuses every push.
+	warnLeakTerms warningID = "leak-terms"
 )
 
 // warningIDs is every ID a doctor warning carries. A doctor.ignoreWarnings
 // entry outside it is itself a warning, so a typo silences nothing.
-var warningIDs = []warningID{warnVSCodeInspect, warnVSCodeLink, warnVSCodeIndex, warnVSCodeSettings}
+var warningIDs = []warningID{
+	warnVSCodeInspect, warnVSCodeLink, warnVSCodeIndex, warnVSCodeSettings, warnVSCodeUnlinked, warnThemeUnowned,
+	warnGitPush, warnLeakTerms,
+}
 
 // ignoreWarningsKey is the config key every hint and IGNORED row names.
 const ignoreWarningsKey = "doctor.ignoreWarnings"
@@ -44,12 +59,12 @@ type warningFilter struct {
 	configPath string
 }
 
-// printIgnorableDoctor runs the checks whose warnings carry an ID through one
-// doctor.ignoreWarnings filter, after the filter's own unknown-ID rows, and
-// returns the warnings they count. A check that adopts IDs is called here.
-func printIgnorableDoctor(stdout io.Writer, machine config.Config, home, primaryDir string) int {
-	filter, warnings := newWarningFilter(stdout, machine)
-	return warnings + printVSCodeDoctor(stdout, home, primaryDir, filter)
+// printIgnorableDoctor runs the VS Code and theme checks through the one
+// doctor.ignoreWarnings filter of the run, and returns the warnings they
+// count. A check that adopts IDs takes the run's filter: here, or
+// printProfessorCloneDoctor.
+func printIgnorableDoctor(stdout io.Writer, filter warningFilter, home, primaryDir string, env paths.Env) int {
+	return printVSCodeDoctor(stdout, home, primaryDir, env, filter) + printThemeOwnershipDoctor(stdout, home, filter)
 }
 
 // newWarningFilter reads doctor.ignoreWarnings from the loaded machine config

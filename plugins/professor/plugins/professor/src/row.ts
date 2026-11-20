@@ -176,13 +176,24 @@ function contextForm(scene: Scene, look: DoorLook): DoorContextForm {
 }
 
 /**
+ * The tokens the gauge counts: Claude Code's tokenCount when it is above zero and registers against the window (without a
+ * window any count above zero stands), since a missing, zero or too-small count often trails the agent's real context;
+ * else pfm's prompt size of the agent's newest completed call, read from its transcript; else the count as stated.
+ */
+function contextUsed(agent: RowAgent, facts: DoorFacts | undefined, window: number | undefined): number {
+  const stated = agent.tokenCount;
+  if (stated > 0 && (share(stated, window) ?? 1) > 0) return stated;
+  return facts && facts.context > 0 ? facts.context : stated;
+}
+
+/**
  * `lead`: the cells after the strip that put a row less nested than the list's deepest back on the same cells. Without
  * a growth figure the strip widens over the figure's blank cells, the lead and the share's pad, to one blank before the
  * share, so the share stays on its cells and no run of blanks sits between them; a figure drawn takes its cells back.
  */
 function pulseColumn(agent: RowAgent, facts: DoorFacts | undefined, form: DoorContextForm, lead: number, paint: Brush): string {
   const window = facts && facts.contextWindow > 0 ? facts.contextWindow : agent.contextWindowSize;
-  const used = agent.tokenCount;
+  const used = contextUsed(agent, facts, window);
   const full = share(used, window);
   const tone = full === undefined ? 'muted' : paint.shareTone(full);
   const samples = agent.tokenSamples;

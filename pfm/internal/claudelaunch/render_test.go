@@ -782,6 +782,9 @@ func TestPromptWarning(t *testing.T) {
 		carries bool   // Render adds --system-prompt-file itself
 	}{
 		{"professor, no clone recorded", "professor", "", Request{}, "no source repository recorded", false},
+		{"default professor, no clone recorded", "default", "", Request{}, "", false},
+		{"default professor, composed file missing", "default", "marker", Request{}, "claude.md", false},
+		{"default professor, composed file present", "default", "file", Request{}, "", true},
 		{"professor, composed file missing", "professor", "marker", Request{}, "claude.md", false},
 		{"professor, composed file present", "professor", "file", Request{}, "", true},
 		{"production wants no fleet prompt", "production", "", Request{}, "", false},
@@ -823,6 +826,11 @@ func TestPromptWarning(t *testing.T) {
 		t.Run(entry.name, func(t *testing.T) {
 			home, machine := renderMachine(t)
 			machine.Claude.SystemPrompt = entry.mode
+			// "default" is professor as the shipped default, no file setting it.
+			machine.Claude.SystemPromptDefault = entry.mode == "default"
+			if machine.Claude.SystemPromptDefault {
+				machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
+			}
 			switch entry.stage {
 			case "marker":
 				stageComposedPrompt(t, home, false)

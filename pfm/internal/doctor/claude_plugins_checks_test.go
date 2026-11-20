@@ -513,7 +513,8 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 	for _, state := range []string{
 		"alpha clean", "alpha retired copy enabled", "alpha copy symlinked", "alpha copy missing", "alpha fallback",
 		"alpha from the default source clone", "alpha source clone moved away", "alpha copy differs",
-		"alpha unlisted plugin disabled", "alpha unlisted plugin enabled", "alpha cache behind", "alpha cache differs",
+		"alpha unlisted plugin disabled", "alpha unlisted plugin enabled", "alpha unlisted plugin disabled, list unset",
+		"alpha cache behind", "alpha cache differs",
 		"alpha cache unreadable", "alpha cache unversioned", "alpha cache behind with its snapshot gone",
 		"alpha marketplace empty",
 	} {
@@ -528,13 +529,13 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				// No marker and no key: the clone at the default path holds the checkouts.
 				root = filepath.Join(home, ".professor", "plugins")
 				build = doctorClaudePluginBuild(
-					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()}, false,
+					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
 				)
 			}
 			if state == "alpha fallback" {
 				// No marker, no key and no clone at the default path: the checkouts under src/ are not looked at.
 				build = doctorClaudePluginBuild(
-					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()}, false,
+					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
 				)
 			}
 			if state == "alpha source clone moved away" {
@@ -550,11 +551,18 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					t.Fatal(err)
 				}
 				build = doctorClaudePluginBuild(
-					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()}, false,
+					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
 				)
 				if build.SourceRepoErr == nil {
 					t.Fatalf("build = %+v, want the moved clone's resolve error", build)
 				}
+			}
+			if state == "alpha unlisted plugin disabled, list unset" {
+				// claude.plugins unset: the config's default list, planned like the key set to it.
+				build = doctorClaudePluginBuild(
+					"0.80.0-alpha", home,
+					pfmconfig.Claude{PluginCheckoutRoot: root, Plugins: pfmconfig.DefaultClaudePlugins()},
+				)
 			}
 			unlisted := strings.HasPrefix(state, "alpha unlisted")
 			if unlisted {
@@ -803,10 +811,9 @@ func TestDoctorClaudePluginBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	build := doctorClaudePluginBuild(
-		"0.80.0-alpha", home, pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins}, true,
+		"0.80.0-alpha", home, pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins},
 	)
 	if build.Version != "0.80.0-alpha" || build.Home != home || build.CheckoutRoot != "/opt/plugins" ||
-		!build.PluginsDefault ||
 		!reflect.DeepEqual(build.Plugins, plugins) ||
 		build.SourceRepo != clone ||
 		build.SourceRepoErr != nil {
@@ -896,25 +903,24 @@ func TestEngineSyncHookDoctor(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		plugins  []pfmconfig.ClaudePlugin
-		def      bool
 		want     string
 		warnings int
 	}{
-		{"unset list is the default and silent", pfmconfig.DefaultClaudePlugins(), true, "", 0},
-		{"set list without engine-sync warns", []pfmconfig.ClaudePlugin{{ID: "forward-compaction"}}, false, omitted, 1},
-		{"set empty list warns", nil, false, omitted, 1},
-		{"set list with a lookalike name warns", []pfmconfig.ClaudePlugin{{ID: "engine-sync-extra"}}, false, omitted, 1},
-		{"set list with bare engine-sync is silent", []pfmconfig.ClaudePlugin{{ID: "engine-sync"}}, false, "", 0},
+		{"the default list is silent", pfmconfig.DefaultClaudePlugins(), "", 0},
+		{"set list without engine-sync warns", []pfmconfig.ClaudePlugin{{ID: "forward-compaction"}}, omitted, 1},
+		{"set empty list warns", nil, omitted, 1},
+		{"set list with a lookalike name warns", []pfmconfig.ClaudePlugin{{ID: "engine-sync-extra"}}, omitted, 1},
+		{"set list with bare engine-sync is silent", []pfmconfig.ClaudePlugin{{ID: "engine-sync"}}, "", 0},
 		{
 			"set list with engine-sync@market is silent",
 			[]pfmconfig.ClaudePlugin{{ID: "cache-live-control"}, {ID: "engine-sync@market"}},
-			false, "", 0,
+			"", 0,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var out bytes.Buffer
 			tally := &doctorTally{}
-			printEngineSyncHookDoctor(&out, test.plugins, test.def, tally)
+			printEngineSyncHookDoctor(&out, test.plugins, tally)
 			if out.String() != test.want || tally.warnings != test.warnings || tally.failures != 0 {
 				t.Fatalf(
 					"got %q tally=%+v\nwant %q warnings=%d failures=0",

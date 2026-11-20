@@ -60,6 +60,15 @@ function chromeTarget() {
   return vscode.workspace.workspaceFolders?.[0]?.uri.toString() || null;
 }
 
+// settingsTarget is the settings layer a write from this window must use: Global is the client's
+// user settings, so a window whose extension host is a remote machine (Remote-SSH) writes
+// Workspace, never the local machine's. Known side effect: with an open .code-workspace file the
+// Workspace layer is that file, tracked in a repository or not.
+function settingsTarget() {
+  return vscode.env.remoteName === undefined
+    ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace;
+}
+
 // peacockUnlisted names the wanted chrome keys Peacock would overwrite or delete at the next window
 // start: with Peacock installed, every key outside the merged peacock.excludedSettings.
 function peacockUnlisted(wantChrome) {
@@ -412,4 +421,4 @@ function startThemeSync(dir = stateDir(), onApplied = () => {}, refusal = '') {
   };
 }
 
-module.exports = { startThemeSync, stateDir, planColors, chromeTarget, withLock };
+module.exports = { startThemeSync, stateDir, planColors, chromeTarget, settingsTarget, withLock };

@@ -132,7 +132,7 @@ func TestWebSearchBudgetRequiresPassedSettings(t *testing.T) {
 	if got, want := strings.Join(
 		args,
 		" ",
-	), "-p --output-format json --settings {\"cleanupPeriodDays\":36500,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"7\",\"CLAUDE_CODE_TMUX_TRUECOLOR\":\"1\"},\"outputStyle\":\"default\",\"showThinkingSummaries\":true}"; got != want {
+	), "-p --output-format json --settings {\"cleanupPeriodDays\":36500,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"7\",\"CLAUDE_CODE_NATIVE_CURSOR\":\"1\",\"CLAUDE_CODE_TMUX_TRUECOLOR\":\"1\"},\"outputStyle\":\"default\",\"showThinkingSummaries\":true,\"tui\":\"fullscreen\"}"; got != want {
 		t.Fatalf("args = %q, want %q", got, want)
 	}
 	var environment []string

@@ -92,6 +92,33 @@ func TestVSCodeExtensionLinksIntoEveryPresentProductRootNeverAnAbsentOne(t *test
 	if !reflect.DeepEqual(ledger.Extensions, want) {
 		t.Fatalf("ledger extensions = %v, want %v", ledger.Extensions, want)
 	}
+	output := installer.options.Stdout.(*bytes.Buffer).String()
+	const reload = "  reload  reload every open VS Code window (Developer: Reload Window): " +
+		"VS Code reads the extension's contributed colour themes only at window start\n"
+	if !strings.HasSuffix(output, reload) {
+		t.Fatalf("install --vscode output does not end on %q:\n%s", reload, output)
+	}
+}
+
+// TestVSCodeWithoutTheFlagSaysSo: an install without --vscode on a host whose
+// ledger holds nothing touches no VS Code file and prints the one skip row
+// naming the flag; the reload line is --vscode's alone.
+func TestVSCodeWithoutTheFlagSaysSo(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "product-a")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installer := newVSCodeExtensionEngine(t, home, []string{root}, false)
+	if err := installer.wireVSCode(); err != nil {
+		t.Fatal(err)
+	}
+	if output := installer.options.Stdout.(*bytes.Buffer).String(); output != "  skip    vscode — pass --vscode\n" {
+		t.Fatalf("output = %q, want the one skip row", output)
+	}
+	if _, err := os.Stat(filepath.Join(root, "extensions")); !os.IsNotExist(err) {
+		t.Fatalf("an install without --vscode touched %s: %v", root, err)
+	}
 }
 
 // TestVSCodeExtensionReinstallIsIdempotent proves a second apply over the

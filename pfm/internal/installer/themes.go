@@ -90,7 +90,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 			}
 			if profile.exists && !profile.owned {
 				installer.ok("theme " + name + " profile copy exists at " + profile.path +
-					" and is not installer-owned; apply adopts it only when byte-identical to the install," +
+					" and is not installer-owned; apply adopts it only when byte-identical to the install or a stale copy of the shipped profile," +
 					" else skips the theme")
 			}
 			switch {
@@ -98,7 +98,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 				installer.ok("theme " + name + " currently installed; apply checks its profile for updates")
 			case claude.exists:
 				installer.ok("theme " + name + " exists at " + target +
-					" and is not installer-owned; apply adopts it only when byte-identical to the install")
+					" and is not installer-owned; apply adopts it only when byte-identical to the install or a stale copy of the shipped profile")
 			default:
 				verb := "fetch theme"
 				if source.local != "" {

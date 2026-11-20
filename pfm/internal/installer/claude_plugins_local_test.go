@@ -446,6 +446,9 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 		checkouts []int
 		local     []bool
 		reason    func(root, home string, p testPlugin) string
+		// uninitialised lists the plugins the clone's .gitmodules registers with
+		// an empty directory: a submodule never initialised.
+		uninitialised []int
 	}{
 		{
 			"alpha without the key or a clone at the default path", alphaVersion, false, false, nil,
@@ -454,12 +457,24 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 				return "no checkout at " + filepath.Join(home, ".professor", "plugins", p.Name, "plugins", p.Name,
 					".claude-plugin", "plugin.json") + " (the source clone's plugins/; claude.pluginCheckoutRoot unset)"
 			},
+			nil,
 		},
 		{
 			"alpha without the key installs from the source clone", alphaVersion, false, true,
 			[]int{0, 1, 2, 3, 4, 5, 6},
 			[]bool{true, true, true, true, true, true, true},
 			nil,
+			nil,
+		},
+		{
+			"alpha from the source clone with a submodule never initialised", alphaVersion, false, true,
+			[]int{0, 2, 3, 4, 5, 6},
+			[]bool{true, false, true, true, true, true, true},
+			func(root, _ string, p testPlugin) string {
+				return "submodule plugins/" + p.Name + " is not initialised in " + root +
+					": run git submodule update --init plugins/" + p.Name + " there"
+			},
+			[]int{1},
 		},
 		{
 			"alpha with a checkout missing", alphaVersion, true, false,
@@ -469,8 +484,9 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 				return "no checkout at " + filepath.Join(root, p.Name, "plugins", p.Name, ".claude-plugin", "plugin.json") +
 					" (claude.pluginCheckoutRoot)"
 			},
+			nil,
 		},
-		{"release", "0.80.0", true, false, []int{0, 1, 2, 3, 4, 5, 6}, []bool{false, false, false, false, false, false, false}, nil},
+		{"release", "0.80.0", true, false, []int{0, 1, 2, 3, 4, 5, 6}, []bool{false, false, false, false, false, false, false}, nil, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -480,6 +496,19 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 			}
 			for _, index := range test.checkouts {
 				writePluginCheckout(t, checkoutRoot, testPlugins[index].Name)
+			}
+			gitmodules := ""
+			for _, index := range append(slices.Clone(test.checkouts), test.uninitialised...) {
+				name := testPlugins[index].Name
+				gitmodules += "[submodule \"" + name + "\"]\n\tpath = plugins/" + name + "\n"
+			}
+			for _, index := range test.uninitialised {
+				if err := os.MkdirAll(filepath.Join(checkoutRoot, testPlugins[index].Name), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.uninitialised != nil {
+				writeFixture(t, filepath.Join(root, ".gitmodules"), gitmodules)
 			}
 			configured := root
 			if !test.withRoot {

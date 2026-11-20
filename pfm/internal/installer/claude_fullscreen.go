@@ -71,7 +71,7 @@ func (installer *engine) clearFullscreenAutoDisable() error {
 	seen := map[string]bool{}
 	var failures []error
 	for _, account := range installer.options.ClaudeAccounts {
-		wants, err := claudelaunch.WantsFullscreen(account.ConfigDir)
+		wants, err := claudelaunch.WantsFullscreen(account.ConfigDir, installer.options.ClaudeSettings)
 		if err != nil {
 			failures = append(failures, installer.fail(fmt.Errorf(
 				"claude fullscreen canary for account %d: settings unreadable, state unknown: %w", account.ID, err,

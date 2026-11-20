@@ -137,7 +137,10 @@ func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Fatalf("parse seeded config = %q: %v", body, err)
 		}
-		want := map[string]any{"version": float64(2)}
+		want := map[string]any{
+			"version": float64(2),
+			"claude":  map[string]any{"systemPrompt": "production"},
+		}
 		for key, value := range extra {
 			want[key] = value
 		}

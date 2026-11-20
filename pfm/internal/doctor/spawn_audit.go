@@ -90,7 +90,7 @@ func classifySpawn(
 		return spawnUnverified, reason + " — original launch payload unverified"
 	}
 	missing := ""
-	switch promptPolicyName(prefs.SystemPrompt) {
+	switch claudelaunch.PromptMode(home, prefs) {
 	case config.SystemPromptProfessor:
 		if parsed.PromptFile == "" {
 			missing = "no --system-prompt-file prompt material"
@@ -116,7 +116,7 @@ func classifySpawn(
 		missing = "registry hooks missing"
 	}
 	if missing == "" {
-		switch promptPolicyName(prefs.SystemPrompt) {
+		switch claudelaunch.PromptMode(home, prefs) {
 		case config.SystemPromptProfessor:
 			return spawnInjected, "argv carries --system-prompt-file and registry payload"
 		case config.SystemPromptLean:
@@ -264,9 +264,9 @@ func printSpawnAuditDoctorWithClock(
 	clk clock.Clock,
 ) int {
 	prefs := machine.EffectiveClaude(primary)
-	policy := promptPolicyName(prefs.SystemPrompt)
+	policy := claudelaunch.PromptMode(resolved.Home, prefs)
 	for _, account := range machine.Accounts {
-		if promptPolicyName(machine.EffectiveClaude(account.ID).SystemPrompt) != policy {
+		if claudelaunch.PromptMode(resolved.Home, machine.EffectiveClaude(account.ID)) != policy {
 			policy = "per-account"
 			break
 		}
@@ -396,13 +396,6 @@ func spawnAuditUnreadWarnings(stdout io.Writer, unread []string) int {
 		strings.Join(unread, "; "),
 	)
 	return 1
-}
-
-func promptPolicyName(value string) string {
-	if value == "" {
-		return config.SystemPromptProduction
-	}
-	return value
 }
 
 // spawnDoorExecutable locates the pfm binary whose spawn doors the audit

@@ -145,6 +145,7 @@ const snapshot = (name) => ({
   step: name, colors, workspace: workspaceColors === undefined ? null : workspaceColors, ack: readJSONFile('vscode-ack.json'),
   writes, workspaceUpdates, chromeRecord: readJSONFile('vscode-chrome.json'), record: fs.existsSync(path.join(stateDir, 'vscode-applied.json')),
   messages: [...messages],
+  settingsTarget: require(path.join(path.dirname(extensionPath), 'theme.js')).settingsTarget(), // the one Global/Workspace choice theme.js and native.js write through
 });
 // A fired configuration change reaches the extension's own listener, which queues its own sync;
 // the driver calls none, and waits for the ack that run rewrites.
@@ -425,6 +426,7 @@ type vscodeScenarioStep struct {
 	WorkspaceUpdates int                `json:"workspaceUpdates"`
 	ChromeRecord     vscodeChromeRecord `json:"chromeRecord"`
 	Record           bool               `json:"record"`
+	SettingsTarget   int                `json:"settingsTarget"`
 	Messages         []struct {
 		Kind    string `json:"kind"`
 		Message string `json:"message"`
@@ -701,6 +703,13 @@ func TestVSCodeExtensionPaintsEveryWorkspaceKind(t *testing.T) {
 						wantGlobal,
 						wantWorkspace,
 					)
+				}
+				wantTarget := 1 // Global, the local window's
+				if tc.window.RemoteName != "" {
+					wantTarget = 2 // Workspace, never the client's Global
+				}
+				if got.SettingsTarget != wantTarget {
+					t.Errorf("%s: settingsTarget = %d, want %d", got.Step, got.SettingsTarget, wantTarget)
 				}
 				if tc.target == "global" && got.WorkspaceUpdates != 0 {
 					t.Errorf("empty window wrote Workspace settings")

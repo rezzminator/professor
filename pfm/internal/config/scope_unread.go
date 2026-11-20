@@ -17,7 +17,7 @@ var retiredClaudeKeys = map[string]string{
 	"autoCompactWindow":      "claude.settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW",
 	"helperModel":            "claude.settings.env.ANTHROPIC_SMALL_FAST_MODEL",
 	"tmuxTruecolor":          "claude.settings.env.CLAUDE_CODE_TMUX_TRUECOLOR" + " (null turns it off)",
-	"nativeCursor":           "claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR" + ` "1" (null turns it off)`,
+	"nativeCursor":           "claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR" + " (null turns it off)",
 	"maxSubagentSpawnDepth":  "claude.settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH",
 	"maxConcurrentSubagents": "claude.settings.env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
 	"cleanupPeriodDays":      "claude.settings.cleanupPeriodDays",

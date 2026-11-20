@@ -173,10 +173,6 @@ type Options struct {
 	AdoptAgents bool
 	// ClaudePlugins is claude.plugins: the plugins the Claude plugin step ensures.
 	ClaudePlugins []pfmconfig.ClaudePlugin
-	// ClaudePluginsDefault says claude.plugins is unset, ClaudePlugins its
-	// default: an -alpha install then ensures every plugin the source clone's
-	// marketplace lists.
-	ClaudePluginsDefault bool
 	// ClaudeEnv is claude.env: the plugin options as environment variables
 	// pfm writes into the primary seat's settings.json env (ensureClaudeEnv).
 	ClaudeEnv map[string]string

@@ -17,7 +17,7 @@
     "theme": null,
     "cache1h": true,
     "remoteControl": true,
-    "systemPrompt": null,
+    "systemPrompt": "professor",
     "requireManagedCleanup": true,
     "pluginCheckoutRoot": null,
     "plugins": [
@@ -41,10 +41,12 @@
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0",
         "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "8",
         "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "9007199254740991",
+        "CLAUDE_CODE_NATIVE_CURSOR": "1",
         "CLAUDE_CODE_TMUX_TRUECOLOR": "1"
       },
       "outputStyle": "default",
-      "showThinkingSummaries": true
+      "showThinkingSummaries": true,
+      "tui": "fullscreen"
     }
   },
   "codex": {

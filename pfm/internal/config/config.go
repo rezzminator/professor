@@ -2,6 +2,7 @@
 // set and, at a managed root, a project's, which sets only the scope keys (scope.go).
 //
 // scope_unread.go: the keys a file sets that its scope never reads, retired or machine-only.
+// runtime_reload.go: Runtime.Reload, the machine file read again for a long-lived process.
 package config
 
 import (
@@ -86,9 +87,15 @@ type ClaudePrefs struct {
 	PermissionMode        string
 	Binary, Theme         string
 	RequireManagedCleanup bool
-	// SystemPrompt is one of the SystemPrompt* values; empty means
-	// SystemPromptProduction.
+	// SystemPrompt is one of the SystemPrompt* values. Defaults and Load
+	// resolve an unset or null claude.systemPrompt to SystemPromptProfessor;
+	// a hand-built zero value means SystemPromptProduction.
 	SystemPrompt string
+	// SystemPromptDefault is true while SystemPrompt is the shipped default:
+	// neither the machine file nor the account set claude.systemPrompt.
+	// claudelaunch.PromptMode drops a default professor to production on a
+	// host with no Professor clone recorded; an explicit one stays.
+	SystemPromptDefault bool
 	// Cache1H is the main chat's starting prompt-cache TTL: true hands 1h,
 	// false 5m, to the cache-live-control plugin as CACHE_LIVE_CONTROL_MAIN_TTL
 	// in the launch's process environment; the plugin owns the TTL from then on,
@@ -527,6 +534,8 @@ func defaultsWithMCPServers(
 			PermissionMode:        PermissionBypass,
 			Binary:                pfmengine.MustLookup(pfmengine.Claude).Binary,
 			RequireManagedCleanup: true,
+			SystemPrompt:          SystemPromptProfessor,
+			SystemPromptDefault:   true,
 			Cache1H:               true,
 			RemoteControl:         true,
 			CostLedger:            true,
@@ -757,6 +766,7 @@ func loadWithMCPServers(
 		applyRemoteControl(&result.Claude, raw.Claude.RemoteControl, true, result.Sources, -1)
 		if raw.Claude.SystemPrompt != nil {
 			result.Claude.SystemPrompt = prefs.SystemPrompt
+			result.Claude.SystemPromptDefault = false
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
 		}
 		if err := applyClaudeMachinePrefs(&result.Claude, *raw.Claude, home, result.Path, result.Sources); err != nil {
@@ -1157,6 +1167,7 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		copyClaudeLaunchPrefs(&result, *account.Claude)
 		if account.Claude.SystemPrompt != "" {
 			result.SystemPrompt = account.Claude.SystemPrompt
+			result.SystemPromptDefault = false
 		}
 	}
 	return result

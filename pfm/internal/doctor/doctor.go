@@ -3,6 +3,14 @@
 // external plugin runtime, with healthy, broken, and could-not-look kept distinct.
 //
 // herdr_claude.go: the herdr-integration row of each Claude settings store.
+// host_overlay.go: the host_overlay rows, one per contracted overlay symlink.
+// clone_checks.go: the professor clone's rows: pfm_build against VERSION and HEAD, then git_push and leak_terms.
+// clone_leak_terms.go: the leak_terms row, the clone's private leak denylist the pre-push gate reads.
+// git_push_check.go: the git_push row, whether git can push the clone's github.com origin.
+// optional_deps.go: the deps_since_install row, an optional dependency that appeared since the last install.
+// theme_ownership.go: the theme-unowned warning, a shipped theme install left alone renders no VS Code theme.
+// herdr_keys.go: the herdr-keys row, each pfm Herdr mapping the config lacks.
+// system_prompt_checks.go: each Claude account's system prompt mode, warned when the built fleet prompt is not injected.
 package doctor
 
 import (
@@ -186,6 +194,12 @@ func Run(
 	tally.warnings += printCostLedgerDoctor(stdout, runtime, dependencies.Env)
 	tally.warnings += printSupervisionDoctor(ctx, stdout, dependencies, runtime)
 	tally.warnings += printPrePushDoctorWithRunner(context.Background(), stdout, dependencies.Runner)
+	// One doctor.ignoreWarnings filter for the run: its unknown-ID rows print once.
+	filter, unknownWarningIDs := newWarningFilter(stdout, runtime.Config)
+	tally.warnings += unknownWarningIDs
+	tally.warnings += printProfessorCloneDoctor(
+		ctx, stdout, resolved.Home, currentPfmBuild(runtime.Version), dependencies.Runner, filter,
+	)
 	verboseDir := ""
 	if *verbose {
 		abs, err := filepath.Abs(filepath.Join(resolved.SIDDir, paths.SIDScratchDoctor))
@@ -241,7 +255,7 @@ func Run(
 		}
 	}
 	primary, _ := runtime.Config.AccountByID(primaryAccount)
-	tally.warnings += printIgnorableDoctor(stdout, runtime.Config, resolved.Home, primary.ConfigDir)
+	tally.warnings += printIgnorableDoctor(stdout, filter, resolved.Home, primary.ConfigDir, dependencies.Env)
 	claudeVersionsWarnings, claudeVersionsFailures := printClaudeVersionsDoctor(
 		stdout,
 		resolved.Home,
@@ -259,14 +273,12 @@ func Run(
 	)
 	tally.warnings += depWarnings
 	tally.failures += depFailures
+	tally.warnings += printOptionalDepsDoctor(stdout, resolved.Home, dependencies.Runner)
 	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
 	retiredLists, retiredFailures := loadRetiredLists(stdout, resolved.Home)
 	tally.failures += retiredFailures
 	claudeStore := installer.ClaudeStore(resolved.Home)
-	pluginBuild := doctorClaudePluginBuild(
-		runtime.Version, resolved.Home, runtime.Config.Claude,
-		runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
-	)
+	pluginBuild := doctorClaudePluginBuild(runtime.Version, resolved.Home, runtime.Config.Claude)
 	claudeEnv := runtime.Config.EffectiveClaudeEnv(dependencies.Env, resolved.Home)
 	claudeEnvDir := primary.ConfigDir
 	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
@@ -280,7 +292,7 @@ func Run(
 		retiredLists.ClaudePlugins,
 		tally,
 	)
-	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, pluginBuild.PluginsDefault, tally)
+	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, tally)
 	printManagedPluginLogsDoctor(
 		stdout, append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...), pluginBuild,
 		installer.ManagedRoot(resolved.Home), filepath.Join(claudeEnvDir, "settings.json"), tally,
@@ -290,10 +302,7 @@ func Run(
 		installer.ManagedRoot(resolved.Home),
 		filepath.Join(claudeEnvDir, "settings.json"),
 		claudeEnv,
-		doctorClaudePluginBuild(
-			runtime.Version, resolved.Home, runtime.Config.Claude,
-			runtime.Config.Source(config.KeyClaudePlugins) == config.SourceDefault,
-		),
+		doctorClaudePluginBuild(runtime.Version, resolved.Home, runtime.Config.Claude),
 		tally,
 	)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
@@ -316,6 +325,7 @@ func Run(
 	tally.failures += hookFailures
 	tally.failures += printTracetreeKitDoctor(ctx, stdout, resolved.Home, dependencies)
 	tally.warnings += printHerdrShellDoctor(stdout, resolved.Home, dependencies)
+	tally.warnings += printHerdrKeysDoctor(stdout, resolved.Home, dependencies)
 	herdrWarnings, herdrFailures := printHerdrDoctor(ctx, stdout, dependencies, resolved.Home, runtime.Config)
 	tally.warnings += herdrWarnings
 	tally.failures += herdrFailures
@@ -798,6 +808,9 @@ func PrintDependencies(
 				requirement = "required"
 				unverified(gatesEngine)
 			}
+			if entry.MissingCost != "" {
+				requirement += " — " + entry.MissingCost
+			}
 			fmt.Fprintf(
 				stdout,
 				"doctor: dep %s path=(none) MISSING %s — install: %s\n",
@@ -890,38 +903,6 @@ func PrintDependencies(
 		}
 	}
 	return warnings, failures, claudeAbsent
-}
-
-// printHostOverlayDoctor treats every missing, displaced, or unknown overlay
-// symlink as a failure: a misdirected or absent overlay is invisible from the
-// prompt itself (issue #14 F1).
-func printHostOverlayDoctor(stdout io.Writer, home string) (failures int) {
-	for _, overlay := range installer.InspectHostOverlays(home) {
-		switch overlay.State {
-		case installer.HostOverlayOK:
-			fmt.Fprintf(stdout, "doctor: host_overlay %s ok\n", overlay.Name)
-		case installer.HostOverlayMissing:
-			failures++
-			fmt.Fprintf(stdout, "doctor: host_overlay %s missing — run pfm install --yes\n", overlay.Name)
-		case installer.HostOverlayDisplaced:
-			failures++
-			fmt.Fprintf(
-				stdout,
-				"doctor: host_overlay %s DISPLACED by %s — run pfm install --yes\n",
-				overlay.Name,
-				overlay.Target,
-			)
-		default:
-			failures++
-			fmt.Fprintf(
-				stdout,
-				"doctor: host_overlay %s unknown state=%s — run pfm install --yes\n",
-				overlay.Name,
-				overlay.State,
-			)
-		}
-	}
-	return failures
 }
 
 // printClaudeVersionsDoctor reports the growth pfm's launcher causes by

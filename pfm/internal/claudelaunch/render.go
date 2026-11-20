@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,13 +148,13 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {
 		result.Argv = append(result.Argv, flagName, name)
 	}
-	settings := settingsFor(request, prefs, noFlicker(request, settingsDir))
 	// request.Settings is the persona's machine-then-project layer; a launch no persona read carries the
 	// machine file's claude.settings alone.
 	layered := request.Settings
 	if layered == nil {
 		layered = prefs.Settings
 	}
+	settings := settingsFor(request, prefs, noFlicker(request, settingsDir, withCallerTUI(request.Args, layered)))
 	args, payload, err := settingsArgv(request.Args, layered, settings)
 	if err != nil {
 		return Launch{}, err
@@ -206,14 +207,15 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 }
 
 // noFlicker reports whether a seat's launch carries envNoFlicker: an
-// interactive seat whose account asks for fullscreen (WantsFullscreen). A
+// interactive seat that runs fullscreen (WantsFullscreen) under claude, its
+// layered claude.settings. A
 // settings file that cannot be judged never blocks the launch: the failure is
 // logged with its path and the seat launches without the knob.
-func noFlicker(request Request, settingsDir string) bool {
-	if request.Purpose == PurposeQuery || settingsDir == "" {
+func noFlicker(request Request, settingsDir string, claude map[string]any) bool {
+	if request.Purpose == PurposeQuery {
 		return false
 	}
-	wants, err := WantsFullscreen(settingsDir)
+	wants, err := WantsFullscreen(settingsDir, claude)
 	if err != nil {
 		obs.Logger(context.Background()).Warn(
 			"claudelaunch: fullscreen settings unreadable; launching without "+envNoFlicker,
@@ -337,7 +339,7 @@ func wantedPromptFile(request Request, prefs pfmconfig.ClaudePrefs) (path, why s
 	}
 	path = request.PromptFile
 	if path == "" {
-		if prefs.SystemPrompt != pfmconfig.SystemPromptProfessor {
+		if PromptMode(request.Home, prefs) != pfmconfig.SystemPromptProfessor {
 			return "", ""
 		}
 		var err error
@@ -374,6 +376,25 @@ func lostPromptWarning(request Request, prefs pfmconfig.ClaudePrefs) string {
 // starts the chat tells the starter exactly when the flag was dropped.
 func PromptWarning(request Request, machine pfmconfig.Config) string {
 	return lostPromptWarning(request, machine.EffectiveClaude(request.Account))
+}
+
+// PromptMode is the claude.systemPrompt mode a launch from home runs under,
+// one of the pfmconfig.SystemPrompt* values: an empty mode is production, and
+// the shipped default professor applies only where a Professor clone is
+// recorded, since the fleet prompt is built in the clone. With none recorded
+// a default professor is production, so a binary-only host launches without
+// the file and without a warning; an explicit professor stays professor and
+// its launches say the file is missing.
+func PromptMode(home string, prefs pfmconfig.ClaudePrefs) string {
+	switch {
+	case prefs.SystemPrompt == "":
+		return pfmconfig.SystemPromptProduction
+	case prefs.SystemPrompt == pfmconfig.SystemPromptProfessor && prefs.SystemPromptDefault:
+		if _, err := paths.ReadSourceRepoMarker(home); errors.Is(err, paths.ErrNoSourceRepoMarker) {
+			return pfmconfig.SystemPromptProduction
+		}
+	}
+	return prefs.SystemPrompt
 }
 
 func PromptFile(home string) (string, error) {

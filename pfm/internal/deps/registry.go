@@ -18,16 +18,19 @@ const (
 // Entry describes one external command pfm may execute. Command is the
 // configured name or absolute path; Name is the stable doctor-row key.
 type Entry struct {
-	Name           string
-	Command        string
-	Engine         pfmengine.ID
-	Purpose        string
-	Required       bool
-	Platforms      []string
-	VersionArgs    []string
-	MinVersion     string
-	Parse          func(string) (string, error)
-	InstallHint    string
+	Name        string
+	Command     string
+	Engine      pfmengine.ID
+	Purpose     string
+	Required    bool
+	Platforms   []string
+	VersionArgs []string
+	MinVersion  string
+	Parse       func(string) (string, error)
+	InstallHint string
+	// MissingCost names what an absent optional dependency takes away, so a
+	// MISSING optional row says what the host loses, never only that it is absent.
+	MissingCost    string
 	SelfDoctorArgs []string
 	// ProbeHome runs the version and self-doctor probes in a throwaway engine
 	// home (NewEngineProbeHome), never the ambient account.
@@ -186,7 +189,8 @@ var fixedCommands = []Entry{
 	{
 		Name:        "herdr",
 		Purpose:     "attaching to Herdr chat panes",
-		InstallHint: "install Herdr to attach Herdr chats",
+		InstallHint: "curl -fsSL https://releases.herdr.dev/app/install.sh | sh (https://herdr.dev)",
+		MissingCost: "the herdr theme surface and Herdr chat panes are unavailable",
 	},
 	{
 		Name:        "launchctl",
@@ -284,6 +288,20 @@ func Registry(options ...Options) []Entry {
 		}
 	}
 	return entries
+}
+
+// OptionalCommands is every fixed, non-engine registry command this OS can
+// use that pfm runs without: what pfm install records it found and pfm
+// doctor re-checks for one that appeared since.
+func OptionalCommands() []Entry {
+	entries := Registry(Options{Home: "."})
+	var optional []Entry
+	for index := range entries {
+		if entry := &entries[index]; !entry.Required && entry.Engine == "" && entry.AppliesTo(runtime.GOOS) {
+			optional = append(optional, *entry)
+		}
+	}
+	return optional
 }
 
 // Registered reports whether name is a fixed literal or stable registry key.

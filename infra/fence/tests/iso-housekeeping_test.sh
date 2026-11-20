@@ -49,7 +49,7 @@ cat >"$BIN/docker" <<'STUB'
 printf '%s\n' "$*" >>"$STUB_DOCKER_LOG"
 [[ "$1" != info || "${STUB_DAEMON:-1}" = 1 ]] || { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
 case "$1 ${2:-}" in
-  "info --format") echo "${STUB_INFO:-Docker Desktop|10|8267812044}" ;;
+  "info --format") echo "${STUB_INFO:-linux|Docker Desktop|10|8267812044}" ;;
   "volume inspect") [ "${STUB_VOLUME:-1}" = 1 ] || { echo "Error response from daemon: no such volume" >&2; exit 1; } ;;
   "compose -f")
     if [[ "$*" == *' config '* ]]; then
@@ -222,8 +222,8 @@ sed -i 's/^PFM_FENCE_CPUS|.*/PFM_FENCE_CPUS|6|cpu|8/' "$R/infra/fence/shared.sh"
 unset STUB_RUNNING
 for profile_case in native desktop override; do
   case "$profile_case" in
-    native) PFM_FENCE_PROFILE=auto STUB_INFO='Ubuntu Linux|23|126701535232' iso run true; want=8 ;;
-    desktop) PFM_FENCE_PROFILE=auto STUB_INFO='Docker Desktop|10|8267812044' iso run true; want=6 ;;
+    native) PFM_FENCE_PROFILE=auto STUB_INFO='linux|Ubuntu Linux|23|126701535232' iso run true; want=8 ;;
+    desktop) PFM_FENCE_PROFILE=auto STUB_INFO='linux|Docker Desktop|10|8267812044' iso run true; want=6 ;;
     override) PFM_FENCE_PROFILE=native PFM_FENCE_CPUS=6 iso run true; want=6 ;;
   esac
   if [[ $RC == 0 ]] && grep -q -- "--cpus $want " "$STUB_DOCKER_LOG" && grep -q -- "-e PFM_FENCE_CPUS=$want " "$STUB_DOCKER_LOG"; then

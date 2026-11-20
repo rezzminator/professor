@@ -82,17 +82,7 @@ func runConfigClaude(args []string, stdout, stderr io.Writer, runtime commandRun
 			return 2
 		}
 	}
-	for _, row := range claudelaunch.Resolve(runtime.Config, *account) {
-		fmt.Fprintf(
-			stdout,
-			"%s wire=%s target=%s value=%s source=%s\n",
-			row.Knob.Name,
-			row.Knob.Wire,
-			row.Knob.Target,
-			row.Value,
-			row.Won,
-		)
-	}
+	claudelaunch.WriteResolved(stdout, runtime.Config, *account)
 	return 0
 }
 

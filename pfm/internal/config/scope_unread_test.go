@@ -31,13 +31,13 @@ func TestClaudeRetiredKeysLoadAsNoOps(t *testing.T) {
 		}
 	}
 	want := []string{
-		"accounts[0].claude.nativeCursor is retired: set claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR \"1\" (null turns it off) instead",
+		"accounts[0].claude.nativeCursor is retired: set claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR (null turns it off) instead",
 		"claude.autoCompactWindow is retired: set claude.settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW instead",
 		"claude.cleanupPeriodDays is retired: set claude.settings.cleanupPeriodDays instead",
 		"claude.helperModel is retired: set claude.settings.env.ANTHROPIC_SMALL_FAST_MODEL instead",
 		"claude.maxConcurrentSubagents is retired: set claude.settings.env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS instead",
 		"claude.maxSubagentSpawnDepth is retired: set claude.settings.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH instead",
-		"claude.nativeCursor is retired: set claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR \"1\" (null turns it off) instead",
+		"claude.nativeCursor is retired: set claude.settings.env.CLAUDE_CODE_NATIVE_CURSOR (null turns it off) instead",
 		"claude.tmuxTruecolor is retired: set claude.settings.env.CLAUDE_CODE_TMUX_TRUECOLOR (null turns it off) instead",
 		"claude.webSearchesPerSession is retired: set claude.settings.env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION instead",
 	}

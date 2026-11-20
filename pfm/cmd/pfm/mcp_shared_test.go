@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -38,5 +41,36 @@ func TestMCPRuntimeBindsTheVerbLayerToTheCommandsRuntime(t *testing.T) {
 		t.Fatal(
 			"AllowAmbientIdentity must follow ambient: the shared daemon fails closed, stdio runs inside its caller",
 		)
+	}
+}
+
+// TestMCPDispatchReadsTheConfigAtSpawnTime: the long-lived MCP daemon loaded
+// its runtime once at start, yet every chat verb it dispatches reads the
+// machine config as the file holds it at that moment (config.Runtime.Reload):
+// an edit that breaks the file refuses the spawn as the CLI would, never
+// launching on the stale copy.
+func TestMCPDispatchReadsTheConfigAtSpawnTime(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), "pfm.config.json")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"version":2}`)
+	machine, err := config.Load(path, home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := commandRuntime{Config: machine, Paths: paths.Values{Home: home}}
+	bridged := mcpRuntime(runtime, false)
+
+	write(`{"version":2,"claude":{"systemPrompt":"verbose"}}`)
+	var stderr strings.Builder
+	code := bridged.Dispatch(context.Background(), []string{"chat"}, io.Discard, &stderr)
+	want := `pfm: config: config ` + path + `: claude.systemPrompt must be "production", "lean" or "professor", got "verbose"` + "\n"
+	if code != 1 || stderr.String() != want {
+		t.Fatalf("Dispatch after a broken edit = %d %q, want 1 %q", code, stderr.String(), want)
 	}
 }

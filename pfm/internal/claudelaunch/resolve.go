@@ -42,11 +42,14 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 			} else {
 				row.Value = fmt.Sprint(knob.Default)
 			}
+			if value, set := layeredDefault(knob, prefs.Settings); set {
+				row.Value, row.Won = settingText(value), configWord
+			}
 		case SourceAccount:
 			if accountIndex >= 0 {
 				selected := machine.Accounts[accountIndex]
 				if knob.Name == knobNoFlicker {
-					row.Value, row.Won = noFlickerValue(selected.ConfigDir), accountWord
+					row.Value, row.Won = noFlickerValue(selected.ConfigDir, prefs.Settings), accountWord
 				} else {
 					row.Value = selected.ConfigDir
 					row.Won = accountWord
@@ -63,7 +66,7 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 			} else if machine.Source(
 				key,
 			) == pfmconfig.SourceFile {
-				row.Won = "config"
+				row.Won = configWord
 			}
 			if accountIndex >= 0 && overridesErr != nil {
 				row.Won += " (" + overridesErr.Error() + ")"
@@ -73,7 +76,7 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 		case SourceMachineConfig:
 			row.Value = configValue(knob.Name, prefs, machine)
 			if machine.MCPServerSource(pfmconfig.MCPServerChat) != pfmconfig.SourceDefault {
-				row.Won = "config"
+				row.Won = configWord
 			}
 		}
 		if knob.Name == knobTheme {

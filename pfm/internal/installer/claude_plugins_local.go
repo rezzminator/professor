@@ -82,6 +82,10 @@ func localClaudePluginTarget(target ClaudePluginTarget, build ClaudePluginBuild)
 	case err == nil && info.Mode().IsRegular():
 	case err == nil || errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR):
 		target.Fallback = "no checkout at " + manifest + " (" + rootName + ")"
+		if build.CheckoutRoot == "" && uninitialisedSubmodule(build.SourceRepo, target.Name) {
+			target.Fallback = "submodule plugins/" + target.Name + " is not initialised in " + build.SourceRepo +
+				": run git submodule update --init plugins/" + target.Name + " there"
+		}
 		return target
 	default:
 		target.Undecided = fmt.Sprintf("checkout unreadable (%s): %v", rootName, err)

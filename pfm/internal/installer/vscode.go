@@ -116,6 +116,7 @@ func (installer *engine) wireVSCode() error {
 		return installer.unwireVSCode(ownershipPath, ownershipRaw, ownership, extensions, indexRegistrations)
 	}
 	if !installer.options.VSCode && len(ownership) == 0 && len(extensions) == 0 {
+		installer.skip("vscode — pass --vscode")
 		return nil
 	}
 
@@ -186,12 +187,16 @@ func (installer *engine) wireVSCode() error {
 	for _, target := range extensions {
 		indexRegistrations = append(indexRegistrations, filepath.Join(filepath.Dir(target), vscodeExtensionIndexName))
 	}
-	return errors.Join(
+	err = errors.Join(
 		errors.Join(failures...),
 		promptErr,
 		linkErr,
 		installer.writeVSCodeOwnership(ownershipPath, ownershipRaw, ownership, extensions, indexRegistrations),
 	)
+	if installer.options.VSCode && installer.apply && err == nil {
+		installer.say("  reload  %s", VSCodeReloadNote)
+	}
+	return err
 }
 
 // vscodeExtensionLinks enumerates the extension-link targets pfm can wire on
@@ -205,17 +210,7 @@ func (installer *engine) wireVSCode() error {
 func (installer *engine) vscodeExtensionLinks() []string {
 	roots := installer.options.vscodeExtensionRoots
 	if roots == nil {
-		home := installer.options.Home
-		roots = []string{
-			filepath.Join(home, ".vscode"),
-			filepath.Join(home, ".vscode-insiders"),
-			filepath.Join(home, ".vscode-oss"),
-			filepath.Join(home, ".vscode-server"),
-			filepath.Join(home, ".vscode-server-insiders"),
-		}
-		if portable := installer.env().Get("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
-			roots = append(roots, portable)
-		}
+		roots = vscodeProductRootCandidates(installer.options.Home, installer.env())
 	}
 	var found []string
 	for _, root := range roots {

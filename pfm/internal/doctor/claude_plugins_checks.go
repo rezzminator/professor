@@ -19,23 +19,20 @@ import (
 // source clone a prior install anchored on (paths.GlobalSourceRepo, the
 // marker else the default path), whose plugins/ an -alpha build copies from
 // when the key is unset. A clone that cannot be resolved rides as
-// SourceRepoErr, named in the fallback line. pluginsDefault says claude.plugins
-// is unset: an -alpha build then checks every plugin the clone's marketplace
-// lists.
+// SourceRepoErr, named in the fallback line. claude.plugins is the effective
+// list, its default when unset, so install and doctor plan one list.
 func doctorClaudePluginBuild(
 	version, home string,
 	claude pfmconfig.Claude,
-	pluginsDefault bool,
 ) installer.ClaudePluginBuild {
 	sourceRepo, sourceRepoErr := paths.GlobalSourceRepo(home)
 	return installer.ClaudePluginBuild{
-		Version:        version,
-		Home:           home,
-		CheckoutRoot:   claude.PluginCheckoutRoot,
-		SourceRepo:     sourceRepo,
-		SourceRepoErr:  sourceRepoErr,
-		Plugins:        claude.Plugins,
-		PluginsDefault: pluginsDefault,
+		Version:       version,
+		Home:          home,
+		CheckoutRoot:  claude.PluginCheckoutRoot,
+		SourceRepo:    sourceRepo,
+		SourceRepoErr: sourceRepoErr,
+		Plugins:       claude.Plugins,
 	}
 }
 
@@ -44,18 +41,9 @@ func doctorClaudePluginBuild(
 const engineSyncHookOmission = "doctor: claude.plugins omits engine-sync — no hook rebuilds the Codex and OpenCode " +
 	"mirrors; add engine-sync to claude.plugins\n"
 
-// printEngineSyncHookDoctor warns once when claude.plugins is set (pluginsDefault false) and no entry
-// is the engine-sync plugin, bare or as engine-sync@marketplace. An unset list is the default, which
-// lists it, so nothing prints.
-func printEngineSyncHookDoctor(
-	stdout io.Writer,
-	plugins []pfmconfig.ClaudePlugin,
-	pluginsDefault bool,
-	tally *doctorTally,
-) {
-	if pluginsDefault {
-		return
-	}
+// printEngineSyncHookDoctor warns once when the effective claude.plugins names no engine-sync plugin,
+// bare or as engine-sync@marketplace. An unset list is the default, which lists it, so nothing prints.
+func printEngineSyncHookDoctor(stdout io.Writer, plugins []pfmconfig.ClaudePlugin, tally *doctorTally) {
 	if slices.ContainsFunc(plugins, func(plugin pfmconfig.ClaudePlugin) bool {
 		return plugin.Name() == "engine-sync"
 	}) {

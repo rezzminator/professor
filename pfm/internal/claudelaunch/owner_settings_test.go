@@ -152,13 +152,20 @@ func TestEffectiveSettingsLayersOverTheDefaults(t *testing.T) {
 	if machine["env"].(map[string]any)["B"] != "machine" {
 		t.Fatalf("LayerSettings wrote into its first layer: %#v", machine)
 	}
+	// A top-level null turns off the shipped default under it the same way: the key leaves the launch.
+	if tui, carried := EffectiveSettings(nil)["tui"]; tui != "fullscreen" || !carried {
+		t.Errorf("EffectiveSettings(nil) tui = %#v (carried %v), want the shipped fullscreen", tui, carried)
+	}
+	if tui, carried := EffectiveSettings(map[string]any{"tui": nil})["tui"]; carried {
+		t.Errorf("EffectiveSettings tui null carries %#v, want the key gone", tui)
+	}
 	if none, err := LayerSettings(nil, nil); none != nil || err != nil {
 		t.Fatalf("LayerSettings of no layer = %#v, %v; want nil", none, err)
 	}
 	env := EffectiveEnv(layered)
 	_, truecolor := env["CLAUDE_CODE_TMUX_TRUECOLOR"]
 	if env["A"] != "machine" || env["B"] != "project" || env["ANTHROPIC_SMALL_FAST_MODEL"] != "claude-haiku-5-5" ||
-		truecolor || len(env) != 8 {
+		truecolor || len(env) != 9 {
 		t.Fatalf("EffectiveEnv = %#v", env)
 	}
 	for _, tc := range []struct {

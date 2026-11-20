@@ -229,7 +229,11 @@ func canonicalBinaryOwnershipContent(home string) ([]byte, error) {
 }
 
 func (installer *engine) removeUpdateMetadata() error {
-	for _, path := range []string{paths.SourceRepoPath(installer.options.Home), binaryOwnershipPath(installer.options.Home)} {
+	for _, path := range []string{
+		paths.SourceRepoPath(installer.options.Home),
+		binaryOwnershipPath(installer.options.Home),
+		optionalDepsPath(installer.options.Home),
+	} {
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 			continue
 		} else if err != nil {

@@ -1,15 +1,14 @@
 package claudelaunch
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"strings"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // settingsEnvKey is the --settings key holding the launch's environment variables.
@@ -29,12 +28,31 @@ func settingsArgv(args []string, project, settings map[string]any) (rest []strin
 		return nil, "", err
 	}
 	mergeOwnerSettings(settings, project)
+	rest, values := splitSettingsArgs(args)
+	for _, value := range values {
+		owner, readErr := ownerSettings(value)
+		if readErr != nil {
+			return nil, "", readErr
+		}
+		mergeOwnerSettings(settings, owner)
+	}
+	dropNullSettings(settings)
+	encoded, err := json.Marshal(settings)
+	if err != nil {
+		return nil, "", fmt.Errorf("render --settings: %w", err)
+	}
+	return rest, string(encoded), nil
+}
+
+// splitSettingsArgs separates the caller's words from the values of the
+// --settings flags among them (`--settings v` and `--settings=v`), in order;
+// everything from a "--" on is the caller's.
+func splitSettingsArgs(args []string) (rest, values []string) {
 	rest = make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
 		word := args[index]
 		if word == "--" {
-			rest = append(rest, args[index:]...)
-			break
+			return append(rest, args[index:]...), values
 		}
 		value, inline := strings.CutPrefix(word, flagSettings+"=")
 		if !inline {
@@ -45,18 +63,35 @@ func settingsArgv(args []string, project, settings map[string]any) (rest []strin
 			index++
 			value = args[index]
 		}
-		owner, readErr := ownerSettings(value)
-		if readErr != nil {
-			return nil, "", readErr
+		values = append(values, value)
+	}
+	return rest, values
+}
+
+// withCallerTUI is layered with the "tui" a caller's own --settings sets laid
+// over it, the last one winning as in settingsArgv, so the fullscreen verdict
+// judges the tui the launch carries. A --settings value that cannot be read
+// is passed over here: settingsArgv refuses the launch over it next.
+func withCallerTUI(args []string, layered map[string]any) map[string]any {
+	_, values := splitSettingsArgs(args)
+	var tui any
+	found := false
+	for _, value := range values {
+		if owner, err := ownerSettings(value); err == nil {
+			if set, present := owner[settingsTUI]; present {
+				tui, found = set, true
+			}
 		}
-		mergeOwnerSettings(settings, owner)
 	}
-	dropNullEnv(settings)
-	encoded, err := json.Marshal(settings)
-	if err != nil {
-		return nil, "", fmt.Errorf("render --settings: %w", err)
+	if !found {
+		return layered
 	}
-	return rest, string(encoded), nil
+	view := maps.Clone(layered)
+	if view == nil {
+		view = map[string]any{}
+	}
+	view[settingsTUI] = tui
+	return view
 }
 
 // ownerSettings is the JSON object a caller's --settings value names: inline JSON, or a file holding it.
@@ -97,51 +132,6 @@ func LayerSettings(layers ...map[string]any) (map[string]any, error) {
 		mergeOwnerSettings(result, clone)
 	}
 	return result, nil
-}
-
-// EffectiveSettings is claude, the layered claude.settings, over the shipped defaults: the value a
-// launch's --settings carries for every key pfm does not compute. A consumer outside that wire (the
-// passthrough session's environment, the managed cleanup drop-in) reads its value here.
-func EffectiveSettings(claude map[string]any) map[string]any {
-	settings, env := defaultSettings()
-	settings[settingsEnvKey] = env
-	layered, err := LayerSettings(claude)
-	if err != nil {
-		// The shipped defaults stand; the launch's own --settings refuses the same layer.
-		obs.Logger(context.Background()).Error("claudelaunch: layer claude.settings", obs.FieldErr, err.Error())
-		return settings
-	}
-	mergeOwnerSettings(settings, layered)
-	dropNullEnv(settings)
-	return settings
-}
-
-// EffectiveEnv is EffectiveSettings' env block, each value as Claude reads it: a string kept, a null
-// left out, any other JSON value in its JSON text.
-func EffectiveEnv(claude map[string]any) map[string]string {
-	result := map[string]string{}
-	switch env := EffectiveSettings(claude)[settingsEnvKey].(type) {
-	case map[string]string:
-		for name, value := range env {
-			result[name] = value
-		}
-	case map[string]any:
-		for name, value := range env {
-			if text, isText := value.(string); isText {
-				result[name] = text
-				continue
-			}
-			if value == nil {
-				continue
-			}
-			encoded, err := json.Marshal(value)
-			if err != nil {
-				continue // a value json.Unmarshal produced always marshals
-			}
-			result[name] = string(encoded)
-		}
-	}
-	return result
 }
 
 // CleanupPeriodDays is the effective cleanupPeriodDays under claude: a positive whole number of days,
@@ -207,7 +197,7 @@ func mergeOwnerSettings(settings, owner map[string]any) {
 }
 
 // mergeEnv lays layer's variables over env, a null included: it outranks an earlier layer's value
-// until dropNullEnv removes the variable on the wire, the one way a layer turns off a variable an
+// until dropNullSettings removes the variable on the wire, the one way a layer turns off a variable an
 // earlier one set (Claude Code reads any value of a flag variable as on).
 func mergeEnv(env, layer map[string]any) {
 	for name, variable := range layer {
@@ -215,8 +205,15 @@ func mergeEnv(env, layer map[string]any) {
 	}
 }
 
-// dropNullEnv removes the variables settings' env sets to null, once every layer is merged.
-func dropNullEnv(settings map[string]any) {
+// dropNullSettings removes the top-level keys and the env variables settings sets to null, once every
+// layer is merged: a null turns off what an earlier layer or the shipped defaults set, so the launch
+// carries no value of its own there and Claude reads the account's settings.json.
+func dropNullSettings(settings map[string]any) {
+	for key, value := range settings {
+		if value == nil {
+			delete(settings, key)
+		}
+	}
 	if env, ok := settings[settingsEnvKey].(map[string]any); ok {
 		for name, variable := range env {
 			if variable == nil {

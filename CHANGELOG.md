@@ -16,6 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
+- [v0.89.0](releases/v0.89.0.md) — one pfm.config.json at two scopes, Herdr keys and spaces from config, sub-agent rows drawn by the in-tree professor plugin, an anonymous install ping, and the install fixes from issues #62 and #63
 - [v0.88.1](releases/v0.88.1.md) — a chat pfm hosts in tmux no longer closes the terminal it was opened from: typing claude over ssh and leaving the chat gives the prompt back instead of dropping the connection
 - [v0.88.0](releases/v0.88.0.md) — a one-screen README with a one-command installer, the Herdr indicator daemon stops rescanning the fleet on every change, and the journey suite gets its orientation file
 - [v0.87.0](releases/v0.87.0.md) — the flights family moves into its plugin, the journey tree and the unit net test pfm end to end, an adopter gets its own pfm.settings.json, the full gate runs in half the time, and the Herdr indicator daemon no longer rereads the cache

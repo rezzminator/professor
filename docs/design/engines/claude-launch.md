@@ -290,7 +290,7 @@ Values set through the `--settings` `env` block are read from argv, never from `
 
 ## Surfaces that stay in sync
 
-- `defaults.json` `settings` ↔ `templates/project/pfm.config.json` `claude.settings`, held equal by `TestSettingsTemplateCarriesTheDefaults` in `pfm/internal/claudelaunch/defaults_test.go`; a new default lands in the template in the same change ([workbench.md](workbench.md#project-pfmconfigjson)).
+- `defaults.json` `settings` ↔ `example.pfm.config.json` `claude.settings`, held equal by `TestExampleConfigCarriesTheDefaults` in `pfm/internal/claudelaunch/defaults_test.go`; a new default lands in the example in the same change. The project template `templates/project/pfm.config.json` carries none of them: its `claude.settings` is empty, held by `TestProjectTemplateKeepsTheMachineSettings` ([workbench.md](workbench.md#project-pfmconfigjson)).
 - `claudelaunch.Knobs` ↔ `example.pfm.config.json` (every config-sourced knob has its key there) ↔ `pfm config claude` ↔ the mock engine's accepted flags (`pfm/internal/mockengine/claude.go`). The fake Claude re-runs the status line command every `statusLine.refreshInterval` seconds of the settings it was launched with, besides its own events, as real Claude does (`statusLineSetting`, `invokeStatusLine` in `pfm/internal/mockengine/statusline.go`; the ticker in `runPane`, `pfm/internal/mockengine/pane.go`; the screen drawing in `pane_screen.go`); the Codex and OpenCode fakes have no interval.
 - The hygiene rows ↔ the Codex launch's unset list (`pfm internal codex-launch`) ↔ the headless strip lists ↔ the doctor harness probe's capture environment — all read from the registry.
 - `outputStyle` constant ↔ the gate `checks_templates_output_styles` in `infra/fence/checks.sh`.

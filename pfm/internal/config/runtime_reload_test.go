@@ -69,6 +69,12 @@ func TestRuntimeReloadReadsTheFileAgain(t *testing.T) {
 		t.Fatalf("Reload Codex homes = %v roots %v (%v), want %v", fromAmbient.Config.CodexHomes(),
 			fromAmbient.Paths.Roots[pfmengine.Codex], err, want)
 	}
+	// The reloaded runtime owns its roots: the shared MCP daemon reloads its one
+	// runtime on every verb, concurrently, so a write into the caller's map is a
+	// concurrent map write.
+	if got := codexRuntime.Paths.Roots[pfmengine.Codex]; !reflect.DeepEqual(got, []string{stale}) {
+		t.Fatalf("Reload rewrote the caller's Codex roots to %v, want them kept at %v", got, []string{stale})
+	}
 
 	write(`{"version":2,"claude":{"systemPrompt":"verbose"}}`)
 	kept, err := runtime.Reload()

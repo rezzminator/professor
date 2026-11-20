@@ -108,45 +108,70 @@ func TestDefaultsReachEveryLaunch(t *testing.T) {
 	check(t, payload)
 }
 
-// TestSettingsTemplateCarriesTheDefaults: the project template pfm init copies into a project as
-// pfm.config.json, and the machine file's example pfm install seeds, list every shipped launch default
-// at its value under claude.settings, so either file shows them all; a default added to defaults.json
-// and not to both fails here.
-func TestSettingsTemplateCarriesTheDefaults(t *testing.T) {
+// TestExampleConfigCarriesTheDefaults: the machine file's example, which pfm install seeds, lists every
+// shipped launch default at its value under claude.settings, so it shows them all; a default added to
+// defaults.json and not to the example fails here.
+func TestExampleConfigCarriesTheDefaults(t *testing.T) {
+	path := filepath.Join(launchRepoRoot(t), "example.pfm.config.json")
+	if got, want := configFileSettings(t, path), shippedDefaultSettings(t); !reflect.DeepEqual(got, want) {
+		t.Errorf("%s claude.settings = %#v, want defaults.json settings %#v", path, got, want)
+	}
+}
+
+// TestProjectTemplateKeepsTheMachineSettings: the project file pfm init scaffolds from the template
+// layers nothing over the machine file, so a machine file's own choice (a default changed, a default
+// turned off with a null) still reaches every chat in that project.
+func TestProjectTemplateKeepsTheMachineSettings(t *testing.T) {
+	path := filepath.Join(launchRepoRoot(t), "templates", "project", "pfm.config.json")
+	machine := map[string]any{"tui": "default", "env": map[string]any{"CLAUDE_CODE_NATIVE_CURSOR": nil}}
+	layered, err := LayerSettings(shippedDefaultSettings(t), machine, configFileSettings(t, path))
+	if err != nil {
+		t.Fatalf("layer %s over the machine settings: %v", path, err)
+	}
+	env, _ := layered["env"].(map[string]any)
+	cursor, held := env["CLAUDE_CODE_NATIVE_CURSOR"]
+	if layered["tui"] != "default" || !held || cursor != nil {
+		t.Fatalf(
+			"%s over a machine file setting tui \"default\" and CLAUDE_CODE_NATIVE_CURSOR null: "+
+				"tui = %#v, CLAUDE_CODE_NATIVE_CURSOR = %#v (held %t); want \"default\" and a held null",
+			path, layered["tui"], cursor, held,
+		)
+	}
+}
+
+func launchRepoRoot(t *testing.T) string {
+	t.Helper()
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate test source")
 	}
-	repo := filepath.Join(filepath.Dir(source), "..", "..", "..")
+	return filepath.Join(filepath.Dir(source), "..", "..", "..")
+}
+
+func shippedDefaultSettings(t *testing.T) map[string]any {
+	t.Helper()
 	var file struct {
 		Settings map[string]any `json:"settings"`
 	}
 	if err := json.Unmarshal(defaultsJSON, &file); err != nil {
 		t.Fatalf("decode defaults.json: %v", err)
 	}
-	for _, path := range []string{
-		filepath.Join(repo, "templates", "project", "pfm.config.json"),
-		filepath.Join(repo, "example.pfm.config.json"),
-	} {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var config struct {
-			Claude struct {
-				Settings map[string]any `json:"settings"`
-			} `json:"claude"`
-		}
-		if err := json.Unmarshal(raw, &config); err != nil {
-			t.Fatalf("decode %s: %v", path, err)
-		}
-		if !reflect.DeepEqual(config.Claude.Settings, file.Settings) {
-			t.Errorf(
-				"%s claude.settings = %#v, want defaults.json settings %#v",
-				path,
-				config.Claude.Settings,
-				file.Settings,
-			)
-		}
+	return file.Settings
+}
+
+func configFileSettings(t *testing.T, path string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
+	var config struct {
+		Claude struct {
+			Settings map[string]any `json:"settings"`
+		} `json:"claude"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return config.Claude.Settings
 }

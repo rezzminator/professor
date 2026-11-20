@@ -260,7 +260,7 @@ func TestSettingsFaults(t *testing.T) {
 }
 
 // TestSettingsTemplate: the template pfm init copies into a project as pfm.config.json sets exactly the
-// keys the project scope reads, and a launch reads it as written, with no warning.
+// keys the project scope reads, each empty, and a launch reads it as setting nothing, with no warning.
 func TestSettingsTemplate(t *testing.T) {
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
@@ -296,18 +296,10 @@ func TestSettingsTemplate(t *testing.T) {
 	if got, want := slices.Sorted(maps.Keys(keys.Claude)), []string{"settings"}; !slices.Equal(got, want) {
 		t.Errorf("%s claude keys = %q, want %q", path, got, want)
 	}
-	var template struct {
-		Claude struct {
-			Settings map[string]any `json:"settings"`
-		} `json:"claude"`
-	}
-	if err := json.Unmarshal(raw, &template); err != nil {
-		t.Fatalf("decode %s: %v", path, err)
-	}
 	root, _ := benchFixture(t)
 	writeBenchFile(t, pfmconfig.PathIn(root), string(raw))
 	got, err := ForLaunch(filepath.Join(root, "src"), t.TempDir(), pfmengine.Claude, New)
-	want := Persona{Envs: map[string]string{}, ClaudeSettings: template.Claude.Settings}
+	want := Persona{Envs: map[string]string{}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("ForLaunch over %s = %#v, %v; want %#v", path, got, err, want)
 	}

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"maps"
+
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -29,6 +31,9 @@ func (runtime Runtime) Reload() (Runtime, error) {
 	}
 	runtime.Config = machine
 	if runtime.Paths.Roots != nil {
+		// The copy gets its own map: the shared MCP daemon reloads on every
+		// verb, concurrently, from the one runtime other verbs are reading.
+		runtime.Paths.Roots = maps.Clone(runtime.Paths.Roots)
 		runtime.Paths.Roots[pfmengine.Codex] = machine.CodexHomes()
 	}
 	return runtime, nil

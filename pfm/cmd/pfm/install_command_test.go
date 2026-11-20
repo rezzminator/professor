@@ -25,12 +25,21 @@ import (
 
 func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
 	plugins := []pfmconfig.ClaudePlugin{{ID: "callmeter"}, {ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}}
+	herdrKeys := &pfmconfig.HerdrKeys{
+		Actions: map[string]*pfmconfig.HerdrKeyBinding{"next_workspace": {Keys: []string{"cmd+shift+down"}}},
+	}
 	runtime := commandRuntime{
-		Paths:   paths.Values{Home: t.TempDir()},
-		Config:  pfmconfig.Config{Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins}},
+		Paths: paths.Values{Home: t.TempDir()},
+		Config: pfmconfig.Config{
+			Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins},
+			Herdr:  pfmconfig.Herdr{Keys: herdrKeys},
+		},
 		Version: "0.80.0-alpha",
 	}
 	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
+	if !reflect.DeepEqual(options.HerdrKeys, herdrKeys) {
+		t.Fatalf("installer herdr.keys = %#v, want %#v", options.HerdrKeys, herdrKeys)
+	}
 	if options.Version != "0.80.0-alpha" || options.ClaudePluginCheckoutRoot != "/opt/plugins" {
 		t.Fatalf("plugin options version=%q root=%q", options.Version, options.ClaudePluginCheckoutRoot)
 	}

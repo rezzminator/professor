@@ -143,6 +143,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
 	fmt.Fprint(stdout, config.ChatSummary())
+	fmt.Fprint(stdout, config.HerdrSummary())
 	for index, value := range []string{runtime.Paths.StateDB, runtime.Paths.CacheDB} {
 		source := config.Source([]string{"state.db", "state.cacheDb"}[index])
 		if (paths.OSEnv{}).Get([]string{paths.EnvStateDB, paths.EnvCacheDB}[index]) != "" {

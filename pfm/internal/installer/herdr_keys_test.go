@@ -4,7 +4,37 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
+
+// herdrKeysReleasedBlock is the block the previous pfm wrote, a hand-written
+// TOML constant: semantically pfm's keymap, its text not the render's.
+const herdrKeysReleasedBlock = `# >>> pfm herdr keys >>>
+[keys]
+previous_workspace = "prefix+i"
+next_workspace = "prefix+m"
+
+[[keys.command]]
+key = "prefix+a"
+type = "shell"
+description = "new pfm chat in this space"
+command = '"${HERDR_BIN_PATH:-herdr}" tab create --workspace "${HERDR_ACTIVE_WORKSPACE_ID:-$HERDR_WORKSPACE_ID}" --env PFM_AUTO_OPEN=pfm --focus'
+# <<< pfm herdr keys <<<
+`
+
+// herdrKeysOverride moves previous_workspace and adds a command; its block
+// is herdrKeysOverrideBlock.
+var herdrKeysOverride = &pfmconfig.HerdrKeys{
+	Actions:  map[string]*pfmconfig.HerdrKeyBinding{"previous_workspace": {Keys: []string{"cmd+shift+up"}}},
+	Commands: []pfmconfig.HerdrKeyCommand{{Key: "prefix+z", Type: "shell", Command: "zoom"}},
+}
+
+const herdrKeysOverrideBlock = "# >>> pfm herdr keys >>>\n[keys]\nnext_workspace = \"prefix+m\"\nprevious_workspace = \"cmd+shift+up\"\n\n" +
+	"[[keys.command]]\nkey = \"prefix+a\"\ntype = \"shell\"\ndescription = \"new pfm chat in this space\"\n" +
+	"command = \"\\\"${HERDR_BIN_PATH:-herdr}\\\" tab create --workspace \\\"${HERDR_ACTIVE_WORKSPACE_ID:-$HERDR_WORKSPACE_ID}\\\" --env PFM_AUTO_OPEN=pfm --focus\"\n\n" +
+	"[[keys.command]]\nkey = \"prefix+z\"\ntype = \"shell\"\ncommand = \"zoom\"\n" +
+	"# <<< pfm herdr keys <<<\n"
 
 // TestHerdrKeysBlockIsWrittenAdoptedOrLeftAlone drives install's keys step
 // over every config shape it can meet: none, other tables only, pfm's own
@@ -19,22 +49,25 @@ func TestHerdrKeysBlockIsWrittenAdoptedOrLeftAlone(t *testing.T) {
 	oldBlock := herdrKeysOpen + "[keys]\nprevious_workspace = \"prefix+i\"\n" + herdrKeysClose
 	cases := []struct {
 		name, original, want, line string
+		keys                       *pfmconfig.HerdrKeys
 	}{
 		{
-			name: "empty config", original: "", want: herdrKeysBlock,
+			name: "empty config", original: "", want: herdrKeysDefaultBlock,
 			line: "  change  wire herdr keys in {path}",
 		},
 		{
-			name: "other tables only", original: theme, want: theme + "\n" + herdrKeysBlock,
+			name: "other tables only", original: theme, want: theme + "\n" + herdrKeysDefaultBlock,
 			line: "  change  wire herdr keys in {path}",
 		},
 		{
-			name: "owned block", original: theme + "\n" + herdrKeysBlock, want: theme + "\n" + herdrKeysBlock,
-			line: "  ok      herdr keys: wired {path}",
+			name:     "owned block",
+			original: theme + "\n" + herdrKeysDefaultBlock,
+			want:     theme + "\n" + herdrKeysDefaultBlock,
+			line:     "  ok      herdr keys: wired {path}",
 		},
 		{
 			name: "identical hand-written table", original: theme + "\n" + identical + "\n[ui]\nsound = false\n",
-			want: theme + "\n" + herdrKeysBlock + "\n[ui]\nsound = false\n",
+			want: theme + "\n" + herdrKeysDefaultBlock + "\n[ui]\nsound = false\n",
 			line: "  change  adopt hand-written [keys] into pfm's block in {path}",
 		},
 		{
@@ -44,13 +77,33 @@ func TestHerdrKeysBlockIsWrittenAdoptedOrLeftAlone(t *testing.T) {
 				`[[keys.command]] key = "prefix+a" (new pfm chat in this space)`,
 		},
 		{
-			name: "old block", original: theme + "\n" + oldBlock, want: theme + "\n" + herdrKeysBlock,
+			name: "old block", original: theme + "\n" + oldBlock, want: theme + "\n" + herdrKeysDefaultBlock,
 			line: "  change  update herdr keys in {path}",
+		},
+		{
+			name: "block the previous pfm wrote", original: theme + "\n" + herdrKeysReleasedBlock,
+			want: theme + "\n" + herdrKeysDefaultBlock, line: "  change  update herdr keys in {path}",
+		},
+		{
+			name: "herdr.keys over an empty config", original: "", keys: herdrKeysOverride,
+			want: herdrKeysOverrideBlock, line: "  change  wire herdr keys in {path}",
+		},
+		{
+			name:     "herdr.keys over pfm's default block",
+			original: theme + "\n" + herdrKeysDefaultBlock,
+			keys:     herdrKeysOverride,
+			want:     theme + "\n" + herdrKeysOverrideBlock,
+			line:     "  change  update herdr keys in {path}",
+		},
+		{
+			name: "herdr.keys block owned", original: herdrKeysOverrideBlock, keys: herdrKeysOverride,
+			want: herdrKeysOverrideBlock, line: "  ok      herdr keys: wired {path}",
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			installer, config, output := herdrShellInstaller(t, testCase.original, true)
+			installer.options.HerdrKeys = testCase.keys
 			if err := installer.wireHerdrKeys(false); err != nil {
 				t.Fatalf("wireHerdrKeys: %v\n%s", err, output)
 			}
@@ -68,7 +121,7 @@ func TestHerdrKeysBlockIsWrittenAdoptedOrLeftAlone(t *testing.T) {
 
 func TestHerdrKeysUninstallRemovesOnlyTheBlockAndAbsentHerdrSkips(t *testing.T) {
 	const theme = "[theme]\nname = \"catppuccin\"\n"
-	installer, config, output := herdrShellInstaller(t, theme+"\n"+herdrKeysBlock, true)
+	installer, config, output := herdrShellInstaller(t, theme+"\n"+herdrKeysDefaultBlock, true)
 	if err := installer.wireHerdrKeys(true); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +130,7 @@ func TestHerdrKeysUninstallRemovesOnlyTheBlockAndAbsentHerdrSkips(t *testing.T) 
 	}
 	// A config TOML refuses (a hand-written [keys] beside the block) still
 	// loses the block at uninstall, found by its markers.
-	broken, brokenConfig, _ := herdrShellInstaller(t, "[keys]\nx = 1\n"+herdrKeysBlock, true)
+	broken, brokenConfig, _ := herdrShellInstaller(t, "[keys]\nx = 1\n"+herdrKeysDefaultBlock, true)
 	if err := broken.wireHerdrKeys(true); err != nil {
 		t.Fatalf("uninstall over an unparsable config: %v", err)
 	}

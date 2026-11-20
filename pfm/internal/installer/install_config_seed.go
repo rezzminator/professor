@@ -16,8 +16,8 @@ var seedNewClaudeKeys = []string{"remoteControl", "pluginCheckoutRoot", "plugins
 
 // seedWithoutDefaultNewKeys is the seed a first install writes: the example's
 // bytes, less each key of seedNewClaudeKeys that config.Marshal would leave out
-// at its default, and less each scope key (envs, harnessPrompt, claude.settings)
-// that changes no launch. A fresh config then rolls back to the last release as
+// at its default, less each scope key (envs, harnessPrompt, claude.settings)
+// that changes no launch, and less an unset herdr block. A fresh config then rolls back to the last release as
 // `pfm config init`'s does; a key the example sets away from its default stays.
 // The probe marshals the loaded config as if the file had not set those keys,
 // so the omission rule stays marshalClaude's alone.
@@ -54,6 +54,11 @@ func seedWithoutDefaultNewKeys(loaded pfmconfig.Config) ([]byte, error) {
 	}
 	if _, present := document[pfmconfig.KeyHarnessPrompt]; present && loaded.HarnessPrompt == nil {
 		delete(document, pfmconfig.KeyHarnessPrompt)
+		removed = true
+	}
+	// An unset herdr.keys is pfm's own keymap, and a pfm before it refuses the herdr block.
+	if _, present := document[pfmconfig.KeyHerdr]; present && loaded.Herdr.Keys == nil {
+		delete(document, pfmconfig.KeyHerdr)
 		removed = true
 	}
 	raw, found := document[claudeKey]

@@ -5,15 +5,17 @@ import (
 	"io"
 	"strings"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
-// printHerdrKeysDoctor names each pfm Herdr mapping the config lacks: without
+// printHerdrKeysDoctor names each mapping of herdr.keys over pfm's keymap the
+// Herdr config lacks: without
 // them VS Code's cmd+shift+up/down (^Bi / ^Bm) and prefix+a do nothing, and
 // nothing else says so. A hand-written [keys] table stays the user's, so its
 // fix is to add the mapping there; an unusable herdr binary is the
 // herdr-shell row's warning, named here and not counted twice.
-func printHerdrKeysDoctor(stdout io.Writer, home string, dependencies Dependencies) int {
+func printHerdrKeysDoctor(stdout io.Writer, home string, dependencies Dependencies, keys *pfmconfig.HerdrKeys) int {
 	const row = "doctor: herdr-keys:"
 	binary, ok := resolveHerdrBinary(dependencies.Runner, dependencies, func(string, string, string) {})
 	switch {
@@ -24,7 +26,7 @@ func printHerdrKeysDoctor(stdout io.Writer, home string, dependencies Dependenci
 		fmt.Fprintln(stdout, row, "ok herdr absent")
 		return 0
 	}
-	status, err := installer.InspectHerdrKeys(home, dependencies.Env)
+	status, err := installer.InspectHerdrKeys(home, dependencies.Env, keys)
 	if err != nil {
 		fmt.Fprintf(stdout, "%s WARN %v\n", row, err)
 		return 1
@@ -38,6 +40,9 @@ func printHerdrKeysDoctor(stdout io.Writer, home string, dependencies Dependenci
 		fmt.Fprintf(stdout, "%s WARN %s lacks %s — run pfm install --yes\n", row, status.Path, missing)
 	case status.Block && !status.Current && !status.HandWritten:
 		fmt.Fprintf(stdout, "%s WARN pfm's keys block in %s is out of date — run pfm install --yes\n", row, status.Path)
+	case !status.Block && !status.HandWritten:
+		// herdr.keys removed every pfm mapping, so none is missing, yet no keys table is there.
+		fmt.Fprintf(stdout, "%s WARN %s lacks pfm's keys block — run pfm install --yes\n", row, status.Path)
 	case status.Owned():
 		fmt.Fprintf(stdout, "%s ok wired %s\n", row, status.Path)
 		return 0

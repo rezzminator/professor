@@ -1,6 +1,8 @@
 // Package config owns pfm's versioned configuration, pfm.config.json: the machine file every key may
 // set and, at a managed root, a project's, which sets only the scope keys (scope.go).
 //
+// name_sync.go: nameSync.interval, the window-name convergence schedule.
+// herdr.go: herdr.keys, the user's Herdr keymap pfm install merges over its own.
 // scope_unread.go: the keys a file sets that its scope never reads, retired or machine-only.
 // runtime_reload.go: Runtime.Reload, the machine file read again for a long-lived process.
 package config
@@ -16,7 +18,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -127,28 +128,6 @@ type ClaudePrefs struct {
 	Settings map[string]any
 }
 
-// NameSync is the window-name convergence schedule. Interval is rendered into
-// BOTH schedulers at install time — the launchd job's StartInterval and the
-// systemd timer's OnUnitInactiveSec — from this ONE value, so the two can
-// never drift apart on a host that runs either.
-type NameSync struct {
-	Interval time.Duration
-}
-
-// DefaultNameSyncInterval is the poll the fleet shipped with: a claude
-// /rename's backstop between picker runs.
-const DefaultNameSyncInterval = 15 * time.Minute
-
-// MinNameSyncInterval floors the poll. name-sync gathers the whole fleet and
-// captures every claude pane; below a minute the poll costs more than the
-// drift it converges.
-const MinNameSyncInterval = time.Minute
-
-// DefaultNameSync is the schedule when the file says nothing.
-func DefaultNameSync() NameSync {
-	return NameSync{Interval: DefaultNameSyncInterval}
-}
-
 // Claude is retained as an alias for callers that used the v1 public shape.
 type Claude = ClaudePrefs
 
@@ -222,6 +201,8 @@ func (config AskConfig) PrefsFor(id pfmengine.ID) EnginePrefs {
 // each effective value came from the machine file or from a default.
 type Config struct {
 	Chat ChatConfig
+	// Herdr is the herdr block (herdr.go).
+	Herdr Herdr
 	// SeedContent carries the validated seed bytes into installation.
 	SeedContent      []byte `json:"-"`
 	Version          int
@@ -285,6 +266,7 @@ type rawConfig struct {
 	MCP      *rawMCP       `json:"mcp,omitempty"`
 	Log      *rawLog       `json:"log,omitempty"`
 	Ask      *rawAsk       `json:"ask,omitempty"`
+	Herdr    *rawHerdr     `json:"herdr,omitempty"`
 	// Envs and HarnessPrompt are scope keys (scope.go), read at both scopes.
 	Envs          json.RawMessage   `json:"envs,omitempty"`
 	HarnessPrompt *rawHarnessPrompt `json:"harnessPrompt,omitempty"`
@@ -299,10 +281,6 @@ type rawTmux struct {
 
 type rawTmuxTitles struct {
 	Enabled *bool `json:"enabled,omitempty"`
-}
-
-type rawNameSync struct {
-	Interval *string `json:"interval,omitempty"`
 }
 
 type rawAccount struct {
@@ -505,6 +483,7 @@ func defaultsWithMCPServers(
 		"ask.engine":                                         SourceDefault,
 		"chat.backend":                                       SourceDefault,
 		"chat.herdrTabStatus":                                SourceDefault,
+		KeyHerdrKeys:                                         SourceDefault,
 		"tmux.titles.enabled":                                SourceDefault,
 		"nameSync.interval":                                  SourceDefault,
 		keyDoctorIgnoreWarnings:                              SourceDefault,
@@ -776,6 +755,9 @@ func loadWithMCPServers(
 	if err := applyScope(&result, raw); err != nil {
 		return Config{}, err
 	}
+	if err := applyHerdr(&result, raw.Herdr); err != nil {
+		return Config{}, err
+	}
 	if raw.Accounts != nil {
 		accounts, err := validateAccounts(*raw.Accounts, home)
 		if err != nil {
@@ -931,29 +913,6 @@ func loadWithMCPServers(
 		}
 	}
 	return result, nil
-}
-
-// parseNameSyncInterval refuses invalid nameSync.interval values rather than
-// silently substituting a default for the scheduler installed from this value.
-func parseNameSyncInterval(value, path string) (time.Duration, error) {
-	interval, err := time.ParseDuration(strings.TrimSpace(value))
-	if err != nil {
-		return 0, fmt.Errorf(
-			"config %s: nameSync.interval must be a Go duration such as %q, got %q",
-			path,
-			DefaultNameSyncInterval.String(),
-			value,
-		)
-	}
-	if interval < MinNameSyncInterval {
-		return 0, fmt.Errorf(
-			"config %s: nameSync.interval must be at least %s, got %s",
-			path,
-			MinNameSyncInterval,
-			interval,
-		)
-	}
-	return interval, nil
 }
 
 // multipleJSONValues is the machine config's refusal of a second value.
@@ -1412,6 +1371,9 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	}
 	if chat := marshalChat(config); len(chat) != 0 {
 		value["chat"] = chat
+	}
+	if herdr := marshalHerdr(config); herdr != nil {
+		value[KeyHerdr] = herdr
 	}
 	if doctor := marshalDoctor(config); len(doctor) != 0 {
 		value["doctor"] = doctor

@@ -9,19 +9,32 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// herdrKeysCommand is the [keys] array of [[keys.command]] tables.
-const herdrKeysCommand = "command"
-
-// herdrKeyMappings is each binding pfm's keymap carries, as a doctor row
+// herdrKeyMapping is one binding of the rendered keymap, as a doctor row
 // names it when the config lacks it: the [keys] action or the
 // [[keys.command]] key it binds.
-var herdrKeyMappings = []struct{ action, key, name string }{
-	{action: "previous_workspace", key: "prefix+i", name: `previous_workspace = "prefix+i"`},
-	{action: "next_workspace", key: "prefix+m", name: `next_workspace = "prefix+m"`},
-	{action: herdrKeysCommand, key: "prefix+a", name: `[[keys.command]] key = "prefix+a" (new pfm chat in this space)`},
+type herdrKeyMapping struct{ action, key, name string }
+
+// herdrKeyMappings is every binding keymap carries: each key of each action,
+// then each command by its key.
+func herdrKeyMappings(keymap herdrKeymap) []herdrKeyMapping {
+	var mappings []herdrKeyMapping
+	for _, action := range keymap.actions {
+		for _, key := range action.binding.Keys {
+			mappings = append(mappings, herdrKeyMapping{action.name, key, fmt.Sprintf("%s = %q", action.name, key)})
+		}
+	}
+	for _, command := range keymap.commands {
+		name := fmt.Sprintf("[[keys.command]] key = %q", command.Key)
+		if command.Description != "" {
+			name += " (" + command.Description + ")"
+		}
+		mappings = append(mappings, herdrKeyMapping{pfmconfig.HerdrKeysCommand, command.Key, name})
+	}
+	return mappings
 }
 
 // HerdrKeysStatus is the Herdr config's keymap as read from disk.
@@ -29,7 +42,8 @@ type HerdrKeysStatus struct {
 	Path        string
 	Exists      bool
 	Block       bool     // pfm's marker block is present
-	Current     bool     // the block holds this pfm's keymap
+	Current     bool     // the block holds the rendered keymap
+	Want        string   // the block herdr.keys over pfm's keymap renders
 	HandWritten bool     // a keys table is defined outside pfm's block
 	Missing     []string // each pfm mapping the config does not bind
 }
@@ -39,17 +53,22 @@ func (status HerdrKeysStatus) Owned() bool {
 	return status.Block && status.Current && !status.HandWritten
 }
 
-// InspectHerdrKeys reads the Herdr config's keymap; a config that does not
-// parse is an error, never a missing mapping.
-func InspectHerdrKeys(home string, env paths.Env) (HerdrKeysStatus, error) {
+// InspectHerdrKeys reads the Herdr config's keymap against herdr.keys
+// (user, nil when unset) over pfm's keymap; a config that does not parse is
+// an error, never a missing mapping.
+func InspectHerdrKeys(home string, env paths.Env, user *pfmconfig.HerdrKeys) (HerdrKeysStatus, error) {
 	path, err := paths.HerdrConfig(home, env)
 	status := HerdrKeysStatus{Path: path}
 	if err != nil {
 		return status, err
 	}
+	keymap := herdrKeymapMerged(user)
+	if status.Want, err = herdrKeysBlockFor(keymap); err != nil {
+		return status, err
+	}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		status.Missing = herdrKeysMissing(nil)
+		status.Missing = herdrKeysMissing(keymap, nil)
 		return status, nil
 	}
 	if err != nil {
@@ -61,11 +80,11 @@ func InspectHerdrKeys(home string, env paths.Env) (HerdrKeysStatus, error) {
 		return status, fmt.Errorf("parse Herdr config %s: %w", path, err)
 	}
 	keys, _ := whole["keys"].(map[string]any)
-	status.Missing = herdrKeysMissing(keys)
+	status.Missing = herdrKeysMissing(keymap, keys)
 	outside := string(raw)
 	if start, end, found := herdrKeysBlockRange(outside); found {
 		status.Block = true
-		status.Current = outside[start:end] == herdrKeysBlock
+		status.Current = outside[start:end] == status.Want
 		outside = outside[:start] + outside[end:]
 	}
 	rest, err := decodeHerdrConfig(outside)
@@ -96,14 +115,14 @@ func herdrKeysBlockRange(content string) (start, end int, found bool) {
 	return start, start + closeAt + len(herdrKeysClose), true
 }
 
-// herdrKeysMissing names each pfm mapping keys does not bind; an action may
-// be bound to one key or to a list of them.
-func herdrKeysMissing(keys map[string]any) []string {
+// herdrKeysMissing names each mapping of keymap that keys does not bind; an
+// action may be bound to one key or to a list of them.
+func herdrKeysMissing(keymap herdrKeymap, keys map[string]any) []string {
 	var missing []string
-	for _, mapping := range herdrKeyMappings {
+	for _, mapping := range herdrKeyMappings(keymap) {
 		bound := false
-		if mapping.action == herdrKeysCommand {
-			for _, command := range herdrKeyCommands(keys[herdrKeysCommand]) {
+		if mapping.action == pfmconfig.HerdrKeysCommand {
+			for _, command := range herdrKeyCommands(keys[pfmconfig.HerdrKeysCommand]) {
 				bound = bound || herdrKeyBinds(command["key"], mapping.key)
 			}
 		} else {

@@ -10,6 +10,7 @@
 // claude_plugins_submodule.go: whether a plugin's checkout is a submodule the source clone never initialised.
 // optional_deps.go: the record of the optional dependencies the last install found, which pfm doctor compares.
 // herdr_keys.go: pfm's Herdr keymap block (space walk, new chat in this space), adopting an identical hand-written table.
+// herdr_keymap.go: pfm's Herdr keymap, herdr.keys merged over it, and its one TOML render.
 // herdr_keys_status.go: the Herdr config's keymap as read from disk, each pfm mapping it lacks.
 // themes_unowned.go: shipped themes install left alone as the user's, and the stale copies it adopts instead.
 // vscode_presence.go: the VS Code product roots present on the host, and the window-reload line install --vscode ends on.

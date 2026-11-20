@@ -13,21 +13,13 @@ import (
 )
 
 // installedHerdrKeys is the keys block pfm install writes into the Herdr
-// config (installer's herdrKeysBlock, unexported and out of testjail's reach,
+// config with herdr.keys unset (installer's rendered block, unexported and out of testjail's reach,
 // as installer's tests import testjail): a drift turns the jailed doctor's
 // herdr-keys row red.
-const installedHerdrKeys = `# >>> pfm herdr keys >>>
-[keys]
-previous_workspace = "prefix+i"
-next_workspace = "prefix+m"
-
-[[keys.command]]
-key = "prefix+a"
-type = "shell"
-description = "new pfm chat in this space"
-command = '"${HERDR_BIN_PATH:-herdr}" tab create --workspace "${HERDR_ACTIVE_WORKSPACE_ID:-$HERDR_WORKSPACE_ID}" --env PFM_AUTO_OPEN=pfm --focus'
-# <<< pfm herdr keys <<<
-`
+const installedHerdrKeys = "# >>> pfm herdr keys >>>\n[keys]\nnext_workspace = \"prefix+m\"\nprevious_workspace = \"prefix+i\"\n\n" +
+	"[[keys.command]]\nkey = \"prefix+a\"\ntype = \"shell\"\ndescription = \"new pfm chat in this space\"\n" +
+	"command = \"\\\"${HERDR_BIN_PATH:-herdr}\\\" tab create --workspace \\\"${HERDR_ACTIVE_WORKSPACE_ID:-$HERDR_WORKSPACE_ID}\\\" --env PFM_AUTO_OPEN=pfm --focus\"\n" +
+	"# <<< pfm herdr keys <<<\n"
 
 // StageHerdrShell supplies the config and wrapper of an installed Herdr host:
 // pfm's shell and keys blocks.

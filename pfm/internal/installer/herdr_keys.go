@@ -11,30 +11,18 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
-// herdrKeysBody is pfm's Herdr keymap: prefix+i / prefix+m walk the spaces
-// (VS Code's cmd+shift+up/down send ^Bi / ^Bm into the terminal), prefix+a
-// opens a pfm chat in the active space. It owns the whole [keys] table, so a
-// config holds it or a hand-written [keys] table, never both (TOML refuses a
-// second [keys]).
+// pfm's keymap block (herdr_keymap.go renders it) owns the whole [keys]
+// table, so a config holds it or a hand-written [keys] table, never both (TOML
+// refuses a second [keys]).
 const (
 	herdrKeysOpen  = "# >>> pfm herdr keys >>>\n"
 	herdrKeysClose = "# <<< pfm herdr keys <<<\n"
-	herdrKeysBody  = `[keys]
-previous_workspace = "prefix+i"
-next_workspace = "prefix+m"
-
-[[keys.command]]
-key = "prefix+a"
-type = "shell"
-description = "new pfm chat in this space"
-command = '"${HERDR_BIN_PATH:-herdr}" tab create --workspace "${HERDR_ACTIVE_WORKSPACE_ID:-$HERDR_WORKSPACE_ID}" --env PFM_AUTO_OPEN=pfm --focus'
-`
-	herdrKeysBlock = herdrKeysOpen + herdrKeysBody + herdrKeysClose
 )
 
-// wireHerdrKeys owns pfm's keymap block in the Herdr config. A hand-written
-// [keys] table that already says exactly what the block says is adopted into
-// it; any other stays the user's, its missing mappings named.
+// wireHerdrKeys owns pfm's keymap block in the Herdr config, rendered from
+// herdr.keys over pfm's keymap. A hand-written [keys] table that already says
+// exactly what the block says is adopted into it; any other stays the user's,
+// its missing mappings named.
 func (installer *engine) wireHerdrKeys(uninstall bool) (result error) {
 	if !uninstall {
 		if absent, err := installer.herdrAbsent(); err != nil || absent {
@@ -52,7 +40,7 @@ func (installer *engine) wireHerdrKeys(uninstall bool) (result error) {
 		}
 		defer func() { result = errors.Join(result, release()) }()
 	}
-	status, err := InspectHerdrKeys(home, installer.env())
+	status, err := InspectHerdrKeys(home, installer.env(), installer.options.HerdrKeys)
 	switch {
 	case err != nil && (!uninstall || status.Path == ""):
 		return err
@@ -81,11 +69,11 @@ func (installer *engine) wireHerdrKeys(uninstall bool) (result error) {
 		installer.ok("herdr keys: wired " + status.Path)
 		return nil
 	case block && !status.HandWritten:
-		return write("update herdr keys in", original[:start]+herdrKeysBlock+original[end:])
+		return write("update herdr keys in", original[:start]+status.Want+original[end:])
 	case status.HandWritten:
 		return installer.adoptHerdrKeys(status, original, write)
 	}
-	updated := original + themesync.HerdrAppendSeparator(original) + herdrKeysBlock
+	updated := original + themesync.HerdrAppendSeparator(original) + status.Want
 	if err := herdrKeysOnlyAdded(original, updated); err != nil {
 		return fmt.Errorf("add pfm's keys block to %s: %w", status.Path, err)
 	}
@@ -101,7 +89,7 @@ func (installer *engine) adoptHerdrKeys(
 ) error {
 	start, end, found, err := themesync.HerdrTableSpan(original, "keys")
 	if err == nil && found && !status.Block {
-		candidate := original[:start] + herdrKeysBlock + original[end:]
+		candidate := original[:start] + status.Want + original[end:]
 		before, beforeErr := decodeHerdrConfig(original)
 		after, afterErr := decodeHerdrConfig(candidate)
 		if beforeErr == nil && afterErr == nil && reflect.DeepEqual(before, after) {

@@ -11,7 +11,7 @@ import (
 
 // The seed a first install writes leaves out the new claude keys a pfm of the
 // last release refuses (remoteControl, pluginCheckoutRoot, plugins, costLedger, settings, and the
-// top-level envs and harnessPrompt) while they sit at their defaults, exactly as `pfm config init` does
+// top-level envs, harnessPrompt and herdr) while they sit at their defaults, exactly as `pfm config init` does
 // (marshalClaude); the example file itself keeps them, for its parity test.
 func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 	_, source, _, ok := runtime.Caller(0)
@@ -28,7 +28,7 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 			t.Errorf("the seed keeps claude.%s at its default", key)
 		}
 	}
-	for _, key := range []string{"envs", "harnessPrompt"} {
+	for _, key := range []string{"envs", "harnessPrompt", "herdr"} {
 		if _, present := document[key]; present {
 			t.Errorf("the seed keeps %s at its default", key)
 		}
@@ -44,9 +44,11 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 // A value the example sets away from its default is kept.
 func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
 	document, claude := installSeedClaude(t, []byte(`{"version":2,"envs":{"TEAM_MODE":"strict"},`+
-		`"harnessPrompt":{"replace":"team.md"},"claude":{"settings":{"cleanupPeriodDays":30},"costLedger":false,`+
+		`"harnessPrompt":{"replace":"team.md"},"herdr":{"keys":{"close_pane":null}},"claude":{"settings":{"cleanupPeriodDays":30},"costLedger":false,`+
 		`"plugins":["auto-effort"],"remoteControl":false,"theme":null}}`))
-	for key, want := range map[string]string{"envs": `{"TEAM_MODE":"strict"}`, "harnessPrompt": `{"replace":"team.md"}`} {
+	for key, want := range map[string]string{
+		"envs": `{"TEAM_MODE":"strict"}`, "harnessPrompt": `{"replace":"team.md"}`, "herdr": `{"keys":{"close_pane":null}}`,
+	} {
 		if got := strings.Join(strings.Fields(string(document[key])), ""); got != want {
 			t.Errorf("seed %s = %q, want %q", key, got, want)
 		}

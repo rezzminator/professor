@@ -53,7 +53,18 @@ var claudeEnvRefused = map[string]string{
 
 // claudeEnvSet reports whether raw carries claude.env: absent and null are unset.
 func claudeEnvSet(raw json.RawMessage) bool {
-	return len(raw) != 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+	return len(raw) != 0 && !jsonNull(raw)
+}
+
+func jsonNull(raw json.RawMessage) bool { return bytes.Equal(bytes.TrimSpace(raw), []byte("null")) }
+
+// jsonString decodes raw as a JSON string; null is not one.
+func jsonString(raw json.RawMessage) (string, bool) {
+	var value string
+	if jsonNull(raw) || json.Unmarshal(raw, &value) != nil {
+		return "", false
+	}
+	return value, true
 }
 
 // DecodeEnv decodes an environment object under key (claude.env, a settings

@@ -6,16 +6,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-const herdrKeysFixtureBlock = "# >>> pfm herdr keys >>>\n[keys]\nprevious_workspace = \"prefix+i\"\nnext_workspace = \"prefix+m\"\n\n" +
+const herdrKeysFixtureBlock = "# >>> pfm herdr keys >>>\n[keys]\nnext_workspace = \"prefix+m\"\nprevious_workspace = \"prefix+i\"\n\n" +
 	"[[keys.command]]\nkey = \"prefix+a\"\ntype = \"shell\"\ndescription = \"new pfm chat in this space\"\n" +
-	"command = '\"${HERDR_BIN_PATH:-herdr}\" tab create --workspace \"${HERDR_ACTIVE_WORKSPACE_ID:-$HERDR_WORKSPACE_ID}\" --env PFM_AUTO_OPEN=pfm --focus'\n" +
+	"command = \"\\\"${HERDR_BIN_PATH:-herdr}\\\" tab create --workspace \\\"${HERDR_ACTIVE_WORKSPACE_ID:-$HERDR_WORKSPACE_ID}\\\" --env PFM_AUTO_OPEN=pfm --focus\"\n" +
 	"# <<< pfm herdr keys <<<\n"
+
+// herdrKeysMovedPrevious is herdr.keys moving previous_workspace off prefix+i.
+var herdrKeysMovedPrevious = &pfmconfig.HerdrKeys{
+	Actions: map[string]*pfmconfig.HerdrKeyBinding{"previous_workspace": {Keys: []string{"cmd+shift+up"}}},
+}
+
+// herdrKeysRemoveAll is herdr.keys removing each of pfm's mappings.
+var herdrKeysRemoveAll = &pfmconfig.HerdrKeys{
+	Actions:  map[string]*pfmconfig.HerdrKeyBinding{"previous_workspace": nil, "next_workspace": nil},
+	Commands: []pfmconfig.HerdrKeyCommand{{Key: "prefix+a", Remove: true}},
+}
 
 func TestHerdrKeysDoctorNamesEachMissingMapping(t *testing.T) {
 	const config = "{root}/.config/herdr/config.toml"
@@ -25,6 +38,7 @@ func TestHerdrKeysDoctorNamesEachMissingMapping(t *testing.T) {
 		name, config, want string
 		lookup             error
 		noConfig           bool
+		keys               *pfmconfig.HerdrKeys
 		warnings           int
 	}{
 		{name: "herdr absent", lookup: exec.ErrNotFound, want: "doctor: herdr-keys: ok herdr absent\n"},
@@ -48,6 +62,26 @@ func TestHerdrKeysDoctorNamesEachMissingMapping(t *testing.T) {
 			config: "# >>> pfm herdr keys >>>\n[keys]\nprevious_workspace = \"prefix+i\"\nnext_workspace = \"prefix+m\"\n\n[[keys.command]]\nkey = \"prefix+a\"\ntype = \"shell\"\ncommand = \"pfm\"\n# <<< pfm herdr keys <<<\n",
 			want:   "doctor: herdr-keys: WARN pfm's keys block in " + config + " is out of date — run pfm install --yes\n",
 		},
+		{
+			name: "herdr.keys block owned", keys: herdrKeysMovedPrevious,
+			config: strings.Replace(herdrKeysFixtureBlock, `previous_workspace = "prefix+i"`, `previous_workspace = "cmd+shift+up"`, 1),
+			want:   "doctor: herdr-keys: ok wired " + config + "\n",
+		},
+		{
+			name: "herdr.keys bound by a hand-written table", keys: herdrKeysMovedPrevious,
+			config: "[keys]\nprevious_workspace = \"cmd+shift+up\"\nnext_workspace = \"prefix+m\"\n\n[[keys.command]]\nkey = \"prefix+a\"\ntype = \"shell\"\ncommand = \"pfm\"\n",
+			want:   "doctor: herdr-keys: ok hand-written [keys] in " + config + " binds every pfm mapping\n",
+		},
+		{
+			name: "herdr.keys over pfm's default block", keys: herdrKeysMovedPrevious, warnings: 1,
+			config: herdrKeysFixtureBlock,
+			want:   "doctor: herdr-keys: WARN " + config + ` lacks previous_workspace = "cmd+shift+up" — run pfm install --yes` + "\n",
+		},
+		{
+			name: "herdr.keys removing every pfm mapping, no keys table", keys: herdrKeysRemoveAll, warnings: 1,
+			config: "[theme]\nname = 'x'\n",
+			want:   "doctor: herdr-keys: WARN " + config + " lacks pfm's keys block — run pfm install --yes\n",
+		},
 		{name: "broken config", config: "[keys", warnings: 1, want: "doctor: herdr-keys: WARN parse Herdr config " + config + ": toml: line 1: expected '.' or ']' to end table name, but got '\\x00' instead\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,7 +102,7 @@ func TestHerdrKeysDoctorNamesEachMissingMapping(t *testing.T) {
 				runner.ScriptLookPath("herdr", "/fixture/herdr", nil)
 			}
 			var out bytes.Buffer
-			warnings := printHerdrKeysDoctor(&out, home, Dependencies{Runner: runner, Env: &paths.MapEnv{}})
+			warnings := printHerdrKeysDoctor(&out, home, Dependencies{Runner: runner, Env: &paths.MapEnv{}}, tc.keys)
 			if got := rooted(out.String(), home); warnings != tc.warnings || got != tc.want {
 				t.Errorf("warnings=%d output = %q\nwant %d %q", warnings, got, tc.warnings, tc.want)
 			}

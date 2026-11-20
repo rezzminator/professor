@@ -325,7 +325,7 @@ func Run(
 	tally.failures += hookFailures
 	tally.failures += printTracetreeKitDoctor(ctx, stdout, resolved.Home, dependencies)
 	tally.warnings += printHerdrShellDoctor(stdout, resolved.Home, dependencies)
-	tally.warnings += printHerdrKeysDoctor(stdout, resolved.Home, dependencies)
+	tally.warnings += printHerdrKeysDoctor(stdout, resolved.Home, dependencies, runtime.Config.Herdr.Keys)
 	herdrWarnings, herdrFailures := printHerdrDoctor(ctx, stdout, dependencies, resolved.Home, runtime.Config)
 	tally.warnings += herdrWarnings
 	tally.failures += herdrFailures

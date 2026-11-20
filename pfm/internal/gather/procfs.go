@@ -221,7 +221,7 @@ func (proc RealProcFS) PIDs() ([]int, error) {
 
 // Cmdline returns NUL-delimited argv.
 func (proc RealProcFS) Cmdline(pid int) ([]string, error) {
-	content, err := os.ReadFile(proc.path(pid, "cmdline"))
+	content, err := proc.readPID(pid, "cmdline")
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +230,7 @@ func (proc RealProcFS) Cmdline(pid int) ([]string, error) {
 
 // Environ returns the process environment keyed before the first equals sign.
 func (proc RealProcFS) Environ(pid int) (map[string]string, error) {
-	content, err := os.ReadFile(proc.path(pid, "environ"))
+	content, err := proc.readPID(pid, "environ")
 	if err != nil {
 		return nil, proc.withheld(pid, err)
 	}
@@ -295,7 +295,7 @@ func (proc RealProcFS) Stat(pid int) (ProcStat, error) {
 
 // statFields are /proc/<pid>/stat's fields after the command name, state first.
 func (proc RealProcFS) statFields(pid int) ([]string, error) {
-	content, err := os.ReadFile(proc.path(pid, "stat"))
+	content, err := proc.readPID(pid, "stat")
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +349,7 @@ func (proc RealProcFS) privileged(pid int) bool {
 
 func (proc RealProcFS) effectiveCapabilities(pid int) (uint64, error) {
 	path := proc.path(pid, "status")
-	content, err := os.ReadFile(path)
+	content, err := proc.readPID(pid, "status")
 	if err != nil {
 		return 0, err
 	}
@@ -438,7 +438,7 @@ func (proc RealProcFS) bootTime() (int64, error) {
 // no parsing beyond a field split) and the one whose page counts scale with
 // the kernel's own page size rather than assuming 4 KiB.
 func (proc RealProcFS) RSSKB(pid int) (int64, error) {
-	content, err := os.ReadFile(proc.path(pid, "statm"))
+	content, err := proc.readPID(pid, "statm")
 	if err != nil {
 		return 0, err
 	}

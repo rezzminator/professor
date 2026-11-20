@@ -2,6 +2,7 @@
 // A native Herdr seat's pane is the one holding its saved terminal (herdrpanes.go).
 // A seat is judged dead, its supervisor exited or its Herdr socket file gone, in herdrgone.go.
 // The Gatherer, its Dependencies and New, which builds it from the caller's paths, live in gatherer.go.
+// A Linux-shaped proc table reads each /proc/<pid> file in procfs_read.go, a process exiting mid-read reading as gone.
 package gather
 
 import (

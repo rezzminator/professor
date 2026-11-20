@@ -70,6 +70,7 @@ func Compose(input Input) Output {
 
 	output := Output{
 		ProjectDirs:        cloneStringMap(current.projectDirs),
+		Spaces:             cloneStringMap(input.Spaces),
 		includeNewClaude:   input.Options.View != KilledView && len(input.ClaudeSeats) != 0,
 		includeNewCodex:    input.Options.View != KilledView && len(input.Options.CodexAccountIDs) != 0,
 		includeNewOpenCode: input.Options.View != KilledView && len(input.Options.OpenCodeAccountIDs) != 0,
@@ -1086,6 +1087,7 @@ func (current *composer) finalize(row Row) Row {
 	if current.input.Options.NowNS > row.ActivityNS && row.ActivityNS > 0 {
 		row.AgeNS = current.input.Options.NowNS - row.ActivityNS
 	}
+	row.Space = current.input.Spaces[row.ID]
 	return row
 }
 

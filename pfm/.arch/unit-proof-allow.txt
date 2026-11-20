@@ -25,6 +25,7 @@
 {checkout}/pfm/*example.pfm.config.json	absent	config discovery probes the example config relative to the package directory and its ancestors
 /work	absent	invented fixture cwd /work/**: the project-root walk, cwd existence checks and transcript lookups stat a host path that exists on no host; the assertions read the literal
 /work/*	absent	invented fixture cwd /work/**: the project-root walk, cwd existence checks and transcript lookups stat a host path that exists on no host; the assertions read the literal
+/src/*	absent	invented place fixture /src/** of the ui picker tests: a space's new chat lands through place.Fleet.Landing, whose project-root walk (gitroot, workbench) stats the folder and each ancestor's .git; the assertions read the literal
 /jail*	absent	invented fixture root /jail/** (same reason as /work)
 /fixture*	absent	invented fixture root /fixture/** (same reason as /work)
 /opt/pfm*	absent	invented install root /opt/pfm/** of the restart tests (same reason as /work)

@@ -108,8 +108,8 @@ func TestSharedOpenDropsTheRetiredIssuesTable(t *testing.T) {
 				}
 			}()
 			var version, hidden int
-			if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 6 {
-				t.Fatalf("user_version=%d err=%v, want 6: the drop needs no bump", version, err)
+			if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
+				t.Fatalf("user_version=%d err=%v, want %d: the drop needs no bump", version, err, SchemaVersion)
 			}
 			if count := countIssueObjects(t, state.db); count != 0 {
 				t.Fatalf("issues objects=%d, want the table and its index dropped", count)

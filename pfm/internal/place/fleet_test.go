@@ -25,7 +25,7 @@ func TestFleetOfPlacesANewbornByTheFold(t *testing.T) {
 		{testjail.Place("/jail/me/ops"), Place{Root: testjail.Place("/jail/me/ops"), Label: "ops"}},
 		{testjail.Place("/jail/me/fresh"), Place{Root: testjail.Place("/jail/me/fresh"), Label: "fresh"}},
 	} {
-		if got := fleet.Of(test.cwd); got != test.want {
+		if got := fleet.Of(test.cwd, ""); got != test.want {
 			t.Errorf("Of(%q) = %+v, want %+v", test.cwd, got, test.want)
 		}
 	}
@@ -52,7 +52,7 @@ func TestFleetOfRollsANestedDirectoryUpToItsProject(t *testing.T) {
 		{"a workbench", bench},
 		{"a plain subdirectory", repo.Subdir},
 	} {
-		if got := fleet.Of(test.cwd); got != want {
+		if got := fleet.Of(test.cwd, ""); got != want {
 			t.Errorf("%s: Of(%q) = %+v, want %+v", test.name, test.cwd, got, want)
 		}
 	}
@@ -77,5 +77,37 @@ func TestLabeledTellsNamesakesApart(t *testing.T) {
 	Disambiguate([]string{"/w/a/api", "/w/b/api"}, labels, []bool{true, false})
 	if want := []string{"api", "b/api"}; !reflect.DeepEqual(labels, want) {
 		t.Fatalf("Disambiguate with a fixed entry = %q, want %q", labels, want)
+	}
+}
+
+// A chat recorded in a space sits in that space's place whatever its folder,
+// and a cleared record sends it back to the place its folder gives; a
+// namesake folder place takes the parent in its label, the space never does.
+func TestFleetOfPlacesASpacedChatInItsSpace(t *testing.T) {
+	fleet := fleetFixture()
+	// "away" wears a space no listed row does: its chat fell outside the scan.
+	fleet.Spaces = map[string]string{"in-glass": "glass", "in-ops": "ops", "away": "lab"}
+	fw, ops, lab := testjail.Place("/jail/me/fw"), testjail.Place("/jail/me/ops"), testjail.Place("/jail/me/other/lab")
+	fleet.Rows = append(fleet.Rows,
+		compose.Row{Kind: compose.LiveClaude, ID: "in-ops", Project: "ops", CWD: ops, Space: "ops"})
+	for _, test := range []struct {
+		name, cwd, id string
+		want          Place
+	}{
+		{"spaced chat in a project folder", fw, "in-glass", Place{Root: "space:glass", Label: "glass", Dir: fw}},
+		{
+			"the space's chat elsewhere", ops + "/deep", "in-glass",
+			Place{Root: "space:glass", Label: "glass", Dir: ops + "/deep"},
+		},
+		{"a space named like a folder place", ops, "in-ops", Place{Root: "space:ops", Label: "ops", Dir: ops}},
+		{"the folder place beside that space", ops, "plain", Place{Root: ops, Label: "me/ops"}},
+		{"the space of a chat no row lists", lab, "away", Place{Root: "space:lab", Label: "lab", Dir: lab}},
+		{"the folder place beside that unlisted space", lab, "plain", Place{Root: lab, Label: "other/lab"}},
+		{"a cleared chat", fw, "was-glass", Place{Root: fw, Label: ".fw"}},
+		{"a newborn with no id", fw, "", Place{Root: fw, Label: ".fw"}},
+	} {
+		if got := fleet.Of(test.cwd, test.id); got != test.want {
+			t.Errorf("%s: Of(%q, %q) = %+v, want %+v", test.name, test.cwd, test.id, got, test.want)
+		}
 	}
 }

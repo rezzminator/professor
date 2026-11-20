@@ -22,6 +22,7 @@ import (
 type place struct {
 	root     string // cleaned absolute directory; allPlaceRoot is the everywhere stop
 	label    string
+	dir      string // a space's folder, where a chat started in it runs; "" for any other place
 	live     int
 	resume   int
 	newestNS int64
@@ -94,7 +95,8 @@ func buildPlaces(
 		return byRoot[root]
 	}
 	for _, entry := range filed.Places {
-		ensure(entry.Root).label = entry.Label
+		slot := ensure(entry.Root)
+		slot.label, slot.dir = entry.Label, entry.Dir
 	}
 	all := place{root: allPlaceRoot, label: allPlaceLabel}
 	for position := range rows {
@@ -223,7 +225,8 @@ func disambiguateLabels(places []place) {
 	labels := make([]string, len(places))
 	fixed := make([]bool, len(places))
 	for position, entry := range places {
-		roots[position], labels[position], fixed[position] = entry.root, entry.label, entry.adhoc
+		roots[position], labels[position] = entry.root, entry.label
+		fixed[position] = entry.adhoc || fleetplace.IsSpaceRoot(entry.root)
 	}
 	fleetplace.Disambiguate(roots, labels, fixed)
 	for position := range places {

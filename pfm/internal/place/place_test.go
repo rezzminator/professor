@@ -2,6 +2,7 @@ package place
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -121,5 +122,44 @@ func TestLabelNamesHomeAndBareRoots(t *testing.T) {
 	}
 	if got := Clean("  "); got != "" {
 		t.Errorf("Clean(blank) = %q, want empty", got)
+	}
+}
+
+// A row with a space files under the space's label whatever its folder; the
+// chats filed by folder keep the places they had, and a folder holding only
+// spaced chats files nothing.
+func TestBuildFilesASpacedRowUnderItsSpaceLabel(t *testing.T) {
+	fleet := fleetFixture()
+	atlas, solo := testjail.Place("/jail/me/atlas"), testjail.Place("/jail/me/solo")
+	rows := slices.Concat(fleet.Rows, []compose.Row{
+		{Kind: compose.LiveClaude, ID: "bks", Project: "atlas", CWD: atlas, Space: "glass"},
+		{Kind: compose.LiveClaude, ID: "plain", Project: "atlas", CWD: atlas},
+		{Kind: compose.LiveClaude, ID: "types", Project: "solo", CWD: solo, Space: "glass"},
+	})
+	dirs := map[string]string{"atlas": atlas, "solo": solo}
+	for project, dir := range fleet.ProjectDirs {
+		dirs[project] = dir
+	}
+	index := Build(rows, dirs, fleet.Home)
+	if got, want := index.RowPlace[5:], []string{"space:glass", atlas, "space:glass"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("RowPlace = %q, want %q", got, want)
+	}
+	want := []Place{
+		{Root: testjail.Place("/jail/me/fw"), Label: ".fw"},
+		{Root: testjail.Place("/jail/me/ops"), Label: "ops"},
+		{Root: "space:glass", Label: "glass", Dir: atlas},
+		{Root: atlas, Label: "atlas"},
+	}
+	if !reflect.DeepEqual(index.Places, want) {
+		t.Fatalf("Places = %+v, want %+v", index.Places, want)
+	}
+	if got := index.Places[2].Directory(); got != atlas {
+		t.Fatalf("space Directory = %q, want its first chat's folder %q", got, atlas)
+	}
+	if got := index.Places[3].Directory(); got != atlas {
+		t.Fatalf("folder place Directory = %q, want its root %q", got, atlas)
+	}
+	if got := (Place{Root: SpaceRoot("glass"), Label: "glass"}).Directory(); got != "" {
+		t.Fatalf("space with no known folder Directory = %q, want none: its root is a key", got)
 	}
 }

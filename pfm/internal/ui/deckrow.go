@@ -306,11 +306,7 @@ func (model Model) renderGroupedRow(
 // colours, so a project's rows read as one block.
 func groupHexOf(model Model, row compose.Row) string {
 	palette := configuredPalette
-	project := cleanField(row.Project)
-	if project == "" {
-		project = "?"
-	}
-	if model.projectOrdinal(project)%2 == 1 {
+	if model.projectOrdinal(groupName(row))%2 == 1 {
 		return palette.GroupB
 	}
 	return palette.GroupA

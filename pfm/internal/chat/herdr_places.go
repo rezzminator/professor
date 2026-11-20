@@ -50,6 +50,7 @@ func HerdrPlaces(ctx context.Context, runtime *pfmconfig.Runtime) (result *place
 	return &place.Fleet{
 		Rows:        scan.Output.Rows,
 		ProjectDirs: scan.Output.ProjectDirs,
+		Spaces:      scan.Output.Spaces,
 		Home:        scan.Env.Paths.Home,
 		Benches:     scan.Env.Workbenches,
 		Faults:      faults,

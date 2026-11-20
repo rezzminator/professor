@@ -18,6 +18,7 @@
 // queries.go: transcript, rollout, Codex-name and meta queries, and DefaultCandidates.
 // readonly.go: OpenWithoutMigrating, both databases read-only for doctor.
 // rowcache.go: Transcripts and Rollouts, the index tables a Store rereads only where written since its last read.
+// space.go: ChatSpaces, each indexed chat's recorded space under every id its rows carry.
 // summary.go: ChatSummary and PutChatSummary, the paid summary of a transcript frontier.
 // tx.go: ImmediateTx, a BEGIN IMMEDIATE transaction.
 package store

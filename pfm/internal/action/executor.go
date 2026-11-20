@@ -271,7 +271,7 @@ func (executor *Executor) openHerdr(
 	}
 	inPlace := choice.InPlace && !request.Detached
 	if inPlace {
-		if inPlace, err = spawn.HerdrOpensInPlace(ctx, values, &choice, plan.SeatRun.CWD); err != nil {
+		if inPlace, err = spawn.HerdrOpensInPlace(ctx, values, &choice, plan.SeatRun.CWD, sessionID); err != nil {
 			return OpenResult{}, fmt.Errorf("place the open of chat %s: %w", sessionID, err)
 		}
 	}

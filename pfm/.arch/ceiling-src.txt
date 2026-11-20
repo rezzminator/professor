@@ -224,7 +224,7 @@ internal/schedule/command.go 445
 internal/schedule/deliver.go 316
 internal/servicemanager/launchd.go 259
 internal/spawn/herdr.go 295
-internal/spawn/herdr_place.go 489
+internal/spawn/herdr_place.go 534
 internal/spawn/spawn.go 796
 internal/spawn/tmux.go 366
 internal/stale/stale.go 508

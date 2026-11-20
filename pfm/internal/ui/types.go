@@ -112,7 +112,11 @@ type Snapshot struct {
 	InitialQuery      string
 	// HerdrSpace is the label of the Herdr space a picker opened in ~ runs in;
 	// the picker opens on the place wearing it (omnibox.go). "" elsewhere.
-	HerdrSpace      string
+	HerdrSpace string
+	// Spaces is each chat's recorded space by chat id (compose.Output.Spaces),
+	// the chats the rows do not list included: every place.Fleet the picker
+	// builds files by it (Model.placeFleet).
+	Spaces          map[string]string
 	InitialCursorID string
 	// ScheduleError is a failed read of the unseen-schedule flags, shown in
 	// the Chats header so a broken read never renders as "no schedules".

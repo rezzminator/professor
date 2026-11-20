@@ -58,3 +58,25 @@ func ProjectOf(cwd string, benches []workbench.Bench) (name, root string) {
 	ref := projectNames{benches: benches}.resolve(cwd)
 	return ref.name, ref.root
 }
+
+// Output contains the rows plus project metadata. Composition reads the kill
+// list; the store owns persistence and expiry of /clear prompt baselines.
+type Output struct {
+	Rows         []Row
+	ProjectDirs  map[string]string
+	ProjectOrder []string
+	// Spaces is Input.Spaces, handed on so Herdr placement files a chat the
+	// rows do not list (a resume the default view caps out) in its space.
+	Spaces          map[string]string
+	KilledCount     int
+	SuppressedCount int
+
+	includeNewClaude   bool
+	includeNewCodex    bool
+	includeNewOpenCode bool
+	primaryAccount     int
+	primaryCodex       int
+	primaryOpenCode    int
+	fallbackDir        string
+	projects           projectNames
+}

@@ -33,6 +33,7 @@
 //     herdr_indicators_probe_titles.go reads the titles a tabbed chat's transcript or OpenCode store names;
 //     herdr_indicators_run.go builds one painter run over a store it holds open across its ticks.
 //   - herdr_name.go and herdr_name_sync.go name Herdr tabs; herdr_places.go lists the Herdr places.
+//   - space.go moves the calling chat into a named space (`pfm chat space`) and records it per chat.
 package chat
 
 import (

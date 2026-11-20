@@ -1,12 +1,17 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+// everyRetiredKeyChanges judges every retired value as changing the launch; which values do is
+// claudelaunch's call (RetiredKnobChangesLaunch).
+func everyRetiredKeyChanges(string, json.RawMessage) bool { return true }
 
 // The retired launch keys load as no-ops wherever the file sets them, each named for pfm doctor, and
 // requireManagedCleanup still merges by scope.
@@ -41,7 +46,7 @@ func TestClaudeRetiredKeysLoadAsNoOps(t *testing.T) {
 		"claude.tmuxTruecolor is retired: set claude.settings.env.CLAUDE_CODE_TMUX_TRUECOLOR (null turns it off) instead",
 		"claude.webSearchesPerSession is retired: set claude.settings.env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION instead",
 	}
-	if got := loaded.RetiredKeyWarnings(); !reflect.DeepEqual(got, want) {
+	if got := loaded.RetiredKeyWarnings(everyRetiredKeyChanges); !reflect.DeepEqual(got, want) {
 		t.Fatalf("RetiredKeyWarnings() =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	encoded, err := Marshal(loaded, false)
@@ -55,7 +60,11 @@ func TestClaudeRetiredKeysLoadAsNoOps(t *testing.T) {
 	if err := os.WriteFile(clean, []byte(`{"version":2}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if loaded, err := Load(clean, home, nil); err != nil || len(loaded.RetiredKeyWarnings()) != 0 {
-		t.Fatalf("a file without retired keys: warnings %v, err %v", loaded.RetiredKeyWarnings(), err)
+	loaded, err = Load(clean, home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if warnings := loaded.RetiredKeyWarnings(everyRetiredKeyChanges); len(warnings) != 0 {
+		t.Fatalf("a file without retired keys: warnings %v", warnings)
 	}
 }

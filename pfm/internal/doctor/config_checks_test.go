@@ -334,11 +334,16 @@ func TestDoctorSortsDuplicateSeatLoginAdvisoriesByEmail(t *testing.T) {
 // naming the key and the file; a project file that is the machine file is the machine's alone.
 func TestDoctorConfigScopeRows(t *testing.T) {
 	t.Run("retired machine key", func(t *testing.T) {
+		// The claude block v0.88.1 seeded into every machine file, helperModel changed: only the two
+		// values that launch differently from the shipped defaults warn.
 		path := filepath.Join(t.TempDir(), config.FileName)
 		writeDoctorBenchFile(
 			t,
 			path,
-			`{"version":2,"claude":{"helperModel":"claude-sonnet-5-5","nativeCursor":true,"systemPrompt":"production"}}`,
+			`{"version":2,"claude":{"nativeCursor":false,"systemPrompt":"production",`+
+				`"webSearchesPerSession":9007199254740991,"autoCompactWindow":100000,`+
+				`"helperModel":"claude-sonnet-5-5","tmuxTruecolor":true,"cleanupPeriodDays":36500,`+
+				`"maxSubagentSpawnDepth":8,"maxConcurrentSubagents":null}}`,
 		)
 		machine, err := config.Load(path, t.TempDir(), nil)
 		if err != nil {

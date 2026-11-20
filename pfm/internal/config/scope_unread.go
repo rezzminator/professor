@@ -67,16 +67,23 @@ var (
 	claudeKey    = strings.TrimSuffix(claudePrefix, ".")
 )
 
-// retiredKeys are the retired keys raw sets, at the top claude block and each account's, sorted.
-func retiredKeys(raw rawConfig) []string {
-	var keys []string
+// RetiredKey is a retired key a file sets: its path in the file, its name in the claude block and its
+// raw value.
+type RetiredKey struct {
+	Path, Name string
+	Value      json.RawMessage
+}
+
+// retiredKeys are the retired keys raw sets, at the top claude block and each account's, sorted by path.
+func retiredKeys(raw rawConfig) []RetiredKey {
+	var keys []RetiredKey
 	collect := func(prefix string, claude *rawClaude) {
 		if claude == nil {
 			return
 		}
 		for name, value := range claude.retired() {
 			if len(value) != 0 {
-				keys = append(keys, prefix+name)
+				keys = append(keys, RetiredKey{Path: prefix + name, Name: name, Value: value})
 			}
 		}
 	}
@@ -86,17 +93,20 @@ func retiredKeys(raw rawConfig) []string {
 			collect(fmt.Sprintf("accounts[%d].%s.", index, claudeKey), account.Claude)
 		}
 	}
-	slices.Sort(keys)
+	slices.SortFunc(keys, func(a, b RetiredKey) int { return strings.Compare(a.Path, b.Path) })
 	return keys
 }
 
-// RetiredKeyWarnings names each retired key the machine file sets and the claude.settings path
-// that sets its value now.
-func (config Config) RetiredKeyWarnings() []string {
+// RetiredKeyWarnings names each retired key the machine file sets whose value changes the launch, as
+// changes judges it from the key's name and raw value, and the claude.settings path that sets it now.
+// A key whose value the shipped launch defaults already carry is a silent no-op.
+func (config Config) RetiredKeyWarnings(changes func(name string, value json.RawMessage) bool) []string {
 	warnings := make([]string, 0, len(config.Retired))
 	for _, key := range config.Retired {
-		name := key[strings.LastIndex(key, ".")+1:]
-		warnings = append(warnings, fmt.Sprintf("%s is retired: set %s instead", key, retiredClaudeKeys[name]))
+		if !changes(key.Name, key.Value) {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("%s is retired: set %s instead", key.Path, retiredClaudeKeys[key.Name]))
 	}
 	return warnings
 }

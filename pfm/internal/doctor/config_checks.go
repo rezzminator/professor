@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -171,11 +172,9 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 		found := true
 		for _, part := range parts {
 			values, ok := current.(map[string]any)
-			if !ok {
-				found = false
-				break
+			if ok {
+				current, ok = values[part]
 			}
-			current, ok = values[part]
 			if !ok {
 				found = false
 				break
@@ -190,7 +189,7 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 			)
 		}
 	}
-	for _, warning := range runtime.Config.RetiredKeyWarnings() {
+	for _, warning := range runtime.Config.RetiredKeyWarnings(claudelaunch.RetiredKnobChangesLaunch) {
 		fmt.Fprintf(stdout, "doctor: config: %s (%s)\n", warning, path)
 		warnings++
 	}

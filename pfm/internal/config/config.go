@@ -227,8 +227,8 @@ type Config struct {
 	// Envs and HarnessPrompt are the machine file's envs and harnessPrompt (scope.go), nil when unset.
 	Envs          map[string]string
 	HarnessPrompt *HarnessPrompt
-	// Retired names each retired key the file sets, accepted and never read (scope.go).
-	Retired []string
+	// Retired is each retired key the file sets, accepted and never read (scope_unread.go).
+	Retired []RetiredKey
 
 	Path    string
 	Exists  bool

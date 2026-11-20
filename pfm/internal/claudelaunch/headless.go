@@ -172,6 +172,27 @@ func RenderHeadless(settings map[string]any) (string, error) {
 
 func mustInteger(value any) int64 { number, _ := integer(value); return number }
 
+// RetiredKnobChangesLaunch reports whether a retired claude key's raw value, rendered as the knob it was,
+// launches differently from the shipped defaults alone. null and a value the defaults already carry
+// change nothing; a value the knob cannot render changes the launch, so its warning stays.
+func RetiredKnobChangesLaunch(name string, value json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return true
+	}
+	if decoded == nil {
+		return false
+	}
+	with, err := RenderHeadless(map[string]any{name: decoded})
+	if err != nil {
+		return true
+	}
+	without, err := RenderHeadless(nil)
+	return err != nil || with != without
+}
+
 // setFlagEnv sets name to "1" when on, else removes it, a default's value included: Claude Code reads
 // any non-empty value of these as on.
 func setFlagEnv(env map[string]string, name string, on bool) {

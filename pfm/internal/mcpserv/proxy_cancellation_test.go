@@ -129,12 +129,14 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 	fakeClock.Advance(proxy.retryDelay)
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}`)
 	// The cancellation needs a session too, so it waits behind the held replay;
-	// the request must already be cancelled when the replay boundary opens.
+	// the request must already be cancelled when the replay boundary opens. The
+	// retry loop reads the request's context, which is cancelled just after the
+	// cancelled flag is set, so the test waits on the context.
 	deadline := time.After(2 * time.Second)
 	for {
 		proxy.requestMutex.Lock()
 		request := proxy.requests["number:2"]
-		cancelled := request != nil && request.cancelled
+		cancelled := request != nil && request.ctx.Err() != nil
 		proxy.requestMutex.Unlock()
 		if cancelled {
 			break

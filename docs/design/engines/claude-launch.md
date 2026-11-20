@@ -135,7 +135,7 @@ pfm remembers what it launched in `pfm.db`, table `launch` — one row per sessi
 
 ## Config keys
 
-The `claude` block of the machine `pfm.config.json`; each key also takes a per-account override. The retired keys `claude.webSearchesPerSession`, `autoCompactWindow`, `helperModel`, `tmuxTruecolor`, `nativeCursor` (global and per account), `maxSubagentSpawnDepth`, `maxConcurrentSubagents` and `cleanupPeriodDays` are accepted as no-ops and `pfm doctor` warns; their defaults live in `defaults.json` `settings` and any of them is overridden through `claude.settings` at either scope.
+The `claude` block of the machine `pfm.config.json`; each key also takes a per-account override. The retired keys `claude.webSearchesPerSession`, `autoCompactWindow`, `helperModel`, `tmuxTruecolor`, `nativeCursor` (global and per account), `maxSubagentSpawnDepth`, `maxConcurrentSubagents` and `cleanupPeriodDays` are accepted as no-ops, and `pfm doctor` warns for each whose value would launch differently from the shipped defaults (`RetiredKnobChangesLaunch`, `headless.go`), null and a value the defaults already carry staying silent; their defaults live in `defaults.json` `settings` and any of them is overridden through `claude.settings` at either scope.
 
 | Key | Default | Knob |
 | --- | --- | --- |

@@ -123,3 +123,36 @@ func TestParseSettings(t *testing.T) {
 		}
 	}
 }
+
+// A retired claude key warns only when its value launches differently from the shipped defaults: the
+// values v0.88.1 seeded into every machine file are silent, except nativeCursor false, which the
+// defaults now turn on; null is silent and a value the knob cannot render keeps its warning.
+func TestRetiredKnobChangesLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		changes     bool
+	}{
+		{"webSearchesPerSession", "9007199254740991", false},
+		{"webSearchesPerSession", "7", true},
+		{"autoCompactWindow", "100000", false},
+		{"autoCompactWindow", "50000", true},
+		{"helperModel", `"claude-haiku-5-5"`, false},
+		{"helperModel", `"claude-sonnet-5-5"`, true},
+		{"tmuxTruecolor", "true", false},
+		{"tmuxTruecolor", "false", true},
+		{"nativeCursor", "true", false},
+		{"nativeCursor", "false", true},
+		{"cleanupPeriodDays", "36500", false},
+		{"cleanupPeriodDays", "30", true},
+		{"maxSubagentSpawnDepth", "8", false},
+		{"maxSubagentSpawnDepth", "3", true},
+		{"maxConcurrentSubagents", "null", false},
+		{"maxConcurrentSubagents", "0", false},
+		{"maxConcurrentSubagents", "4", true},
+		{"maxConcurrentSubagents", `"x"`, true},
+	} {
+		if got := RetiredKnobChangesLaunch(tc.name, json.RawMessage(tc.value)); got != tc.changes {
+			t.Errorf("RetiredKnobChangesLaunch(%s, %s) = %t, want %t", tc.name, tc.value, got, tc.changes)
+		}
+	}
+}

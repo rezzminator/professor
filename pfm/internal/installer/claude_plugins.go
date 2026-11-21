@@ -13,7 +13,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -22,9 +21,10 @@ import (
 const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
 
 // ConfigureClaudePlugins hands the plugin and env steps the machine config's
-// effective claude.plugins (its default list when unset) and claude.env as pfm writes it.
+// effective claude.plugins (its default list when unset), claude.pluginSource and claude.env as pfm writes it.
 func ConfigureClaudePlugins(options *Options, machine pfmconfig.Config) {
 	options.ClaudePlugins = machine.Claude.Plugins
+	options.ClaudePluginsFromCheckout = machine.Claude.PluginsFromCheckout()
 	env := options.Env
 	if env == nil {
 		env = paths.OSEnv{}
@@ -57,12 +57,12 @@ const ClaudePluginRepair = "run pfm install --yes"
 const ClaudePluginUnresolvedFix = `give its claude.plugins entry a "source" (what claude plugin marketplace add takes), ` +
 	`or run claude plugin marketplace add <source>, then run pfm install --yes`
 
-// ClaudePluginBuild is what decides where each plugin comes from: pfm's own
-// stamped version, the home pfm's paths resolve from, claude.pluginCheckoutRoot,
+// ClaudePluginBuild is what decides where each plugin comes from:
+// claude.pluginSource (FromCheckout), the home pfm's paths resolve from, claude.pluginCheckoutRoot,
 // and the source clone whose plugins/ is the checkout root when that key is
 // unset (SourceRepoErr when the clone could not be resolved).
 type ClaudePluginBuild struct {
-	Version       string
+	FromCheckout  bool
 	Home          string
 	CheckoutRoot  string
 	SourceRepo    string
@@ -71,7 +71,7 @@ type ClaudePluginBuild struct {
 	// the key is unset, planned exactly like the key set to it.
 	Plugins []pfmconfig.ClaudePlugin
 	// Unlisted is every plugin the source clone's marketplace lists that
-	// claude.plugins names in no form: an -alpha build installs each from its
+	// claude.plugins names in no form: a checkout host installs each from its
 	// checkout and keeps every copy disabled (WithMarketplacePlugins).
 	Unlisted []string
 }
@@ -79,12 +79,12 @@ type ClaudePluginBuild struct {
 // ClaudePluginTarget is one claude.plugins entry as this build ensures it. ID
 // is the enabledPlugins key ensured and Source what `plugin marketplace add`
 // takes, empty for a full id whose entry has no source. A bare name (Own) is
-// {name}@professor on every build: from the GitHub professor marketplace on a
-// release, or on an -alpha build with a checkout (Local) from the pfm-owned
+// {name}@professor on every host: from the GitHub professor marketplace with
+// claude.pluginSource release, or on a checkout host with a checkout (Local) from the pfm-owned
 // directory marketplace Marketplace, holding a copy of Checkout. Fallback says
-// why an -alpha build has no checkout to install from: it then installs
+// why a checkout host has no checkout to install from: it then installs
 // nothing, since one professor marketplace has one source. Undecided says why
-// an -alpha build could not tell whether a checkout exists (its source clone
+// a checkout host could not tell whether a checkout exists (its source clone
 // or checkout could not be read): install and doctor then decide nothing,
 // never reading the error as a missing checkout.
 type ClaudePluginTarget struct {
@@ -100,7 +100,7 @@ type ClaudePluginTarget struct {
 	Own bool
 	// MarketplaceName is the marketplace a full id names; empty for a bare name.
 	MarketplaceName string
-	// InstallOnly marks an -alpha marketplace plugin claude.plugins does not
+	// InstallOnly marks a checkout host's marketplace plugin claude.plugins does not
 	// name: installed from its checkout, kept disabled.
 	InstallOnly bool
 }
@@ -113,11 +113,10 @@ func (target ClaudePluginTarget) NeedsKnownMarketplace() bool {
 
 // ClaudePluginTargets plans every claude.plugins entry for build. A bare name is
 // a plugin of ours, {name}@professor: from the GitHub professor marketplace, or
-// on an -alpha build its local copy. A full id is ensured as named, from the
-// entry's source when it has one. An -alpha build then plans each of
+// on a checkout host its local copy. A full id is ensured as named, from the
+// entry's source when it has one. A checkout host then plans each of
 // build.Unlisted as a bare name kept disabled (InstallOnly).
 func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
-	alpha := obs.AlphaBuild(build.Version)
 	targets := make([]ClaudePluginTarget, 0, len(build.Plugins)+len(build.Unlisted))
 	for _, plugin := range build.Plugins {
 		if !plugin.Bare() {
@@ -129,11 +128,11 @@ func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 			})
 			continue
 		}
-		targets = append(targets, ownClaudePluginTarget(plugin.ID, build, alpha))
+		targets = append(targets, ownClaudePluginTarget(plugin.ID, build))
 	}
-	if alpha {
+	if build.FromCheckout {
 		for _, name := range build.Unlisted {
-			target := ownClaudePluginTarget(name, build, alpha)
+			target := ownClaudePluginTarget(name, build)
 			target.InstallOnly = true
 			targets = append(targets, target)
 		}
@@ -142,14 +141,14 @@ func ClaudePluginTargets(build ClaudePluginBuild) []ClaudePluginTarget {
 }
 
 // ownClaudePluginTarget plans the bare name of a plugin of ours.
-func ownClaudePluginTarget(name string, build ClaudePluginBuild, alpha bool) ClaudePluginTarget {
+func ownClaudePluginTarget(name string, build ClaudePluginBuild) ClaudePluginTarget {
 	target := ClaudePluginTarget{
 		Name:   name,
 		ID:     name + "@" + pfmconfig.ProfessorMarketplace,
-		Source: professorMarketplaceRepository,
+		Source: ProfessorMarketplaceRepository,
 		Own:    true,
 	}
-	if !alpha {
+	if !build.FromCheckout {
 		return target
 	}
 	return localClaudePluginTarget(target, build)
@@ -162,21 +161,22 @@ func BareClaudePluginRepair(name string) string {
 	return fmt.Sprintf(
 		"claude.plugins entry %q is a bare name: pfm installs it from the professor marketplace github.com/%s — "+
 			"fix or remove the entry in claude.plugins if that marketplace does not list it",
-		name, professorMarketplaceRepository,
+		name, ProfessorMarketplaceRepository,
 	)
 }
 
 // FallbackNote is the one line install and doctor print for a Fallback: with
-// no checkout an -alpha build installs nothing.
+// no checkout a checkout host installs nothing.
 func (target ClaudePluginTarget) FallbackNote() string {
 	if target.InstallOnly {
 		return target.Name + ": not installed — " + pfmconfig.KeyClaudePlugins +
-			" does not list it and this alpha build has no checkout of it: " + target.Fallback
+			" does not list it and " + pfmconfig.KeyClaudePluginSource + " checkout finds no checkout of it: " + target.Fallback
 	}
-	return target.Name + ": not installed — this alpha build has no checkout of it: " + target.Fallback
+	return target.Name + ": not installed — " + pfmconfig.KeyClaudePluginSource + " checkout finds no checkout of it: " +
+		target.Fallback
 }
 
-// ClaudePluginFallbackGap is a Fallback as the gap an -alpha install fails a
+// ClaudePluginFallbackGap is a Fallback as the gap a checkout-host install fails a
 // listed plugin on and doctor reports.
 func ClaudePluginFallbackGap(target ClaudePluginTarget) ClaudePluginGap {
 	reason := target.Fallback
@@ -184,7 +184,7 @@ func ClaudePluginFallbackGap(target ClaudePluginTarget) ClaudePluginGap {
 		reason = pfmconfig.KeyClaudePlugins + " does not list it and " + reason
 	}
 	return ClaudePluginGap{
-		Problem: "plugin " + target.Name + " is not installed on this alpha build: " + reason,
+		Problem: "plugin " + target.Name + " is not installed with " + pfmconfig.KeyClaudePluginSource + " checkout: " + reason,
 		Fix: "check the plugin out where named, or set " + pfmconfig.KeyClaudePluginCheckoutRoot + ", then " +
 			ClaudePluginRepair,
 	}
@@ -208,13 +208,13 @@ func pluginEnabled(document map[string]any, id string) bool {
 }
 
 // claudePluginBuild is the build the plugin step plans from: claude.plugins
-// plus, on an -alpha build, every plugin the marketplace lists.
+// plus, on a checkout host, every plugin the marketplace lists.
 func (installer *engine) claudePluginBuild() (ClaudePluginBuild, error) {
-	// The clone the global links anchor on is the one whose plugins/ an
-	// -alpha build copies from when claude.pluginCheckoutRoot is unset.
+	// The clone the global links anchor on is the one whose plugins/ a
+	// checkout host copies from when claude.pluginCheckoutRoot is unset.
 	sourceRepo, sourceRepoErr := installer.globalSourceRepoRoot()
 	return ClaudePluginBuild{
-		Version:       installer.options.Version,
+		FromCheckout:  installer.options.ClaudePluginsFromCheckout,
 		Home:          installer.options.Home,
 		CheckoutRoot:  installer.options.ClaudePluginCheckoutRoot,
 		SourceRepo:    sourceRepo,
@@ -229,13 +229,14 @@ func (installer *engine) claudePluginBuild() (ClaudePluginBuild, error) {
 // whose Options.ConfigDir is the store, skips the step with one named line: no
 // claude subprocess runs on the store (it would write .claude.json and backups
 // there). A --config-dir on a roster host carries no roster but ClaudeRosterHost, so the same refusal holds.
-// An -alpha build ensures each bare name with a checkout from its local copy
+// A checkout host ensures each bare name with a checkout from its local copy
 // (ClaudePluginTargets), plus every other plugin the source clone's
 // marketplace lists, installed and kept disabled (WithMarketplacePlugins);
 // every build then disables each enabled plugin id the retired lists name
-// (retired.Lists ClaudePlugins) once its successor is ensured. A bare name
-// whose checkout is undecided, or a listed one with no checkout on an -alpha build, is a failure naming why, left as it is. A listed id pfm cannot install is a failure naming it; an id the
-// list does not name is never read or written. An applied -alpha install ends
+// (retired.Lists ClaudePlugins) once its successor is ensured; the professor marketplace's settings entry is
+// pointed at this pass's source first (ensureProfessorMarketplaceEntry). A bare name
+// whose checkout is undecided, or a listed one with no checkout on a checkout host, is a failure naming why, left as it is. A listed id pfm cannot install is a failure naming it; an id the
+// list does not name is never read or written. An applied checkout-host install ends
 // by reading every listed plugin of ours back: one not installed from its
 // checkout copy and enabled is a failure (checkListedClaudePlugins).
 func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
@@ -284,13 +285,18 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 		installer.options.ClaudeBinary,
 		installer.env().Get("PATH"),
 	)
+	entryErr := installer.ensureProfessorMarketplaceEntry(run, targets)
 	failed := map[int]bool{}
 	for index := range targets {
+		if entryErr != nil && targets[index].Own && targets[index].Source != "" {
+			failed[index] = true // left as it is: no add of the professor marketplace could take
+			continue
+		}
 		before := len(run.failures)
 		installer.ensureClaudePluginTarget(ctx, run, &targets[index])
 		failed[index] = len(run.failures) > before
 	}
-	if installer.apply && obs.AlphaBuild(installer.options.Version) {
+	if installer.apply && installer.options.ClaudePluginsFromCheckout {
 		installer.checkListedClaudePlugins(run, targets, failed)
 	}
 	return errors.Join(run.failures...)
@@ -530,7 +536,7 @@ func (installer *engine) updateClaudePluginRecord(
 
 // repointClaudePluginMarketplace re-points the professor marketplace of an
 // installed plugin of ours that Claude Code knows from another source at the
-// target's own source, its checkout copies' dir on -alpha: `plugin
+// target's own source, its checkout copies' dir on a checkout host: `plugin
 // marketplace add` on a known name re-points it and keeps its plugins and their
 // options, which `plugin marketplace remove` would delete. An applied re-point
 // is read back, and a marketplace still pointing elsewhere is an error.
@@ -567,7 +573,7 @@ func (installer *engine) repointClaudePluginMarketplace(
 	})
 }
 
-// checkListedClaudePlugins reads back, after an applied -alpha pass, every
+// checkListedClaudePlugins reads back, after an applied checkout-host pass, every
 // plugin of ours claude.plugins lists that the pass did not already fail: one
 // not installed from its checkout copy and enabled is a failure naming each
 // problem pfm doctor reports for it.

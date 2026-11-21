@@ -3,6 +3,7 @@
   "theme": "default",
   "envs": {},
   "harnessPrompt": null,
+  "installPing": true,
   "chat": {
     "backend": "auto",
     "herdrTabStatus": "emoji"
@@ -26,6 +27,7 @@
     "systemPrompt": "professor",
     "requireManagedCleanup": true,
     "pluginCheckoutRoot": null,
+    "pluginSource": "release",
     "plugins": [
       "cache-live-control",
       "forward-compaction",

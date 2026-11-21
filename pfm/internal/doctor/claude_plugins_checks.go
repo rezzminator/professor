@@ -10,24 +10,20 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// doctorClaudePluginBuild is the build doctor checks the plugins of: this
-// pfm's version, home, claude.pluginCheckoutRoot, claude.plugins and the
+// doctorClaudePluginBuild is the build doctor checks the plugins of:
+// claude.pluginSource, home, claude.pluginCheckoutRoot, claude.plugins and the
 // source clone a prior install anchored on (paths.GlobalSourceRepo, the
-// marker else the default path), whose plugins/ an -alpha build copies from
+// marker else the default path), whose plugins/ a checkout host copies from
 // when the key is unset. A clone that cannot be resolved rides as
 // SourceRepoErr, named in the fallback line. claude.plugins is the effective
 // list, its default when unset, so install and doctor plan one list.
-func doctorClaudePluginBuild(
-	version, home string,
-	claude pfmconfig.Claude,
-) installer.ClaudePluginBuild {
+func doctorClaudePluginBuild(home string, claude pfmconfig.Claude) installer.ClaudePluginBuild {
 	sourceRepo, sourceRepoErr := paths.GlobalSourceRepo(home)
 	return installer.ClaudePluginBuild{
-		Version:       version,
+		FromCheckout:  claude.PluginsFromCheckout(),
 		Home:          home,
 		CheckoutRoot:  claude.PluginCheckoutRoot,
 		SourceRepo:    sourceRepo,
@@ -54,15 +50,15 @@ func printEngineSyncHookDoctor(stdout io.Writer, plugins []pfmconfig.ClaudePlugi
 }
 
 // printClaudePluginsDoctor checks the shared store once for the plugins build
-// ensures: each {name}@professor id, from its checkout copy on an -alpha build
-// with checkouts and from the professor marketplace otherwise, each -alpha
+// ensures: each {name}@professor id, from its checkout copy on a checkout host
+// with checkouts and from the professor marketplace otherwise, each checkout-host
 // plugin with no checkout a gap, and each id of retiredPlugins (the retired
 // lists' plugin ids once ours, keyed by their successor's bare name; nil when
 // the lists could not be read, a failure the caller reports) a gap while it is
-// enabled, listed or configured (installer.ClaudePluginGaps). An -alpha build also checks
+// enabled, listed or configured (installer.ClaudePluginGaps). A checkout host also checks
 // every plugin the source clone's marketplace lists that claude.plugins does
 // not, installed with no copy enabled; a marketplace list it cannot read is a
-// failure. On an -alpha build each gap of a plugin of ours claude.plugins
+// failure. On a checkout host each gap of a plugin of ours claude.plugins
 // lists is a failure, every other gap a warning; a
 // bare name whose source clone or checkout cannot be read is one warning
 // naming the error, neither copy checked. A
@@ -92,7 +88,7 @@ func printClaudePluginsDoctor(
 		fmt.Fprintf(stdout, "doctor: claude_plugins %v — repair it, then run pfm install --yes\n", listErr)
 	}
 	targets := installer.ClaudePluginTargets(build)
-	failing := listedPluginGaps(build.Version, targets)
+	failing := listedPluginGaps(build.FromCheckout, targets)
 	var cannotInstall []installer.ClaudePluginGap
 	for index := range targets {
 		if targets[index].Fallback != "" {
@@ -231,7 +227,7 @@ func bareNameInstallFix(target installer.ClaudePluginTarget) string {
 }
 
 // bareNameInstallFixes swaps the generic repair of every "not enabled" and "not installed" gap of
-// a bare name that installs from GitHub for bareNameInstallFix. A local -alpha checkout copy has a
+// a bare name that installs from GitHub for bareNameInstallFix. A local checkout copy has a
 // checkout to name instead and keeps its repair. A "not enabled" one whose install record in store
 // remains names the version it holds: the marketplace's current version is Claude Code's alone to
 // read, and pfm install brings that record to it before enabling it.
@@ -266,12 +262,12 @@ func bareNameInstallFixes(
 	return gaps
 }
 
-// listedPluginGaps is the gaps an -alpha build fails on: each naming a plugin
+// listedPluginGaps is the gaps a checkout host fails on: each naming a plugin
 // of ours claude.plugins lists, which must run from its checkout copy, enabled. On
-// a release no gap fails.
-func listedPluginGaps(version string, targets []installer.ClaudePluginTarget) func(installer.ClaudePluginGap) bool {
+// claude.pluginSource release no gap fails.
+func listedPluginGaps(fromCheckout bool, targets []installer.ClaudePluginTarget) func(installer.ClaudePluginGap) bool {
 	var listed []string
-	if obs.AlphaBuild(version) {
+	if fromCheckout {
 		for index := range targets {
 			if targets[index].Own && !targets[index].InstallOnly {
 				listed = append(listed, targets[index].Name)

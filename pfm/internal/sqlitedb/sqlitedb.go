@@ -7,6 +7,8 @@
 // memory.go: the test-process memory mode — ServeTestMemory (testjail.Run's
 // switch), AllowDatabaseFiles, ReleaseTestMemory and AttachName: in a test
 // process every path is served from a memory database its marker file names.
+//
+// restore.go: RestoreFrom, a database overwritten from another through SQLite's online backup.
 package sqlitedb
 
 import (

@@ -276,8 +276,13 @@ func (f *scheduleRestartHerdr) serve(socket string) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
+	// Each connection is served on its own goroutine, so a client that has
+	// dialled but not yet written never holds back another client's exchange
+	// past the herdr client's per-exchange deadline; f.mu orders the fixture's
+	// state across connections.
+	var conns sync.WaitGroup
 	done := make(chan struct{})
-	f.t.Cleanup(func() { _ = listener.Close(); <-done })
+	f.t.Cleanup(func() { _ = listener.Close(); <-done; conns.Wait() })
 	go func() {
 		defer close(done)
 		for {
@@ -285,26 +290,32 @@ func (f *scheduleRestartHerdr) serve(socket string) {
 			if err != nil {
 				return
 			}
-			func() {
-				defer func() { _ = conn.Close() }()
-				var req struct {
-					ID     string                     `json:"id"`
-					Method string                     `json:"method"`
-					Params map[string]json.RawMessage `json:"params"`
-				}
-				if err := json.NewDecoder(conn).Decode(&req); err != nil {
-					f.t.Error(err)
-					return
-				}
-				f.mu.Lock()
-				defer f.mu.Unlock()
-				result := f.respond(req.Method, req.Params)
-				if err := json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
-					f.t.Error(err)
-				}
+			conns.Add(1)
+			go func() {
+				defer conns.Done()
+				f.serveConn(conn)
 			}()
 		}
 	}()
+}
+
+func (f *scheduleRestartHerdr) serveConn(conn net.Conn) {
+	defer func() { _ = conn.Close() }()
+	var req struct {
+		ID     string                     `json:"id"`
+		Method string                     `json:"method"`
+		Params map[string]json.RawMessage `json:"params"`
+	}
+	if err := json.NewDecoder(conn).Decode(&req); err != nil {
+		f.t.Error(err)
+		return
+	}
+	f.mu.Lock()
+	result := f.respond(req.Method, req.Params)
+	f.mu.Unlock()
+	if err := json.NewEncoder(conn).Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
+		f.t.Error(err)
+	}
 }
 
 func (f *scheduleRestartHerdr) respond(method string, params map[string]json.RawMessage) any {

@@ -217,7 +217,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			Offline:    paths.PricesOffline(),
 			Clock:      clock.Real,
 		})
-		hookentry.InstallPing(context.Background(), stdout, *offline, runtime, paths.OSEnv{})
+		hookentry.InstallPing(context.Background(), *offline, runtime, paths.OSEnv{})
 	}
 	return code
 }
@@ -255,7 +255,6 @@ func newInstallerOptions(
 		options.MCPConfigPath = runtime.Config.Path
 		options.OpenCodeConfigPath = installer.OpenCodeConfigPath(runtime.Paths.Home)
 		options.ClaudeBinary, options.GptAgents = runtime.Config.Claude.Binary, runtime.Config.Claude.GptAgents
-		options.Version = runtime.Version
 		options.ClaudePluginCheckoutRoot = runtime.Config.Claude.PluginCheckoutRoot
 		installer.ConfigureClaudePlugins(&options, runtime.Config)
 		options.HerdrKeys = runtime.Config.Herdr.Keys

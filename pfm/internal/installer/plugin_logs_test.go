@@ -109,7 +109,7 @@ func TestReadPluginLogEnv(t *testing.T) {
 	}
 }
 
-func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
+func TestCheckoutInstallOwnsSharedPluginLogEnv(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		value           any
@@ -138,8 +138,14 @@ func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
 			path := filepath.Join(store, "settings.json")
 			writeFixture(t, path, string(raw))
 			inst := &engine{
-				options:     Options{Home: home, ConfigDir: store, Version: alphaVersion, Stdout: &bytes.Buffer{}},
-				managedRoot: managedRootForHome(home), apply: true,
+				options: Options{
+					Home:                      home,
+					ConfigDir:                 store,
+					ClaudePluginsFromCheckout: true,
+					Stdout:                    &bytes.Buffer{},
+				},
+				managedRoot: managedRootForHome(home),
+				apply:       true,
 			}
 			if tc.explicit {
 				inst.options.ClaudeEnv = map[string]string{PluginLogDirEnv: filepath.Join(home, "configured-logs")}
@@ -155,7 +161,7 @@ func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
 			}
 			for _, phase := range []string{"install", "reinstall", "release", "uninstall"} {
 				if phase == "release" {
-					inst.options.Version = "0.82.0"
+					inst.options.ClaudePluginsFromCheckout = false
 				}
 				if err := inst.ensureClaudeEnv(phase == "uninstall"); err != nil {
 					t.Fatal(err)
@@ -192,12 +198,12 @@ func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
 	var output bytes.Buffer
 	inst := &engine{
 		options: Options{
-			Home:             home,
-			ConfigDir:        store,
-			PrimaryConfigDir: first,
-			RosterConfigDirs: []string{first, second},
-			Version:          alphaVersion,
-			Stdout:           &output,
+			Home:                      home,
+			ConfigDir:                 store,
+			PrimaryConfigDir:          first,
+			RosterConfigDirs:          []string{first, second},
+			ClaudePluginsFromCheckout: true,
+			Stdout:                    &output,
 		},
 		managedRoot: managedRootForHome(home),
 		apply:       true,
@@ -229,7 +235,7 @@ func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
 	if err := inst.ensureClaudeEnv(false); err != nil || strings.Contains(output.String(), "  change  ") {
 		t.Fatalf("unchanged log env re-applied: %v, %s", err, output.String())
 	}
-	inst.options.Version = "0.82.0"
+	inst.options.ClaudePluginsFromCheckout = false
 	if err := inst.ensureClaudeEnv(false); err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +244,7 @@ func TestAlphaInstallOwnsSharedPluginLogEnv(t *testing.T) {
 			t.Fatalf("release kept alpha log key: %+v", setting)
 		}
 	}
-	inst.options.Version = alphaVersion
+	inst.options.ClaudePluginsFromCheckout = true
 	if err := inst.ensureClaudeEnv(false); err != nil {
 		t.Fatal(err)
 	}

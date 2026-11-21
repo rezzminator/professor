@@ -11,7 +11,7 @@ import (
 
 // ClaudePlugin is one claude.plugins entry. ID is a bare plugin name of ours
 // ("auto-effort": {name}@professor, from the GitHub professor
-// marketplace, or on an -alpha build from its checkout under
+// marketplace, or with claude.pluginSource checkout from its checkout under
 // claude.pluginCheckoutRoot, else under the source clone's plugins/) or a full
 // "name@marketplace" id.
 // Source is what `claude plugin marketplace add` takes (owner/repo, a git or

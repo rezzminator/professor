@@ -59,6 +59,54 @@ func TestClaudePluginCheckoutRoot(t *testing.T) {
 	}
 }
 
+// claude.pluginSource is where Professor's plugins come from: release when unset, checkout only
+// when the machine file says so, any other value a load error naming both, refused at account
+// scope; PluginsFromCheckout reads it.
+func TestClaudePluginSource(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), FileName)
+	for _, tc := range []struct {
+		content, want, err string
+		checkout           bool
+		source             Source
+	}{
+		{`{"version":2}`, PluginSourceRelease, "", false, SourceDefault},
+		{`{"version":2,"claude":{"pluginSource":"release"}}`, PluginSourceRelease, "", false, SourceFile},
+		{`{"version":2,"claude":{"pluginSource":"checkout"}}`, PluginSourceCheckout, "", true, SourceFile},
+		{`{"version":2,"claude":{"pluginSource":"Checkout"}}`, "", "claude.pluginSource must be \"release\" or \"checkout\", got \"Checkout\"", false, ""},
+		{`{"version":2,"claude":{"pluginSource":""}}`, "", "claude.pluginSource must be \"release\" or \"checkout\", got \"\"", false, ""},
+		{
+			`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"pluginSource":"checkout"}}]}`, "",
+			"accounts[0].pluginSource is machine-wide: set claude.pluginSource", false, "",
+		},
+	} {
+		if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path, home, nil)
+		if tc.err != "" {
+			if err == nil || err.Error() != "config "+path+": "+tc.err {
+				t.Fatalf("%s error = %v, want %q", tc.content, err, tc.err)
+			}
+			continue
+		}
+		if err != nil || loaded.Claude.PluginSource != tc.want || loaded.Claude.PluginsFromCheckout() != tc.checkout ||
+			loaded.Source(KeyClaudePluginSource) != tc.source {
+			t.Fatalf(
+				"%s source=%q checkout=%v from=%q err=%v, want %q %v %q",
+				tc.content,
+				loaded.Claude.PluginSource,
+				loaded.Claude.PluginsFromCheckout(),
+				loaded.Source(KeyClaudePluginSource),
+				err,
+				tc.want,
+				tc.checkout,
+				tc.source,
+			)
+		}
+	}
+}
+
 // claude.costLedger is the machine-wide switch of the per-call cost ledger: on by default, an
 // account may not set it, and Marshal writes the value back when the file set it.
 func TestClaudeCostLedgerSwitch(t *testing.T) {
@@ -128,6 +176,7 @@ var v079ClaudeKeys = map[string]bool{
 var releaseClaudeKeys = []string{
 	"remoteControl",
 	"pluginCheckoutRoot",
+	"pluginSource",
 	"plugins",
 	"costLedger",
 	"gptAgents",
@@ -182,20 +231,20 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 	}{
 		{
 			"every key set to a non-default",
-			`{"version":2,"claude":{"pluginCheckoutRoot":"/opt/plugins",` +
+			`{"version":2,"claude":{"pluginCheckoutRoot":"/opt/plugins","pluginSource":"checkout",` +
 				`"plugins":["auto-effort"],"costLedger":false}}`,
 			map[string]any{
-				"pluginCheckoutRoot": "/opt/plugins",
-				"plugins":            []any{"auto-effort"}, "costLedger": false,
+				"pluginCheckoutRoot": "/opt/plugins", "pluginSource": "checkout",
+				"plugins": []any{"auto-effort"}, "costLedger": false,
 			},
 		},
 		{
 			"keys the user set to their defaults",
-			`{"version":2,"claude":{"costLedger":true,` +
+			`{"version":2,"claude":{"costLedger":true,"pluginSource":"release",` +
 				`"plugins":["cache-live-control","forward-compaction","auto-effort","tool-visibility-controller"]}}`,
 			map[string]any{
-				"costLedger": true,
-				"plugins":    []any{"cache-live-control", "forward-compaction", "auto-effort", "tool-visibility-controller"},
+				"costLedger": true, "pluginSource": "release",
+				"plugins": []any{"cache-live-control", "forward-compaction", "auto-effort", "tool-visibility-controller"},
 			},
 		},
 		{"an explicitly empty list", `{"version":2,"claude":{"plugins":[]}}`, map[string]any{"plugins": []any{}}},
@@ -237,7 +286,7 @@ func TestMarshalClaudeKeysAddedSinceTheLastReleaseAreWrittenOnlyWhenSet(t *testi
 				t.Errorf("round trip changed the claude block:\n%#v\n%#v", loaded.Claude, reloaded.Claude)
 			}
 			for _, key := range []string{
-				KeyClaudePlugins, KeyClaudePluginCheckoutRoot, KeyClaudeCostLedger,
+				KeyClaudePlugins, KeyClaudePluginCheckoutRoot, KeyClaudePluginSource, KeyClaudeCostLedger,
 			} {
 				if loaded.Source(key) != reloaded.Source(key) {
 					t.Errorf(

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -103,4 +104,50 @@ func TestThirdPartyKeyDefault(t *testing.T) {
 		}
 	}
 	t.Fatal("mcp.thirdParty missing from Keys")
+}
+
+// installPing is the machine-wide switch of both install pings: on by default, a file's boolean
+// wins with source file, and Marshal writes it only when the file set it, so a default file
+// (config init) stays readable by a pfm that predates the key.
+func TestLoadInstallPingSwitch(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), FileName)
+	for _, tc := range []struct {
+		content    string
+		want       bool
+		wantSource Source
+		wantJSON   string
+	}{
+		{`{"version":2}`, true, SourceDefault, ""},
+		{`{"version":2,"installPing":true}`, true, SourceFile, `  "installPing": true,`},
+		{`{"version":2,"installPing":false}`, false, SourceFile, `  "installPing": false,`},
+	} {
+		if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path, home, nil)
+		if err != nil || loaded.InstallPing != tc.want || loaded.Source(KeyInstallPing) != tc.wantSource {
+			t.Fatalf("%s installPing=%v source=%q err=%v, want %v %q",
+				tc.content, loaded.InstallPing, loaded.Source(KeyInstallPing), err, tc.want, tc.wantSource)
+		}
+		encoded, err := Marshal(loaded, false)
+		if err != nil {
+			t.Fatalf("%s marshal: %v", tc.content, err)
+		}
+		if tc.wantJSON == "" {
+			if strings.Contains(string(encoded), `"installPing"`) ||
+				!strings.Contains(string(encoded), `"theme": "default"`) {
+				t.Fatalf("%s marshals %s; want a theme key and no installPing key", tc.content, encoded)
+			}
+			continue
+		}
+		if !strings.Contains(string(encoded), "\n"+tc.wantJSON+"\n") {
+			t.Fatalf("%s marshals %s; want the line %q", tc.content, encoded, tc.wantJSON)
+		}
+	}
+	for _, def := range Keys() {
+		if def.Key == KeyInstallPing && def.Default != true {
+			t.Fatalf("Keys() lists %s default %v, want true", def.Key, def.Default)
+		}
+	}
 }

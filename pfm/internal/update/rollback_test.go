@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,7 +13,10 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -32,9 +36,16 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 			updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 				return testjail.WriteExecutableNeverRun(output, []byte("new\n"), 0o755)
 			}
+			// The candidate migrates the state database past this binary's schema.
+			stateDir := filepath.Join(runtime.Paths.Home, ".local", "state", "pfm")
+			testjail.DatabaseFiles(t, stateDir)
+			runtime.Paths.StateDB = filepath.Join(stateDir, "pfm.db")
+			updateTestStateDatabase(t, runtime.Paths.StateDB, "SELECT 1")
 			var order []string
 			updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, io.Writer, io.Writer) error {
 				order = append(order, "candidate-install")
+				updateTestStateDatabase(t, runtime.Paths.StateDB, "CREATE TABLE candidate_only (v TEXT)",
+					fmt.Sprintf("PRAGMA user_version=%d", fleetdb.SchemaVersion+1))
 				if got, err := os.ReadFile(canonical); err != nil || string(got) != "new\n" {
 					t.Fatalf("candidate install binary = %q, %v; want new", got, err)
 				}
@@ -69,6 +80,15 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 				if got := updateGitRevision(t, repo, "HEAD"); got != previousRef {
 					t.Errorf("previous install source = %q, want %q", got, previousRef)
 				}
+				state := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: runtime.Paths.StateDB})
+				version, err := state.UserVersion(context.Background())
+				if closeErr := state.Close(); closeErr != nil {
+					t.Errorf("close %s: %v", runtime.Paths.StateDB, closeErr)
+				}
+				if err != nil || version != fleetdb.SchemaVersion {
+					t.Errorf("state database %s the previous install opens: version %d, %v; want %d, nil",
+						runtime.Paths.StateDB, version, err, fleetdb.SchemaVersion)
+				}
 				return nil
 			}
 			updateRollbackDoctor = func(_ context.Context, binary string, _ pfmconfig.Runtime, configPath string, _, _ io.Writer) (doctorOutcome, error) {
@@ -94,6 +114,16 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 			}
 			if !slices.Equal(order, want) {
 				t.Fatalf("update order = %q, want %q", order, want)
+			}
+			kept := runtime.Paths.StateDB + fmt.Sprintf(".rolled-back-v%d", fleetdb.SchemaVersion+1)
+			restoredLine := fmt.Sprintf("pfm update: rolled back state database %s from schema %d to %d; "+
+				"the candidate's database, with every write since the update began, is kept at %s",
+				runtime.Paths.StateDB, fleetdb.SchemaVersion+1, fleetdb.SchemaVersion, kept)
+			if !slices.Contains(strings.Split(stderr.String(), "\n"), restoredLine) {
+				t.Errorf("rollback stderr lacks the line %q:\n%s", restoredLine, stderr.String())
+			}
+			if _, err := os.Stat(kept); err != nil {
+				t.Errorf("candidate's database kept at %s: %v", kept, err)
 			}
 			if got := updateGitBranch(t, repo); got != previousBranch {
 				t.Errorf("source branch = %q, want %q", got, previousBranch)
@@ -222,6 +252,7 @@ func TestUpdateRollbackJoinsStepFailures(t *testing.T) {
 				step == "source",
 				replacements,
 				nil,
+				&updateStateSnapshot{},
 				runtime,
 				io.Discard,
 				io.Discard,
@@ -306,7 +337,17 @@ func TestUpdateRollbackResetsSourceDespiteARefreshedPriceTable(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := rollbackUpdateState(
-		context.Background(), repo, repo, previousRef, true, nil, nil, runtime, &stdout, &stderr,
+		context.Background(),
+		repo,
+		repo,
+		previousRef,
+		true,
+		nil,
+		nil,
+		&updateStateSnapshot{},
+		runtime,
+		&stdout,
+		&stderr,
 	)
 
 	if err != nil && strings.Contains(err.Error(), "restore source revision") {
@@ -317,5 +358,64 @@ func TestUpdateRollbackResetsSourceDespiteARefreshedPriceTable(t *testing.T) {
 	}
 	if content, readErr := os.ReadFile(file); readErr != nil || string(content) != "previous\n" {
 		t.Fatalf("prices after rollback = %q, %v; want the previous release's table", content, readErr)
+	}
+}
+
+// updateTestStateDatabase brings the state database at path to this binary's
+// schema, as the running pfm left it, then runs statements on it.
+func updateTestStateDatabase(t *testing.T, path string, statements ...string) {
+	t.Helper()
+	ctx := context.Background()
+	state := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: path})
+	if err := state.Close(); err != nil {
+		t.Fatalf("close %s: %v", path, err)
+	}
+	database, err := sqlitedb.OpenStore(ctx, path)
+	if err != nil {
+		t.Fatalf("OpenStore(%s) = %v", path, err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close %s: %v", path, err)
+		}
+	}()
+	for _, statement := range statements {
+		if _, err := database.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("%s: %s: %v", path, statement, err)
+		}
+	}
+}
+
+// A state database restore that fails keeps its pre-update copy as the repair
+// source: the error names the copy and restoreFailed keeps the stage holding it.
+func TestUpdateRollbackStateDatabaseRestoreFailureKeepsTheCopy(t *testing.T) {
+	dir := t.TempDir()
+	testjail.DatabaseFiles(t, dir)
+	path := filepath.Join(dir, "pfm.db")
+	updateTestStateDatabase(t, path, fmt.Sprintf("PRAGMA user_version=%d", fleetdb.SchemaVersion+1))
+	for _, tc := range []struct {
+		name, snapshot string
+		wantFailed     bool
+	}{
+		{name: "copy unreadable", snapshot: filepath.Join(dir, "missing", "state.db"), wantFailed: true},
+		{name: "no copy", snapshot: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &updateStateSnapshot{path: tc.snapshot}
+			err := rollbackUpdateStateDatabase(context.Background(), path, state, io.Discard)
+			wantPrefix := "restore state database: "
+			if tc.wantFailed {
+				wantPrefix = "restore state database (its pre-update copy is kept at " + tc.snapshot + "): "
+			}
+			if err == nil || !strings.HasPrefix(err.Error(), wantPrefix) {
+				t.Fatalf(
+					"rollbackUpdateStateDatabase(%s, %q) = %v, want an error starting %q",
+					path, tc.snapshot, err, wantPrefix,
+				)
+			}
+			if state.restoreFailed != tc.wantFailed {
+				t.Fatalf("restoreFailed = %v, want %v (error %v)", state.restoreFailed, tc.wantFailed, err)
+			}
+		})
 	}
 }

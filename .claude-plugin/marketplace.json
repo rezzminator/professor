@@ -27,10 +27,10 @@
         "path": "./plugins/cache-live-control",
         "ref": "main"
       },
-      "description": "A /cache command that switches the prompt-cache TTL (5m, 1h or automatic) for one chat and its sub-agents, live, with no model turn.",
+      "description": "A /cache command that switches the prompt-cache TTL (5m, 1h or automatic) for one chat and its sub-agents, live, with no model turn, and keep-warm pokes that hold a waiting chat's cache warm while background work runs.",
       "homepage": "https://github.com/rezzminator/cache-live-control",
       "license": "MIT",
-      "keywords": ["claude-code", "prompt-cache", "cache-ttl", "function-hooks", "professor"]
+      "keywords": ["claude-code", "prompt-cache", "cache-ttl", "keep-warm", "function-hooks", "professor"]
     },
     {
       "name": "auto-effort",
@@ -122,19 +122,6 @@
       "homepage": "https://github.com/rezzminator/engine-sync",
       "license": "MIT",
       "keywords": ["claude-code", "claude-code-plugin", "codex", "opencode", "agents", "hooks", "mirror", "professor"]
-    },
-    {
-      "name": "cache-keepwarm",
-      "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/rezzminator/cache-keepwarm.git",
-        "path": "./plugins/cache-keepwarm",
-        "ref": "main"
-      },
-      "description": "Keeps the main chat's prompt cache warm while it waits on background agents, shells, Monitors and workflows: one invisible replay before expiry, admitted only while the forecast spend stays under the rewrite it saves.",
-      "homepage": "https://github.com/rezzminator/cache-keepwarm",
-      "license": "MIT",
-      "keywords": ["claude-code", "prompt-cache", "keep-warm", "function-hooks", "professor"]
     },
     {
       "name": "harvester",

@@ -155,7 +155,7 @@ func TestClaudeEnvDoctor(t *testing.T) {
 			var out bytes.Buffer
 			tally := &doctorTally{}
 			printClaudeEnvDoctor(&out, managedRoot, settings, test.env,
-				installer.ClaudePluginBuild{Version: "0.80.0", Home: home, Plugins: pfmconfig.DefaultClaudePlugins()},
+				installer.ClaudePluginBuild{Home: home, Plugins: pfmconfig.DefaultClaudePlugins()},
 				tally)
 			for _, line := range test.lines {
 				if !strings.Contains(out.String(), expand(line)) {
@@ -190,7 +190,7 @@ func TestClaudeEnvPluginLogMissingHasOneRepair(t *testing.T) {
 				t.Fatal(err)
 			}
 			writePluginLogsFile(t, filepath.Join(managed, "claude-env-ownership.json"), string(raw))
-			build := installer.ClaudePluginBuild{Version: "0.82.0-alpha", Home: fixture.home, SourceRepo: fixture.clone}
+			build := installer.ClaudePluginBuild{FromCheckout: true, Home: fixture.home, SourceRepo: fixture.clone}
 			var env map[string]string
 			if explicit {
 				env = map[string]string{installer.PluginLogDirEnv: fixture.folder}

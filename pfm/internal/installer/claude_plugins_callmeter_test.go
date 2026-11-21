@@ -68,7 +68,7 @@ func writeCallmeterCheckout(t *testing.T, root, version string) (module, checkou
 	return module, checkout
 }
 
-// TestEnsureCallmeterBinary: an -alpha install builds callmeter from its
+// TestEnsureCallmeterBinary: a checkout-host install builds callmeter from its
 // checkout, stamped with the checkout's version, into the path the wrapper
 // runs; the binary there is kept as callmeter.prev, an equal build changes
 // nothing, a failed build leaves the binary as it was, and a dry run builds
@@ -318,7 +318,7 @@ func TestEnsureClaudePluginsBuildsCallmeterBeforeItsCopy(t *testing.T) {
 			runner.onBuild = func() { _, err := os.Stat(mirror); copied = err == nil }
 			var out bytes.Buffer
 			inst := pluginEngine(home, binary, first, second, runner, &out, true)
-			inst.options.Version = alphaVersion
+			inst.options.ClaudePluginsFromCheckout = true
 			inst.options.ClaudePluginCheckoutRoot = root
 			inst.options.ClaudePlugins = bareList("callmeter")
 			simulateClaude(t, &runner.pluginRunner)
@@ -353,7 +353,7 @@ func TestEnsureClaudePluginsSkipsDisabledCallmeterBuild(t *testing.T) {
 	runner := &goRunner{missing: true}
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
-	inst.options.Version, inst.options.ClaudePluginCheckoutRoot = alphaVersion, root
+	inst.options.ClaudePluginsFromCheckout, inst.options.ClaudePluginCheckoutRoot = true, root
 	inst.options.ClaudePlugins = bareList()
 	inst.options.SourceRepo = writeMarketplaceClone(t, []string{"callmeter"}, nil)
 	simulateClaude(t, &runner.pluginRunner)

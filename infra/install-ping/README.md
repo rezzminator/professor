@@ -12,7 +12,7 @@ One row per (UTC day, id, product) in the `pings` table (`migrations/0001_pings.
 
 ## Privacy
 
-Stored: the row above and nothing else. Never stored: the IP address, any request header, country, user agent, a time finer than the day, or anything derived from the machine or the user; the id is random and made on the install. A client sends nothing when `{PRODUCT}_INSTALL_PING_OFFLINE=1` (`PFM_INSTALL_PING_OFFLINE`, `HARVESTER_INSTALL_PING_OFFLINE`) or `DO_NOT_TRACK` is set (any value but `0` or `false`), under CI, or inside the project's test jail and fence.
+Stored: the row above and nothing else. Never stored: the IP address, any request header, country, user agent, a time finer than the day, or anything derived from the machine or the user; the id is random and made on the install. `pfm` sends nothing when the machine `pfm.config.json` sets `"installPing": false` (a project's own file cannot set it) or is unreadable. A client sends nothing when `{PRODUCT}_INSTALL_PING_OFFLINE=1` (`PFM_INSTALL_PING_OFFLINE`, `HARVESTER_INSTALL_PING_OFFLINE`) or `DO_NOT_TRACK` is set (any value but `0` or `false`), under CI, or inside the project's test jail and fence.
 
 ## Deploy
 

@@ -1,5 +1,7 @@
 // Package paths centralizes filesystem defaults and their test-jail overrides.
 //
+// env.go: Env, the seam every environment and host identity read crosses, and the
+// name of every variable pfm reads.
 // logroot.go: LogRoot, the one folder every pfm log is written to and read from.
 // platform.go: Platform, the OS and architecture the binary runs on.
 package paths
@@ -60,78 +62,6 @@ const (
 // SIDScratchDirs lists every SID-dir scratch purpose, so a check that
 // audits the SID dir can tell pfm's own directories from rot.
 func SIDScratchDirs() []string { return []string{SIDScratchDoctor, SIDScratchChatLoads} }
-
-const (
-	EnvConfig      = "PFM_CONFIG"
-	EnvCacheDB     = "PFM_CACHE_DB"
-	EnvStateDB     = "PFM_STATE_DB"
-	EnvSIDDir      = "PFM_SID_DIR"
-	EnvClaudeRoots = "PFM_CLAUDE_ROOTS"
-	EnvCodexHome   = "PFM_CODEX_ROOT"
-	// EnvOpenCodeRoot jails OpenCode's data home (~/.local/share/opencode),
-	// the directory holding its SQLite session store opencode.db.
-	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
-	EnvTmuxDir      = "PFM_TMUX_DIR"
-	EnvHome         = "PFM_HOME"
-	// EnvDevFence=1 marks a process the fence (infra/fence) started; with
-	// /.dockerenv it is how testjail admits a test run.
-	EnvDevFence = "PFM_DEV_FENCE"
-	// EnvCostLedgerDir names the directory of the per-call cost ledger
-	// ({session_id}.jsonl, one line per API call) the cost sink writes and the
-	// status line, `pfm tokens` and callmeter read; unset, it hangs off the
-	// pfm state directory (CostLedgerDir).
-	EnvCostLedgerDir = "PFM_COST_LEDGER_DIR"
-	// EnvWatchSnapshot names the fleet snapshot `pfm chat watch` processes
-	// share (WatchSnapshot); unset, it sits beside the fleet cache.
-	EnvWatchSnapshot = "PFM_WATCH_SNAPSHOT"
-	// EnvRealHome lets the rare test that MUST see the operator's own
-	// machine — building against the real module cache, probing a live
-	// config — opt back in by name. Everything else running under `go
-	// test` is refused the real home rather than handed it silently.
-	EnvRealHome             = "PFM_TEST_REAL_HOME"
-	EnvTestPFMBinary        = "PFM_TEST_PFM_BINARY"
-	EnvTestMockEngineBinary = "PFM_TEST_MOCK_ENGINE_BINARY"
-	EnvProcRoot             = "PFM_PROC_ROOT"
-	EnvManagedSettingsDir   = "PFM_MANAGED_SETTINGS_DIR"
-	EnvCgroupRoot           = "PFM_CGROUP_ROOT"
-	EnvDevRepoGitDir        = "PFM_DEV_REPO_GIT_DIR"
-	EnvDevRepoWorkTree      = "PFM_DEV_REPO_WORK_TREE"
-	// EnvTestArtifactDir names the directory every Go test process writes its
-	// profile under (internal/testjail); unset, profiling writes nothing and a
-	// red run says so once on stderr. EnvTestProfile=0 turns profiling off;
-	// EnvTestProfile=cpu adds a CPU profile, opt-in only: its SIGPROF interval
-	// timer survives execve, so a test whose child execs another program (zsh, a
-	// re-exec'd pfm) sees that child killed by "profiling timer expired".
-	// EnvTestProfileParent is exported by the first profiled process: a test
-	// binary inheriting it is a helper, recorded but never a failure bundle,
-	// since helpers exit non-zero on purpose. EnvTestDeadlineEpoch is the step
-	// deadline in decimal epoch seconds, which the profiler's watchdog fires
-	// before.
-	EnvTestArtifactDir   = "PFM_TEST_ARTIFACT_DIR"
-	EnvTestProfile       = "PFM_TEST_PROFILE"
-	EnvTestProfileParent = "PFM_TEST_PROFILE_PARENT"
-	EnvTestDeadlineEpoch = "PFM_TEST_DEADLINE_EPOCH"
-	// EnvTmuxConf pins the config a chat's tmux server is born with. Unset —
-	// the way a real chat runs — the server loads ~/.tmux.conf like every other
-	// terminal on the machine, because a chat IS a terminal the user lives in:
-	// one that ignores their config wears tmux's default green status bar at
-	// the bottom while every other window wears theirs on top. Jails set it to
-	// /dev/null so a machine's real config can never steer a fixture.
-	EnvTmuxConf = "PFM_TMUX_CONF"
-	// EnvLogLevel overrides the activity log's level for one run,
-	// EnvLogComponents (`mcp=debug,db=off`) its per-component levels, and
-	// EnvLogMirror set to "stderr" mirrors every record onto stderr for a
-	// foreground run (internal/obs).
-	EnvLogLevel      = "PFM_LOG_LEVEL"
-	EnvLogComponents = "PFM_LOG_COMPONENTS"
-	EnvLogMirror     = "PFM_LOG"
-	// EnvAutoEffortStateFile is the auto-effort plugin's own variable naming
-	// its per-session state file (AutoEffortStateFile); pfm only reads it.
-	EnvAutoEffortStateFile = "AUTO_EFFORT_STATE_FILE"
-	// EnvFormerAutoEffortStateFile is the variable under the plugin's former
-	// name, which the plugin reads in place of an unset EnvAutoEffortStateFile.
-	EnvFormerAutoEffortStateFile = "AUTO_EFFORT_CONTROL_STATE_FILE"
-)
 
 const sourceRepoMarkerName = "source-repo"
 

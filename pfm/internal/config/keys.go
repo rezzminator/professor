@@ -1,6 +1,10 @@
 package config
 
-import pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+import (
+	"fmt"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+)
 
 // The machine-config keys and default the key inventory shares with Load.
 const (
@@ -12,10 +16,23 @@ const (
 )
 
 // KeyClaudePluginCheckoutRoot names the directory holding one checkout per
-// Claude plugin pfm install ensures ({root}/{plugin}/plugins/{plugin}): an
-// -alpha build installs each plugin from a copy of its checkout there. Unset,
-// that directory is the source clone's plugins/.
+// Claude plugin pfm install ensures ({root}/{plugin}/plugins/{plugin}): with
+// claude.pluginSource "checkout" each plugin installs from a copy of its
+// checkout there. Unset, that directory is the source clone's plugins/.
 const KeyClaudePluginCheckoutRoot = "claude.pluginCheckoutRoot"
+
+// KeyClaudePluginSource names where Professor's own Claude plugins come from:
+// PluginSourceRelease, the default, from the GitHub professor marketplace, or
+// PluginSourceCheckout, from the local checkouts under claude.pluginCheckoutRoot
+// (else the source clone's plugins/). Machine-wide, an account may not set it;
+// ClaudePrefs.PluginsFromCheckout is the one reader of it.
+const KeyClaudePluginSource = "claude.pluginSource"
+
+// The two claude.pluginSource values.
+const (
+	PluginSourceRelease  = "release"
+	PluginSourceCheckout = "checkout"
+)
 
 // KeyClaudePlugins names the list of Claude Code plugins pfm install ensures
 // once, through the primary account, in the store every account links: each
@@ -35,6 +52,15 @@ const KeyClaudeCostLedger = "claude.costLedger"
 
 // KeyClaudeGptAgents is the machine-wide switch declaring the engine-sync capability gpt-agents.
 const KeyClaudeGptAgents = "claude.gptAgents"
+
+// KeyInstallPing is the machine-wide switch of pfm's two anonymous install pings (internal/installping):
+// false sends neither. A project's pfm.config.json never sets it (ReadProjectScope warns and ignores it).
+const KeyInstallPing = "installPing"
+
+// InstallPingSummary is the `pfm config show` line of installPing: its value and source.
+func (config Config) InstallPingSummary() string {
+	return fmt.Sprintf("config %s=%t (%s)\n", KeyInstallPing, config.InstallPing, config.Source(KeyInstallPing))
+}
 
 // KeyDefault describes a machine-config leaf and the value shown by the
 // tracked example when the key is unset. Roster arrays are intentionally
@@ -65,6 +91,7 @@ func Keys() []KeyDefault {
 		{"claude.systemPrompt", SystemPromptProfessor},
 		{"claude.requireManagedCleanup", true},
 		{KeyClaudePluginCheckoutRoot, nil},
+		{KeyClaudePluginSource, PluginSourceRelease},
 		{KeyClaudePlugins, defaultClaudePluginIDs()},
 		{KeyClaudeEnv, map[string]any{}},
 		{KeyClaudeCostLedger, true},
@@ -74,6 +101,7 @@ func Keys() []KeyDefault {
 		{KeyClaudeSettings, nil},
 		{KeyEnvs, map[string]any{}},
 		{KeyHarnessPrompt, nil},
+		{KeyInstallPing, true},
 		{"codex.yolo", true},
 		{"codex.binary", pfmengine.MustLookup(pfmengine.Codex).Binary},
 		{"opencode.binary", pfmengine.MustLookup(pfmengine.OpenCode).Binary},

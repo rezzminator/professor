@@ -390,7 +390,7 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	path := writeConfigFixture(
 		t,
 		root,
-		`{"version":2,"claude":{"remoteControl":false,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins"}}`,
+		`{"version":2,"installPing":false,"claude":{"remoteControl":false,"requireManagedCleanup":false,"pluginCheckoutRoot":"/opt/plugins","pluginSource":"checkout"}}`,
 	)
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
@@ -400,6 +400,8 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 		"config claude.remoteControl=false (file)",
 		"config claude.requireManagedCleanup=false (file)",
 		"config claude.pluginCheckoutRoot=/opt/plugins (file)",
+		"config claude.pluginSource=checkout (file)",
+		"config installPing=false (file)",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("config show lacks %q: %s", want, stdout.String())
@@ -415,6 +417,9 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "config claude.remoteControl=true (default)") {
 		t.Fatalf("default config show lacks Remote Control: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "config installPing=true (default)\n") {
+		t.Fatalf("default config show lacks installPing=true (default): %s", stdout.String())
 	}
 }
 

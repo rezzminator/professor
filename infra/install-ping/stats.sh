@@ -36,23 +36,21 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < stats.sql
 add_block
 
-# render prints wrangler's --json answer as an aligned table, header first,
-# each column but the last padded to its widest cell plus two spaces; an empty
-# result is "(no rows)". jq aligns it, not column(1): that is absent from
-# minimal images such as the test fence.
+# render prints wrangler's --json answer as an aligned table, header first;
+# an empty result is "(no rows)". Aligned in awk, not column(1): minimal
+# Linux images (the fence among them) ship without util-linux's column.
 render() {
   jq -r '.[0].results as $rows
     | if ($rows | length) == 0 then "(no rows)"
       else ($rows[0] | keys_unsorted) as $keys
-        | ([$keys] + [$rows[] | [.[$keys[]] | tostring]]) as $lines
-        | [range(0; $keys | length) as $c | [$lines[][$c] | length] | max] as $widths
-        | $lines[]
-        | [to_entries[]
-            | if .key < ($widths | length) - 1
-              then .value + (" " * ($widths[.key] - (.value | length) + 2))
-              else .value end]
-        | join("")
-      end'
+        | ($keys | @tsv), ($rows[] | [.[$keys[]] | tostring] | @tsv)
+      end' | awk -F '\t' '
+    { for (i = 1; i <= NF; i++) { cell[NR, i] = $i; if (length($i) > w[i]) w[i] = length($i) }
+      nf[NR] = NF }
+    END { for (r = 1; r <= NR; r++) {
+            line = ""
+            for (i = 1; i < nf[r]; i++) line = line sprintf("%-" (w[i] + 2) "s", cell[r, i])
+            print line cell[r, nf[r]] } }'
 }
 
 for i in "${!queries[@]}"; do

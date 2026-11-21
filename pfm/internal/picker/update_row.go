@@ -27,6 +27,9 @@ var startProfessorUpdateCheck = func(ctx context.Context, argv []string, options
 	return err
 }
 
+// openChatRow is the seam openProfessorUpdate opens its chat through.
+var openChatRow = pfmchat.OpenRow
+
 func professorUpdateCachePath(runtime pfmconfig.Runtime) string {
 	return filepath.Join(filepath.Dir(runtime.Paths.CacheDB), "update-check.json")
 }
@@ -201,11 +204,12 @@ func openProfessorUpdate(
 	}
 	row.Name = "Professor update " + strings.TrimPrefix(outcome.Row.ID, "pfm-update-")
 	row.Account = outcome.PrimaryAccount
-	return pfmchat.OpenRow(
+	// Always the 1h cache, whatever the picker's toggle: an update run waits on gates and agents for long stretches.
+	return openChatRow(
 		ctx,
 		row,
 		outcome.PrimaryAccount,
-		false,
+		true,
 		professorUpdatePrompt(outcome.Row),
 		stdout,
 		stderr,

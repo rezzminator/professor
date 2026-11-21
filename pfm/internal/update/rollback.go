@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 type updateReplacement struct {
@@ -47,18 +48,57 @@ func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writ
 	return rollbackErr
 }
 
-// rollbackUpdateState restores binaries, source and files before re-running
-// the previous install and its doctor; failures are joined as rollback residue.
+// updateStateSnapshot is the state database's copy from before the candidate
+// ran ("" when there was none); restoreFailed keeps the stage, and the copy in
+// it, as the manual repair source.
+type updateStateSnapshot struct {
+	path          string
+	restoreFailed bool
+}
+
+// rollbackUpdateStateDatabase returns the state database to its pre-update copy
+// when the candidate migrated it past the schema of this binary, the one the
+// rollback restores, which refuses a newer database.
+func rollbackUpdateStateDatabase(
+	ctx context.Context,
+	path string,
+	state *updateStateSnapshot,
+	stderr io.Writer,
+) error {
+	restore, err := fleetdb.RestoreSharedState(ctx, path, state.path)
+	if err != nil {
+		if state.path == "" {
+			return fmt.Errorf("restore state database: %w", err)
+		}
+		state.restoreFailed = true
+		return fmt.Errorf("restore state database (its pre-update copy is kept at %s): %w", state.path, err)
+	}
+	if restore.Restored {
+		fmt.Fprintf(
+			stderr,
+			"pfm update: rolled back state database %s from schema %d to %d; "+
+				"the candidate's database, with every write since the update began, is kept at %s\n",
+			path, restore.From, restore.To, restore.Kept,
+		)
+	}
+	return nil
+}
+
+// rollbackUpdateState restores binaries, the state database, source and files
+// before re-running the previous install and its doctor; failures are joined as
+// rollback residue.
 func rollbackUpdateState(
 	ctx context.Context,
 	repo, installSourceRepo, previousRef string,
 	sourceAdvanced bool,
 	replacements []updateReplacement,
 	snapshots []updateFileSnapshot,
+	state *updateStateSnapshot,
 	runtime config.Runtime,
 	stdout, stderr io.Writer,
 ) error {
 	rollbackErr := rollbackUpdateReplacements(replacements, stderr)
+	rollbackErr = errors.Join(rollbackErr, rollbackUpdateStateDatabase(ctx, runtime.Paths.StateDB, state, stderr))
 	if sourceAdvanced {
 		// A refresh since the fast-forward leaves prices.json modified, and
 		// reset --keep refuses to overwrite a modified file the two revisions

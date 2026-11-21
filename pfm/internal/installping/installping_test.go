@@ -2,6 +2,7 @@ package installping
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -19,8 +21,30 @@ import (
 func TestReasonNamesTheSwitchThatTurnsThePingOff(t *testing.T) {
 	for _, test := range []struct {
 		name, variable, value, version, want string
+		configOff                            bool
+		configError                          error
 	}{
 		{name: "nothing set", version: "v1.2.3"},
+		{
+			name: "config false", version: "v1.2.3", configOff: true,
+			want: `"installPing": false in pfm.config.json`,
+		},
+		{
+			name: "config false outranks DO_NOT_TRACK", variable: "DO_NOT_TRACK", value: "1", version: "v1.2.3",
+			configOff: true, want: `"installPing": false in pfm.config.json`,
+		},
+		{
+			name: "config unreadable", version: "v1.2.3", configError: errors.New("parse config /x at byte 3"),
+			want: "pfm.config.json unreadable",
+		},
+		{
+			name: "config unreadable outranks the fence", variable: paths.EnvDevFence, value: "1", version: "v1.2.3",
+			configError: errors.New("parse config /x at byte 3"), want: "pfm.config.json unreadable",
+		},
+		{
+			name: "config false and unreadable", version: "v1.2.3", configOff: true,
+			configError: errors.New("parse config /x at byte 3"), want: `"installPing": false in pfm.config.json`,
+		},
 		{name: "a stamped alpha", version: "1.2.3-alpha"},
 		{name: "opt-out on", variable: paths.EnvInstallPingOffline, value: "1", version: "v1.2.3", want: "PFM_INSTALL_PING_OFFLINE"},
 		{name: "opt-out 0", variable: paths.EnvInstallPingOffline, value: "0", version: "v1.2.3"},
@@ -45,22 +69,42 @@ func TestReasonNamesTheSwitchThatTurnsThePingOff(t *testing.T) {
 			if test.variable != "" {
 				env.Values[test.variable] = test.value
 			}
-			if got := Reason(env, test.version); got != test.want {
-				t.Fatalf("Reason(%s=%q, %q) = %q, want %q", test.variable, test.value, test.version, got, test.want)
+			options := Options{
+				Env:         env,
+				Version:     test.version,
+				ConfigOff:   test.configOff,
+				ConfigError: test.configError,
+			}
+			if got := Reason(options); got != test.want {
+				t.Fatalf("Reason(%s=%q, %q, off=%v, err=%v) = %q, want %q",
+					test.variable, test.value, test.version, test.configOff, test.configError, got, test.want)
 			}
 		})
 	}
 }
 
-func TestNoticeSaysOnWithTheOptOutsOrWhatTurnedItOff(t *testing.T) {
-	for reason, want := range map[string]string{
-		"": "pfm: anonymous install ping on (random id, version, OS, Professor plugins; no IP stored) — " +
-			"set PFM_INSTALL_PING_OFFLINE=1 or DO_NOT_TRACK=1 to turn it off",
-		"DO_NOT_TRACK": "pfm: install ping off (DO_NOT_TRACK)",
+func TestForRuntimeCarriesTheConfigSwitchAndLoadError(t *testing.T) {
+	loadErr := errors.New("parse config /x at byte 3")
+	for _, test := range []struct {
+		name          string
+		runtime       pfmconfig.Runtime
+		wantOff       bool
+		wantConfigErr error
+	}{
+		{name: "installPing true", runtime: pfmconfig.Runtime{Config: pfmconfig.Config{InstallPing: true}}},
+		{name: "installPing false", runtime: pfmconfig.Runtime{}, wantOff: true},
+		{
+			name:    "load error",
+			runtime: pfmconfig.Runtime{Config: pfmconfig.Config{InstallPing: true}, ConfigError: loadErr}, wantConfigErr: loadErr,
+		},
 	} {
-		if got := Notice(reason); got != want {
-			t.Errorf("Notice(%q) = %q, want %q", reason, got, want)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			got := ForRuntime(test.runtime, &paths.MapEnv{Values: map[string]string{}})
+			if got.ConfigOff != test.wantOff || !errors.Is(got.ConfigError, test.wantConfigErr) {
+				t.Fatalf("ForRuntime ConfigOff=%v ConfigError=%v, want %v %v",
+					got.ConfigOff, got.ConfigError, test.wantOff, test.wantConfigErr)
+			}
+		})
 	}
 }
 
@@ -155,16 +199,23 @@ func TestDailySendsOncePerUTCDay(t *testing.T) {
 func TestPingOffSendsAndWritesNothing(t *testing.T) {
 	c := newCounter(t, http.StatusNoContent, "")
 	options := testOptions(t, c.server.URL, clock.NewFake(time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)))
-	options.Env = &paths.MapEnv{Values: map[string]string{"DO_NOT_TRACK": "1"}}
-	if err := SendInstall(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	if err := SendDaily(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	entries, _ := os.ReadDir(options.StateDir)
-	if len(c.bodies) != 0 || len(entries) != 0 {
-		t.Fatalf("with DO_NOT_TRACK=1: %d posts, state %v; want none", len(c.bodies), entries)
+	for name, off := range map[string]func(*Options){
+		"DO_NOT_TRACK=1":       func(o *Options) { o.Env = &paths.MapEnv{Values: map[string]string{"DO_NOT_TRACK": "1"}} },
+		`"installPing": false`: func(o *Options) { o.ConfigOff = true },
+		"an unreadable config": func(o *Options) { o.ConfigError = errors.New("parse config /x at byte 3") },
+	} {
+		off(&options)
+		if err := SendInstall(context.Background(), options); err != nil {
+			t.Fatal(err)
+		}
+		if err := SendDaily(context.Background(), options); err != nil {
+			t.Fatal(err)
+		}
+		entries, _ := os.ReadDir(options.StateDir)
+		if len(c.bodies) != 0 || len(entries) != 0 {
+			t.Fatalf("with %s: %d posts, state %v; want none", name, len(c.bodies), entries)
+		}
+		options = testOptions(t, c.server.URL, clock.NewFake(time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)))
 	}
 	options.Env = &paths.MapEnv{Values: map[string]string{}}
 	if err := SendDaily(context.Background(), options); err != nil || len(c.bodies) != 1 {

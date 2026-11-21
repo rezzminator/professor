@@ -1,5 +1,14 @@
-// Package binwatch ends a long-lived pfm server when the binary it runs is
-// replaced, so its service manager restarts it on the new build.
+// Package binwatch tells a long-lived pfm process that an install replaced the
+// binary it runs, and ends a pfm server then, so its service manager restarts
+// it on the new build.
+//
+// Entry points:
+//   - Image (OwnImage at start, ImageAt for a path) and Image.Replaced: the one
+//     door asking whether the executable a process started from was replaced
+//     (new inode, size or mtime); the seat-host and the stdio MCP server re-exec
+//     onto the installed build on it.
+//   - Serve, ServeWithClock: serve an HTTP server until its binary is replaced,
+//     then exit ExitReplaced.
 //
 // Replacing ~/.local/bin/pfm never touches a process already running the old
 // image, and the shared MCP daemon is the one pfm process nobody closes: it
@@ -77,10 +86,48 @@ func ownReplacement(ctx context.Context, stderr io.Writer, clk clock.Clock) <-ch
 	return nil
 }
 
+// Image is the executable file a process started from, read once at start:
+// the one door every long-lived pfm process asks whether an install has
+// replaced the binary it runs.
+type Image struct {
+	// Path is the executable's path, the file an install renames a new build over.
+	Path    string
+	started os.FileInfo
+}
+
+// OwnImage is this process's executable as it is now; call it at start.
+func OwnImage() (Image, error) {
+	path, err := os.Executable()
+	if err != nil {
+		return Image{}, err
+	}
+	return ImageAt(path)
+}
+
+// ImageAt is the executable at path as it is now.
+func ImageAt(path string) (Image, error) {
+	started, err := os.Stat(path)
+	if err != nil {
+		return Image{}, fmt.Errorf("stat own executable %s: %w", path, err)
+	}
+	return Image{Path: path, started: started}, nil
+}
+
+// Replaced reports whether Path no longer names the file the image started
+// from. A rename over the path (make host-install's atomic mv) changes the
+// inode; a copy over it changes size or mtime — either one is a replacement.
+// A path that cannot be read is an error, never a replacement.
+func (image Image) Replaced() (bool, error) {
+	current, err := os.Stat(image.Path)
+	if err != nil {
+		return false, err
+	}
+	return !os.SameFile(image.started, current) || current.Size() != image.started.Size() ||
+		!current.ModTime().Equal(image.started.ModTime()), nil
+}
+
 // watch reports, by closing the returned channel, the moment path no longer
-// names the file this process started from. A rename over the path (make
-// host-install's atomic mv) changes the inode; a copy over it changes size or
-// mtime — either one is a replacement.
+// names the file this process started from (Image.Replaced).
 //
 // A path that cannot be read mid-run is said out loud once per outage and never
 // treated as a replacement: restarting onto a binary that is not there would
@@ -95,9 +142,9 @@ func watch(
 	if clk == nil {
 		clk = clock.Real
 	}
-	started, err := os.Stat(path)
+	image, err := ImageAt(path)
 	if err != nil {
-		return nil, fmt.Errorf("stat own executable %s: %w", path, err)
+		return nil, err
 	}
 	replaced := make(chan struct{})
 	go func() {
@@ -110,7 +157,7 @@ func watch(
 				return
 			case <-ticker.C():
 			}
-			current, err := os.Stat(path)
+			changed, err := image.Replaced()
 			if err != nil {
 				if !unreadable {
 					fmt.Fprintf(
@@ -124,8 +171,7 @@ func watch(
 				continue
 			}
 			unreadable = false
-			if !os.SameFile(started, current) || current.Size() != started.Size() ||
-				!current.ModTime().Equal(started.ModTime()) {
+			if changed {
 				close(replaced)
 				return
 			}

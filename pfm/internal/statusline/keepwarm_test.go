@@ -36,7 +36,7 @@ func (proc keepwarmProcFixture) ProcessIdentity(int) (gather.ProcessIdentity, er
 func (proc keepwarmProcFixture) Birth(int) (int64, error) { return proc.born, proc.birthErr }
 
 // Probe failures differ from negative liveness: unreadable is ERR, never ?.
-func TestCacheKeepwarmProbe(t *testing.T) {
+func TestKeepwarmProbe(t *testing.T) {
 	for _, tc := range []struct {
 		name                                     string
 		aliveErr, argvErr, identityErr, birthErr error
@@ -89,7 +89,7 @@ func TestCacheKeepwarmProbe(t *testing.T) {
 }
 
 // Exercise the shipped JSON boundary and the real cache segment, not a copied renderer.
-func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
+func TestKeepwarmShieldStatesAndFailures(t *testing.T) {
 	now := time.Unix(1800000000, 0)
 	cases := []struct {
 		name, state, want, color, bad                    string
@@ -264,14 +264,15 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 				}
 			}
 			var warn bytes.Buffer
-			stateDir := dir
+			stateDir, runtimeHome := dir, home
 			if tc.relativeDir {
-				stateDir = "relative/state"
+				// Relative, with no absolute fallback: the writer keeps no state file either.
+				stateDir, runtimeHome = "relative/state", ""
 			}
 			runtime := Runtime{
-				Home:     home,
+				Home:     runtimeHome,
 				ProcRoot: proc,
-				Env:      map[string]string{"CACHE_KEEPWARM_STATE_DIR": stateDir},
+				Env:      map[string]string{"CACHE_LIVE_CONTROL_KEEPWARM_STATE_DIR": stateDir},
 				Warn:     &warn,
 			}
 			expires := now.Add(5 * time.Minute).Unix()
@@ -295,7 +296,7 @@ func TestCacheKeepwarmShieldStatesAndFailures(t *testing.T) {
 			switch {
 			case tc.relativeDir:
 				if len(lines) != 1 ||
-					lines[0] != "statusline: cache-keepwarm state directory \"relative/state\" is not absolute (shield shows ERR)" {
+					lines[0] != "statusline: keepwarm state directory unresolved: CACHE_LIVE_CONTROL_KEEPWARM_STATE_DIR not absolute (shield shows ERR)" {
 					t.Fatalf("want one warning naming the unresolved directory, got %q", warn.String())
 				}
 			case tc.want == "🛡 ERR":

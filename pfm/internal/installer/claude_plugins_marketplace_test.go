@@ -189,7 +189,7 @@ func bareList(names ...string) []pfmconfig.ClaudePlugin {
 	return list
 }
 
-// TestClaudePluginBuildWithMarketplacePlugins: an -alpha build reads the
+// TestClaudePluginBuildWithMarketplacePlugins: a checkout host reads the
 // source clone's marketplace: unset claude.plugins becomes every plugin it
 // lists, an explicit list stays and the rest are Unlisted; a release and a
 // build with no clone are untouched; a list that cannot be read is an error
@@ -212,48 +212,48 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 		wantErr      string
 	}{
 		{"an unset list plans the default list and the rest unlisted", func(*testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{Version: alphaVersion, SourceRepo: clone, Plugins: defaults}
+			return ClaudePluginBuild{FromCheckout: true, SourceRepo: clone, Plugins: defaults}
 		}, defaults, []string{"buddy", "example-plugin"}, ""},
 		{"an explicit list stays and the rest are unlisted", func(*testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{Version: alphaVersion, SourceRepo: clone, Plugins: []pfmconfig.ClaudePlugin{
+			return ClaudePluginBuild{FromCheckout: true, SourceRepo: clone, Plugins: []pfmconfig.ClaudePlugin{
 				{ID: "forward-compaction"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
 			}}
 		}, []pfmconfig.ClaudePlugin{
 			{ID: "forward-compaction"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
 		}, []string{"buddy", "auto-effort", "example-plugin"}, ""},
 		{"a release reads nothing", func(*testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{Version: "0.80.0", SourceRepo: clone, Plugins: defaults}
+			return ClaudePluginBuild{SourceRepo: clone, Plugins: defaults}
 		}, defaults, nil, ""},
 		{"no source clone", func(*testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{Version: alphaVersion, Plugins: defaults}
+			return ClaudePluginBuild{FromCheckout: true, Plugins: defaults}
 		}, defaults, nil, ""},
 		{"an explicit list beside a clone without a marketplace", func(t *testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{Version: alphaVersion, SourceRepo: t.TempDir(), Plugins: bareList("buddy")}
+			return ClaudePluginBuild{FromCheckout: true, SourceRepo: t.TempDir(), Plugins: bareList("buddy")}
 		}, bareList("buddy"), nil, ""},
 		{"a default list beside a clone without a marketplace", func(t *testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{Version: alphaVersion, SourceRepo: t.TempDir(), Plugins: defaults}
+			return ClaudePluginBuild{FromCheckout: true, SourceRepo: t.TempDir(), Plugins: defaults}
 		}, defaults, nil, ""},
 		{"an unresolved source clone", func(*testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{Version: alphaVersion, SourceRepoErr: unresolved, Plugins: defaults}
+			return ClaudePluginBuild{FromCheckout: true, SourceRepoErr: unresolved, Plugins: defaults}
 		}, defaults, nil, "source clone unresolved: " + unresolved.Error()},
 		{"garbage", func(t *testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{Version: alphaVersion, SourceRepo: manifest(t, "{"), Plugins: defaults}
+			return ClaudePluginBuild{FromCheckout: true, SourceRepo: manifest(t, "{"), Plugins: defaults}
 		}, defaults, nil, "parse the marketplace plugin list "},
 		{"no plugins", func(t *testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{
-				Version: alphaVersion, SourceRepo: manifest(t, `{"name":"professor","plugins":[]}`), Plugins: defaults,
+				FromCheckout: true, SourceRepo: manifest(t, `{"name":"professor","plugins":[]}`), Plugins: defaults,
 			}
 		}, defaults, nil, "lists no plugins"},
 		{"a name that is not a plugin name", func(t *testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{
-				Version:    alphaVersion,
-				SourceRepo: manifest(t, `{"plugins":[{"name":"../x","source":"./x"},{"name":"good","source":"./good"}]}`),
-				Plugins:    defaults,
+				FromCheckout: true,
+				SourceRepo:   manifest(t, `{"plugins":[{"name":"../x","source":"./x"},{"name":"good","source":"./good"}]}`),
+				Plugins:      defaults,
 			}
 		}, defaults, []string{"good"}, `plugins[0] name "../x" is not a plugin name`},
 		{"a name listed twice", func(t *testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{
-				Version: alphaVersion,
+				FromCheckout: true,
 				SourceRepo: manifest(t,
 					`{"plugins":[{"name":"a","source":"./a"},{"name":"a","source":"./b"},{"name":"b","source":"./b"}]}`),
 				Plugins: defaults,
@@ -261,7 +261,7 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 		}, defaults, []string{"a", "b"}, "lists a twice"},
 		{"only bad names", func(t *testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{
-				Version: alphaVersion, SourceRepo: manifest(t, `{"plugins":[{"name":"../x","source":"./x"}]}`),
+				FromCheckout: true, SourceRepo: manifest(t, `{"plugins":[{"name":"../x","source":"./x"}]}`),
 				Plugins: defaults,
 			}
 		}, defaults, nil, `plugins[0] name "../x" is not a plugin name`},
@@ -361,7 +361,7 @@ func simulateClaude(t *testing.T, runner *pluginRunner) {
 	}
 }
 
-// TestEnsureClaudePluginsAlphaMarketplacePlugins: an -alpha install puts every
+// TestEnsureClaudePluginsFromCheckoutMarketplacePlugins: a checkout-host install puts every
 // plugin the source clone's marketplace lists on {name}@professor from the one
 // pfm-owned professor-dev marketplace, which lists each checkout copy.
 // claude.plugins is the enabled set: a listed plugin is enabled; an unlisted
@@ -369,7 +369,7 @@ func simulateClaude(t *testing.T, runner *pluginRunner) {
 // set, exactly as when the key names it. A
 // professor marketplace registered from GitHub is re-pointed at the copies,
 // never removed, and every option value stays.
-func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
+func TestEnsureClaudePluginsFromCheckoutMarketplacePlugins(t *testing.T) {
 	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort"}
 	defaultNames := make([]string, 0, len(pfmconfig.DefaultClaudePlugins())+1)
 	for _, plugin := range pfmconfig.DefaultClaudePlugins() {
@@ -479,7 +479,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				t.Fatalf("pluginConfigs = %v, want %v", settings["pluginConfigs"], wantConfigs)
 			}
 			gaps, err := ClaudePluginMarketplaceGaps(first, ClaudePluginTargets(ClaudePluginBuild{
-				Version: alphaVersion, Home: home, SourceRepo: inst.options.SourceRepo, Plugins: bareList(names...),
+				FromCheckout: true, Home: home, SourceRepo: inst.options.SourceRepo, Plugins: bareList(names...),
 			}))
 			if err != nil || len(gaps) != 0 {
 				t.Fatalf("marketplaces left foreign: %v %v", gaps, err)
@@ -516,7 +516,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsFailsAListedPluginLeftOff: an -alpha install fails a
+// TestEnsureClaudePluginsFailsAListedPluginLeftOff: a checkout-host install fails a
 // plugin claude.plugins lists that has no checkout, and after an applied one a
 // listed plugin not installed from its checkout copy and enabled, each a FAIL
 // naming the plugin, the account dir and each cause, never a quiet skip. A dry
@@ -532,7 +532,7 @@ func TestEnsureClaudePluginsFailsAListedPluginLeftOff(t *testing.T) {
 		wantCause []string
 	}{
 		{"its checkout is missing", false, true, true, []string{
-			"plugin " + name + " is not installed on this alpha build: no checkout at ",
+			"plugin " + name + " is not installed with claude.pluginSource checkout: no checkout at ",
 		}},
 		{"the install left it disabled", true, false, true, []string{
 			"not installed from its checkout copy and enabled after this install: ",
@@ -546,7 +546,7 @@ func TestEnsureClaudePluginsFailsAListedPluginLeftOff(t *testing.T) {
 			runner := &pluginRunner{}
 			var out bytes.Buffer
 			inst := pluginEngine(home, binary, first, second, runner, &out, test.apply)
-			inst.options.Version = alphaVersion
+			inst.options.ClaudePluginsFromCheckout = true
 			inst.options.ClaudePlugins = bareList(name)
 			var checkouts []string
 			if test.checkout {
@@ -583,12 +583,12 @@ func TestEnsureClaudePluginsFailsAListedPluginLeftOff(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled: an unlisted
+// TestEnsureClaudePluginsFromCheckoutUnlistedPluginLeftEnabled: an unlisted
 // marketplace plugin found enabled is disabled; one with no checkout is never
 // installed from GitHub while its enabled id is still disabled, and a
 // professor marketplace the add does not re-point is a failure naming what the
 // remove would delete, never reported ensured.
-func TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled(t *testing.T) {
+func TestEnsureClaudePluginsFromCheckoutUnlistedPluginLeftEnabled(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		foreign    bool
@@ -601,7 +601,7 @@ func TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled(t *testing.T) {
 			"  change  disable buddy@professor in {first}/settings.json: claude.plugins does not list buddy\n",
 		}, ""},
 		{"no checkout: never installed from GitHub, its copy still disabled", false, true, []string{
-			"  skip    claude plugin buddy: not installed — claude.plugins does not list it and this alpha build has no checkout of it: no checkout at ",
+			"  skip    claude plugin buddy: not installed — claude.plugins does not list it and claude.pluginSource checkout finds no checkout of it: no checkout at ",
 			"disable buddy@professor in {first}/settings.json",
 		}, ""},
 		{
@@ -616,7 +616,7 @@ func TestEnsureClaudePluginsAlphaUnlistedPluginLeftEnabled(t *testing.T) {
 			runner := &pluginRunner{}
 			var out bytes.Buffer
 			inst := pluginEngine(home, binary, first, second, runner, &out, true)
-			inst.options.Version = alphaVersion
+			inst.options.ClaudePluginsFromCheckout = true
 			names := []string{"forward-compaction", "buddy"}
 			withCheckout := names
 			if test.noCheckout {

@@ -88,7 +88,7 @@ func newPluginLogsFixture(t *testing.T) pluginLogsFixture {
 	return fixture
 }
 
-// TestPluginLogsDoctor: on an -alpha build the plugin_logs rows print ok only
+// TestPluginLogsDoctor: on a checkout host the plugin_logs rows print ok only
 // for a host whose every config dir sets one absolute, usable folder, with no
 // fallback rows; each broken
 // state prints its own line, a failed read a failure, never a missing value;
@@ -98,20 +98,20 @@ func TestPluginLogsDoctor(t *testing.T) {
 	jsonErr := json.Unmarshal([]byte("{"), &parseErr).Error()
 	for _, test := range []struct {
 		name               string
-		version            string
+		release            bool
 		mutate             func(t *testing.T, fixture pluginLogsFixture)
 		want               func(fixture pluginLogsFixture) string
 		warnings, failures int
 	}{
 		{
-			name:    "a release build does not apply",
-			version: "0.82.0",
+			name:    "claude.pluginSource release does not apply",
+			release: true,
 			mutate: func(t *testing.T, fixture pluginLogsFixture) {
 				t.Helper()
 				writePluginLogsFile(t, filepath.Join(fixture.own, "settings.json"), "{")
 			},
 			want: func(pluginLogsFixture) string {
-				return "doctor: plugin_logs does not apply: pfm 0.82.0 is not an -alpha build\n"
+				return "doctor: plugin_logs does not apply: claude.pluginSource is release\n"
 			},
 		},
 		{
@@ -342,14 +342,10 @@ func TestPluginLogsDoctor(t *testing.T) {
 			if test.mutate != nil {
 				test.mutate(t, fixture)
 			}
-			version := test.version
-			if version == "" {
-				version = "0.80.0-alpha"
-			}
 			build := installer.ClaudePluginBuild{
-				Version:    version,
-				Home:       fixture.home,
-				SourceRepo: fixture.clone,
+				FromCheckout: !test.release,
+				Home:         fixture.home,
+				SourceRepo:   fixture.clone,
 			}
 			var stdout bytes.Buffer
 			tally := &doctorTally{}
@@ -397,7 +393,7 @@ func TestPluginLogFolderGap(t *testing.T) {
 	}
 }
 
-func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
+func TestCheckoutInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 	fixture := newPluginLogsFixture(t)
 	for _, dir := range []string{fixture.store, fixture.own} {
 		writePluginLogsFile(t, filepath.Join(dir, "settings.json"), `{"env":{"OTHER":"keep"}}`)
@@ -409,16 +405,16 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 	if _, err := installer.Run(
 		context.Background(),
 		installer.Options{
-			EngineSyncRunner: engineSync,
-			Home:             fixture.home,
-			ConfigDir:        fixture.store,
-			RosterConfigDirs: []string{fixture.linked, fixture.own},
-			SourceRepo:       fixture.clone,
-			Version:          "0.82.0-alpha",
-			Mode:             installer.ModeApply,
-			ProcRoot:         t.TempDir(),
-			Runner:           healthyServiceManager{},
-			Stdout:           io.Discard,
+			EngineSyncRunner:          engineSync,
+			Home:                      fixture.home,
+			ConfigDir:                 fixture.store,
+			RosterConfigDirs:          []string{fixture.linked, fixture.own},
+			SourceRepo:                fixture.clone,
+			ClaudePluginsFromCheckout: true,
+			Mode:                      installer.ModeApply,
+			ProcRoot:                  t.TempDir(),
+			Runner:                    healthyServiceManager{},
+			Stdout:                    io.Discard,
 		},
 	); err != nil {
 		t.Fatal(err)
@@ -428,7 +424,7 @@ func TestAlphaInstallSatisfiesPluginLogsDoctor(t *testing.T) {
 	printPluginLogsDoctor(
 		&out,
 		[]string{fixture.store, fixture.linked, fixture.own},
-		installer.ClaudePluginBuild{Home: fixture.home, Version: "0.82.0-alpha", SourceRepo: fixture.clone},
+		installer.ClaudePluginBuild{Home: fixture.home, FromCheckout: true, SourceRepo: fixture.clone},
 		unix.Access,
 		tally,
 	)

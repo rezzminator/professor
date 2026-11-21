@@ -159,9 +159,9 @@ type Options struct {
 	// callers may leave it empty to opt out of OpenCode wiring.
 	OpenCodeConfigPath string
 	ClaudeBinary       string
-	// Version is pfm's own stamped build version: an -alpha build ensures the
-	// Claude plugins from their local checkouts (ClaudePluginTargets).
-	Version string
+	// ClaudePluginsFromCheckout is claude.pluginSource checkout (pfmconfig.ClaudePrefs.PluginsFromCheckout):
+	// the Claude plugins of ours install from their local checkouts (ClaudePluginTargets).
+	ClaudePluginsFromCheckout bool
 	// ClaudePluginCheckoutRoot is claude.pluginCheckoutRoot; empty when unset.
 	ClaudePluginCheckoutRoot string
 	// GptAgents is claude.gptAgents: the machine-wide switch declaring the engine-sync

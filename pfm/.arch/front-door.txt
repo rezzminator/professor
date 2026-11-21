@@ -31,7 +31,6 @@ internal/hookentry 46
 internal/hostcheck 10
 internal/hostfixture 9
 internal/installer 90
-internal/mcpserv 18
 internal/naming 5
 internal/obs 18
 internal/paths 12

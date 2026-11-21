@@ -133,16 +133,18 @@ func runMCPStdio(_, stderr io.Writer, runtime commandRuntime, family string) (ex
 		fmt.Fprintf(stderr, "pfm mcp serve --stdio: %v\n", err)
 		return 1
 	}
-	// This server answers from the build it started on until its chat ends:
-	// Claude Code does not relaunch a stdio server that exits, so ending it on
-	// an install would take the MCP tools away from every running chat.
+	// Claude Code never relaunches an exited stdio server: an install hands it over (mcpserv.Handover).
 	err = professor.RunStdio(context.Background(), os.Stdin, os.Stdout, mcpserv.StdioOptions{
 		Family:        family,
 		DaemonAddress: chatRuntime.DaemonAddress,
 		Home:          runtime.Paths.Home,
 		SIDDir:        runtime.Paths.SIDDir,
 		Warnings:      stderr,
+		Handover:      mcpserv.OwnHandover(os.Args[1:], commandRunner, stderr),
 	})
+	if handedExit := (*mcpserv.HandoverExitError)(nil); errors.As(err, &handedExit) {
+		return handedExit.Code
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm mcp serve --stdio: %v\n", err)
 		return 1

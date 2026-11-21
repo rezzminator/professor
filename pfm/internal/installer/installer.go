@@ -9,6 +9,7 @@
 // claude_registry_keys.go: byte-preserving splices of one top-level key in a .claude.json.
 // install_config_seed.go: the config a first install seeds, less the new keys an older pfm refuses.
 // claude_plugins_submodule.go: whether a plugin's checkout is a submodule the source clone never initialised.
+// claude_plugins_marketplace_entry.go: the professor marketplace's settings entry pointed at the configured source before an add.
 // optional_deps.go: the record of the optional dependencies the last install found, which pfm doctor compares.
 // herdr_keys.go: pfm's Herdr keymap block (space walk, new chat in this space), adopting an identical hand-written table.
 // herdr_keymap.go: pfm's Herdr keymap, herdr.keys merged over it, and its one TOML render.

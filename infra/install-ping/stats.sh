@@ -36,14 +36,23 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < stats.sql
 add_block
 
-# render prints wrangler's --json answer as an aligned table, header first;
-# an empty result is "(no rows)".
+# render prints wrangler's --json answer as an aligned table, header first,
+# each column but the last padded to its widest cell plus two spaces; an empty
+# result is "(no rows)". jq aligns it, not column(1): that is absent from
+# minimal images such as the test fence.
 render() {
   jq -r '.[0].results as $rows
     | if ($rows | length) == 0 then "(no rows)"
       else ($rows[0] | keys_unsorted) as $keys
-        | ($keys | @tsv), ($rows[] | [.[$keys[]] | tostring] | @tsv)
-      end' | column -t -s "$(printf '\t')"
+        | ([$keys] + [$rows[] | [.[$keys[]] | tostring]]) as $lines
+        | [range(0; $keys | length) as $c | [$lines[][$c] | length] | max] as $widths
+        | $lines[]
+        | [to_entries[]
+            | if .key < ($widths | length) - 1
+              then .value + (" " * ($widths[.key] - (.value | length) + 2))
+              else .value end]
+        | join("")
+      end'
 }
 
 for i in "${!queries[@]}"; do

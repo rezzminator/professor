@@ -32,15 +32,37 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
+// seatFixtureLedger reports whether mode's engine starts go through the faked ledger seam, and
+// whether the ledger is on for them.
+func seatFixtureLedger(mode string) (faked, enabled bool) {
+	enabled = strings.HasSuffix(mode, "ledger-on") || mode == "reload-success" || mode == "reload-replaced"
+	return enabled || strings.Contains(mode, "ledger-"), enabled
+}
+
 // Jail: the subject is a real PTY and the engine children on it.
 func TestSeatHostPTY(t *testing.T) {
 	if os.Getenv("PFM_S3_FIXTURE") == "1" {
 		root := os.Getenv("PFM_S3_ROOT")
 		mode := os.Getenv("PFM_S3_MODE")
-		if strings.Contains(mode, "ledger-") {
+		ledgerFaked, ledgerOn := seatFixtureLedger(mode)
+		if ledgerFaked {
 			calls := 0
 			armCostLedger = func(environ []string, _ paths.Env, enabled bool, _ io.Writer) ([]string, string) {
+				// costsink.Prepare keeps the sink of a launch already armed for this process.
+				if enabled && claudelaunch.CostArmedFor(environ, os.Getpid()) {
+					return environ, claudelaunch.CostLedgerOn
+				}
 				calls++
+				arms, err := os.OpenFile(filepath.Join(root, "ledger-arms"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := arms.WriteString("armed\n"); err != nil {
+					t.Fatal(err)
+				}
+				if err := arms.Close(); err != nil {
+					t.Fatal(err)
+				}
 				environ = seatEnvironment(
 					environ,
 					[]string{"PFM_S3_ARM_CALLS=" + strconv.Itoa(calls)},
@@ -56,7 +78,7 @@ func TestSeatHostPTY(t *testing.T) {
 			}
 		}
 		runtime := config.Runtime{
-			Config: config.Config{Claude: config.ClaudePrefs{CostLedger: strings.HasSuffix(mode, "ledger-on")}},
+			Config: config.Config{Claude: config.ClaudePrefs{CostLedger: ledgerOn}},
 			Paths: paths.Values{
 				Home:     root,
 				StateDB:  os.Getenv(paths.EnvStateDB),
@@ -138,7 +160,9 @@ func TestSeatHostPTY(t *testing.T) {
 			values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}
 			db := fleetdb.OpenSharedState(context.Background(), values)
 			defer func() { _ = db.Close() }()
-			if strings.Contains(mode, "ledger-") {
+			ledgerFaked, ledgerOn := seatFixtureLedger(mode)
+			if ledgerFaked {
+				// A parent pfm chat's own ledger, which no start of this seat may keep.
 				environment = append(environment, claudelaunch.CostEnv(11111, 1)...)
 			}
 			engineID := pfmengine.Claude
@@ -169,7 +193,7 @@ func TestSeatHostPTY(t *testing.T) {
 					Binary:     binary,
 					Env:        saved,
 					CWD:        root,
-					CostLedger: strings.HasSuffix(mode, "ledger-on"),
+					CostLedger: ledgerOn,
 				}
 				if mode == "failed-malformed-recipe" {
 					run.Binary = "relative-engine"
@@ -402,6 +426,23 @@ func TestSeatHostPTY(t *testing.T) {
 					}
 					if next.Pane != wantPane || next.SupervisorPID != command.Process.Pid {
 						t.Fatalf("reload moved lifetime owner: %+v", next)
+					}
+					if ledgerOn {
+						// The sink serves the host until it exits, so the engine a reload starts gets
+						// the one the first start armed, from a replaced host image too.
+						arms, err := os.ReadFile(filepath.Join(root, "ledger-arms"))
+						if err != nil || string(arms) != "armed\n" || !next.LedgerArmed ||
+							next.LedgerPID != strconv.Itoa(command.Process.Pid) {
+							t.Fatalf(
+								"reloaded engine's ledger: arms=%q (%v), want one %q; armed=%t pid=%q, want true and %d",
+								arms,
+								err,
+								"armed\n",
+								next.LedgerArmed,
+								next.LedgerPID,
+								command.Process.Pid,
+							)
+						}
 					}
 					if mode == "reload-replaced" || mode == "reload-retry" {
 						running, runErr := os.Stat("/proc/" + strconv.Itoa(command.Process.Pid) + "/exe")

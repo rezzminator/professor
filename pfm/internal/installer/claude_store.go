@@ -70,8 +70,9 @@ var AccountEntries = []string{
 
 // IgnoredEntries are neither shared nor per-account identity: IDE locks, pfm's
 // pane bookkeeping, a project settings name, Claude Code's own runtime scratch
-// (debug logs, the daemon's lock and status, the state file's write lock, temp
-// files) and the native runtime and user customization paths it keeps in place
+// (debug logs, the daemon's lock and status, the state file's write lock, the
+// OAuth refresh lock and its owner record, temp files) and the native runtime
+// and user customization paths it keeps in place
 // (chrome, dev-mods, keybindings), and engine-sync's machine policy
 // (engine-sync.json), which pfm install renders into the store itself and no
 // account directory carries: engine-sync reads it from $HOME/.claude whatever
@@ -79,6 +80,7 @@ var AccountEntries = []string{
 var IgnoredEntries = []string{
 	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
 	"debug", "daemon.lock", "daemon.status.json", ".claude.json.lock", "tmp",
+	".oauth_refresh.lock", ".oauth_refresh.lock.owner",
 	"chrome", "dev-mods", "keybindings.json", "hooks", "engine-sync.json",
 }
 

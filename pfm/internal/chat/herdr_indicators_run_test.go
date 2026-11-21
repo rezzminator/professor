@@ -53,7 +53,7 @@ func newHerdrRunFixture(t *testing.T) herdrRunFixture {
 		t.Fatal(err)
 	}
 	warn := &bytes.Buffer{}
-	run, err := newHerdrIndicatorRun(&runtime, warn)
+	run, err := newHerdrIndicatorRun(&runtime, warn, warn)
 	if err != nil {
 		t.Fatal(err)
 	}

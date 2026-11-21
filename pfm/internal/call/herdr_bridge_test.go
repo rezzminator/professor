@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -178,6 +179,11 @@ func TestHerdrBridgeProof(t *testing.T) {
 }
 
 func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
+	seatGone := fmt.Errorf("seat seat1 %w", gather.ErrHerdrSeatGone)
+	seatRefused := errors.New(`persist proved seat seat1: persist native ownership proof update seat "seat1": ` +
+		"seat no longer exists or Herdr pane is already owned")
+	paneGone := &herdr.Refusal{Request: "pane.process_info", Code: "pane_not_found", Message: "pane not found"}
+	serverStopping := &herdr.Refusal{Request: "pane.process_info", Code: "server_unavailable", Message: "stopping"}
 	for _, tc := range []struct {
 		name          string
 		argv          []string
@@ -185,7 +191,10 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 		durable       bool
 		foregroundErr error
 		mixed         bool
-		notFleet      bool
+		// seatProof, when set, is the durable seat proof's answer for a seat
+		// holding the pane: the ownership proof runs over that one seat.
+		seatProof error
+		notFleet  bool
 	}{
 		{name: "shell", argv: []string{"-zsh"}, notFleet: true},
 		{name: "shell-helper", argv: []string{"id", "-Gn"}, notFleet: true},
@@ -197,9 +206,17 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 		{name: "fleet-tmux-refused", argv: []string{"tmux", "-L", "cc-1", "attach"}},
 		{name: "shell-plus-failed-tmux", argv: []string{"tmux", "-L", "cc-1", "attach"}, mixed: true},
 		{name: "shell-plus-missing-process", argv: []string{"-zsh"}, missing: true, mixed: true},
-		{name: "empty-command-line", argv: []string{}},
+		// A zombie, or a process that exited between the list and the read.
+		{name: "empty-command-line", argv: []string{}, notFleet: true},
 		{name: "blank-program", argv: []string{""}},
+		{name: "foreign-tmux-server", argv: []string{"tmux", "-S", "/elsewhere/tmux.sock", "attach"}, notFleet: true},
 		{name: "durable-owner-unproved", argv: []string{"-zsh"}, durable: true},
+		{name: "seat-ended-during-proof", argv: []string{"-zsh"}, seatProof: seatGone, notFleet: true},
+		{name: "seat-write-refused", argv: []string{"-zsh"}, seatProof: seatRefused},
+		{name: "pane-closed", foregroundErr: paneGone, seatProof: paneGone, notFleet: true},
+		{name: "pane-closed-no-seat", foregroundErr: paneGone, notFleet: true},
+		{name: "pane-closed-seat-unproved", foregroundErr: paneGone, seatProof: errors.New("supervisor argv mismatch")},
+		{name: "pane-proof-refused", foregroundErr: serverStopping, seatProof: serverStopping},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			socket := testjail.Place("/fixture/herdr.sock")
@@ -230,7 +247,32 @@ func TestHerdrPaneProofDistinguishesNonFleet(t *testing.T) {
 					return "", errors.New("fleet server refused")
 				},
 			}
-			err := proveHerdrPaneOrBridge(context.Background(), socket, pane, prover.prove)
+			var err error
+			if tc.seatProof == nil {
+				err = proveHerdrPaneOrBridge(context.Background(), socket, pane, prover.prove)
+			} else {
+				seats := []fleetdb.Seat{
+					{
+						SeatID:      "seat1",
+						Engine:      "cc",
+						Backend:     "herdr",
+						State:       "live",
+						HerdrSocket: socket,
+						HerdrPane:   pane,
+					},
+				}
+				prove := func(_ context.Context, target Target) (Target, error) {
+					return proveHerdrOwner(
+						paths.Values{},
+						seats,
+						target,
+						func(seat fleetdb.Seat) (fleetdb.Seat, bool, error) {
+							return seat, false, tc.seatProof
+						},
+					)
+				}
+				err = proveHerdrPaneWith(context.Background(), socket, pane, prove, prover.prove)
+			}
 			if err == nil || errors.Is(err, herdr.ErrNotFleetPane) != tc.notFleet {
 				t.Fatalf("proof = %v; non-fleet=%t, want %t", err, errors.Is(err, herdr.ErrNotFleetPane), tc.notFleet)
 			}

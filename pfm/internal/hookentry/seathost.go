@@ -164,7 +164,7 @@ func SeatHostWith(args []string, stdout, stderr io.Writer, runtime config.Runtim
 				},
 				[]string{paths.EnvStateDB, herdr.EnvSocket, herdr.EnvPane, herdr.EnvWorkspace, herdr.EnvTab},
 			)
-			options.Env, _ = armCostLedger(options.Env, paths.OSEnv{}, run.CostLedger, stderr)
+			options.Env = armSeatCostLedger(options.Env, run.CostLedger, stderr)
 			acknowledge := seat.ReloadPending
 			status, started, runErr = runSeatEngine(runner, argv, options, tty, func() error {
 				current, found, err := db.Seat(ctx, seat.SeatID)

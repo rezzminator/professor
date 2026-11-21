@@ -88,8 +88,9 @@ func bridgeTmux(ctx context.Context, socketPath string, args ...string) (string,
 }
 
 var (
-	errNotTmuxClient = errors.New("not a tmux client")
-	errNoHerdrBridge = errors.New("no pfm tmux client in its foreground")
+	errNotTmuxClient     = errors.New("not a tmux client")
+	errForeignTmuxServer = errors.New("outside pfm's tmux directory")
+	errNoHerdrBridge     = errors.New("no pfm tmux client in its foreground")
 )
 
 // prove returns the first foreground pid proved a pfm bridge client; every
@@ -113,7 +114,7 @@ func (prover bridgeProver) prove(ctx context.Context, socket, pane string) (Herd
 		if err == nil {
 			return bridge, nil
 		}
-		noBridge = noBridge && errors.Is(err, errNotTmuxClient)
+		noBridge = noBridge && (errors.Is(err, errNotTmuxClient) || errors.Is(err, errForeignTmuxServer))
 		refusals = append(refusals, fmt.Errorf(
 			"herdr pane %s bridge client %d ownership unproved: %w",
 			pane,
@@ -211,7 +212,10 @@ func (prover bridgeProver) client(ctx context.Context, pid int) (HerdrBridge, er
 // serverSocket reads the tmux server a client command line names: -S wins over
 // -L as in tmux, and only a server inside pfm's tmux directory is a pfm server.
 func (prover bridgeProver) serverSocket(argv []string) (string, error) {
-	if len(argv) == 0 || argv[0] == "" {
+	if len(argv) == 0 { // a zombie's, or a process's that exited since the list
+		return "", fmt.Errorf("%w: empty command line %q", errNotTmuxClient, argv)
+	}
+	if argv[0] == "" {
 		return "", fmt.Errorf("not a tmux client: empty command line %q", argv)
 	}
 	label, socketPath, isTmux := pfmtmux.NamedServer(argv)
@@ -221,7 +225,7 @@ func (prover bridgeProver) serverSocket(argv []string) (string, error) {
 	if socketPath != "" {
 		clean := filepath.Clean(socketPath)
 		if filepath.Dir(clean) != filepath.Clean(prover.values.TmuxDir) {
-			return "", fmt.Errorf("tmux server %s outside pfm's tmux directory %s", socketPath, prover.values.TmuxDir)
+			return "", fmt.Errorf("tmux server %s %w %s", socketPath, errForeignTmuxServer, prover.values.TmuxDir)
 		}
 		return clean, nil
 	}

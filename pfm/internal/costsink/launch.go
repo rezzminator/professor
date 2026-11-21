@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -96,6 +97,25 @@ func Prepare(opts LaunchOptions) ([]string, string) {
 		opts.Environ,
 		claudelaunch.CostEnvNames(),
 		claudelaunch.CostEnv(armed.Port, opts.PID)...), claudelaunch.CostLedgerOn
+}
+
+// Kept is environ for one more Claude start by process pid, whose own environment host still holds
+// the ledger armed for it (claudelaunch.CostArmedFor): every ledger entry in environ, a parent pfm
+// chat's included, gives way to host's, so Prepare keeps that sink instead of arming one more.
+// environ comes back unchanged when no ledger is armed for pid, or when it carries a telemetry
+// variable of the user's, which pre-empts the ledger.
+func Kept(environ, host []string, pid int) []string {
+	if !claudelaunch.CostArmedFor(host, pid) || claudelaunch.CostPreemptedReason(environ, nil) != "" {
+		return environ
+	}
+	names := claudelaunch.CostEnvNames()
+	kept := withEnv(environ, names)
+	for _, entry := range host {
+		if name, _, _ := strings.Cut(entry, "="); slices.Contains(names, name) {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
 }
 
 // withEnv returns environ without the entries named in drop or by an assignment, plus the

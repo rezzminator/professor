@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -209,8 +211,19 @@ func TestARefusedTargetIsLoggedAndThePaintGoesOn(t *testing.T) {
 			if _, _, err := painter.paint(context.Background()); err != nil {
 				t.Fatalf("paint = %v, want a missing target to be logged only", err)
 			}
-			if got, want := stderr.String(), map[string]string{targetPane: "herdr indicators: socket /fake/herdr.sock: pane w1:p1: herdr refused pane.report_metadata: pane_not_found: gone\n", targetWorkspace: "herdr indicators: socket /fake/herdr.sock: workspace w1: herdr refused workspace.report_metadata: workspace_not_found: gone\n"}[kind]; got != want {
+			want := map[string]string{targetPane: "herdr indicators: socket /fake/herdr.sock: pane w1:p1: herdr refused pane.report_metadata: pane_not_found: gone\n", targetWorkspace: "herdr indicators: socket /fake/herdr.sock: workspace w1: herdr refused workspace.report_metadata: workspace_not_found: gone\n"}[kind]
+			if got := stderr.String(); got != want {
 				t.Fatalf("stderr = %q, want %q", got, want)
+			}
+			// A target Herdr says is gone is a lifecycle outcome: one INFO row,
+			// never a reporter error.
+			path := filepath.Join(painter.lockDir, "indicators"+ErrorLogSuffix)
+			logged, err := os.ReadFile(path)
+			if _, row, _ := strings.Cut(string(logged), "\t"); err != nil || row != "INFO\t"+want {
+				t.Fatalf("%s row = %q (%v), want %q", path, row, err, "INFO\t"+want)
+			}
+			if records, err := RecentErrors(painter.lockDir, time.Time{}); err != nil || len(records) != 0 {
+				t.Fatalf("reporter errors = %+v (%v), want none", records, err)
 			}
 			if len(herdr.panes[1].Tokens) != 1 || len(herdr.spaces[1].Tokens) != 1 {
 				t.Fatalf("p2 %v and w2 %v must still be painted", herdr.panes[1].Tokens, herdr.spaces[1].Tokens)

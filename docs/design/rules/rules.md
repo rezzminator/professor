@@ -237,7 +237,7 @@ No project build covers `~/.claude/rules/`. Triggers 1, 3 and 4 run `engine-sync
 | `engine-sync doctor --machine` | `RULE-FRONTMATTER {path}: {parse error}` or `RULE-FENCE {path}: …` for a global rule, level `fail`, the rule skipped | built |
 | `engine-sync doctor --machine` | `global-rules PATH-SCOPED {rule} delivered to Codex and OpenCode as a read-on-match pointer` (`ok`: the [pointer](#read-on-match-pointer), no repair) | built |
 | `engine-sync doctor --machine` | `global-rules VISIBLE-TO {rule} delivered to every Codex and OpenCode loop` (`ok`: the [agent-targeting](#agent-targeting) gap, no repair) | built |
-| `engine-sync doctor --machine` | `GLOBAL-BUDGET {bytes} > 9216` when the compiled global set (always-on bodies and pointers) exceeds 9 KiB, the cost every agent of every project pays (warning); the compiled set is 9,461 bytes against the 9,216 budget, so the warning shows | built |
+| `engine-sync doctor --machine` | `GLOBAL-BUDGET {bytes} > 10240` when the compiled global set (always-on bodies and pointers) exceeds 10 KiB, the cost every agent of every project pays (warning); the compiled set is 10,067 bytes against the 10,240 budget | built |
 | `engine-sync doctor --machine` | `global-rules ERROR …` when a source, target or config cannot be read, `read rule {path}: …` and `read rules {dir}: …` included; never shown as a clean state | built |
 | `pfm doctor` | every `engine-sync doctor` row, rendered; a missing binary as a failing row | built |
 | `engine-sync codex check` | `STALE` or `MISSING` `AGENTS.md` after a project rule edit (the reconcile compare) | built |

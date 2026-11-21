@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -304,9 +305,10 @@ func missingTabAgentState(
 
 // tickWarnings names each per-chat tab diagnostic once while it recurs on
 // every half-second tick: a body written in the previous tick is not written
-// again, and one that stopped recurring is named afresh when it returns.
+// again, and one that stopped recurring is named afresh when it returns. info
+// receives the expected lifecycle outcomes (lifecycle; nil: out).
 type tickWarnings struct {
-	out        io.Writer
+	out, info  io.Writer
 	last, this map[string]bool
 	writes     uint64 // every body written, named or not
 }
@@ -325,6 +327,26 @@ func (writer *tickWarnings) tick() {
 }
 
 func (writer *tickWarnings) Write(body []byte) (int, error) {
+	return writer.emit(writer.out, body)
+}
+
+// lifecycle is the writer's side for expected lifecycle outcomes, named once
+// while it recurs like every other diagnostic.
+func (writer *tickWarnings) lifecycle() io.Writer {
+	if writer.info == nil {
+		return writer
+	}
+	return tickLifecycle{writer}
+}
+
+type tickLifecycle struct{ ticks *tickWarnings }
+
+func (lifecycle tickLifecycle) Write(body []byte) (int, error) {
+	return lifecycle.ticks.emit(lifecycle.ticks.info, body)
+}
+
+// emit writes body to out unless the previous tick named it.
+func (writer *tickWarnings) emit(out io.Writer, body []byte) (int, error) {
 	if writer.this == nil {
 		writer.this = map[string]bool{}
 	}
@@ -334,24 +356,7 @@ func (writer *tickWarnings) Write(body []byte) (int, error) {
 	if writer.last[key] {
 		return len(body), nil
 	}
-	return writer.out.Write(body)
-}
-
-type tabIndicatorWarnings struct {
-	dir    string
-	stderr io.Writer
-}
-
-func (writer tabIndicatorWarnings) Write(body []byte) (int, error) {
-	if writer.stderr != nil {
-		if _, err := writer.stderr.Write(body); err != nil {
-			return 0, fmt.Errorf("write tab diagnostic: %w", err)
-		}
-	}
-	if err := herdr.AppendError(writer.dir, "tab-status", clock.Real.Now(), string(body)); err != nil {
-		return 0, fmt.Errorf("persist tab diagnostic: %w", err)
-	}
-	return len(body), nil
+	return out.Write(body)
 }
 
 // tabViewReader's prove is the native seat ownership proof (nil: nativeAlive),
@@ -366,9 +371,11 @@ type tabViewReader struct {
 	state   func(context.Context) (*fleetdb.Store, error)
 	// bridge proves a pfm tmux client in a Herdr pane's foreground; nil is
 	// call.ProveHerdrBridge.
-	bridge   func(context.Context, string, string) (call.HerdrBridge, error)
-	warn     io.Writer
-	previous map[string][]herdr.TabDecoration
+	bridge func(context.Context, string, string) (call.HerdrBridge, error)
+	warn   io.Writer
+	// lifecycle receives the expected lifecycle outcomes; nil is warn.
+	lifecycle io.Writer
+	previous  map[string][]herdr.TabDecoration
 }
 
 // liveness returns a native tab's dead/unknown state over a proved owner; an
@@ -414,10 +421,15 @@ func (reader *tabViewReader) liveness(
 }
 
 // unproved records, through the painter's diagnostic writer (the Herdr plugin
-// log and the persistent Herdr error log), why a chat's tab was left untouched.
+// log and the persistent Herdr error log), why a chat's tab was left untouched;
+// a pane Herdr no longer lists is the seat's pane closed, a lifecycle outcome.
 func (reader *tabViewReader) unproved(target headless.Chat, proof error) error {
+	out := reader.warn
+	if reader.lifecycle != nil && errors.Is(proof, gather.ErrHerdrPaneAbsent) {
+		out = reader.lifecycle
+	}
 	if _, err := fmt.Fprintf(
-		reader.warn,
+		out,
 		"Herdr tab of %s left untouched: seat %s ownership unproved: %v\n",
 		target.ID,
 		target.SeatID,

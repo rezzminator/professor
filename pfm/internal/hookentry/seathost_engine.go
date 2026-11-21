@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/costsink"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -98,6 +99,28 @@ func seatEnvironment(saved, current, keys []string) []string {
 		}
 	}
 	return result
+}
+
+// armSeatCostLedger is armCostLedger for a host that starts an engine more than once. The sink
+// serves this process until it exits, so the ledger one start armed is recorded in the host's own
+// environment, where a replaced image of the host finds it too, and every later start gets it back.
+func armSeatCostLedger(environ []string, enabled bool, stderr io.Writer) []string {
+	environ, ledger := armCostLedger(costsink.Kept(environ, os.Environ(), os.Getpid()), paths.OSEnv{}, enabled, stderr)
+	if ledger != claudelaunch.CostLedgerOn {
+		return environ
+	}
+	names := claudelaunch.CostEnvNames()
+	for _, entry := range environ {
+		name, value, _ := strings.Cut(entry, "=")
+		if !slices.Contains(names, name) {
+			continue
+		}
+		if err := os.Setenv(name, value); err != nil {
+			fmt.Fprintf(stderr, "pfm internal seat-host: keep the cost ledger's %s for the next engine start: %v\n",
+				name, err)
+		}
+	}
+	return environ
 }
 
 func runSeatEngine(

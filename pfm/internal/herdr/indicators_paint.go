@@ -203,3 +203,20 @@ func (painter *indicatorPainter) classify(target indicatorTarget, notFleet bool)
 		Status: target.status, At: painter.clock.Now().UnixNano(), Server: painter.server, NotFleet: notFleet,
 	}
 }
+
+// infof is logf for an expected lifecycle outcome: an INFO row, never a
+// reporter error.
+func (painter *indicatorPainter) infof(format string, args ...any) {
+	painter.persist(AppendInfo, fmt.Sprintf(format, args...))
+}
+
+// persist writes message to stderr and appends it to the indicators log
+// through appendRow (AppendError or AppendInfo).
+func (painter *indicatorPainter) persist(appendRow func(string, string, time.Time, string) error, message string) {
+	_, _ = fmt.Fprintln(painter.stderr, message)
+	if painter.lockDir != "" {
+		if err := appendRow(painter.lockDir, "indicators", painter.clock.Now(), message); err != nil {
+			_, _ = fmt.Fprintf(painter.stderr, "persist indicator diagnostic: %v\n", err)
+		}
+	}
+}

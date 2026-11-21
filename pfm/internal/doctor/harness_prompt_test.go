@@ -24,19 +24,19 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 	sum := sha256.Sum256([]byte(captured))
 	matching := hex.EncodeToString(sum[:])
 
-	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.316.md", captured, nil)
-	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.316.md") {
+	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.330.md", captured, nil)
+	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.330.md") {
 		t.Fatalf("match outcome = (%q, %v), want an ok line", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.316.md", captured, nil)
+	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.330.md", captured, nil)
 	if !warn || !strings.Contains(line, "DRIFT") {
 		t.Fatalf("drift outcome = (%q, %v), want a DRIFT warning", line, warn)
 	}
 
 	line, warn = harnessPromptVerdict(
 		matching,
-		"harness-original-v2.1.316.md",
+		"harness-original-v2.1.330.md",
 		"",
 		errors.New("no API request reached the capture sink"),
 	)
@@ -45,7 +45,7 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 		t.Fatalf("capture-failure outcome = (%q, %v), want a distinct CHECK FAILED warning", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.316.md", "", errClaudeAbsent)
+	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.330.md", "", errClaudeAbsent)
 	if warn || line != "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare" {
 		t.Fatalf("absence outcome = (%q, %v), want the named skip with no warning", line, warn)
 	}
@@ -624,8 +624,8 @@ func TestHarnessDoctorSonnetBaselineCatalogOnlyChangeIsSilent(t *testing.T) {
 	var stdout bytes.Buffer
 	code := printModelHarnessPromptDoctor(context.Background(), &stdout, home, sonnet)
 	if code != 0 || stdout.String() != `doctor: harness-prompt requested=sonnet
-doctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=sonnet resolved=claude-sonnet-5 cli="2.1.280" baseline=harness-original-v2.1.316.md baseline_model=claude-sonnet-5 unchecked=active-chat,fable,codex
-doctor: harness-prompt: matches baseline harness-original-v2.1.316.md
+doctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=sonnet resolved=claude-sonnet-5 cli="2.1.280" baseline=harness-original-v2.1.330.md baseline_model=claude-sonnet-5 unchecked=active-chat,fable,codex
+doctor: harness-prompt: matches baseline harness-original-v2.1.330.md
 ` {
 		t.Fatalf("catalog-only change warned: code=%d\n%s", code, &stdout)
 	}

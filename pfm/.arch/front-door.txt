@@ -47,7 +47,6 @@ internal/rowfacts 3
 internal/schedule 6
 internal/servicemanager 6
 internal/sky 1
-internal/spawn 14
 internal/stats 7
 internal/testjail 19
 internal/themecmd 3

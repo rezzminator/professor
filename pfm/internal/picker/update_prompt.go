@@ -1,0 +1,55 @@
+package picker
+
+import (
+	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/compose"
+)
+
+// professorUpdatePrompt is the opening message of the update chat: the user reads it as the chat's first
+// message, so it is written as numbered steps in plain words, one paragraph per step.
+func professorUpdatePrompt(row compose.Row) string {
+	target := strings.TrimPrefix(row.ID, "pfm-update-")
+	return strings.Join([]string{
+		"Professor " + target + " is available. This chat updates this machine to it, working only in this " +
+			"Professor source clone. Never push, tag, publish or release, and never edit the source by hand.",
+		"1. Read what changed. Run `pfm version` for the installed version and `git fetch --tags origin`. Then " +
+			"read every release note after the installed version up to " + target + ", oldest first, with " +
+			"`git show " + target + ":releases/vX.Y.Z.md` (`git show " + target + ":CHANGELOG.md` lists them). " +
+			"Skip none: a skipped note skips its migration steps. A note with a `#### → Stop:` line is a required " +
+			"stop: update to that release first, finish its steps, then continue from it.",
+		"2. Make one checklist from the notes' `#### → For:` actions. Each item says when it runs (`before " +
+			"update`, `after update` or `per project`) and what it touches; when two releases act on the same " +
+			"thing, the later one wins. An older action that names no timing, including one written `#### For:` " +
+			"or `#### → For adopters …:`, gets the timing you judge.",
+		"3. Ask before changing anything. Show the user a short, plain summary of what changes for them, with " +
+			"the checklist, then ask with AskUserQuestion whether to update now. On an engine without " +
+			"AskUserQuestion, ask the same question as the last block of your reply and wait for the answer.",
+		"4. Once the user says yes: do the `before update` actions, run `pfm update --to " + target + "` (or " +
+			"the stop's tag), do the `after update` actions, then run `pfm doctor`.",
+		"5. Ask which projects to update. `pfm doctor` prints one `project_updates` warning per Professor " +
+			"project on this machine with open rows, naming its `root=` and its `unresolved=` count. Ask with " +
+			"AskUserQuestion, multi-select, one option per project: its folder name as the label, its path and " +
+			"open-row count as the description. A question holds four projects; put more projects in further " +
+			"questions of the same call. With no project listed, skip to step 7. Update only the projects the " +
+			"user picks.",
+		"6. Update each picked project, one at a time. In its root, run `pfm doctor --project-updates` and take " +
+			"it to `clean`, exit 0. The user's pick covers every row, so no row waits for another question, " +
+			"and every row ends in a verb:\n" +
+			"- `UPDATED`: port each listed upstream commit's intent into the local file, keeping the project's " +
+			"own edits, then `pfm update pin <local>`; a version kept on purpose is `pfm update pin <local> " +
+			"--keep \"<what you did not take, and why>\"`, never a row left open.\n" +
+			"- `NEW`: decide from the project's own rules, then adopt it (`pfm update pin --template <template> " +
+			"<local>`) or `pfm update ignore <template>`.\n" +
+			"- `RETIRED-NAME`: edit the line to its successor, or `pfm update accept <path> --reason \"<why>\"` " +
+			"for a mention that must stay.\n" +
+			"- `INCOMPLETE`: inspect the unscanned text, then `pfm update accept <path> --coverage --reason " +
+			"\"<why>\"` once reviewed.\n" +
+			"- `GONE-UPSTREAM`, `MOVED` and `LOCAL-DELETED`: the verbs printed on the row.\n" +
+			"Run the verbs one at a time, never in parallel: each rewrites `.professor/baseline.json`. Then do " +
+			"the `per project` actions for that project, re-run the report and quote its last line.",
+		"7. End with a short report in plain words: the version now installed, the exact result of each step, " +
+			"each updated project's last report line, and each project not picked with the command that " +
+			"updates it later, `pfm doctor --project-updates --root <path>`.",
+	}, "\n\n")
+}

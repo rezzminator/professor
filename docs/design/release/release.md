@@ -29,7 +29,7 @@ Typing `/pfm:release cut` is the user's explicit publish request for that versio
 
 ## The reader
 
-The notes have one primary reader: the adopter's update chat, opened from `pfm ls`'s PROFESSOR UPDATE banner with the prompt `professorUpdatePrompt` (`pfm/internal/picker/update_row.go`; `pfm/cmd/pfm/update_notice_command.go` through v0.77.x). That chat runs `pfm version`, reads every `releases/vX.Y.Z.md` after the installed version through the target oldest first with `git show {target}:releases/…`, merges their `#### → For:` lines into one checklist, shows the user an overview, and only on approval runs `pfm update --to {target}`, the checklist, and `pfm doctor`. Inside each adopted project it then runs `pfm doctor --project-updates`, takes the report to `clean`: each `UPDATED` row ported and pinned (or kept on record with `pin --keep`), each `NEW` row adopted or ignored, each `RETIRED-NAME` hit fixed or accepted with `pfm update accept`.
+The notes have one primary reader: the adopter's update chat, opened from `pfm ls`'s PROFESSOR UPDATE banner with the prompt `professorUpdatePrompt` (`pfm/internal/picker/update_prompt.go`; `pfm/cmd/pfm/update_notice_command.go` through v0.77.x). That chat runs `pfm version`, reads every `releases/vX.Y.Z.md` after the installed version through the target oldest first with `git show {target}:releases/…`, merges their `#### → For:` lines into one checklist, shows the user an overview and asks with AskUserQuestion whether to update, and only on a yes runs `pfm update --to {target}`, the checklist, and `pfm doctor`. It then asks with AskUserQuestion, multi-select, which of the projects `pfm doctor` lists with open rows to update, and inside each picked project runs `pfm doctor --project-updates`, takes the report to `clean`: each `UPDATED` row ported and pinned (or kept on record with `pin --keep`), each `NEW` row adopted or ignored, each `RETIRED-NAME` hit fixed or accepted with `pfm update accept`.
 
 Three facts about that reader shape every rule of the family:
 
@@ -129,7 +129,7 @@ The bump has a floor computed from the note's sections, following the left-most 
 | `scripts/release-check.mjs` | everyone, by running it | The tier and area table, the grammar, coverage, the floors, the preflight |
 | `.github/workflows/ci.yml` | GitHub Actions | The PR gate |
 | `.github/workflows/publish.yml` | GitHub Actions | The tag, the published-asset check |
-| `pfm/internal/picker/update_row.go` | the adopter's update chat | The update prompt |
+| `pfm/internal/picker/update_prompt.go` | the adopter's update chat | The update prompt |
 
 A rule the script enforces is never restated as a prompt rule; the prompt names the check to run.
 
@@ -152,7 +152,7 @@ The release reviews in full only the `pfm-update` area, and only when the cut ch
 | The publish gate | `.claude/agents/gitter.md` Phase RELEASE and its machine-global twin `templates/global/agents/gitter.md` | The release PR, the file check, the merge back |
 | The script | `scripts/release-check.mjs` and its tests | The mechanisms |
 | The public spec | `docs/RELEASE.md`, `CHANGELOG.md` (index and a pointer), `INSTALL.md` § Updating, `docs/SETUP.md` § Staying current | What adopters read |
-| The reader's prompt | `pfm/internal/picker/update_row.go` `professorUpdatePrompt` and its test | Timing, surfaces, stops |
+| The reader's prompt | `pfm/internal/picker/update_prompt.go` `professorUpdatePrompt`, tested in `update_row_test.go` | Timing, surfaces, stops |
 | The workflows | `.github/workflows/ci.yml`, `.github/workflows/publish.yml` | The PR gate; `publish` and `verify` |
 | The mirrors | `.codex/`, `.opencode/` | The agent registered |
 

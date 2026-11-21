@@ -253,8 +253,8 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	for _, want := range []string{
 		"cwd=" + professor,
 		"Professor v0.61.2 is available",
-		"present a concise overview",
-		"Ask the user for explicit approval",
+		"then ask with AskUserQuestion whether to update now",
+		"5. Ask which projects to update.",
 		"pfm update --to v0.61.2",
 	} {
 		if !strings.Contains(launch, want) {

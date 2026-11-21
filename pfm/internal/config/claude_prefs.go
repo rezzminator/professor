@@ -51,6 +51,14 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 			KeyClaudePluginCheckoutRoot,
 		)
 	}
+	if raw.PluginSource != nil && index >= 0 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.pluginSource is machine-wide: set %s",
+			path,
+			configScope(scope, index),
+			KeyClaudePluginSource,
+		)
+	}
 	if raw.Plugins != nil && index >= 0 {
 		return ClaudePrefs{}, fmt.Errorf(
 			"config %s: %s.plugins is machine-wide: set %s",
@@ -113,7 +121,7 @@ func copyClaudeLaunchPrefs(target *ClaudePrefs, source ClaudePrefs) {
 
 // applyClaudeMachinePrefs sets the top-level claude keys no account may carry
 // (decodeClaudePrefs refuses them there): the plugin checkout root, the plugin
-// list, the env map and the cost ledger switch.
+// source, the plugin list, the env map and the cost ledger switch.
 func applyClaudeMachinePrefs(
 	target *ClaudePrefs, raw rawClaude, home, path string, sources map[string]Source,
 ) error {
@@ -124,6 +132,15 @@ func applyClaudeMachinePrefs(
 		}
 		target.PluginCheckoutRoot = root
 		sources[KeyClaudePluginCheckoutRoot] = SourceFile
+	}
+	if raw.PluginSource != nil {
+		source := *raw.PluginSource
+		if source != PluginSourceRelease && source != PluginSourceCheckout {
+			return fmt.Errorf("config %s: %s must be %q or %q, got %q",
+				path, KeyClaudePluginSource, PluginSourceRelease, PluginSourceCheckout, source)
+		}
+		target.PluginSource = source
+		sources[KeyClaudePluginSource] = SourceFile
 	}
 	if raw.Plugins != nil {
 		plugins, err := decodeClaudePlugins(*raw.Plugins)
@@ -163,8 +180,16 @@ func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[stri
 	}
 }
 
+// PluginsFromCheckout reports whether Professor's own plugins come from their
+// local checkouts (claude.pluginSource "checkout") rather than the GitHub
+// professor marketplace: the one door every plugin-source decision reads,
+// install and doctor alike, whatever pfm's own build version.
+func (prefs ClaudePrefs) PluginsFromCheckout() bool {
+	return prefs.PluginSource == PluginSourceCheckout
+}
+
 // marshalClaude is the machine claude block. The keys a pfm of the last release (v0.79.0) does
-// not know — pluginCheckoutRoot, plugins, env, costLedger — are written only when the file
+// not know — pluginCheckoutRoot, pluginSource, plugins, env, costLedger — are written only when the file
 // set them or the value differs from the default, so `pfm config init` writes a file that pfm still
 // decodes: its loader refuses an unknown key. An unset value loads as its default either way.
 func marshalClaude(config Config) map[string]any {
@@ -181,6 +206,9 @@ func marshalClaude(config Config) map[string]any {
 	}
 	if config.Claude.PluginCheckoutRoot != "" { // an unset root is left out: null would also be an unknown key
 		value["pluginCheckoutRoot"] = config.Claude.PluginCheckoutRoot
+	}
+	if set(KeyClaudePluginSource) || config.Claude.PluginsFromCheckout() {
+		value["pluginSource"] = config.Claude.PluginSource
 	}
 	if set(KeyClaudePlugins) || !slices.Equal(config.Claude.Plugins, DefaultClaudePlugins()) {
 		value["plugins"] = marshalClaudePlugins(config.Claude.Plugins)

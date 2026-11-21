@@ -27,6 +27,9 @@ var startProfessorUpdateCheck = func(ctx context.Context, argv []string, options
 	return err
 }
 
+// openChatRow is the seam openProfessorUpdate opens its chat through.
+var openChatRow = pfmchat.OpenRow
+
 func professorUpdateCachePath(runtime pfmconfig.Runtime) string {
 	return filepath.Join(filepath.Dir(runtime.Paths.CacheDB), "update-check.json")
 }
@@ -201,32 +204,15 @@ func openProfessorUpdate(
 	}
 	row.Name = "Professor update " + strings.TrimPrefix(outcome.Row.ID, "pfm-update-")
 	row.Account = outcome.PrimaryAccount
-	return pfmchat.OpenRow(
+	// Always the 1h cache, whatever the picker's toggle: an update run waits on gates and agents for long stretches.
+	return openChatRow(
 		ctx,
 		row,
 		outcome.PrimaryAccount,
-		false,
+		true,
 		professorUpdatePrompt(outcome.Row),
 		stdout,
 		stderr,
 		&runtime,
 	)
-}
-
-func professorUpdatePrompt(row compose.Row) string {
-	target := strings.TrimPrefix(row.ID, "pfm-update-")
-	return "Professor " + target + " is available. Work only in this Professor source clone. " +
-		"First run `pfm version` for the installed version and `git fetch --tags origin`, then read EVERY release-notes file after the installed version through " + target + ", oldest first, with `git show " + target + ":releases/vX.Y.Z.md` (`git show " + target + ":CHANGELOG.md` lists them) — skipping a release skips its migration actions. " +
-		"A release whose note carries a `#### → Stop:` line is a required stop: update to it first, finish its actions, then continue from it. " +
-		"Merge the `#### → For:` actions into one checklist per update: each names its timing — `before update`, `after update` or `per project` — and the surface it touches, and a later release's action supersedes an earlier one on the same surface; an older note's action that names no timing, including one written `#### For:` or `#### → For adopters …:`, gets the timing you judge. " +
-		"Then present a concise overview of every change and migration impact, with that checklist. " +
-		"Ask the user for explicit approval before making any change. Only after approval, do the before-update actions, run `pfm update --to " + target + "` (or the stop's tag), do the after-update actions, run `pfm doctor`, " +
-		"then in each adopted project run `pfm doctor --project-updates` and take it to `clean`, exit 0: every row ends in a verb, and the approval above covers every row, so no row waits for another question. " +
-		"`UPDATED`: port each listed upstream commit's intent into the local file, keeping the project's own edits, then `pfm update pin <local>`; a version kept on purpose is `pfm update pin <local> --keep \"<what you did not take, and why>\"`, never a row left open. " +
-		"`NEW`: decide from the project's own rules, then adopt it (`pfm update pin --template <template> <local>`) or `pfm update ignore <template>`. " +
-		"`RETIRED-NAME`: edit the line to its successor, or `pfm update accept <path> --reason \"<why>\"` for a mention that must stay. " +
-		"`INCOMPLETE`: inspect the unscanned text, then `pfm update accept <path> --coverage --reason \"<why>\"` once reviewed. " +
-		"`GONE-UPSTREAM`, `MOVED` and `LOCAL-DELETED`: the verbs printed on the row. " +
-		"Run the verbs one at a time, never in parallel: each rewrites `.professor/baseline.json`. Re-run the report after each project and quote its last line; then do the `per project` actions; report the exact result of each step. " +
-		"Do not push, tag, publish, release, or edit the source manually."
 }

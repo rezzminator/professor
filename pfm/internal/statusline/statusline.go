@@ -17,7 +17,7 @@
 //   - rate_limits_cache.go: the quota windows' cache and their reset stamps.
 //   - full_width_row.go: quota readings drawn as labelled full-width bars.
 //   - cache_window.go: the prompt cache's time left and hit share, 💾1h✓59m28s 94%.
-//   - cache_keepwarm.go: the cache-keepwarm shield beside the cache window.
+//   - keepwarm.go: the keep-warm shield (cache-live-control plugin) beside the cache window.
 //   - instrument.go: line 2, the chat's instrument row: the context block's width table, clock, spend, cache, and what a narrow terminal gives up.
 //   - pulse.go: the context strip, the ▰▱ gauge of the share used (fillBar) and the pulse of the growth a step.
 //   - spend_text.go: a spend's forms, words, slashes or dollars alone.

@@ -188,8 +188,8 @@ func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
 	proxy.retryDelay = time.Millisecond
 	proxy.sessionID = oldSession
 	proxy.protocol = "2025-06-18"
-	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
-	proxy.storeHandshake("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
+	proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
+	proxy.handshake.store("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
 
 	results := make(chan error, 2)
 	for range 2 {
@@ -315,9 +315,7 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 			t.Fatalf("replayed handshake frame %d was incomplete", index+1)
 		}
 	}
-	proxy.handshakeMutex.Lock()
-	proxy.initialized = nil
-	proxy.handshakeMutex.Unlock()
+	proxy.handshake.store("notifications/initialized", nil)
 	session := proxy.session()
 	if session.sessionID == "" && session.protocol == "" {
 		t.Fatal("restoreSession replay left no held session")
@@ -617,7 +615,7 @@ func TestStdioProxyRefusesReplayIntoDifferentRuntime(t *testing.T) {
 			proxy.protocol = "2025-06-18"
 			proxy.retryDelay = time.Millisecond
 			proxy.retryWindow = time.Second
-			proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
+			proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
 			frame := []byte(proxyTestToolCall(8, row.call, `{"name":"wrong-fleet"}`))
 			_, err := proxy.sendWithRetry(context.Background(), frame, false)
 			if firstSendProbes.Load() != 0 {

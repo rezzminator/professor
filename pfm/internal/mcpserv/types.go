@@ -1,4 +1,3 @@
-// Package mcpserv exposes the pfm chat family over stdio MCP.
 package mcpserv
 
 import (

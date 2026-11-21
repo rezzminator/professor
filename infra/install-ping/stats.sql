@@ -6,8 +6,8 @@
 SELECT product, COUNT(DISTINCT id) AS ids
 FROM pings GROUP BY product ORDER BY product;
 
--- unique install ids ever, release vs -alpha builds
-SELECT product, CASE WHEN instr(version, '-alpha') > 0 THEN 'alpha' ELSE 'release' END AS build,
+-- unique install ids ever, release vs development (-alpha, -dev) builds
+SELECT product, CASE WHEN instr(version, '-alpha') > 0 OR instr(version, '-dev') > 0 THEN 'dev' ELSE 'release' END AS build,
   COUNT(DISTINCT id) AS ids
 FROM pings GROUP BY product, build ORDER BY product, build;
 
@@ -37,3 +37,10 @@ GROUP BY plugin.value ORDER BY ids DESC, plugin;
 SELECT day, product, COUNT(*) AS installs
 FROM pings WHERE event = 'install'
 GROUP BY day, product ORDER BY day, product;
+
+-- every install id: first and last day seen, days, latest version and OS
+SELECT product, substr(id, 1, 8) AS id, MIN(day) AS first_day, MAX(day) AS last_day, COUNT(*) AS days,
+  (SELECT latest.version FROM pings AS latest WHERE latest.id = pings.id AND latest.product = pings.product ORDER BY latest.day DESC LIMIT 1) AS version,
+  (SELECT latest.os FROM pings AS latest WHERE latest.id = pings.id AND latest.product = pings.product ORDER BY latest.day DESC LIMIT 1) AS os,
+  (SELECT latest.arch FROM pings AS latest WHERE latest.id = pings.id AND latest.product = pings.product ORDER BY latest.day DESC LIMIT 1) AS arch
+FROM pings GROUP BY product, id ORDER BY product, last_day DESC, id;

@@ -15,6 +15,8 @@ import (
 const (
 	KeyHerdr     = "herdr"
 	KeyHerdrKeys = KeyHerdr + ".keys"
+	// KeyHerdrSettings names herdr.settings, Herdr's config.toml as JSON.
+	KeyHerdrSettings = KeyHerdr + ".settings"
 	// HerdrKeysCommand is the [keys] array of [[keys.command]] tables, the
 	// one name every reader of the keymap uses.
 	HerdrKeysCommand = "command"
@@ -30,6 +32,9 @@ const herdrKeyCommandFieldsText = "key, type, description or command"
 type Herdr struct {
 	// Keys is herdr.keys, nil when unset.
 	Keys *HerdrKeys
+	// Settings is herdr.settings, nil when unset: Herdr's config.toml as JSON,
+	// an object a table, null removing pfm's default of that key.
+	Settings map[string]any
 }
 
 // HerdrKeys is the user's Herdr keymap. Each action's binding replaces pfm's
@@ -58,12 +63,20 @@ type HerdrKeyCommand struct {
 }
 
 type rawHerdr struct {
-	Keys json.RawMessage `json:"keys,omitempty"`
+	Keys     json.RawMessage `json:"keys,omitempty"`
+	Settings json.RawMessage `json:"settings,omitempty"`
 }
 
-// applyHerdr decodes herdr.keys; absent and null leave it unset.
+// applyHerdr decodes herdr.keys and herdr.settings; absent and null leave
+// each unset.
 func applyHerdr(result *Config, raw *rawHerdr) error {
-	if raw == nil || !claudeEnvSet(raw.Keys) {
+	if raw == nil {
+		return nil
+	}
+	if err := applyHerdrSettings(result, raw.Settings); err != nil {
+		return err
+	}
+	if !claudeEnvSet(raw.Keys) {
 		return nil
 	}
 	keys, err := decodeHerdrKeys(raw.Keys)
@@ -213,26 +226,4 @@ func (keys HerdrKeys) JSON() map[string]any {
 	}
 	value[HerdrKeysCommand] = commands
 	return value
-}
-
-// marshalHerdr is the herdr block, nil while herdr.keys is unset so a file
-// without it stays readable by a pfm that predates it.
-func marshalHerdr(config Config) map[string]any {
-	if config.Herdr.Keys == nil {
-		return nil
-	}
-	return map[string]any{"keys": config.Herdr.Keys.JSON()}
-}
-
-// HerdrSummary renders herdr.keys and its source for `pfm config show`.
-func (config Config) HerdrSummary() string {
-	value := "none"
-	if config.Herdr.Keys != nil {
-		encoded, err := json.Marshal(config.Herdr.Keys.JSON())
-		value = string(encoded)
-		if err != nil {
-			value = fmt.Sprintf("unencodable (%v)", err)
-		}
-	}
-	return fmt.Sprintf("config %s=%s (%s)\n", KeyHerdrKeys, value, config.Source(KeyHerdrKeys))
 }

@@ -869,28 +869,50 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 			context.Background(), headless.Chat{ID: "request-caller", CWD: filepath.Join(jail.root, "work")},
 		))
 		defer cancel()
+		// The spawn comms row is written after the spawn returned and before the await
+		// starts, so a cancel sent once it exists lands in the await however loaded the
+		// machine is; the await's timeout is far past the poll's bound.
+		cancelled := make(chan bool, 1)
 		go func() {
-			deadline := time.Now().Add(5 * time.Second)
-			for time.Now().Before(deadline) {
-				content, readErr := os.ReadFile(jail.transcript)
-				if readErr == nil && strings.Contains(string(content), "cancel await") {
-					cancel()
+			defer cancel()
+			state := fleetdb.OpenSharedState(context.Background(), paths.Values{
+				StateDB: filepath.Join(jail.root, "home", ".local", "state", "pfm", "pfm.db"),
+			})
+			defer func() { _ = state.Close() }()
+			for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+				events, readErr := state.CommsSince(context.Background(), 0, 10)
+				if readErr == nil && len(events) == 1 && events[0].Kind == fleetdb.KindSpawn {
+					cancelled <- true
 					return
 				}
-				time.Sleep(10 * time.Millisecond)
 			}
+			cancelled <- false
 		}()
 		var stdout, stderr bytes.Buffer
 		code := runChatWithRuntime([]string{
 			"new", "--engine", "claude", "--name", "await child",
-			"--cwd", filepath.Join(jail.root, "work"), "--await", "--timeout", "1", "cancel await",
+			"--cwd", filepath.Join(jail.root, "work"), "--await", "--timeout", "120", "cancel await",
 		}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
-		if code != 1 || stderr.String() != "pfm chat new: configure chat server: context canceled\n" {
-			t.Fatalf("cancelled await exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		if !<-cancelled {
+			t.Fatalf("no spawn comms row within 30s, so the await was never cancelled: exit=%d stdout=%q stderr=%q",
+				code, stdout.String(), stderr.String())
+		}
+		sockets, err := os.ReadDir(jail.tmuxDir)
+		if err != nil || len(sockets) != 1 {
+			t.Fatalf("cancelled await sockets in %s = %v, err=%v, want the one live chat", jail.tmuxDir, sockets, err)
+		}
+		wantStderr := fmt.Sprintf("cc\tawait child\t%[1]s\tnamed\tlisted\nattach: tmux -L %[1]s attach -t %[1]s\n"+
+			"pfm chat run: context canceled\n", sockets[0].Name())
+		if code != 1 || stdout.String() != "" || stderr.String() != wantStderr {
+			t.Fatalf("cancelled await exit=%d stdout=%q stderr=%q, want exit 1, empty stdout, stderr %q",
+				code, stdout.String(), stderr.String(), wantStderr)
 		}
 		content, err := os.ReadFile(jail.transcript)
 		if err != nil {
 			t.Fatalf("read cancelled await transcript: %v", err)
+		}
+		if !strings.Contains(string(content), "cancel await") {
+			t.Fatalf("cancelled await transcript %s lacks the delivered prompt: %q", jail.transcript, content)
 		}
 		if strings.Contains(string(content), "ack: cancel await") {
 			t.Fatalf("cancelled await transcript contains stub answer: %q", content)

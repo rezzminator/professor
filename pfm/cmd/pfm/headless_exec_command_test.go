@@ -178,9 +178,12 @@ func TestHeadlessExecPFMSettingsFile(t *testing.T) {
 	}
 	argv := startedArgs(t, runner, 0)
 	want := `{"cleanupPeriodDays":36500,"env":{"ANTHROPIC_SMALL_FAST_MODEL":"claude-sonnet-5-5","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000",` +
+		`"CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF":"1","CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY":"1",` +
 		`"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4",` +
-		`"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_NATIVE_CURSOR":"1","CLAUDE_CODE_TMUX_TRUECOLOR":"1"},` +
-		`"outputStyle":"default","showThinkingSummaries":true,"theme":"t","tui":"fullscreen"}`
+		`"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION":"9007199254740991","CLAUDE_CODE_NATIVE_CURSOR":"1","CLAUDE_CODE_RETRY_WATCHDOG":"1","CLAUDE_CODE_STOP_HOOK_BLOCK_CAP":"2",` +
+		`"CLAUDE_CODE_TMUX_TRUECOLOR":"1","CLAUDE_DISABLE_ADOPT":"1","ENABLE_TOOL_SEARCH":"true"},` +
+		`"outputStyle":"default","showThinkingSummaries":true,"skipAutoPermissionPrompt":true,` +
+		`"skipDangerousModePermissionPrompt":true,"skipWorkflowUsageWarning":true,"theme":"t","tui":"fullscreen"}`
 	if !strings.Contains(argv, want) {
 		t.Fatalf("argv = %s", argv)
 	}
@@ -207,7 +210,7 @@ func TestHeadlessExecClaudeIgnoresConfiguredLaunchValues(t *testing.T) {
 	}
 	if !strings.HasSuffix(
 		got,
-		"--settings\n{\"cleanupPeriodDays\":36500,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"9007199254740991\",\"CLAUDE_CODE_NATIVE_CURSOR\":\"1\",\"CLAUDE_CODE_TMUX_TRUECOLOR\":\"1\"},\"outputStyle\":\"default\",\"showThinkingSummaries\":true,\"tui\":\"fullscreen\"}\n",
+		"--settings\n{\"cleanupPeriodDays\":36500,\"env\":{\"ANTHROPIC_SMALL_FAST_MODEL\":\"claude-haiku-5-5\",\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF\":\"1\",\"CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY\":\"1\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\",\"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS\":\"0\",\"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH\":\"8\",\"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION\":\"9007199254740991\",\"CLAUDE_CODE_NATIVE_CURSOR\":\"1\",\"CLAUDE_CODE_RETRY_WATCHDOG\":\"1\",\"CLAUDE_CODE_STOP_HOOK_BLOCK_CAP\":\"2\",\"CLAUDE_CODE_TMUX_TRUECOLOR\":\"1\",\"CLAUDE_DISABLE_ADOPT\":\"1\",\"ENABLE_TOOL_SEARCH\":\"true\"},\"outputStyle\":\"default\",\"showThinkingSummaries\":true,\"skipAutoPermissionPrompt\":true,\"skipDangerousModePermissionPrompt\":true,\"skipWorkflowUsageWarning\":true,\"tui\":\"fullscreen\"}\n",
 	) {
 		t.Fatalf("configured launch values reached child: %q", got)
 	}

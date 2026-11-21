@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prints the install-ping counts: each query in stats.sql, read-only, against
-# the live D1 database through wrangler. Needs Cloudflare credentials wrangler
+# the live D1 database through wrangler, as an aligned table (needs jq). Needs Cloudflare credentials wrangler
 # can use (wrangler login, or CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,10 +36,32 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < stats.sql
 add_block
 
+# render prints wrangler's --json answer as an aligned table, header first;
+# an empty result is "(no rows)". Aligned in awk, not column(1): minimal
+# Linux images (the fence among them) ship without util-linux's column.
+render() {
+  jq -r '.[0].results as $rows
+    | if ($rows | length) == 0 then "(no rows)"
+      else ($rows[0] | keys_unsorted) as $keys
+        | ($keys | @tsv), ($rows[] | [.[$keys[]] | tostring] | @tsv)
+      end' | awk -F '\t' '
+    { for (i = 1; i <= NF; i++) { cell[NR, i] = $i; if (length($i) > w[i]) w[i] = length($i) }
+      nf[NR] = NF }
+    END { for (r = 1; r <= NR; r++) {
+            line = ""
+            for (i = 1; i < nf[r]; i++) line = line sprintf("%-" (w[i] + 2) "s", cell[r, i])
+            print line cell[r, nf[r]] } }'
+}
+
 for i in "${!queries[@]}"; do
   printf '\n== %s\n' "${titles[$i]}"
-  if ! npx --yes wrangler@4 d1 execute install-ping --remote --command "${queries[$i]}" </dev/null; then
+  if ! answer="$(npx --yes wrangler@4 d1 execute install-ping --remote --json --command "${queries[$i]}" </dev/null)"; then
+    printf '%s\n' "$answer" >&2
     echo "stats.sh: query failed: ${titles[$i]}" >&2
+    status=1
+  elif ! printf '%s\n' "$answer" | render; then
+    printf '%s\n' "$answer" >&2
+    echo "stats.sh: unreadable answer: ${titles[$i]}" >&2
     status=1
   fi
 done

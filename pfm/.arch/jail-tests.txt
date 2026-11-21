@@ -167,7 +167,7 @@ internal/mcpserv/herdr_jail_test.go 1
 internal/mcpserv/metadata_identity_jail_test.go 9
 internal/mcpserv/server_jail_test.go 3
 internal/mcpserv/server_stress_jail_test.go 1
-internal/mcpserv/stdio_jail_test.go 2
+internal/mcpserv/stdio_jail_test.go 3
 internal/mockengine/agents_jail_test.go 1
 internal/mockengine/claude_background_job_jail_test.go 1
 internal/mockengine/claude_jail_test.go 5

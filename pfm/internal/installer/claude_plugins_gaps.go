@@ -57,7 +57,7 @@ func ClaudePluginGaps(
 		}
 		switch {
 		case target.InstallOnly && pluginEnabled(document, target.ID):
-			// Every -alpha install disables each plugin claude.plugins does not list.
+			// Every checkout-host install disables each plugin claude.plugins does not list.
 			gaps = append(gaps, ClaudePluginGap{
 				fmt.Sprintf(
 					"plugin %s enabled (%s) in %s, but %s does not list it",

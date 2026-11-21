@@ -159,9 +159,9 @@ type Options struct {
 	// callers may leave it empty to opt out of OpenCode wiring.
 	OpenCodeConfigPath string
 	ClaudeBinary       string
-	// Version is pfm's own stamped build version: an -alpha build ensures the
-	// Claude plugins from their local checkouts (ClaudePluginTargets).
-	Version string
+	// ClaudePluginsFromCheckout is claude.pluginSource checkout (pfmconfig.ClaudePrefs.PluginsFromCheckout):
+	// the Claude plugins of ours install from their local checkouts (ClaudePluginTargets).
+	ClaudePluginsFromCheckout bool
 	// ClaudePluginCheckoutRoot is claude.pluginCheckoutRoot; empty when unset.
 	ClaudePluginCheckoutRoot string
 	// GptAgents is claude.gptAgents: the machine-wide switch declaring the engine-sync
@@ -176,9 +176,9 @@ type Options struct {
 	// ClaudeEnv is claude.env: the plugin options as environment variables
 	// pfm writes into the primary seat's settings.json env (ensureClaudeEnv).
 	ClaudeEnv map[string]string
-	// HerdrKeys is herdr.keys, the keymap the Herdr keys step merges over
-	// pfm's; nil when unset.
-	HerdrKeys *pfmconfig.HerdrKeys
+	// HerdrKeys, HerdrSettings: herdr.keys, herdr.settings, laid over pfm's own by their Herdr steps; nil unset.
+	HerdrKeys     *pfmconfig.HerdrKeys
+	HerdrSettings map[string]any
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches

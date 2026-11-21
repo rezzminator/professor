@@ -31,7 +31,7 @@ import (
 // the config's state.db says; either marker keeps the window the transcript
 // names beside it, and stands alone when it names none. hit < 0 means the harness reported no usage yet,
 // and drops the tail; a lapsed window renders the hit as history, was 99%.
-// The cache-keepwarm shield (cacheKeepwarmShield) follows, even when no
+// The keep-warm shield (cache-live-control plugin; keepwarmShield) follows, even when no
 // countdown renders.
 func cacheWindowSegment(
 	runtime Runtime,
@@ -42,7 +42,7 @@ func cacheWindowSegment(
 	sessionID string,
 ) string {
 	text := cacheWindowText(runtime, now, transcriptPath, hit, harness, sessionID)
-	shield := cacheKeepwarmShield(runtime, sessionID)
+	shield := keepwarmShield(runtime, sessionID)
 	if text == "" && shield != "" {
 		return sep + strings.TrimPrefix(shield, " ")
 	}

@@ -129,6 +129,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - Commit only code whose tests pass.
 - Code builds and tests run in the fence through `.claude/scripts/dev.sh iso`; the full gate is the lander's on a flight, the main chat's on small work.
 - Fence runs leave the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
+- Before hand-setting a host flag, a user-ordered one too: would a fresh `pfm install` break or block without it? Yes → a pfm default in `pfm/internal/claudelaunch/defaults.json`, `templates/global/codex/config.toml` or `pfm.config.json`'s `herdr` section, mirrored in `example.pfm.config.json`, routed by install or launch, test-held; no → the user's config — a live-file edit is lost on the next machine.
 - Template, doc, prompt and config-file changes are non-code work, placed by `templates/global/rules/flights-life-cycle.md`.
 - Once a fenced flight merges, the main chat runs the host mirror build under § Host.
 - At every milestone, checkpoint the plan to a file and store the frontier with `forward_compaction`, which works mid-turn.

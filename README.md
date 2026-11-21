@@ -112,10 +112,6 @@ The refusal names the right way, so the agent takes it instead of trying again. 
 | Ten Claude Code plugins | Each installs on its own: compaction that keeps your facts, live prompt-cache and effort control, per-agent tool and rule visibility, a call meter | [Guide](docs/guide/plugins.md#plugins) |
 | The rest of `pfm` | The limits tab, headless runs, token accounting, the VS Code extension | [Guide](docs/guide/fleet-cli.md) |
 
-## Install ping
-
-`pfm` counts real installs with an anonymous ping: a random install id made once on your machine, the pfm version, OS and architecture, the enabled plugins from Professor's own marketplace, and the event (`install` at the end of `pfm install`, `daily` at most once a UTC day). The counter stores those fields and the UTC day, never your IP address, hostname, username, paths or project names. Set `PFM_INSTALL_PING_OFFLINE=1` or `DO_NOT_TRACK=1` to turn it off; CI and development builds never send it. [What the counter is and stores](infra/install-ping/README.md).
-
 ## Help and community
 
 Questions and ideas go to [Discussions](https://github.com/rezzminator/professor/discussions), bugs to [an issue](https://github.com/rezzminator/professor/issues/new/choose), vulnerabilities privately through [SECURITY.md](SECURITY.md); [SUPPORT.md](SUPPORT.md) has the details.

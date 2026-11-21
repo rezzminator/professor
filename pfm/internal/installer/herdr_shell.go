@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -25,10 +24,6 @@ const (
 	herdrShellOpen  = "# >>> pfm herdr shell >>>\n"
 	herdrShellClose = "# <<< pfm herdr shell <<<\n"
 	herdrShellAsset = "shim/pfm-herdr-shell.sh"
-)
-
-var herdrTerminalHeader = regexp.MustCompile(
-	`(?m)^\s*\[\s*(?:terminal|"terminal"|'terminal')\s*\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)`,
 )
 
 // HerdrShellStatus describes the on-disk key, never an installer's assertion.
@@ -179,7 +174,7 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 		return fmt.Errorf("read Herdr shell config: %w", err)
 	}
 	block := herdrShellOpen + fmt.Sprintf("default_shell = %q\n", wrapper) + herdrShellClose
-	updated, err := extendHerdrShellConfig(string(raw), block, wrapper)
+	updated, err := insertHerdrConfigLines(string(raw), []string{"terminal"}, block)
 	if err != nil {
 		return fmt.Errorf("extend Herdr terminal table in %s: %w", status.Path, err)
 	}
@@ -246,38 +241,6 @@ func loginShellOutput(ctx context.Context, runner deps.Runner, argv ...string) (
 		return "", fmt.Errorf("lookup login shell via %q: exit %d; stderr: %s", argv, result.ExitCode, result.Stderr)
 	}
 	return strings.TrimSpace(string(result.Stdout)), nil
-}
-
-// extendHerdrShellConfig proves the new key is in the terminal table, not
-// merely text inside a multiline TOML string that looks like a table header.
-func extendHerdrShellConfig(original, block, wrapper string) (string, error) {
-	valid := func(candidate string) bool {
-		var config map[string]any
-		if _, err := toml.Decode(candidate, &config); err != nil {
-			return false
-		}
-		terminal, ok := config["terminal"].(map[string]any)
-		return ok && terminal["default_shell"] == wrapper
-	}
-	for _, location := range herdrTerminalHeader.FindAllStringIndex(original, -1) {
-		prefix := original[:location[1]]
-		if !strings.HasSuffix(prefix, "\n") {
-			prefix += "\n"
-		}
-		candidate := prefix + block + original[location[1]:]
-		if valid(candidate) {
-			return candidate, nil
-		}
-	}
-	updated := original
-	if updated != "" && !strings.HasSuffix(updated, "\n") {
-		updated += "\n"
-	}
-	updated += "\n[terminal]\n" + block
-	if valid(updated) {
-		return updated, nil
-	}
-	return "", fmt.Errorf("cannot add default_shell without rewriting the existing terminal table")
 }
 
 func (installer *engine) writeHerdrConfig(path string, original, updated []byte, existed bool) error {

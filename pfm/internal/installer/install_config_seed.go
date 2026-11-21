@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -12,12 +13,12 @@ import (
 
 // seedNewClaudeKeys are the claude keys added since v0.79.0, which a pfm of
 // that release refuses as unknown (config.marshalClaude).
-var seedNewClaudeKeys = []string{"remoteControl", "pluginCheckoutRoot", "plugins", "costLedger"}
+var seedNewClaudeKeys = []string{"remoteControl", "pluginCheckoutRoot", "pluginSource", "plugins", "costLedger"}
 
 // seedWithoutDefaultNewKeys is the seed a first install writes: the example's
 // bytes, less each key of seedNewClaudeKeys that config.Marshal would leave out
 // at its default, less each scope key (envs, harnessPrompt, claude.settings)
-// that changes no launch, and less an unset herdr block. A fresh config then rolls back to the last release as
+// that changes no launch, less installPing at its default true, and less an unset herdr block. A fresh config then rolls back to the last release as
 // `pfm config init`'s does; a key the example sets away from its default stays.
 // The probe marshals the loaded config as if the file had not set those keys,
 // so the omission rule stays marshalClaude's alone.
@@ -56,8 +57,15 @@ func seedWithoutDefaultNewKeys(loaded pfmconfig.Config) ([]byte, error) {
 		delete(document, pfmconfig.KeyHarnessPrompt)
 		removed = true
 	}
-	// An unset herdr.keys is pfm's own keymap, and a pfm before it refuses the herdr block.
-	if _, present := document[pfmconfig.KeyHerdr]; present && loaded.Herdr.Keys == nil {
+	// installPing on is the default, and a pfm before the key refuses it.
+	if _, present := document[pfmconfig.KeyInstallPing]; present && loaded.InstallPing {
+		delete(document, pfmconfig.KeyInstallPing)
+		removed = true
+	}
+	// An unset herdr.keys is pfm's own keymap, a herdr.settings laying nothing over pfm's shipped Herdr
+	// settings changes no config.toml, and a pfm before them refuses the herdr block.
+	if _, present := document[pfmconfig.KeyHerdr]; present && loaded.Herdr.Keys == nil &&
+		reflect.DeepEqual(herdrSettingsEffective(loaded.Herdr.Settings), herdrSettingsDefault()) {
 		delete(document, pfmconfig.KeyHerdr)
 		removed = true
 	}

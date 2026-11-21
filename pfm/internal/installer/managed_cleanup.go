@@ -153,9 +153,8 @@ func readManagedSettings(
 }
 
 // inspectPrependPlugins decides where prependPlugins stands: set as a list in
-// pfm's own drop-in, else in another managed source (every other file Claude
-// Code lists beside it — a regular file or symlink named *.json, not hidden —
-// and the platform's managed-settings.json in the directory above), else
+// pfm's own drop-in, else in another managed source (every other file of
+// managedSettingsSources), else
 // invalid when pfm's drop-in holds a value that is not a list, else absent. A
 // source that cannot be read makes the answer PrependUnknown unless another
 // source already sets the key.
@@ -164,20 +163,14 @@ func inspectPrependPlugins(dir string, own map[string]json.RawMessage) (state, s
 	if ownPresent && prependPluginsIsList(ownValue) {
 		return PrependSet, "", nil
 	}
-	var candidates []string
-	entries, listErr := os.ReadDir(dir)
-	if listErr != nil && !errors.Is(listErr, fs.ErrNotExist) {
+	candidates, listErr := managedSettingsSources(dir)
+	if listErr != nil {
 		source, err = dir, listErr
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		listed := entry.Type().IsRegular() || entry.Type()&fs.ModeSymlink != 0
-		if listed && name != managedDropInName && !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".json") {
-			candidates = append(candidates, filepath.Join(dir, name))
-		}
-	}
-	candidates = append(candidates, filepath.Join(filepath.Dir(dir), managedSettingsFile))
 	for _, candidate := range candidates {
+		if candidate == filepath.Join(dir, managedDropInName) {
+			continue
+		}
 		document, _, readErr := readManagedSettings(candidate, os.Stat)
 		if readErr != nil {
 			if err == nil {

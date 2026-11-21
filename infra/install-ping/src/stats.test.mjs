@@ -24,16 +24,19 @@ test("each stats query counts the fixture rows as its title says", () => {
   const a = "aaaaaaaa-1b4d-4e8a-9c2f-6d1e0b7a5c43";
   const b = "bbbbbbbb-1b4d-4e8a-9c2f-6d1e0b7a5c43";
   const c = "cccccccc-1b4d-4e8a-9c2f-6d1e0b7a5c43";
+  const d = "dddddddd-1b4d-4e8a-9c2f-6d1e0b7a5c43";
   insert.run(day(0), a, "pfm", "0.42.0-alpha", "darwin", "arm64", '["flights","harvester"]', "daily");
   insert.run(day(3), a, "pfm", "0.41.0", "darwin", "arm64", '["flights"]', "install");
   insert.run(day(10), b, "pfm", "0.41.0", "linux", "amd64", '["flights"]', "install");
   insert.run(day(40), c, "harvester", "1.0.0", "linux", "amd64", "[]", "install");
+  insert.run(day(40), d, "harvester", "0.1.0-dev.1", "linux", "amd64", "[]", "install");
   const got = Object.fromEntries(queries().map(({ title, sql }) => [title, db.prepare(sql).all().map((row) => ({ ...row }))]));
   assert.deepEqual(got, {
-    "unique install ids ever, per product": [{ product: "harvester", ids: 1 }, { product: "pfm", ids: 2 }],
-    "unique install ids ever, release vs -alpha builds": [
+    "unique install ids ever, per product": [{ product: "harvester", ids: 2 }, { product: "pfm", ids: 2 }],
+    "unique install ids ever, release vs development (-alpha, -dev) builds": [
+      { product: "harvester", build: "dev", ids: 1 },
       { product: "harvester", build: "release", ids: 1 },
-      { product: "pfm", build: "alpha", ids: 1 },
+      { product: "pfm", build: "dev", ids: 1 },
       { product: "pfm", build: "release", ids: 2 },
     ],
     "daily active ids, last 30 days, per product": [
@@ -54,9 +57,15 @@ test("each stats query counts the fixture rows as its title says", () => {
       { plugin: "harvester", ids: 1 },
     ],
     "installs (event=install) per day, per product": [
-      { day: day(40), product: "harvester", installs: 1 },
+      { day: day(40), product: "harvester", installs: 2 },
       { day: day(10), product: "pfm", installs: 1 },
       { day: day(3), product: "pfm", installs: 1 },
+    ],
+    "every install id: first and last day seen, days, latest version and OS": [
+      { product: "harvester", id: "cccccccc", first_day: day(40), last_day: day(40), days: 1, version: "1.0.0", os: "linux", arch: "amd64" },
+      { product: "harvester", id: "dddddddd", first_day: day(40), last_day: day(40), days: 1, version: "0.1.0-dev.1", os: "linux", arch: "amd64" },
+      { product: "pfm", id: "aaaaaaaa", first_day: day(3), last_day: day(0), days: 2, version: "0.42.0-alpha", os: "darwin", arch: "arm64" },
+      { product: "pfm", id: "bbbbbbbb", first_day: day(10), last_day: day(10), days: 1, version: "0.41.0", os: "linux", arch: "amd64" },
     ],
   });
 });

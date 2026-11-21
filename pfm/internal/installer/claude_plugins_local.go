@@ -21,7 +21,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
-// An -alpha build installs each bare plugin name as {plugin}@professor from a
+// A checkout host installs each bare plugin name as {plugin}@professor from a
 // local marketplace pfm owns, ~/.local/share/professor-dev: its
 // .claude-plugin/marketplace.json, named professor, lists each plugin at
 // ./plugins/{plugin}, a copy of the checkout's plugins/{plugin} (under
@@ -32,7 +32,7 @@ import (
 // claudePluginOwner is the GitHub owner of the professor marketplace.
 const claudePluginOwner = "rezzminator"
 
-// professorDevMarketplace is the local professor marketplace an -alpha build
+// professorDevMarketplace is the local professor marketplace a checkout host
 // installs every plugin with a checkout from.
 func professorDevMarketplace(home string) string {
 	return filepath.Join(home, ".local", "share", pfmconfig.ProfessorMarketplace+"-dev")
@@ -52,7 +52,7 @@ func pluginCopySkipped(rel string) bool {
 	return name == "node_modules" || name == ".DS_Store" || name == "__pycache__"
 }
 
-// localClaudePluginTarget turns an -alpha build's target local when its
+// localClaudePluginTarget turns a checkout host's target local when its
 // checkout exists under the checkout root, and otherwise says why not. The
 // root is build.CheckoutRoot when claude.pluginCheckoutRoot is set, else the
 // source clone's plugins/; a fallback names which root it tried. A source

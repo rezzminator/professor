@@ -285,6 +285,11 @@ func newStdioJail(t *testing.T) *stdioJail {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// macOS's /tmp is a link to /private/tmp, and tmux names its socket by the resolved path: a chat's
+	// TMUX then disagrees with the fleet row built from the jail's path unless the root is canonical.
+	if root, err = filepath.EvalSymlinks(root); err != nil {
+		t.Fatal(err)
+	}
 	jail := &stdioJail{
 		root:            root,
 		home:            filepath.Join(root, "h"),

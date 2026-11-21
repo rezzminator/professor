@@ -16,8 +16,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // pluginLogFolderAccess is what a plugin needs of its log folder: list it,
@@ -30,7 +30,7 @@ func printManagedPluginLogsDoctor(stdout io.Writer, dirs []string, build install
 	managedRoot, settingsPath string, tally *doctorTally,
 ) {
 	var files []string
-	if obs.AlphaBuild(build.Version) {
+	if build.FromCheckout {
 		var err error
 		files, err = installer.ClaudeEnvSettingsPaths(managedRoot, settingsPath)
 		if err != nil {
@@ -45,9 +45,9 @@ func printManagedPluginLogsDoctor(stdout io.Writer, dirs []string, build install
 	printPluginLogsDoctor(stdout, dirs, build, unix.Access, tally, files...)
 }
 
-// printPluginLogsDoctor checks the plugin-logs system on an -alpha build, the
+// printPluginLogsDoctor checks the plugin-logs system on a checkout host, the
 // one that installs the marketplace plugins from their checkouts
-// (obs.AlphaBuild); any other build prints one untallied line saying it does
+// (claude.pluginSource checkout); any other host prints one untallied line saying it does
 // not apply. dirs are the Claude config dirs pfm manages, store first: each
 // settings.json must set installer.PluginLogDirEnv, every one to the same
 // absolute path — missing, differing, relative and unreadable are a line each.
@@ -64,9 +64,9 @@ func printPluginLogsDoctor(
 	tally *doctorTally,
 	extraSettings ...string,
 ) {
-	if !obs.AlphaBuild(build.Version) {
-		fmt.Fprintf(stdout, "doctor: plugin_logs does not apply: pfm %s is not an -alpha build\n",
-			installer.EscapeControl(build.Version))
+	if !build.FromCheckout {
+		fmt.Fprintf(stdout, "doctor: plugin_logs does not apply: %s is %s\n",
+			pfmconfig.KeyClaudePluginSource, pfmconfig.PluginSourceRelease)
 		return
 	}
 	clean := true

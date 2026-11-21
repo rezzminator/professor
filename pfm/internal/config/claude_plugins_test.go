@@ -31,6 +31,7 @@ func TestClaudePluginsKey(t *testing.T) {
 				{ID: "engine-sync"},
 				{ID: "flights"},
 				{ID: "professor"},
+				{ID: "rule-control"},
 			},
 			source: SourceDefault,
 		},

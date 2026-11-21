@@ -123,10 +123,14 @@ func HerdrPaneInfo(pane string) map[string]any {
 	}
 }
 
+// HerdrStartingTab is the shell tab a fake Herdr server creates workspace with.
+func HerdrStartingTab(workspace string) string { return workspace + ":t1" }
+
 // HerdrWorkspaceReply answers a birth's placement on a fake Herdr server whose
 // tabs all land in workspace: workspace.list lists no workspace, so the birth
 // creates its place's, and workspace.create answers with workspace, labelled
-// label, the label the request asked for; workspace.rename answers that
+// label, the label the request asked for, and its starting tab
+// HerdrStartingTab(workspace); workspace.rename answers that
 // workspace now wears label. Any other method is not handled.
 func HerdrWorkspaceReply(method, label, workspace string) (map[string]any, bool) {
 	switch method {
@@ -136,6 +140,7 @@ func HerdrWorkspaceReply(method, label, workspace string) (map[string]any, bool)
 		return map[string]any{
 			"type":      "workspace_created",
 			"workspace": map[string]any{"workspace_id": workspace, "label": label},
+			"tab":       map[string]any{"tab_id": HerdrStartingTab(workspace), "workspace_id": workspace},
 		}, true
 	case "workspace.rename":
 		return map[string]any{

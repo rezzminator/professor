@@ -3,7 +3,8 @@
 // Entry points: Render, Parse, Resolve, WriteResolved, RenderHeadless. Files, one line each:
 //   - knobs.go is the launch registry: every flag, env value and --settings key a Claude chat starts with.
 //   - defaults.go loads defaults.json: the plain settings every launch carries, the registry values install sets,
-//     and the effective settings and env claude.settings lays over them.
+//     and the effective settings and env claude.settings lays over them; defaults_user_settings.go the
+//     settings install also writes into each account's settings.json (UserSettingDefaults).
 //   - render.go renders one managed launch (Render) and checks an account's config dir.
 //   - owner_settings.go folds the project's claude.settings and the caller's --settings into the launch's one.
 //   - parse.go decodes a Claude command line; remote_control.go reapplies Remote Control to argv.

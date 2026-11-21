@@ -31,7 +31,6 @@ internal/hookentry 46
 internal/hostcheck 10
 internal/hostfixture 9
 internal/installer 90
-internal/mcpserv 18
 internal/naming 5
 internal/obs 18
 internal/paths 12
@@ -47,7 +46,6 @@ internal/rowfacts 3
 internal/schedule 6
 internal/servicemanager 6
 internal/sky 1
-internal/spawn 14
 internal/stats 7
 internal/testjail 19
 internal/themecmd 3

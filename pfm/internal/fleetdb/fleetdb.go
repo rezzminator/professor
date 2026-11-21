@@ -9,6 +9,7 @@
 // seatrun.go: SeatRun and its recipe file beside the shared database.
 // space.go: SetSpace and Spaces, the space each chat was moved into, keyed by its session id.
 // primary.go: ClaudePrimaryAccount and SetClaudePrimaryAccount, the primary Claude account row and its mirror file.
+// snapshot.go: SnapshotSharedState and RestoreSharedState, the copy an update takes and returns to.
 package fleetdb
 
 import (

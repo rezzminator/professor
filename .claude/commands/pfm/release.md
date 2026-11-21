@@ -1,7 +1,7 @@
 ---
 name: pfm:release
-description: 'Ships develop''s tip as cut — `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` gates, notes and publishes it; typing it is the publish request, `--dry` stops before any push. /pfm:release → changelogger, flights:reviewer, gitter. Returns the release URL or the STOP that ended it.'
-argument-hint: 'cut {patch|minor|major} "{summary}" [--dry]'
+description: 'Ships develop''s tip as cut — `/pfm:release cut {patch|minor|major} "{summary}" [--hold {plugin,…}] [--dry]` gates, notes and publishes it; typing it is the publish request, `--dry` stops before any push. /pfm:release → changelogger, flights:reviewer, gitter. Returns the release URL or the STOP that ended it.'
+argument-hint: 'cut {patch|minor|major} "{summary}" [--hold {plugin,…}] [--dry]'
 ---
 
 # PFM Release
@@ -13,6 +13,7 @@ One pass releases `develop`'s tip as it stands at the cut. Nothing is fixed insi
 - Public repo `rezzminator/professor` — this repo IS the upstream.
 - Typing `/pfm:release cut` is the user's explicit publish request for this version (project contract § Publication); every gitter brief that pushes quotes it. `--dry` runs steps 1 to 4, closes with § Dry close and pushes nothing.
 - `BUMP` and `SUMMARY` from the arguments, both required. `PREV` = the newest suffix-free `v*` tag, written `vX.Y.Z`; `NEW` = `PREV` bumped by `BUMP`, written `X.Y.Z` — every tag, branch and path spells it `v{NEW}`; `NEXT` = `NEW` with minor + 1 and patch 0.
+- `HOLD` = the comma list after `--hold`, each a plugin's directory name under `plugins/` (e.g. `forward-compaction`); a request excluding plugins in prose ("all plugins except X") is `--hold X`, and a held name `.gitmodules` does not register at `C` is a STOP. A held plugin ships pinned at its latest release while its own `develop` carries work this cut leaves out.
 - `C` = the full sha of `develop`'s HEAD after step 1: the commit the release gates and ships.
 - `WT` = `{repo}/.worktrees/release/`, on branch `release/v{NEW}`.
 - `DIR` = `$HOME/.local/state/pfm/releases/{project}/v{NEW}/`, `{project}` = this repo's directory name with the leading dot stripped. `DIR/run.md` gets one line per step, `{time} {step} {PASS|STOP|SKIP} @{C7} — {one line}`; each cut opens with `{time} CUT @{C7}`.
@@ -22,7 +23,7 @@ One pass releases `develop`'s tip as it stands at the cut. Nothing is fixed insi
 
 1. `gh auth status` names the repo owner. `gitter` Phase PULL in the live checkout: `git pull --ff-only origin develop`, then `git fetch --tags origin`; STOP on failure. `git merge-base --is-ancestor origin/main develop` fails: STOP — `main` holds a commit `develop` lacks. Set `C`, `PREV` (`git tag --list 'v*' --sort=-v:refname | grep -xE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1`) and `NEW`; `git rev-list origin/main..{C}` printing nothing is a STOP (nothing to release), and an existing tag `v{NEW}` is a STOP. Create `DIR`.
 
-   Plugins release first: every plugin `.gitmodules` registers at `C` counts as released when neither its gitlink nor its own `develop` holds a commit past its latest GitHub release, whose tag the releases API names, since tag schemes differ per plugin. This loop, run in the live checkout, prints one line per plugin: `PASS`, `FAIL` with both unreleased counts, or `ERROR` when it could not look.
+   Plugins release first: every plugin `.gitmodules` registers at `C` counts as released when neither its gitlink nor its own `develop` holds a commit that changes a file (an empty merge-back changes none) past its latest GitHub release, whose tag the releases API names, since tag schemes differ per plugin; a held plugin counts on its gitlink alone. This loop, run in the live checkout with `{HOLD}` substituted like `{C}`, prints one line per plugin: `PASS`, `HELD`, `FAIL` with both unreleased counts, or `ERROR` when it could not look.
 
    ```bash
    err() { printf 'ERROR %s — %s: %s\n' "$path" "$1" "$(printf %s "${2##*gh: }" | tr '\n' ' ')"; }
@@ -31,13 +32,18 @@ One pass releases `develop`'s tip as it stands at the cut. Nothing is fixed insi
      url=$(git config --blob {C}:.gitmodules "submodule.$name.url"); r=${url#https://github.com/}; r=${r%.git}
      g=$(git rev-parse --verify -q "{C}:$path") || { err "gitlink" "none at {C}"; continue; }
      t=$(gh api "repos/$r/releases/latest" --jq .tag_name 2>&1) || { err "$r latest release" "$t"; continue; }
-     a=$(gh api "repos/$r/compare/$t...$g" --jq .ahead_by 2>&1) || { err "$r compare $t...${g:0:7}" "$a"; continue; }
-     d=$(gh api "repos/$r/compare/$t...develop" --jq .ahead_by 2>&1) || { err "$r compare $t...develop" "$d"; continue; }
-     if [ "$a" = 0 ] && [ "$d" = 0 ]; then echo "PASS $path $t"; else echo "FAIL $path $t — gitlink ${g:0:7} +$a, develop +$d unreleased commits"; fi
+     o=$(gh api "repos/$r/compare/$t...$g" --jq '"\(.ahead_by) \(.files|length)"' 2>&1) || { err "$r compare $t...${g:0:7}" "$o"; continue; }
+     read -r a f <<<"$o"; [ "$f" = 0 ] && a=0
+     o=$(gh api "repos/$r/compare/$t...develop" --jq '"\(.ahead_by) \(.files|length)"' 2>&1) || { err "$r compare $t...develop" "$o"; continue; }
+     read -r d f <<<"$o"; [ "$f" = 0 ] && d=0
+     case ",{HOLD}," in *",${path##*/},"*) h=1 ;; *) h= ;; esac
+     if [ "$a" = 0 ] && [ "$d" = 0 ]; then echo "PASS $path $t"
+     elif [ "$a" = 0 ] && [ -n "$h" ]; then echo "HELD $path $t — develop +$d unreleased commits, held by --hold"
+     else echo "FAIL $path $t — gitlink ${g:0:7} +$a, develop +$d unreleased commits"; fi
    done > DIR/plugins.txt
    ```
 
-   Zero lines, or any line other than `PASS`, is a STOP quoting every such line. Its fix, outside the cut: release each listed plugin through its own release PR (`develop` → `main`, green `ci`, merge; its publish workflow tags it), pin professor's gitlink on `develop` at that released commit, then cut again. Else record `{time} plugins PASS @{C7} — {N} plugins released`.
+   Zero lines, or any line other than `PASS` or `HELD`, is a STOP quoting every such line. Its fix, outside the cut: release each listed plugin through its own release PR (`develop` → `main`, green `ci`, merge; its publish workflow tags it), pin professor's gitlink on `develop` at that released commit, then cut again. Else record `{time} plugins PASS @{C7} — {N} plugins released, {H} held: {names}`, the held part only when `H` > 0.
 2. `gitter` Phase SETUP: `WT` on a new branch `release/v{NEW}` at `C`, submodules initialized; an existing `WT` or branch is a STOP naming it.
 3. Launch every check below in one message — the background commands and the agents together — and wait for all of them. Each one that fails is a STOP; record each result in `run.md`. Commands run in `WT`.
    1. Gate: `./.claude/scripts/test.sh --full > DIR/gate.log 2>&1; echo "EXIT $? @$(git rev-parse HEAD)" >> DIR/gate.log` in the background, over the clean tree at `C`. It passes when its last line is `EXIT 0 @{C}`.

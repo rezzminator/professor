@@ -165,7 +165,7 @@ func TestEffectiveSettingsLayersOverTheDefaults(t *testing.T) {
 	env := EffectiveEnv(layered)
 	_, truecolor := env["CLAUDE_CODE_TMUX_TRUECOLOR"]
 	if env["A"] != "machine" || env["B"] != "project" || env["ANTHROPIC_SMALL_FAST_MODEL"] != "claude-haiku-5-5" ||
-		truecolor || len(env) != 9 {
+		truecolor || len(env) != 15 {
 		t.Fatalf("EffectiveEnv = %#v", env)
 	}
 	for _, tc := range []struct {

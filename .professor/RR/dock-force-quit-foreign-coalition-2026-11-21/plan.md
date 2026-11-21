@@ -1,0 +1,13 @@
+# RR — Is macOS Dock force-quit killing a foreign coalition (via a reused pid) a publicly known bug?
+Question: decide whether this macOS behavior is a publicly known bug (Dock _LSForceQuitApplication for an exited Chrome appPID=69809, after pid wrap, killed 79 pids of a different coalition — Herdr server + agent CLIs from a VS Code terminal — on Darwin 27.2.0, 2026-11-21); verdict KNOWN / RELATED-ONLY / NOT FOUND, searching Apple forums & Support Community, terminal/browser trackers, HN/Reddit/OpenRadar, macOS 26.x/27.x release notes, and the pid->coalition mechanism in XNU.
+
+1. Apple forums and Support Community reports — settled when the forums were searched for force quit killing Terminal/iTerm/tmux/VS Code processes and coalition force quit, each hit listed with link, date, macOS version, or the search is named as returning nothing/refused.
+   Lens: Apple platform support triage — method: match symptom reports to the case; sources: developer.apple.com/forums threads, discussions.apple.com threads.
+2. Terminal, editor and browser trackers — settled when tmux, iTerm2, microsoft/vscode, ghostty, wezterm, kitty, zellij and issues.chromium.org were searched for force quit + coalition / killed sessions, each hit listed with how it differs.
+   Lens: open-source bug triage — method: issue-tracker search and duplicate matching; sources: GitHub issue pages, Chromium issue tracker entries.
+3. Community and radar archives — settled when HN, r/MacOS, r/MacOSBeta and OpenRadar were searched and hits listed or named empty/refused.
+   Lens: community incident archaeology — method: keyword search over discussion and radar archives; sources: news.ycombinator.com/hn.algolia, reddit threads, openradar.appspot.com entries.
+4. macOS 26.x/27.x release notes — settled when Apple's release notes for 26.x and 27.x were read for Force Quit, Dock, LaunchServices or coalition fixed/known issues.
+   Lens: release engineering — method: reading shipped-change records; sources: developer.apple.com release notes, support.apple.com update notes.
+5. Mechanism: stored pid -> coalition, jetsam vs resource coalitions, coalition_policy — settled when XNU source or an RE write-up states how coalitions are looked up by pid, the resource/jetsam distinction and what coalition_info_resource_usage / coalition_policy do, with any evidence of how LaunchServices/Dock resolve the coalition.
+   Lens: kernel source reading / reverse engineering — method: read the primary source code and disassembly write-ups; sources: apple-oss-distributions/xnu (osfmk/kern/coalition.c, bsd/sys/coalition.h, libsyscall), RE blog posts.

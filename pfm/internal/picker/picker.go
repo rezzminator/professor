@@ -4,6 +4,7 @@
 //
 // reread.go: the parked picker's row-facts re-read (working state, Herdr's
 // blocked marks) over the last pass, without a full pass.
+// update_prompt.go: the opening message of the Professor update chat.
 package picker
 
 import (

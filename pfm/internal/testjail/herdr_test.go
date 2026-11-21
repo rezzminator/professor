@@ -61,8 +61,8 @@ func TestHerdrWorkspaceReplyCreatesTheAskedLabel(t *testing.T) {
 		t.Fatalf("list = %v handled=%v, want no workspace", listed, handled)
 	}
 	created, handled := HerdrWorkspaceReply("workspace.create", "fixture", "w6")
-	workspace := created["workspace"].(map[string]any)
-	if !handled || workspace["workspace_id"] != "w6" || workspace["label"] != "fixture" {
+	workspace, tab := created["workspace"].(map[string]any), created["tab"].(map[string]any)
+	if !handled || workspace["workspace_id"] != "w6" || workspace["label"] != "fixture" || tab["tab_id"] != "w6:t1" {
 		t.Fatalf("create = %v handled=%v", created, handled)
 	}
 	if _, handled := HerdrWorkspaceReply("pane.get", "", "w6"); handled {

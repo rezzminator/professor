@@ -16,8 +16,8 @@ func TestHerdrKeysLoadAndSummary(t *testing.T) {
 		name, json, summary string
 		want                *HerdrKeys
 	}{
-		{name: "unset", json: `{"version":2}`, summary: "config herdr.keys=none (default)\n"},
-		{name: "null", json: `{"version":2,"herdr":{"keys":null}}`, summary: "config herdr.keys=none (default)\n"},
+		{name: "unset", json: `{"version":2}`, summary: "config herdr.keys=none (default)\nconfig herdr.settings=none (default)\n"},
+		{name: "null", json: `{"version":2,"herdr":{"keys":null}}`, summary: "config herdr.keys=none (default)\nconfig herdr.settings=none (default)\n"},
 		{
 			name: "every shape",
 			json: `{"version":2,"herdr":{"keys":{"previous_workspace":"cmd+shift+up","next_workspace":["cmd+shift+down"],` +
@@ -35,11 +35,12 @@ func TestHerdrKeysLoadAndSummary(t *testing.T) {
 			},
 			summary: `config herdr.keys={"close_pane":null,"command":[{"key":"prefix+a"},` +
 				`{"command":"c","description":"d","key":"ctrl+shift+` + "`" + `","type":"shell"}],` +
-				`"next_workspace":["cmd+shift+down"],"previous_workspace":"cmd+shift+up"} (file)` + "\n",
+				`"next_workspace":["cmd+shift+down"],"previous_workspace":"cmd+shift+up"} (file)` + "\n" +
+				"config herdr.settings=none (default)\n",
 		},
 		{
 			name: "empty object", json: `{"version":2,"herdr":{"keys":{}}}`,
-			want: &HerdrKeys{Actions: map[string]*HerdrKeyBinding{}}, summary: "config herdr.keys={} (file)\n",
+			want: &HerdrKeys{Actions: map[string]*HerdrKeyBinding{}}, summary: "config herdr.keys={} (file)\nconfig herdr.settings=none (default)\n",
 		},
 	} {
 		path := filepath.Join(t.TempDir(), "pfm.config.json")

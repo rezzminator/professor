@@ -209,3 +209,28 @@ func awaitReservedPane(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat
 	}
 	return nil
 }
+
+// A canonical pane move never replaces the running supervisor identity.
+func proveRunningHost(
+	ctx context.Context,
+	db *fleetdb.Store,
+	current, host fleetdb.Seat,
+	values paths.Values,
+) (fleetdb.Seat, error) {
+	if current.SeatHostPID != host.SeatHostPID || current.SeatHostStart != host.SeatHostStart ||
+		current.SeatHostBirth != host.SeatHostBirth {
+		return current, errors.New("running supervisor binding changed")
+	}
+	canonical, owned, err := gather.ProveHerdrSeat(ctx, db, gather.NewProcFS(values.ProcRoot), current)
+	if err != nil {
+		return current, err
+	}
+	if !owned {
+		return current, errors.New("running supervisor is dead")
+	}
+	if canonical.SeatHostPID != host.SeatHostPID || canonical.SeatHostStart != host.SeatHostStart ||
+		canonical.SeatHostBirth != host.SeatHostBirth {
+		return current, errors.New("proved supervisor binding changed")
+	}
+	return canonical, nil
+}

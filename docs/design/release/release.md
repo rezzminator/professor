@@ -1,6 +1,6 @@
 # Release
 
-A release ships `develop`'s tip as it stands at the cut to a published tag that an adopter can update onto without guessing. `/pfm:release cut {patch|minor|major} "{summary}" [--dry]` runs it in one pass of about an hour: it gates the cut commit, writes the note, and publishes, with no code written inside the release. This file holds the family's decisions; each member's own live in its file.
+A release ships `develop`'s tip as it stands at the cut to a published tag that an adopter can update onto without guessing. `/pfm:release cut {patch|minor|major} "{summary}" [--hold {plugin,…}] [--dry]` runs it in one pass of about an hour: it gates the cut commit, writes the note, and publishes, with no code written inside the release. This file holds the family's decisions; each member's own live in its file.
 
 A change lands in this design doc first, then in the command, agent or script, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
@@ -29,7 +29,7 @@ Typing `/pfm:release cut` is the user's explicit publish request for that versio
 
 ## The reader
 
-The notes have one primary reader: the adopter's update chat, opened from `pfm ls`'s PROFESSOR UPDATE banner with the prompt `professorUpdatePrompt` (`pfm/internal/picker/update_row.go`; `pfm/cmd/pfm/update_notice_command.go` through v0.77.x). That chat runs `pfm version`, reads every `releases/vX.Y.Z.md` after the installed version through the target oldest first with `git show {target}:releases/…`, merges their `#### → For:` lines into one checklist, shows the user an overview, and only on approval runs `pfm update --to {target}`, the checklist, and `pfm doctor`. Inside each adopted project it then runs `pfm doctor --project-updates`, takes the report to `clean`: each `UPDATED` row ported and pinned (or kept on record with `pin --keep`), each `NEW` row adopted or ignored, each `RETIRED-NAME` hit fixed or accepted with `pfm update accept`.
+The notes have one primary reader: the adopter's update chat, opened from `pfm ls`'s PROFESSOR UPDATE banner with the prompt `professorUpdatePrompt` (`pfm/internal/picker/update_prompt.go`; `pfm/cmd/pfm/update_notice_command.go` through v0.77.x). That chat runs `pfm version`, reads every `releases/vX.Y.Z.md` after the installed version through the target oldest first with `git show {target}:releases/…`, merges their `#### → For:` lines into one checklist, shows the user an overview and asks with AskUserQuestion whether to update, and only on a yes runs `pfm update --to {target}`, the checklist, and `pfm doctor`. It then asks with AskUserQuestion, multi-select, which of the projects `pfm doctor` lists with open rows to update, and inside each picked project runs `pfm doctor --project-updates`, takes the report to `clean`: each `UPDATED` row ported and pinned (or kept on record with `pin --keep`), each `NEW` row adopted or ignored, each `RETIRED-NAME` hit fixed or accepted with `pfm update accept`.
 
 Three facts about that reader shape every rule of the family:
 
@@ -55,7 +55,7 @@ The note grammar that serves this reader is public, because adopters read it: `d
 
 ## The cut
 
-1. `gitter` Phase PULL fast-forwards `develop` and fetches tags. `origin/main` must be an ancestor of `develop`; the cut commit `C` is `develop`'s HEAD; `PREV` is the newest suffix-free `v*` tag and `NEW` is `PREV` bumped. An empty `origin/main..C` is a STOP. Then every plugin `.gitmodules` registers at `C` must be released: neither its gitlink nor its own `develop` ahead of its latest GitHub release, read through the GitHub API. A plugin that is ahead, or that the API could not answer for, is a STOP, fixed in the order `docs/RELEASE.md` § Cutting a release gives: plugins release first.
+1. `gitter` Phase PULL fast-forwards `develop` and fetches tags. `origin/main` must be an ancestor of `develop`; the cut commit `C` is `develop`'s HEAD; `PREV` is the newest suffix-free `v*` tag and `NEW` is `PREV` bumped. An empty `origin/main..C` is a STOP. Then every plugin `.gitmodules` registers at `C` must be released: neither its gitlink nor its own `develop` holds a commit that changes a file past its latest GitHub release, read through the GitHub API; an empty merge-back changes none, so it never blocks a cut. A plugin the user leaves out of the cut, `--hold {plugin,…}` (a prose "all plugins except X" is `--hold X`), counts on its gitlink alone: it ships pinned at its latest release while its own `develop` carries work this cut leaves out, and its line reads `HELD`. A plugin that is ahead, or that the API could not answer for, is a STOP, fixed in the order `docs/RELEASE.md` § Cutting a release gives: plugins release first.
 2. `gitter` Phase SETUP makes `.worktrees/release/` on a new branch `release/v{NEW}` at `C`.
 3. The checks of [§ The checks](#the-checks) run in parallel; each failure is a STOP.
 4. The main chat copies the note into `releases/v{NEW}.md`, prepends the index line, writes `## Verification` from the checks' results, stamps `VERSION` and `.professor/VERSION` to `NEW`, runs the full notes check, and `gitter` commits `release: v{NEW} — {summary}`. A release commit touching any file outside the four release files is a STOP.
@@ -81,7 +81,7 @@ The review's premise is the reader's first fact: an adopter reaches this release
 ```text
 $HOME/.local/state/pfm/releases/{project}/v{NEW}/
   run.md          one line per step, `{time} {step} {PASS|STOP|SKIP} @{C7} — {one line}`   written by /pfm:release
-  plugins.txt     one PASS, FAIL or ERROR line per plugin, the step-1 plugin check          written by /pfm:release
+  plugins.txt     one PASS, HELD, FAIL or ERROR line per plugin, the step-1 plugin check    written by /pfm:release
   gate.log        the full gate's output, closed `EXIT {code} @{sha}`                       written by /pfm:release
   leak.txt        the leak scan's output                                                    written by /pfm:release
   preflight.txt   release-check preflight's output                                          written by /pfm:release
@@ -129,7 +129,7 @@ The bump has a floor computed from the note's sections, following the left-most 
 | `scripts/release-check.mjs` | everyone, by running it | The tier and area table, the grammar, coverage, the floors, the preflight |
 | `.github/workflows/ci.yml` | GitHub Actions | The PR gate |
 | `.github/workflows/publish.yml` | GitHub Actions | The tag, the published-asset check |
-| `pfm/internal/picker/update_row.go` | the adopter's update chat | The update prompt |
+| `pfm/internal/picker/update_prompt.go` | the adopter's update chat | The update prompt |
 
 A rule the script enforces is never restated as a prompt rule; the prompt names the check to run.
 
@@ -152,7 +152,7 @@ The release reviews in full only the `pfm-update` area, and only when the cut ch
 | The publish gate | `.claude/agents/gitter.md` Phase RELEASE and its machine-global twin `templates/global/agents/gitter.md` | The release PR, the file check, the merge back |
 | The script | `scripts/release-check.mjs` and its tests | The mechanisms |
 | The public spec | `docs/RELEASE.md`, `CHANGELOG.md` (index and a pointer), `INSTALL.md` § Updating, `docs/SETUP.md` § Staying current | What adopters read |
-| The reader's prompt | `pfm/internal/picker/update_row.go` `professorUpdatePrompt` and its test | Timing, surfaces, stops |
+| The reader's prompt | `pfm/internal/picker/update_prompt.go` `professorUpdatePrompt`, tested in `update_row_test.go` | Timing, surfaces, stops |
 | The workflows | `.github/workflows/ci.yml`, `.github/workflows/publish.yml` | The PR gate; `publish` and `verify` |
 | The mirrors | `.codex/`, `.opencode/` | The agent registered |
 

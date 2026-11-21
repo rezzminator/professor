@@ -3,6 +3,8 @@
 //
 // name_sync.go: nameSync.interval, the window-name convergence schedule.
 // herdr.go: herdr.keys, the user's Herdr keymap pfm install merges over its own.
+// herdr_settings.go: herdr.settings, Herdr config.toml values pfm install adds where the file lacks them;
+// the herdr block's marshal and `pfm config show` lines.
 // scope_unread.go: the keys a file sets that its scope never reads, retired or machine-only.
 // runtime_reload.go: Runtime.Reload, the machine file read again for a long-lived process.
 package config
@@ -107,9 +109,12 @@ type ClaudePrefs struct {
 	// Claude still enforces its login and endpoint eligibility. Defaults true.
 	RemoteControl bool
 	// PluginCheckoutRoot is claude.pluginCheckoutRoot, an absolute path; empty
-	// when unset, and an -alpha install then reads the source clone's plugins/.
-	// Machine-wide: an account may not set it.
+	// when unset, and a checkout install (PluginsFromCheckout) then reads the
+	// source clone's plugins/. Machine-wide: an account may not set it.
 	PluginCheckoutRoot string
+	// PluginSource is claude.pluginSource, PluginSourceRelease when unset.
+	// Machine-wide: an account may not set it. Read it through PluginsFromCheckout.
+	PluginSource string
 	// CostLedger is claude.costLedger: the machine-wide per-call cost ledger switch.
 	CostLedger bool
 	// GptAgents is claude.gptAgents: the machine-wide switch declaring the engine-sync
@@ -224,6 +229,10 @@ type Config struct {
 	MCP              MCPConfig
 	Ask              AskConfig
 
+	// InstallPing is installPing, true when unset: false turns off both of pfm's install pings
+	// (internal/installping). Machine-only: a project file's installPing is warned about, never read.
+	InstallPing bool
+
 	// Envs and HarnessPrompt are the machine file's envs and harnessPrompt (scope.go), nil when unset.
 	Envs          map[string]string
 	HarnessPrompt *HarnessPrompt
@@ -267,6 +276,8 @@ type rawConfig struct {
 	Log      *rawLog       `json:"log,omitempty"`
 	Ask      *rawAsk       `json:"ask,omitempty"`
 	Herdr    *rawHerdr     `json:"herdr,omitempty"`
+	// InstallPing is installPing, held raw so a non-boolean is refused with its value.
+	InstallPing json.RawMessage `json:"installPing,omitempty"`
 	// Envs and HarnessPrompt are scope keys (scope.go), read at both scopes.
 	Envs          json.RawMessage   `json:"envs,omitempty"`
 	HarnessPrompt *rawHarnessPrompt `json:"harnessPrompt,omitempty"`
@@ -313,6 +324,7 @@ type rawClaude struct {
 	RetiredMaxSubagentSpawnDepth  json.RawMessage `json:"maxSubagentSpawnDepth,omitempty"`
 	RetiredMaxConcurrentSubagents json.RawMessage `json:"maxConcurrentSubagents,omitempty"`
 	PluginCheckoutRoot            *string         `json:"pluginCheckoutRoot,omitempty"`
+	PluginSource                  *string         `json:"pluginSource,omitempty"`
 	CostLedger                    *bool           `json:"costLedger,omitempty"`
 	GptAgents                     *bool           `json:"gptAgents,omitempty"`
 	// Settings is claude.settings, a scope key (scope.go).
@@ -469,10 +481,12 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, "remoteControl"):   SourceDefault,
 		"claude.requireManagedCleanup":                       SourceDefault,
 		KeyClaudePluginCheckoutRoot:                          SourceDefault,
+		KeyClaudePluginSource:                                SourceDefault,
 		KeyClaudePlugins:                                     SourceDefault,
 		KeyClaudeCostLedger:                                  SourceDefault,
 		KeyClaudeGptAgents:                                   SourceDefault,
 		KeyClaudeSettings:                                    SourceDefault,
+		KeyInstallPing:                                       SourceDefault,
 		KeyEnvs:                                              SourceDefault,
 		KeyHarnessPrompt:                                     SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
@@ -484,6 +498,7 @@ func defaultsWithMCPServers(
 		"chat.backend":                                       SourceDefault,
 		"chat.herdrTabStatus":                                SourceDefault,
 		KeyHerdrKeys:                                         SourceDefault,
+		KeyHerdrSettings:                                     SourceDefault,
 		"tmux.titles.enabled":                                SourceDefault,
 		"nameSync.interval":                                  SourceDefault,
 		keyDoctorIgnoreWarnings:                              SourceDefault,
@@ -504,6 +519,7 @@ func defaultsWithMCPServers(
 		Version:          Version,
 		InputVersion:     Version,
 		Theme:            "default",
+		InstallPing:      true,
 		State:            State{DB: paths.DefaultStateDB(home), CacheDB: paths.DefaultCacheDB(home)},
 		Accounts:         accounts,
 		AccountSkips:     accountSkips,
@@ -519,6 +535,7 @@ func defaultsWithMCPServers(
 			RemoteControl:         true,
 			CostLedger:            true,
 			Plugins:               DefaultClaudePlugins(),
+			PluginSource:          PluginSourceRelease,
 		},
 		Codex:      Codex{Yolo: true, Binary: pfmengine.MustLookup(pfmengine.Codex).Binary},
 		OpenCode:   OpenCode{Binary: pfmengine.MustLookup(pfmengine.OpenCode).Binary},
@@ -857,6 +874,19 @@ func loadWithMCPServers(
 		}
 		result.NameSync.Interval = interval
 		result.Sources["nameSync.interval"] = SourceFile
+	}
+	if len(raw.InstallPing) != 0 {
+		var enabled bool
+		if jsonNull(raw.InstallPing) || json.Unmarshal(raw.InstallPing, &enabled) != nil {
+			return Config{}, fmt.Errorf(
+				"config %s: %s must be true or false, got %s",
+				result.Path,
+				KeyInstallPing,
+				raw.InstallPing,
+			)
+		}
+		result.InstallPing = enabled
+		result.Sources[KeyInstallPing] = SourceFile
 	}
 	if err := applyDoctor(&result, raw.Doctor); err != nil {
 		return Config{}, err
@@ -1368,6 +1398,11 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	}
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty
+	}
+	// installPing is written only when the file set it or it is off, so `pfm config init` writes a
+	// file a pfm that predates the key still decodes: its loader refuses an unknown key.
+	if config.Source(KeyInstallPing) == SourceFile || !config.InstallPing {
+		value[KeyInstallPing] = config.InstallPing
 	}
 	if chat := marshalChat(config); len(chat) != 0 {
 		value["chat"] = chat

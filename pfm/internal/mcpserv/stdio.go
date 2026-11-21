@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -30,6 +31,8 @@ type StdioOptions struct {
 	Home          string
 	SIDDir        string
 	Warnings      io.Writer
+	// Handover moves this server onto a newly installed pfm; nil never moves.
+	Handover *Handover
 }
 
 // RunStdio serves the professor server over stdio: it forwards to the daemon's
@@ -45,8 +48,20 @@ func (professor *FamilyServers) RunStdio(
 	output io.Writer,
 	options StdioOptions,
 ) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	reader, writer := io.Pipe()
 	serialized := &lockedWriteCloser{writer: output}
+	var handover *stdioHandover
+	if options.Handover != nil {
+		warnings := options.Warnings
+		if warnings == nil {
+			warnings = os.Stderr
+		}
+		// The installed pfm ending ends this server: close what the transport reads.
+		end := func() { cancel(); _ = writer.Close() }
+		handover = &stdioHandover{options: *options.Handover, warnings: warnings, output: serialized, end: end}
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -60,7 +75,9 @@ func (professor *FamilyServers) RunStdio(
 			frame, err := buffered.ReadBytes('\n')
 			if len(frame) > 0 {
 				if json.Valid(frame) {
-					if _, writeErr := writer.Write(frame); writeErr != nil {
+					if handover != nil && handover.carry(frame) {
+						// The installed pfm answers it.
+					} else if _, writeErr := writer.Write(frame); writeErr != nil {
 						return
 					}
 				} else {
@@ -68,6 +85,9 @@ func (professor *FamilyServers) RunStdio(
 				}
 			}
 			if err != nil {
+				if handover != nil {
+					handover.closeInput()
+				}
 				if err != io.EOF {
 					_ = writer.CloseWithError(err)
 				}
@@ -77,6 +97,12 @@ func (professor *FamilyServers) RunStdio(
 	}()
 	err := professor.runStdioTransport(ctx, reader, serialized, options)
 	_ = reader.Close()
+	if handover != nil && handover.handed() {
+		if err != nil && ctx.Err() == nil {
+			handover.warn("the replaced image's transport ended: %v", err)
+		}
+		err = handover.finish()
+	}
 	// A client holds input open for the whole session, so the frame reader may
 	// never return; an ended context must not wait for it, or the
 	// replaced-executable guard cancels and the process still never exits.

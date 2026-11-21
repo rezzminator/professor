@@ -14,7 +14,8 @@ import (
 
 // defaultsJSON holds the plain values pfm sets for Claude, as data: settings is a Claude settings
 // object every launch carries beneath pfm's computed keys, registry the preferences Claude reads only
-// from an account's .claude.json, which pfm install writes, and reasons say why each value is set.
+// from an account's .claude.json, which pfm install writes, userSettings the settings keys pfm install
+// also writes into each account's own settings.json, and reasons say why each value is set.
 //
 //go:embed defaults.json
 var defaultsJSON []byte
@@ -22,6 +23,7 @@ var defaultsJSON []byte
 const (
 	defaultsSettings = "settings"
 	defaultsRegistry = "registry"
+	defaultsUser     = "userSettings"
 )
 
 // defaultValue is one default: its key, its compact JSON value and why it is set.
@@ -34,7 +36,7 @@ type defaultValue struct {
 // launchDefaults is defaults.json decoded, each list sorted by key: settings holds the top-level
 // settings keys but env, whose variables env holds.
 type launchDefaults struct {
-	settings, env, registry []defaultValue
+	settings, env, registry, userSettings []defaultValue
 }
 
 var defaults = func() launchDefaults {
@@ -46,13 +48,15 @@ var defaults = func() launchDefaults {
 }()
 
 // parseDefaults decodes a defaults file, refusing an unknown key, a settings env that is not an
-// object of strings, a value without a reason and a reason naming no value.
+// object of strings, a user setting naming no top-level settings value, a value without a reason and a
+// reason naming no value.
 func parseDefaults(raw []byte) (launchDefaults, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var file struct {
 		Settings map[string]json.RawMessage `json:"settings"`
 		Registry map[string]json.RawMessage `json:"registry"`
+		User     []string                   `json:"userSettings"`
 		Reasons  map[string]string          `json:"reasons"`
 	}
 	if err := decoder.Decode(&file); err != nil {
@@ -101,6 +105,16 @@ func parseDefaults(raw []byte) (launchDefaults, error) {
 		}
 	}
 	if parsed.registry, err = collect(defaultsRegistry+".", file.Registry); err != nil {
+		return launchDefaults{}, err
+	}
+	user := map[string]json.RawMessage{}
+	for _, key := range file.User {
+		if _, present := file.Settings[key]; !present {
+			return launchDefaults{}, fmt.Errorf("%s.%s names no top-level settings value", defaultsUser, key)
+		}
+		user[key] = file.Settings[key]
+	}
+	if parsed.userSettings, err = collect(defaultsUser+".", user); err != nil {
 		return launchDefaults{}, err
 	}
 	if len(reasons) != 0 {

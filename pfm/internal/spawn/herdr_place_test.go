@@ -43,6 +43,8 @@ type placeHerdr struct {
 	cwds       map[string]string
 	calls      []placeCall
 	listDelay  time.Duration // how long each workspace.list takes to answer
+	refuse     string        // the one method answered with a refusal
+	bareCreate bool          // workspace.create answers without the tab it opened
 }
 
 func (fake *placeHerdr) answer(call placeCall) (any, string) {
@@ -50,6 +52,9 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 	defer fake.mu.Unlock()
 	fake.calls = append(fake.calls, call)
 	pane, _ := call.Params["pane_id"].(string)
+	if call.Method == fake.refuse {
+		return nil, "fixture_refused"
+	}
 	switch call.Method {
 	case "ping":
 		return map[string]any{"type": "pong", "version": "0.9.5", "protocol": 22}, ""
@@ -65,9 +70,14 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 	case "workspace.create":
 		id := fmt.Sprintf("w%d", 90+len(fake.workspaces))
 		fake.workspaces = append(fake.workspaces, [3]any{id, call.Params["label"], 1})
-		return map[string]any{
+		created := map[string]any{
 			"type": "workspace_created", "workspace": map[string]any{"workspace_id": id, "label": call.Params["label"]},
-		}, ""
+			"tab": map[string]any{"tab_id": testjail.HerdrStartingTab(id), "workspace_id": id},
+		}
+		if fake.bareCreate {
+			delete(created, "tab")
+		}
+		return created, ""
 	case "workspace.rename":
 		for index := range fake.workspaces {
 			if id := fake.workspaces[index][0]; id == call.Params["workspace_id"] {
@@ -81,6 +91,9 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 		return nil, "workspace_not_found"
 	case "layout.apply":
 		workspace := call.Params["workspace_id"]
+		if tab, replaces := call.Params["tab_id"].(string); replaces {
+			workspace, _, _ = strings.Cut(tab, ":")
+		}
 		return map[string]any{"layout": map[string]any{
 			"workspace_id": workspace, "root": map[string]any{"type": "pane", "pane_id": fmt.Sprint(workspace, ":p1")},
 		}}, ""
@@ -101,6 +114,8 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 		return map[string]any{"type": "pane_info", "pane": map[string]any{"pane_id": pane, "terminal_id": terminal}}, ""
 	case "pane.close":
 		delete(fake.panes, pane)
+		return map[string]any{"type": "ok"}, ""
+	case "tab.close":
 		return map[string]any{"type": "ok"}, ""
 	case "pane.process_info":
 		return map[string]any{"type": "pane_process_info", "process_info": map[string]any{
@@ -264,7 +279,8 @@ func TestSpawnHerdrBornInItsPlaceWorkspace(t *testing.T) {
 }
 
 // A place with no workspace gets one, opening in the place's root, wearing
-// its label, without focus; the chat is born there.
+// its label, without focus; the chat is born there, in place of the shell tab
+// Herdr opened the workspace with, so the place holds nothing but the chat.
 func TestSpawnHerdrCreatesAMissingPlaceWorkspace(t *testing.T) {
 	fake := &placeHerdr{workspaces: [][3]any{{"wF", "orchard", 7}}}
 	seat, err := spawnInPlace(t, fake, "/fixture/fleet-desk")
@@ -278,6 +294,11 @@ func TestSpawnHerdrCreatesAMissingPlaceWorkspace(t *testing.T) {
 	}
 	if seat.HerdrWorkspace != "w91" {
 		t.Fatalf("seat = %+v, want the created workspace w91", seat)
+	}
+	apply, found := fake.call("layout.apply")
+	if tab, replaces := apply.Params["tab_id"]; !found || tab != "w91:t1" || apply.Params["workspace_id"] != nil {
+		t.Fatalf("layout.apply = %+v (found %v, replaces %v), want the chat's tab to replace starting tab w91:t1",
+			apply.Params, found, replaces)
 	}
 }
 
@@ -304,7 +325,7 @@ func TestPlaceHerdrBirthsRacingCreateOneWorkspace(t *testing.T) {
 		births.Add(1)
 		go func() {
 			defer births.Done()
-			workspaces[birth], _, failures[birth] = placeHerdrBirth(context.Background(), request, fleet)
+			workspaces[birth], _, _, failures[birth] = placeHerdrBirth(context.Background(), request, fleet)
 		}()
 	}
 	births.Wait()
@@ -481,15 +502,21 @@ func TestReconcileHerdrMovesTheLastPaneOfAWorkspace(t *testing.T) {
 		t.Fatalf("seat after the move = %+v (found %v, err %v), want wE:p8", moved, found, err)
 	}
 	fleet.Rows[len(fleet.Rows)-1].PaneID, fleet.Rows[len(fleet.Rows)-1].HerdrWorkspace = "wE:p8", "wE"
-	workspace, unmoved, err := placeHerdrBirth(ctx, HerdrRequest{
+	workspace, starting, unmoved, err := placeHerdrBirth(ctx, HerdrRequest{
 		Paths: values,
 		Choice: BackendChoice{
 			Backend: BackendHerdr, HerdrSocket: socket, HerdrPane: "wE:p1", HerdrWorkspace: "wE",
 		},
 		Run: fleetdb.SeatRun{CWD: "/fixture/fleet-desk"},
 	}, fleet)
-	if err != nil || workspace != "wE" || unmoved != nil {
-		t.Fatalf("birth beside a placed chat: workspace %q, unmoved %v, err %v; want wE", workspace, unmoved, err)
+	if err != nil || workspace != "wE" || starting != "" || unmoved != nil {
+		t.Fatalf(
+			"birth beside a placed chat: workspace %q, starting tab %q, unmoved %v, err %v; want wE and no starting tab",
+			workspace,
+			starting,
+			unmoved,
+			err,
+		)
 	}
 }
 
@@ -709,6 +736,13 @@ func TestReconcileHerdrPlacesAChatByItsOwnDirectory(t *testing.T) {
 				created && create.Params["label"] != test.space {
 				t.Fatalf("workspace.create = %+v (ran %v), want one opening in %q labelled %q",
 					create.Params, created, test.createdAt, test.space)
+			}
+			// A created workspace keeps only the chat: its starting shell tab closes once the chat moved in.
+			closed, closedTab := fake.call("tab.close")
+			wantClosed := map[string]any{"tab_id": test.moveInto + ":t1"}
+			if closedTab != created || closedTab && !reflect.DeepEqual(closed.Params, wantClosed) {
+				t.Fatalf("tab.close = %+v (ran %v), want %v only after a created workspace (calls %v)",
+					closed.Params, closedTab, wantClosed, fake.methods())
 			}
 			if test.createdAt == "" && !reflect.DeepEqual(fake.listed(), listedWant(workspaces)) {
 				t.Fatalf("workspaces = %v, want %v (calls %v)", fake.listed(), listedWant(workspaces), fake.methods())

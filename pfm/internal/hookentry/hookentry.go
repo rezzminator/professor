@@ -6,9 +6,12 @@
 // herdr_settle_process.go is the detached settle process: the mode a hook hands it and its
 // bounded, backing-off retry of a Herdr state the host's load left undelivered.
 // herdr_tmux_seat.go binds and ends a tmux chat's seat on its engine's session start and end.
-// install_ping.go prints pfm install's install-ping line and sends the install and daily pings.
+// install_ping.go sends pfm install's install ping and the daily one, printing nothing.
 // pcm_guard_inline.go reads the inline code an interpreter call carries (python -c, node -e,
 // --eval) by the paths it names, for pcm-guard.
-// seathost_image.go re-execs a seat-host from the installed pfm when an install replaced its binary.
+// seathost_close.go decides what an ended engine does to its seat: restart the reload it awaits, or close it.
+// seathost_engine.go builds and runs a seat's foreground engine from its recipe and the current pane.
+// seathost_image.go re-execs a seat-host from the installed pfm when an install replaced its binary,
+// an ended engine's close resuming there.
 // seathost_retry.go asks the pane, after a failed engine start, whether to retry or close.
 package hookentry

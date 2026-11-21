@@ -477,8 +477,12 @@ func TestOpenNativeDeadResumesInTheCallerPane(t *testing.T) {
 				case "notification.show":
 					return map[string]any{"type": "ok"}, ""
 				case "layout.apply":
-					var workspace string
+					var workspace, tab string
 					_ = json.Unmarshal(req.Params["workspace_id"], &workspace)
+					_ = json.Unmarshal(req.Params["tab_id"], &tab)
+					if tab != "" {
+						workspace, _, _ = strings.Cut(tab, ":")
+					}
 					if tc.newTab != "" {
 						return map[string]any{"layout": map[string]any{
 							"workspace_id": workspace, "root": map[string]any{"type": "pane", "pane_id": tc.newTab},

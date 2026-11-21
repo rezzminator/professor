@@ -133,7 +133,7 @@ cat >"$j/scenario.json" <<'JSON'
 JSON
 printf 'export MOCK_ENGINE_SCENARIO="%s"\n' "$j/scenario.json" >>"$HOME/.zshenv"
 
-# 9. The install ping off in every login and service: the owner's terminals carry only ownerVars, so
+# 9. The install ping switched off in every login and service: the owner's terminals carry only ownerVars, so
 # neither PFM_DEV_FENCE nor CI reaches the stamped pfm the suite installs, which would otherwise send
 # its install and daily pings to the live counter (pfm/internal/installping).
 printf 'export PFM_INSTALL_PING_OFFLINE=1\n' >>"$HOME/.zshenv"

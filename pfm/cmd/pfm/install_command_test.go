@@ -23,28 +23,56 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestInstallerOptionsCarryTheBuildAndPluginCheckoutRoot(t *testing.T) {
+func TestInstallerOptionsCarryThePluginSourceAndCheckoutRoot(t *testing.T) {
 	plugins := []pfmconfig.ClaudePlugin{{ID: "callmeter"}, {ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}}
 	herdrKeys := &pfmconfig.HerdrKeys{
 		Actions: map[string]*pfmconfig.HerdrKeyBinding{"next_workspace": {Keys: []string{"cmd+shift+down"}}},
 	}
-	runtime := commandRuntime{
-		Paths: paths.Values{Home: t.TempDir()},
-		Config: pfmconfig.Config{
-			Claude: pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins},
-			Herdr:  pfmconfig.Herdr{Keys: herdrKeys},
+	tests := []struct {
+		name         string
+		version      string
+		pluginSource string
+		fromCheckout bool
+	}{
+		{
+			name: "a release binary with claude.pluginSource checkout", version: "0.89.0",
+			pluginSource: pfmconfig.PluginSourceCheckout, fromCheckout: true,
 		},
-		Version: "0.80.0-alpha",
+		{
+			name: "an alpha binary with claude.pluginSource release", version: "0.90.0-alpha",
+			pluginSource: pfmconfig.PluginSourceRelease, fromCheckout: false,
+		},
 	}
-	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
-	if !reflect.DeepEqual(options.HerdrKeys, herdrKeys) {
-		t.Fatalf("installer herdr.keys = %#v, want %#v", options.HerdrKeys, herdrKeys)
-	}
-	if options.Version != "0.80.0-alpha" || options.ClaudePluginCheckoutRoot != "/opt/plugins" {
-		t.Fatalf("plugin options version=%q root=%q", options.Version, options.ClaudePluginCheckoutRoot)
-	}
-	if !reflect.DeepEqual(options.ClaudePlugins, plugins) {
-		t.Fatalf("plugin options list = %#v, want %#v", options.ClaudePlugins, plugins)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := commandRuntime{
+				Paths: paths.Values{Home: t.TempDir()},
+				Config: pfmconfig.Config{
+					Claude: pfmconfig.Claude{
+						PluginCheckoutRoot: "/opt/plugins", PluginSource: test.pluginSource, Plugins: plugins,
+					},
+					Herdr: pfmconfig.Herdr{Keys: herdrKeys},
+				},
+				Version: test.version,
+			}
+			options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
+			if !reflect.DeepEqual(options.HerdrKeys, herdrKeys) {
+				t.Fatalf("installer herdr.keys = %#v, want %#v", options.HerdrKeys, herdrKeys)
+			}
+			if options.ClaudePluginsFromCheckout != test.fromCheckout ||
+				options.ClaudePluginCheckoutRoot != "/opt/plugins" {
+				t.Fatalf(
+					"plugin options fromCheckout=%v root=%q, want fromCheckout=%v root=%q",
+					options.ClaudePluginsFromCheckout,
+					options.ClaudePluginCheckoutRoot,
+					test.fromCheckout,
+					"/opt/plugins",
+				)
+			}
+			if !reflect.DeepEqual(options.ClaudePlugins, plugins) {
+				t.Fatalf("plugin options list = %#v, want %#v", options.ClaudePlugins, plugins)
+			}
+		})
 	}
 }
 
@@ -428,7 +456,7 @@ func TestInstallOfflineReachesInstallerAndDefaultFailureStaysLoud(t *testing.T) 
 		}
 		return installer.Report{}, nil
 	}
-	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
+	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}, Config: pfmconfig.Config{InstallPing: true}}
 
 	var stdout, stderr bytes.Buffer
 	if code := runInstall([]string{"--yes"}, &stdout, &stderr, runtime); code != 1 {
@@ -442,10 +470,6 @@ func TestInstallOfflineReachesInstallerAndDefaultFailureStaysLoud(t *testing.T) 
 	stderr.Reset()
 	if code := runInstall([]string{"--yes", "--offline"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("skip apply code=%d stdout=%q stderr=%q, want success", code, stdout.String(), stderr.String())
-	}
-	// The test jail sets PFM_INSTALL_PING_OFFLINE=1, which turns every ping off and outranks --offline.
-	if want := "pfm: install ping off (PFM_INSTALL_PING_OFFLINE)\n"; !strings.HasSuffix(stdout.String(), want) {
-		t.Fatalf("offline apply stdout=%q, want it to end with the install ping line %q", stdout.String(), want)
 	}
 }
 

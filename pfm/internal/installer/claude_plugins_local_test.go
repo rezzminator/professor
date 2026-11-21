@@ -19,8 +19,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-const alphaVersion = "0.80.0-alpha"
-
 // writePluginCheckout lays out {root}/{name}/plugins/{name} the way a plugin
 // repository does, plus the node_modules, .DS_Store and __pycache__ entries a
 // mirror skips.
@@ -91,7 +89,7 @@ func alphaPluginEngine(
 	runner = &pluginRunner{}
 	out = &bytes.Buffer{}
 	inst = pluginEngine(home, binary, first, second, runner, out, true)
-	inst.options.Version = alphaVersion
+	inst.options.ClaudePluginsFromCheckout = true
 	inst.options.ClaudePluginCheckoutRoot = root
 	return inst, runner, out, home, first
 }
@@ -112,6 +110,7 @@ func TestClaudePluginTargets(t *testing.T) {
 	writePluginCheckout(t, partial, table[4].Name)
 	writePluginCheckout(t, partial, table[5].Name)
 	writePluginCheckout(t, partial, table[6].Name)
+	writePluginCheckout(t, partial, table[7].Name)
 	// github is a release target; with a fallback, an -alpha one with no
 	// checkout, which has no source: one professor marketplace has one source.
 	github := func(p testPlugin, fallback string) ClaudePluginTarget {
@@ -154,7 +153,7 @@ func TestClaudePluginTargets(t *testing.T) {
 		writePluginCheckout(t, cloneRoot, p.Name)
 	}
 	partialClone := t.TempDir()
-	for _, index := range []int{0, 2, 3, 4, 5, 6} {
+	for _, index := range []int{0, 2, 3, 4, 5, 6, 7} {
 		writePluginCheckout(t, filepath.Join(partialClone, "plugins"), table[index].Name)
 	}
 	cloneMissing := filepath.Join(
@@ -167,19 +166,15 @@ func TestClaudePluginTargets(t *testing.T) {
 		want  []ClaudePluginTarget
 	}{
 		{"release", ClaudePluginBuild{
-			Version: "0.80.0", Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
+			Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
 		}, pro(
 			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""), github(table[4], ""),
 			github(table[5], ""),
 			github(table[6], ""),
+			github(table[7], ""),
 		)},
-		{"unstamped dev build", ClaudePluginBuild{Version: "dev", Home: home, CheckoutRoot: root, Plugins: defaults}, pro(
-			github(table[0], ""), github(table[1], ""), github(table[2], ""), github(table[3], ""), github(table[4], ""),
-			github(table[5], ""),
-			github(table[6], ""),
-		)},
-		{"alpha without the key or a source clone", ClaudePluginBuild{
-			Version: alphaVersion, Home: home, Plugins: defaults,
+		{"checkout source without the key or a source clone", ClaudePluginBuild{
+			FromCheckout: true, Home: home, Plugins: defaults,
 		}, pro(
 			github(table[0], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[1], "claude.pluginCheckoutRoot unset and no source clone"),
@@ -188,25 +183,28 @@ func TestClaudePluginTargets(t *testing.T) {
 			github(table[4], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[5], "claude.pluginCheckoutRoot unset and no source clone"),
 			github(table[6], "claude.pluginCheckoutRoot unset and no source clone"),
+			github(table[7], "claude.pluginCheckoutRoot unset and no source clone"),
 		)},
-		{"alpha without the key installs from the source clone", ClaudePluginBuild{
-			Version: alphaVersion, Home: home, SourceRepo: clone, Plugins: defaults,
+		{"checkout source without the key installs from the source clone", ClaudePluginBuild{
+			FromCheckout: true, Home: home, SourceRepo: clone, Plugins: defaults,
 		}, pro(
 			local(table[0], cloneRoot), local(table[1], cloneRoot), local(table[2], cloneRoot), local(table[3], cloneRoot),
 			local(table[4], cloneRoot),
 			local(table[5], cloneRoot),
 			local(table[6], cloneRoot),
+			local(table[7], cloneRoot),
 		)},
 		{"the key wins over the source clone", ClaudePluginBuild{
-			Version: alphaVersion, Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
+			FromCheckout: true, Home: home, CheckoutRoot: root, SourceRepo: clone, Plugins: defaults,
 		}, pro(
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
 			local(table[4], root),
 			local(table[5], root),
 			local(table[6], root),
+			local(table[7], root),
 		)},
 		{"a source clone missing a checkout", ClaudePluginBuild{
-			Version: alphaVersion, Home: home, SourceRepo: partialClone, Plugins: defaults,
+			FromCheckout: true, Home: home, SourceRepo: partialClone, Plugins: defaults,
 		}, pro(
 			local(table[0], filepath.Join(partialClone, "plugins")),
 			github(table[1], "no checkout at "+cloneMissing+
@@ -216,13 +214,14 @@ func TestClaudePluginTargets(t *testing.T) {
 			local(table[4], filepath.Join(partialClone, "plugins")),
 			local(table[5], filepath.Join(partialClone, "plugins")),
 			local(table[6], filepath.Join(partialClone, "plugins")),
+			local(table[7], filepath.Join(partialClone, "plugins")),
 		)},
 		{"an unresolved source clone leaves the copy undecided", ClaudePluginBuild{
-			Version: alphaVersion, Home: home, SourceRepoErr: unresolved, Plugins: defaults[:1],
+			FromCheckout: true, Home: home, SourceRepoErr: unresolved, Plugins: defaults[:1],
 		}, pro(
 			undecided(table[0], "source clone unresolved (claude.pluginCheckoutRoot unset): "+unresolved.Error()),
 		)},
-		{"alpha with a checkout missing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: partial, Plugins: defaults}, pro(
+		{"checkout source with a checkout missing", ClaudePluginBuild{FromCheckout: true, Home: home, CheckoutRoot: partial, Plugins: defaults}, pro(
 			local(table[0], partial),
 			github(table[1], "no checkout at "+missing+" (claude.pluginCheckoutRoot)"),
 			local(table[2], partial),
@@ -230,36 +229,38 @@ func TestClaudePluginTargets(t *testing.T) {
 			local(table[4], partial),
 			local(table[5], partial),
 			local(table[6], partial),
+			local(table[7], partial),
 		)},
-		{"alpha with every checkout", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: defaults}, pro(
+		{"checkout source with every checkout", ClaudePluginBuild{FromCheckout: true, Home: home, CheckoutRoot: root, Plugins: defaults}, pro(
 			local(table[0], root), local(table[1], root), local(table[2], root), local(table[3], root),
 			local(table[4], root),
 			local(table[5], root),
 			local(table[6], root),
+			local(table[7], root),
 		)},
 		{"the list decides which bare names", ClaudePluginBuild{
-			Version: "0.80.0", Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}, {ID: table[2].Name}},
+			Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}, {ID: table[2].Name}},
 		}, pro(github(extra, ""), github(table[2], ""))},
 		{"a bare name beyond the default installs from its checkout", ClaudePluginBuild{
-			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}},
+			FromCheckout: true, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{{ID: extra.Name}},
 		}, pro(local(extra, root))},
 		{"full ids are ensured as named, on any build", ClaudePluginBuild{
-			Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{
+			FromCheckout: true, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{
 				{ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills"}, {ID: "auto-effort@some-market"},
 			},
 		}, []ClaudePluginTarget{
 			{Name: "typesafe", ID: "typesafe@typesafe-ai", Source: "typesafe-ai/skills", MarketplaceName: "typesafe-ai"},
 			{Name: "auto-effort", ID: "auto-effort@some-market", MarketplaceName: "some-market"},
 		}},
-		{"an -alpha build keeps every unlisted marketplace plugin disabled", ClaudePluginBuild{
-			Version: alphaVersion, Home: home, CheckoutRoot: root,
+		{"a checkout host keeps every unlisted marketplace plugin disabled", ClaudePluginBuild{
+			FromCheckout: true, Home: home, CheckoutRoot: root,
 			Plugins: []pfmconfig.ClaudePlugin{{ID: table[2].Name}}, Unlisted: []string{extra.Name},
 		}, pro(local(table[2], root), installOnly(local(extra, root)))},
 		{"a release plans no unlisted plugin", ClaudePluginBuild{
-			Version: "0.80.0", Home: home, CheckoutRoot: root,
+			Home: home, CheckoutRoot: root,
 			Plugins: []pfmconfig.ClaudePlugin{{ID: table[2].Name}}, Unlisted: []string{extra.Name},
 		}, pro(github(table[2], ""))},
-		{"an empty list ensures nothing", ClaudePluginBuild{Version: alphaVersion, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{}}, []ClaudePluginTarget{}},
+		{"an empty list ensures nothing", ClaudePluginBuild{FromCheckout: true, Home: home, CheckoutRoot: root, Plugins: []pfmconfig.ClaudePlugin{}}, []ClaudePluginTarget{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := ClaudePluginTargets(test.build)
@@ -270,7 +271,7 @@ func TestClaudePluginTargets(t *testing.T) {
 	}
 }
 
-func TestEnsureClaudePluginsAlphaInstallsTheLocalCopy(t *testing.T) {
+func TestEnsureClaudePluginsFromCheckoutInstallsTheLocalCopy(t *testing.T) {
 	root := t.TempDir()
 	inst, runner, out, home, first := alphaPluginEngine(t, root)
 	simulateClaude(t, runner)
@@ -429,30 +430,30 @@ func TestEnsureClaudePluginsKeepsAnUnparsableLocalManifest(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsAlphaWithoutACheckout: on -alpha each listed plugin
+// TestEnsureClaudePluginsFromCheckoutWithoutACheckout: on a checkout host each listed plugin
 // with a checkout installs as {name}@professor from the professor-dev
 // marketplace; one with no checkout installs nothing and fails naming where it
 // looked. A release installs every plugin from the GitHub professor
 // marketplace and creates no local one.
-func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
+func TestEnsureClaudePluginsFromCheckoutWithoutACheckout(t *testing.T) {
 	// root is claude.pluginCheckoutRoot (withRoot) or the source clone
 	// (fromClone, its checkouts under plugins/); with neither, the source clone
 	// is the default one under home, which holds no checkout.
 	for _, test := range []struct {
-		name      string
-		version   string
-		withRoot  bool
-		fromClone bool
-		checkouts []int
-		local     []bool
-		reason    func(root, home string, p testPlugin) string
+		name         string
+		fromCheckout bool
+		withRoot     bool
+		fromClone    bool
+		checkouts    []int
+		local        []bool
+		reason       func(root, home string, p testPlugin) string
 		// uninitialised lists the plugins the clone's .gitmodules registers with
 		// an empty directory: a submodule never initialised.
 		uninitialised []int
 	}{
 		{
-			"alpha without the key or a clone at the default path", alphaVersion, false, false, nil,
-			[]bool{false, false, false, false, false, false, false},
+			"checkout source without the key or a clone at the default path", true, false, false, nil,
+			[]bool{false, false, false, false, false, false, false, false},
 			func(_, home string, p testPlugin) string {
 				return "no checkout at " + filepath.Join(home, ".professor", "plugins", p.Name, "plugins", p.Name,
 					".claude-plugin", "plugin.json") + " (the source clone's plugins/; claude.pluginCheckoutRoot unset)"
@@ -460,16 +461,16 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 			nil,
 		},
 		{
-			"alpha without the key installs from the source clone", alphaVersion, false, true,
-			[]int{0, 1, 2, 3, 4, 5, 6},
-			[]bool{true, true, true, true, true, true, true},
+			"checkout source without the key installs from the source clone", true, false, true,
+			[]int{0, 1, 2, 3, 4, 5, 6, 7},
+			[]bool{true, true, true, true, true, true, true, true},
 			nil,
 			nil,
 		},
 		{
-			"alpha from the source clone with a submodule never initialised", alphaVersion, false, true,
-			[]int{0, 2, 3, 4, 5, 6},
-			[]bool{true, false, true, true, true, true, true},
+			"checkout source from the source clone with a submodule never initialised", true, false, true,
+			[]int{0, 2, 3, 4, 5, 6, 7},
+			[]bool{true, false, true, true, true, true, true, true},
 			func(root, _ string, p testPlugin) string {
 				return "submodule plugins/" + p.Name + " is not initialised in " + root +
 					": run git submodule update --init plugins/" + p.Name + " there"
@@ -477,16 +478,16 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 			[]int{1},
 		},
 		{
-			"alpha with a checkout missing", alphaVersion, true, false,
-			[]int{0, 2, 3, 4, 5, 6},
-			[]bool{true, false, true, true, true, true, true},
+			"checkout source with a checkout missing", true, true, false,
+			[]int{0, 2, 3, 4, 5, 6, 7},
+			[]bool{true, false, true, true, true, true, true, true},
 			func(root, _ string, p testPlugin) string {
 				return "no checkout at " + filepath.Join(root, p.Name, "plugins", p.Name, ".claude-plugin", "plugin.json") +
 					" (claude.pluginCheckoutRoot)"
 			},
 			nil,
 		},
-		{"release", "0.80.0", true, false, []int{0, 1, 2, 3, 4, 5, 6}, []bool{false, false, false, false, false, false, false}, nil, nil},
+		{"release", false, true, false, []int{0, 1, 2, 3, 4, 5, 6, 7}, []bool{false, false, false, false, false, false, false, false}, nil, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -515,7 +516,7 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 				configured = ""
 			}
 			inst, runner, out, home, first := alphaPluginEngine(t, configured)
-			inst.options.Version = test.version
+			inst.options.ClaudePluginsFromCheckout = test.fromCheckout
 			if test.fromClone {
 				inst.options.SourceRepo = root
 			}
@@ -533,9 +534,9 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 						},
 						pluginCall{"plugin install " + p.ID + " -y", first},
 					)
-				case test.version == alphaVersion:
+				case test.fromCheckout:
 					cause := "claude plugin " + p.ID + " in " + first + ": plugin " + p.Name +
-						" is not installed on this alpha build: " + test.reason(root, home, p)
+						" is not installed with claude.pluginSource checkout: " + test.reason(root, home, p)
 					if err == nil || !strings.Contains(err.Error(), cause) {
 						t.Fatalf("%s: err = %v, want %q\n%s", p.Name, err, cause, out.String())
 					}
@@ -546,13 +547,13 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 					)
 				}
 			}
-			if err != nil && (test.version != alphaVersion || !slices.Contains(test.local, false)) {
+			if err != nil && (!test.fromCheckout || !slices.Contains(test.local, false)) {
 				t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
 			}
 			if fmt.Sprint(runner.calls) != fmt.Sprint(want) {
 				t.Fatalf("calls=%v want %v\n%s", runner.calls, want, out.String())
 			}
-			if test.version == "0.80.0" {
+			if !test.fromCheckout {
 				if strings.Contains(out.String(), "not installed") {
 					t.Fatalf("release build reported a missing checkout:\n%s", out.String())
 				}
@@ -564,7 +565,7 @@ func TestEnsureClaudePluginsAlphaWithoutACheckout(t *testing.T) {
 	}
 }
 
-// TestEnsureClaudePluginsUndecidedLeavesEveryID: an -alpha build that cannot
+// TestEnsureClaudePluginsUndecidedLeavesEveryID: a checkout host that cannot
 // tell where a plugin's checkout is — its source clone moved away, or its
 // checkout cannot be read — decides nothing. It leaves the plugin's enabled
 // and disabled ids from other marketplaces as they are, runs no plugin command,
@@ -637,7 +638,7 @@ func TestEnsureClaudePluginsUndecidedLeavesEveryID(t *testing.T) {
 					t.Fatalf("err = %v, want %s named with %q\n%s", err, p.Name, test.reason(home, p), out.String())
 				}
 			}
-			if strings.Contains(out.String(), "is not installed on this alpha build") {
+			if strings.Contains(out.String(), "is not installed with claude.pluginSource checkout") {
 				t.Fatalf("an undecided source read as a missing checkout:\n%s", out.String())
 			}
 		})

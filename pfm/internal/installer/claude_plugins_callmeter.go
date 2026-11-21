@@ -19,7 +19,7 @@ import (
 
 // callmeterPlugin is the plugin whose hooks run a Go binary: its wrapper runs
 // {callmeter home}/bin/{plugin.json version}/callmeter and downloads a release
-// binary only when that file is missing. An -alpha checkout copy therefore needs the binary
+// binary only when that file is missing. A checkout copy therefore needs the binary
 // built from the same checkout in place before the copy is refreshed.
 const callmeterPlugin = "callmeter"
 

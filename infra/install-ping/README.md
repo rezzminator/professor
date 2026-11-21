@@ -12,7 +12,7 @@ One row per (UTC day, id, product) in the `pings` table (`migrations/0001_pings.
 
 ## Privacy
 
-Stored: the row above and nothing else. Never stored: the IP address, any request header, country, user agent, a time finer than the day, or anything derived from the machine or the user; the id is random and made on the install. A client sends nothing when `{PRODUCT}_INSTALL_PING_OFFLINE=1` (`PFM_INSTALL_PING_OFFLINE`, `HARVESTER_INSTALL_PING_OFFLINE`) or `DO_NOT_TRACK` is set (any value but `0` or `false`), under CI, or inside the project's test jail and fence.
+Stored: the row above and nothing else. Never stored: the IP address, any request header, country, user agent, a time finer than the day, or anything derived from the machine or the user; the id is random and made on the install. `pfm` sends nothing when the machine `pfm.config.json` sets `"installPing": false` (a project's own file cannot set it) or is unreadable. A client sends nothing when `{PRODUCT}_INSTALL_PING_OFFLINE=1` (`PFM_INSTALL_PING_OFFLINE`, `HARVESTER_INSTALL_PING_OFFLINE`) or `DO_NOT_TRACK` is set (any value but `0` or `false`), under CI, or inside the project's test jail and fence.
 
 ## Deploy
 
@@ -25,7 +25,7 @@ CLOUDFLARE_ACCOUNT_ID=… npx --yes wrangler@4 deploy
 
 ## Stats
 
-`./stats.sh` runs each read-only query in `stats.sql` against the live database and prints its table: unique ids per product, release vs `-alpha` builds, daily active ids over 30 days, ids active in the last 7 and 30 days, ids by OS, `pfm` ids per enabled plugin, and installs per day. A new query is a new paragraph in `stats.sql`.
+`./stats.sh` (needs `jq`; `/install-stats` runs it from a chat) runs each read-only query in `stats.sql` against the live database and prints it as an aligned table: unique ids per product, release vs development (`-alpha`, `-dev`) builds, daily active ids over 30 days, ids active in the last 7 and 30 days, ids by OS, `pfm` ids per enabled plugin, installs per day, and every install id with its first and last day, version and OS. A new query is a new paragraph in `stats.sql`.
 
 ## Tests
 

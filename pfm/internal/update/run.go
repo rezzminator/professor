@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
@@ -233,6 +234,7 @@ func updateRepository(
 	}
 	worktreeAdded := false
 	var replacements []updateReplacement
+	var stateSnapshot updateStateSnapshot
 	defer func() {
 		var cleanupErr error
 		if worktreeAdded {
@@ -247,8 +249,8 @@ func updateRepository(
 				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup staged source worktree: %w", removeErr))
 			}
 		}
-		// A failed binary restore leaves its backup as the manual repair source.
-		if !slices.ContainsFunc(
+		// A failed binary or state database restore leaves its copy as the manual repair source.
+		if !stateSnapshot.restoreFailed && !slices.ContainsFunc(
 			replacements,
 			func(replacement updateReplacement) bool { return replacement.restoreFailed },
 		) {
@@ -334,7 +336,16 @@ func updateRepository(
 		)
 		baselineOutcome = doctorOutcome{}
 	}
+	// The candidate may migrate the state database the restored binary must still open.
+	stateSnapshot.path, err = fleetdb.SnapshotSharedState(ctx, runtime.Paths.StateDB, filepath.Join(stage, "state.db"))
+	if err != nil {
+		return fmt.Errorf("copy the state database before install: %w", err)
+	}
 	sourceAdvanced := false
+	rollback := func(snapshots []updateFileSnapshot) error {
+		return rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, snapshots,
+			&stateSnapshot, runtime, stdout, stderr)
+	}
 	if !sourceAlreadyContainsTarget {
 		// Update's own children never refresh prices (updateSourceRepoEnv),
 		// but another pfm process may have since the dirty check: a table it
@@ -349,18 +360,7 @@ func updateRepository(
 	}
 	for index := range replacements {
 		if err := copyUpdateFile(candidateA, replacements[index].target); err != nil {
-			rollbackErr := rollbackUpdateState(
-				ctx,
-				repo,
-				installSourceRepo,
-				previousRef,
-				sourceAdvanced,
-				replacements,
-				nil,
-				runtime,
-				stdout,
-				stderr,
-			)
+			rollbackErr := rollback(nil)
 			return updateFailure(
 				fmt.Errorf("replace owned binary %s: %w", replacements[index].target, err),
 				rollbackErr,
@@ -374,18 +374,7 @@ func updateRepository(
 	if installErr != nil {
 		return updateFailure(
 			fmt.Errorf("install --yes after staging: %w", installErr),
-			rollbackUpdateState(
-				ctx,
-				repo,
-				installSourceRepo,
-				previousRef,
-				sourceAdvanced,
-				replacements,
-				snapshots,
-				runtime,
-				stdout,
-				stderr,
-			),
+			rollback(snapshots),
 		)
 	}
 	candidateOutcome, doctorErr := updateRunDoctor(
@@ -399,36 +388,14 @@ func updateRepository(
 	if doctorErr != nil {
 		return updateFailure(
 			fmt.Errorf("doctor after update: %w", doctorErr),
-			rollbackUpdateState(
-				ctx,
-				repo,
-				installSourceRepo,
-				previousRef,
-				sourceAdvanced,
-				replacements,
-				snapshots,
-				runtime,
-				stdout,
-				stderr,
-			),
+			rollback(snapshots),
 		)
 	}
 	switch candidateOutcome.Exit {
 	case 3:
 		return updateFailure(
 			fmt.Errorf("doctor after update: %d failure(s) — see the doctor rows above", candidateOutcome.Failures),
-			rollbackUpdateState(
-				ctx,
-				repo,
-				installSourceRepo,
-				previousRef,
-				sourceAdvanced,
-				replacements,
-				snapshots,
-				runtime,
-				stdout,
-				stderr,
-			),
+			rollback(snapshots),
 		)
 	case 0, 1:
 		fmt.Fprintf(
@@ -453,18 +420,7 @@ func updateRepository(
 				"doctor after update: exited %d — a doctor that cannot run is not a verdict",
 				candidateOutcome.Exit,
 			),
-			rollbackUpdateState(
-				ctx,
-				repo,
-				installSourceRepo,
-				previousRef,
-				sourceAdvanced,
-				replacements,
-				snapshots,
-				runtime,
-				stdout,
-				stderr,
-			),
+			rollback(snapshots),
 		)
 	}
 	fmt.Fprintf(stdout, "updated %s from %s\n", target, repo)

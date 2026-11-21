@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -140,4 +141,49 @@ func (proxy *stdioProxy) answerForwardFailure(output io.Writer, id json.RawMessa
 		return
 	}
 	proxy.answerFailure(output, id, cause)
+}
+
+// stdioHandshake is the client's initialize and notifications/initialized
+// frames, stored to replay to a server that has not seen them.
+type stdioHandshake struct {
+	mutex                   sync.Mutex
+	initialize, initialized []byte
+}
+
+func (handshake *stdioHandshake) store(method string, frame []byte) {
+	handshake.mutex.Lock()
+	defer handshake.mutex.Unlock()
+	if method == proxyInitializeMethod {
+		handshake.initialize = append(handshake.initialize[:0], frame...)
+		return
+	}
+	handshake.initialized = append(handshake.initialized[:0], frame...)
+}
+
+func (handshake *stdioHandshake) snapshot() ([]byte, []byte) {
+	handshake.mutex.Lock()
+	defer handshake.mutex.Unlock()
+	return append([]byte(nil), handshake.initialize...), append([]byte(nil), handshake.initialized...)
+}
+
+// writeErrorResponse writes the JSON-RPC error answer to request id on output.
+func writeErrorResponse(output io.Writer, id json.RawMessage, code int, message string) error {
+	response := struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Error   struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}{JSONRPC: "2.0", ID: id}
+	response.Error.Code = code
+	response.Error.Message = message
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("encode daemon failure response: %w", err)
+	}
+	if _, err := output.Write(append(encoded, '\n')); err != nil {
+		return fmt.Errorf("write daemon failure response: %w", err)
+	}
+	return nil
 }

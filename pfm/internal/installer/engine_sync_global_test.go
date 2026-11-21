@@ -373,7 +373,7 @@ func TestInstallRefreshesPluginCopiesBeforeEngineSyncGlobal(t *testing.T) {
 	_, err := Run(context.Background(), Options{
 		EngineSyncRunner: probe,
 		MCPConfigPath:    testConfigPath(t), SourceRepo: clone, Mode: ModeApply, Home: home,
-		ConfigDir: filepath.Join(home, "account"), Version: alphaVersion,
+		ConfigDir: filepath.Join(home, "account"), ClaudePluginsFromCheckout: true,
 		ClaudePluginCheckoutRoot: root, ClaudePlugins: bareList(name),
 		Stdout: &output, Runner: &fakeRunner{},
 	})

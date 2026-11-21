@@ -13,7 +13,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // ClaudePluginMarketplaceGaps reads the store's plugins/known_marketplaces.json
@@ -43,22 +42,13 @@ func ClaudePluginMarketplaceGaps(store string, targets []ClaudePluginTarget) ([]
 		if !registered || claudeMarketplaceSourceMatches(target.Source, entry.Source) {
 			continue
 		}
-		var got string
-		switch entry.Source.Kind {
-		case claudeplugin.MarketplaceGitHub:
-			got = entry.Source.Repo
-		case claudeplugin.MarketplaceDirectory:
-			got = entry.Source.Path
-		default:
-			got = strings.TrimSpace(entry.Source.Kind + " " + entry.Source.URL)
-		}
 		gaps = append(gaps, ClaudePluginGap{
 			fmt.Sprintf(
 				"plugin %s marketplace %s in %s points at %s, want %s",
 				target.ID,
 				marketplace,
 				path,
-				EscapeControl(got),
+				EscapeControl(claudeMarketplaceSourceText(entry.Source)),
 				target.Source,
 			),
 			claudeMarketplaceGapFix(target, marketplace),
@@ -84,10 +74,10 @@ func claudeMarketplaceRemoveFix(marketplace string) string {
 		" deletes the saved options and data of its plugins; run it only if they may go, then " + ClaudePluginRepair
 }
 
-// professorMarketplaceRepository is the GitHub repository whose
+// ProfessorMarketplaceRepository is the GitHub repository whose
 // .claude-plugin/marketplace.json is the professor marketplace a release
 // installs every plugin of ours from.
-const professorMarketplaceRepository = claudePluginOwner + "/" + pfmconfig.ProfessorMarketplace
+const ProfessorMarketplaceRepository = claudePluginOwner + "/" + pfmconfig.ProfessorMarketplace
 
 // marketplacePluginName is a plugin name the source clone's marketplace may
 // list: one safe path element, as a bare claude.plugins entry is.
@@ -133,19 +123,19 @@ func MarketplacePluginNames(sourceRepo string) (string, []string, error) {
 	return path, names, errors.Join(skipped...)
 }
 
-// WithMarketplacePlugins resolves an -alpha build's plugins against the source
+// WithMarketplacePlugins resolves a checkout host's plugins against the source
 // clone's marketplace, {SourceRepo}/.claude-plugin/marketplace.json: Unlisted
 // becomes every plugin it lists that Plugins, the effective claude.plugins,
 // names in no form, bare or name@marketplace. Plugins is never widened: an
 // unset claude.plugins is its default list and plans exactly like the key set
-// to it. A release, a build with no source clone and a clone with no
+// to it. A release source, a build with no source clone and a clone with no
 // marketplace file are returned as they are. A file that cannot be read, parsed
 // or validated and a source clone that could not be resolved return the build
 // unchanged with the error: install and doctor name it as a failure and still
 // plan the list, never an empty one. Entries the file lists badly are named in
 // the error beside the build derived from the valid ones.
 func (build ClaudePluginBuild) WithMarketplacePlugins() (ClaudePluginBuild, error) {
-	if !obs.AlphaBuild(build.Version) {
+	if !build.FromCheckout {
 		return build, nil
 	}
 	if build.SourceRepoErr != nil {
@@ -196,5 +186,18 @@ func claudeMarketplaceSourceMatches(source string, record claudeplugin.Marketpla
 		return record.Kind == claudeplugin.MarketplaceGitHub && record.Repo == repo
 	default:
 		return record.Kind == claudeplugin.MarketplaceDirectory
+	}
+}
+
+// claudeMarketplaceSourceText is a marketplace record's source as a gap names
+// it: a github record's repo, a directory record's path, else its kind and url.
+func claudeMarketplaceSourceText(record claudeplugin.MarketplaceSource) string {
+	switch record.Kind {
+	case claudeplugin.MarketplaceGitHub:
+		return record.Repo
+	case claudeplugin.MarketplaceDirectory:
+		return record.Path
+	default:
+		return strings.TrimSpace(record.Kind + " " + record.URL)
 	}
 }

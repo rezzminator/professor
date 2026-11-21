@@ -216,7 +216,11 @@
   ],
   "hookBinaries": [],
   "hookShimHints": [],
-  "claudePlugins": {},
+  "claudePlugins": {
+    "cache-live-control": [
+      "cache-keepwarm@professor"
+    ]
+  },
   "globalAgents": [
     "flights-foreman",
     "flights-foreman-sonnet",

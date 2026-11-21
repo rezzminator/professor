@@ -238,8 +238,8 @@ func TestStdioProxyReplaysHandshakeBeforeSessionlessCall(t *testing.T) {
 		return proxyRecoveryJSON(http.StatusOK, `{"jsonrpc":"2.0","id":2,"result":{}}`)
 	}}
 	proxy := daemon.proxy()
-	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
-	proxy.storeHandshake("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
+	proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
+	proxy.handshake.store("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
 	response, err := proxy.sendWithRetry(
 		context.Background(), []byte(proxyTestToolCall(2, "status", `{"target":"seat"}`)), false,
 	)
@@ -279,8 +279,8 @@ func TestStdioProxyReinitializesOnceOnUninitializedSession(t *testing.T) {
 			proxy := daemon.proxy()
 			proxy.sessionID = "stale"
 			proxy.protocol = "2025-06-18"
-			proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
-			proxy.storeHandshake(
+			proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
+			proxy.handshake.store(
 				"notifications/initialized",
 				[]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`),
 			)

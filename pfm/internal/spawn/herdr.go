@@ -192,7 +192,8 @@ func BirthTabLabel(name, cwd string) string {
 
 // SpawnHerdr is the one Herdr birth of a new tab: it creates one unfocused tab
 // in the workspace of the chat's place (place.Fleet.Of its cwd), creating that
-// workspace when the place has none, after moving every other misplaced
+// workspace when the place has none, its starting shell tab replaced by the
+// chat's, after moving every other misplaced
 // running chat on the socket into its own; then it records the birth and
 // retires the seat it replaces.
 func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, returnErr error) {
@@ -216,17 +217,22 @@ func SpawnHerdr(ctx context.Context, request HerdrRequest) (result HerdrResult, 
 			state.DeleteSeatRun(result.Seat.SeatID),
 		)
 	}
-	workspace, unmoved, err := placeHerdrBirth(ctx, request, *fleet)
+	workspace, starting, unmoved, err := placeHerdrBirth(ctx, request, *fleet)
 	if err != nil {
 		return HerdrResult{}, cleanup(fmt.Errorf("place Herdr tab: %w", err))
 	}
 	if unmoved != nil {
 		result.Warnings = append(result.Warnings, "Herdr places: "+unmoved.Error())
 	}
+	// A layout applied to a tab replaces it: the chat's tab takes the starting shell tab's place.
+	into, id := "workspace_id", workspace
+	if starting != "" {
+		into, id = "tab_id", starting
+	}
 	params := map[string]any{
-		"workspace_id": workspace,
-		"tab_label":    BirthTabLabel(request.Seat.Name, request.Run.CWD),
-		"focus":        false,
+		into:        id,
+		"tab_label": BirthTabLabel(request.Seat.Name, request.Run.CWD),
+		"focus":     false,
 		"root": map[string]any{
 			"type":    "pane",
 			"command": []string{"pfm", "internal", "seat-host", result.Seat.SeatID},

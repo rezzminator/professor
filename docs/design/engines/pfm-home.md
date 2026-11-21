@@ -78,8 +78,28 @@ Machine-wide, default unset. Its value is Herdr's `[keys]` table as JSON, which 
 - Unset (or `null`), the block is exactly pfm's keymap.
 - The block is rendered TOML (`installer.herdrKeysBlockFor`): actions sorted by name, then each `[[keys.command]]`. TOML comments are not carried, and a hand edit inside the block is replaced at the next install.
 - Load refuses any other shape, a blank key (an action's, a list item's, or a command's `key`, `type` or `command`), a command entry lacking `key`, or lacking `type` or `command` when it holds more than `key`, a field other than those four, and a repeated command `key`, naming the path: `herdr.keys.close_pane must be a key, an array of keys or null`, `herdr.keys.command[2].type is required (an entry holding only key removes pfm's command of that key)`.
-- An account entry setting `herdr` fails load as an unknown field; a project file's `herdr` is named as never read. `pfm config show` prints `config herdr.keys={json} (file)`, or `none (default)` when unset.
+- An account entry setting `herdr` fails load as an unknown field; a project file's `herdr` is named as never read. `pfm config show` prints `config herdr.keys={json} (file)`, or `none (default)` when unset, then the `herdr.settings` line.
 - `pfm doctor`'s `herdr-keys` row checks against the merged keymap, so an override never warns that pfm's former key is missing.
+
+### herdr.settings
+
+Machine-wide. Its value is Herdr's `config.toml` as JSON, an object a table, laid over pfm's shipped Herdr settings (`installer.herdrSettingsDefault`: `onboarding = false`, so Herdr's first-run onboarding never greets a pfm-managed Herdr); `example.pfm.config.json` carries the shipped value, held equal by `TestExampleHerdrSettingsAreTheDefaults` (`pfm/internal/installer/herdr_settings_test.go`).
+
+```json
+{
+  "herdr": {
+    "settings": {
+      "onboarding": null,
+      "ui": {"sidebar_width": 30}
+    }
+  }
+}
+```
+
+- A table merges key by key; `null` removes pfm's default of that key; any other value replaces it.
+- `pfm install --yes` (`wireHerdrSettings`, with Herdr present) adds each resulting key the user's `config.toml` lacks and never changes a key it sets, a table name holding a non-table value included. A top-level key goes before the first table, a table's key under its existing header, else under a new header at the end, through the one text door `insertHerdrConfigLines` (`pfm/internal/installer/herdr_config_insert.go`), which keeps every other byte and proves each insertion by decoding the result; the shell block's `default_shell` goes through the same door. It reports `set herdr settings [key = value; …] in {path}`, or `herdr settings set in {path}`. Uninstall leaves the added keys in place.
+- Load refuses any other shape, `keys` (Herdr's keymap is `herdr.keys`), and an array holding a table or `null`, naming the path: `herdr.settings.keys is Herdr's keymap: set it in herdr.keys`, `herdr.settings.ui.rows[1] must be a string, number, boolean or array`. An integer stays a TOML integer.
+- An account entry setting `herdr` fails load as an unknown field; a project file's `herdr` is named as never read. `pfm config show` prints `config herdr.settings={json} (file)`, or `none (default)` when unset (the shipped settings then apply).
 
 ### mcp.thirdParty
 

@@ -86,7 +86,7 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 	// A held session lets the first attempt reach the daemon before any replay.
 	proxy.sessionID = "session-before-refusal"
 	proxy.protocol = "2025-06-18"
-	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
+	proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
 	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
 		if err := request.Context().Err(); err != nil {
 			return nil, err
@@ -256,7 +256,7 @@ func TestStdioProxyCancellationInterruptsAnUnresponsiveReplayProbe(t *testing.T)
 	proxy.retryWindow = time.Minute
 	proxy.sessionID = "session-before-refusal"
 	proxy.protocol = "2025-06-18"
-	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
+	proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
 	proxy.client = &http.Client{Transport: proxyTestTransport(func(*http.Request) (*http.Response, error) {
 		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 	})}

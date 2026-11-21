@@ -10,7 +10,7 @@ Source: the live D1 database `install-ping`, one row per (UTC day, install id, p
 1. Check the login: `npx --yes wrangler@4 whoami`. Signed out → step 4, then back here.
 2. From the repo root, Bash timeout 300000: `mkdir -p /tmp/professor/install-stats && infra/install-ping/stats.sh > /tmp/professor/install-stats/stats.txt 2>&1; echo "exit $?"`. Exit 1: the file's `stats.sh:` lines name each failed query; report the rest. Exit 2: `stats.sql` was refused; report the refusal line and stop. `You are not authenticated` in the file → step 4.
 3. Report from the file:
-   - First line: unique installs per product, each split release vs alpha. A version containing `-alpha` is a develop build, so far the owner's own machines; a release version is a real user.
+   - First line: unique installs per product, each split release vs development build. A version containing `-alpha` or `-dev` is a development build, so far the owner's own machines; a release version is a real user.
    - The per-install table: every install id with first and last day, days seen, version and OS.
    - 7- and 30-day active counts, installs per day, and the OS and plugin splits only where they add to the above; pfm installs carry their enabled Professor plugins, Harvester's none.
    - Last line: `/tmp/professor/install-stats/stats.txt`.

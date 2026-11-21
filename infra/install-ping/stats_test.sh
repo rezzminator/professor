@@ -25,7 +25,7 @@ fail() { echo "stats_test: FAIL — $*" >&2; exit 1; }
 export NPX_LOG="$work/calls"
 PATH="$work/bin:$PATH" bash "$here/stats.sh" >"$work/out" || fail "stats.sh exited $? on the shipped stats.sql (output: $work/out)"
 want_titles='== unique install ids ever, per product
-== unique install ids ever, release vs -alpha builds
+== unique install ids ever, release vs development (-alpha, -dev) builds
 == daily active ids, last 30 days, per product
 == ids active in the last 7 and 30 days, per product
 == ids active in the last 30 days, per product and OS

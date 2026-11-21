@@ -6,8 +6,8 @@
 SELECT product, COUNT(DISTINCT id) AS ids
 FROM pings GROUP BY product ORDER BY product;
 
--- unique install ids ever, release vs -alpha builds
-SELECT product, CASE WHEN instr(version, '-alpha') > 0 THEN 'alpha' ELSE 'release' END AS build,
+-- unique install ids ever, release vs development (-alpha, -dev) builds
+SELECT product, CASE WHEN instr(version, '-alpha') > 0 OR instr(version, '-dev') > 0 THEN 'dev' ELSE 'release' END AS build,
   COUNT(DISTINCT id) AS ids
 FROM pings GROUP BY product, build ORDER BY product, build;
 

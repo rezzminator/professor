@@ -322,13 +322,12 @@ func TestEnsureClaudeEnv(t *testing.T) {
 				Home:             home,
 				ConfigDir:        filepath.Join(home, ".claude"),
 				PrimaryConfigDir: first,
-				Version:          "0.80.0",
 				ClaudePlugins:    pfmconfig.DefaultClaudePlugins(),
 				ClaudeEnv:        test.env,
 				Stdout:           stdout,
 			}, apply: test.apply, managedRoot: managedRoot}
 			if test.unreadPlugins {
-				inst.options.Version, inst.options.SourceRepo = "0.80.0-alpha", home
+				inst.options.ClaudePluginsFromCheckout, inst.options.SourceRepo = true, home
 				writeFixture(t, filepath.Join(home, ".claude-plugin", "marketplace.json"), "{")
 			}
 			err := inst.ensureClaudeEnv(test.uninstall)

@@ -1,7 +1,9 @@
 package picker
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,7 +14,9 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/ui"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
@@ -244,5 +248,76 @@ func TestProfessorUpdateCheckNoticeNamesAFailingCheckWithAnUnusableSourceRepo(t 
 		ReplaceAllString(strings.ReplaceAll(notice, markerErr.Error(), "{marker error}"), "{t}"),
 		"pfm ls: Professor update check failing since {t} (network): latest Professor release returned 503 Service Unavailable; its source repository cannot be used: {marker error} — run pfm install --yes from the clone"; got != want {
 		t.Fatalf("notice = %q, want %q", got, want)
+	}
+}
+
+// TestOpenProfessorUpdateOpensTheChatWithThe1hCache pins that the update chat
+// always runs at 1h, whether or not the picker's own cache toggle is on, for
+// every engine.
+func TestOpenProfessorUpdateOpensTheChatWithThe1hCache(t *testing.T) {
+	type openCall struct {
+		row     compose.Row
+		primary int
+		cache1H bool
+		prompt  string
+	}
+	updateRow := compose.Row{
+		Kind: compose.ProfessorUpdate,
+		ID:   "pfm-update-v1.2.3",
+		Name: "v1.2.3",
+		CWD:  "/src/professor",
+	}
+	wantPrompt := professorUpdatePrompt(updateRow)
+	if !strings.HasPrefix(wantPrompt, "Professor v1.2.3 is available.") {
+		t.Fatalf("prompt = %q, want it to open with %q", wantPrompt, "Professor v1.2.3 is available.")
+	}
+	tests := []struct {
+		name     string
+		engine   pfmengine.ID
+		toggle   bool
+		wantKind compose.Kind
+	}{
+		{name: "claude toggle off", engine: pfmengine.Claude, toggle: false, wantKind: compose.NewClaude},
+		{name: "claude toggle on", engine: pfmengine.Claude, toggle: true, wantKind: compose.NewClaude},
+		{name: "codex toggle off", engine: pfmengine.Codex, toggle: false, wantKind: compose.NewCodex},
+		{name: "opencode toggle off", engine: pfmengine.OpenCode, toggle: false, wantKind: compose.NewOpenCode},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var calls []openCall
+			original := openChatRow
+			t.Cleanup(func() { openChatRow = original })
+			openChatRow = func(
+				_ context.Context, row compose.Row, primary int, cache1H bool, prompt string,
+				_, _ io.Writer, _ *pfmconfig.Runtime,
+			) int {
+				calls = append(calls, openCall{row: row, primary: primary, cache1H: cache1H, prompt: prompt})
+				return 7
+			}
+			outcome := ui.Outcome{
+				Kind: ui.OutcomeProfessorUpdate, Row: updateRow, Engine: test.engine,
+				PrimaryAccount: 2, Cache1H: test.toggle,
+			}
+			var stderr bytes.Buffer
+			code := openProfessorUpdate(context.Background(), outcome, io.Discard, &stderr, pfmconfig.Runtime{})
+			if code != 7 || stderr.Len() != 0 {
+				t.Fatalf("code = %d, stderr = %q, want 7 and empty", code, stderr.String())
+			}
+			if len(calls) != 1 {
+				t.Fatalf("OpenRow calls = %d, want 1", len(calls))
+			}
+			got := calls[0]
+			if !got.cache1H {
+				t.Errorf("cache1H = false, want true (picker toggle %v)", test.toggle)
+			}
+			if got.row.Name != "Professor update v1.2.3" || got.row.Kind != test.wantKind || got.row.Account != 2 ||
+				got.primary != 2 {
+				t.Errorf("row = {Name %q Kind %v Account %d} primary %d, want {Professor update v1.2.3 %v 2} 2",
+					got.row.Name, got.row.Kind, got.row.Account, got.primary, test.wantKind)
+			}
+			if got.prompt != wantPrompt {
+				t.Errorf("prompt = %q, want %q", got.prompt, wantPrompt)
+			}
+		})
 	}
 }

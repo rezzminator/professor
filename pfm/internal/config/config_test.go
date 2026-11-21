@@ -145,9 +145,7 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		RequireManagedCleanup: true,
 		SystemPrompt:          SystemPromptProfessor,
 		SystemPromptDefault:   true,
-		Cache1H:               true,
-		RemoteControl:         true,
-		CostLedger:            true,
+		Cache1H:               true, RemoteControl: true, CostLedger: true, PluginSource: PluginSourceRelease,
 	}) {
 		t.Fatalf("Claude = %#v, want bypass/claude defaults", got.Claude)
 	}
@@ -310,9 +308,7 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		RequireManagedCleanup: true,
 		SystemPrompt:          SystemPromptProfessor,
 		SystemPromptDefault:   true,
-		Cache1H:               true,
-		RemoteControl:         true,
-		CostLedger:            true,
+		Cache1H:               true, RemoteControl: true, CostLedger: true, PluginSource: PluginSourceRelease,
 	}) {
 		t.Fatalf("Claude = %#v, want configured values", got.Claude)
 	}
@@ -429,6 +425,9 @@ func TestLoadRefusesAnUnusableConfig(t *testing.T) {
 		{"state db number", `{"version":2,"state":{"db":12}}`, "parse config {path} at byte 29: json: cannot unmarshal number into Go struct field rawConfig.state.db of type string"},
 		{"state db empty", `{"version":2,"state":{"db":""}}`, "config {path}: state.db must be non-empty"},
 		{"state db relative", `{"version":2,"state":{"db":"relative.db"}}`, "config {path}: state.db: must be absolute or start with ~/ or $HOME/, got \"relative.db\""},
+		{"installPing string", `{"version":2,"installPing":"no"}`, "config {path}: installPing must be true or false, got \"no\""},
+		{"installPing number", `{"version":2,"installPing":0}`, "config {path}: installPing must be true or false, got 0"},
+		{"installPing null", `{"version":2,"installPing":null}`, "config {path}: installPing must be true or false, got null"},
 		{"remoteControl string", `{"version":2,"claude":{"remoteControl":"on"}}`, "parse config {path} at byte 43: json: cannot unmarshal string into Go struct field rawConfig.claude.remoteControl of type bool"},
 		{"account remoteControl number", `{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"remoteControl":1}}]}`, "parse config {path} at byte 80: json: cannot unmarshal number into Go struct field rawConfig.accounts.0.claude.remoteControl of type bool"},
 		{"empty theme", `{"version": 2, "claude": {"theme": ""}}`, "config {path}: claude.theme must be a non-empty string"},

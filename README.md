@@ -114,7 +114,7 @@ The refusal names the right way, so the agent takes it instead of trying again. 
 
 ## Install ping
 
-`pfm` counts real installs with an anonymous ping: a random install id made once on your machine, the pfm version, OS and architecture, the enabled plugins from Professor's own marketplace, and the event (`install` at the end of `pfm install`, `daily` at most once a UTC day). The counter stores those fields and the UTC day, never your IP address, hostname, username, paths or project names. Set `PFM_INSTALL_PING_OFFLINE=1` or `DO_NOT_TRACK=1` to turn it off; CI and development builds never send it. [What the counter is and stores](infra/install-ping/README.md).
+`pfm` counts real installs with an anonymous ping: a random install id made once on your machine, the pfm version, OS and architecture, the enabled plugins from Professor's own marketplace, and the event (`install` at the end of `pfm install`, `daily` at most once a UTC day). The counter stores those fields and the UTC day, never your IP address, hostname, username, paths or project names. Set `"installPing": false` in your machine `pfm.config.json` to turn it off (a project's own `pfm.config.json` cannot set it); `PFM_INSTALL_PING_OFFLINE=1` or `DO_NOT_TRACK=1` does the same, and `pfm install` prints whether it is on. CI and development builds never send it. [What the counter is and stores](infra/install-ping/README.md).
 
 ## Help and community
 

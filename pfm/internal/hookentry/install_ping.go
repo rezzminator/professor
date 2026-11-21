@@ -23,7 +23,7 @@ var (
 // by installping and never fails the install.
 func InstallPing(ctx context.Context, stdout io.Writer, offline bool, runtime config.Runtime, env paths.Env) {
 	options := installping.ForRuntime(runtime, env)
-	reason := installping.Reason(options.Env, options.Version)
+	reason := installping.Reason(options)
 	switch {
 	case reason != "":
 		fmt.Fprintln(stdout, installping.Notice(reason))

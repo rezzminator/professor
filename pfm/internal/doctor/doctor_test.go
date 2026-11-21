@@ -150,7 +150,9 @@ func TestDoctorCallmeterUsesClaudeEnvHome(t *testing.T) {
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
-	runtime.Version = "0.82.0-alpha"
+	// A release binary on a checkout host is doctored as a checkout host.
+	runtime.Version = "0.82.0"
+	runtime.Config.Claude.PluginSource = config.PluginSourceCheckout
 	runtime.Config.Claude.PluginCheckoutRoot = root
 	// Listed, so callmeter is a checked plugin, never an install-only one.
 	runtime.Config.Claude.Plugins = []config.ClaudePlugin{{ID: "callmeter"}}
@@ -184,7 +186,8 @@ func TestDoctorPluginLogsIncludesLedgerOnlyConfigDirs(t *testing.T) {
 	for _, target := range []string{"historical", "target", "physical alias"} {
 		t.Run(target, func(t *testing.T) {
 			runtime := buildCleanDoctorHome(t)
-			runtime.Version = "0.82.0-alpha"
+			runtime.Version = "0.82.0"
+			runtime.Config.Claude.PluginSource = config.PluginSourceCheckout
 			home := runtime.Paths.Home
 			custom := filepath.Join(home, "outside-roster", "settings.json")
 			if target == "physical alias" {

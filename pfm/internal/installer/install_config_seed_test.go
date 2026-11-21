@@ -23,12 +23,12 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	document, claude := installSeedClaude(t, example)
-	for _, key := range []string{"remoteControl", "pluginCheckoutRoot", "plugins", "costLedger", "settings"} {
+	for _, key := range []string{"remoteControl", "pluginCheckoutRoot", "pluginSource", "plugins", "costLedger", "settings"} {
 		if _, present := claude[key]; present {
 			t.Errorf("the seed keeps claude.%s at its default", key)
 		}
 	}
-	for _, key := range []string{"envs", "harnessPrompt", "herdr"} {
+	for _, key := range []string{"envs", "harnessPrompt", "herdr", "installPing"} {
 		if _, present := document[key]; present {
 			t.Errorf("the seed keeps %s at its default", key)
 		}
@@ -43,11 +43,12 @@ func TestInstallConfigSeedOmitsDefaultKeysAnOlderPfmRefuses(t *testing.T) {
 
 // A value the example sets away from its default is kept.
 func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
-	document, claude := installSeedClaude(t, []byte(`{"version":2,"envs":{"TEAM_MODE":"strict"},`+
+	document, claude := installSeedClaude(t, []byte(`{"version":2,"installPing":false,"envs":{"TEAM_MODE":"strict"},`+
 		`"harnessPrompt":{"replace":"team.md"},"herdr":{"keys":{"close_pane":null}},"claude":{"settings":{"cleanupPeriodDays":30},"costLedger":false,`+
-		`"plugins":["auto-effort"],"remoteControl":false,"theme":null}}`))
+		`"plugins":["auto-effort"],"pluginSource":"checkout","remoteControl":false,"theme":null}}`))
 	for key, want := range map[string]string{
 		"envs": `{"TEAM_MODE":"strict"}`, "harnessPrompt": `{"replace":"team.md"}`, "herdr": `{"keys":{"close_pane":null}}`,
+		"installPing": "false",
 	} {
 		if got := strings.Join(strings.Fields(string(document[key])), ""); got != want {
 			t.Errorf("seed %s = %q, want %q", key, got, want)
@@ -55,7 +56,7 @@ func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
 	}
 	for key, want := range map[string]string{
 		"settings": `{"cleanupPeriodDays":30}`, "costLedger": "false", "plugins": `["auto-effort"]`,
-		"remoteControl": "false",
+		"remoteControl": "false", "pluginSource": `"checkout"`,
 	} {
 		if got := strings.Join(strings.Fields(string(claude[key])), ""); got != want {
 			t.Errorf("seed claude.%s = %q, want %q", key, got, want)

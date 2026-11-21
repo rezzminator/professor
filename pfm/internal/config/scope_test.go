@@ -110,6 +110,11 @@ func TestReadProjectScope(t *testing.T) {
 			},
 		},
 		{
+			name: "installPing is machine-only", content: `{"installPing":false,"envs":{"TEAM_MODE":"strict"}}`,
+			wantEnvs: map[string]string{"TEAM_MODE": "strict"},
+			warnings: []string{"installPing is machine-only; ignored in {path}"},
+		},
+		{
 			name: "retired key", content: `{"claude":{"helperModel":"m"}}`,
 			warnings: []string{
 				"claude.helperModel is retired: set claude.settings.env.ANTHROPIC_SMALL_FAST_MODEL instead; ignored in {path}",

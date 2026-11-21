@@ -5,7 +5,6 @@ import (
 	"io"
 
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // printClaudeEnvDoctor checks claude.env against the settings file install
@@ -51,7 +50,7 @@ func printClaudeEnvDoctor(
 	}
 	reported, pluginLogsMissing := 0, false
 	for _, gap := range gaps {
-		if gap.Key == installer.PluginLogDirEnv && gap.Missing && obs.AlphaBuild(build.Version) {
+		if gap.Key == installer.PluginLogDirEnv && gap.Missing && build.FromCheckout {
 			pluginLogsMissing = true
 			continue
 		}

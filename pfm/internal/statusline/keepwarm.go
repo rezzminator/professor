@@ -16,7 +16,7 @@ const keepwarmOff = "off"
 // writer's start time may read before the pid counts as reused.
 const keepwarmBirthSlackMS = 2000
 
-// keepwarmRecord is the public cache-keepwarm v1 protocol's part the shield
+// keepwarmRecord is the keep-warm v1 protocol (cache-live-control plugin)'s part the shield
 // reads: the writer's identity (sessionId, pid, updatedAt) and its state. The
 // record's other fields (enabled, source, reason, pokes, nextAt,
 // protectingTokensEq) are never read here, so nothing gates on them. A quiet
@@ -35,11 +35,11 @@ type keepwarmState struct {
 	err          error
 }
 
-func cacheKeepwarmShield(runtime Runtime, sessionID string) string {
+func keepwarmShield(runtime Runtime, sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
-	path, err := paths.CacheKeepwarmStateFile(runtime.pathsEnv(), runtime.Home, sessionID)
+	path, err := paths.KeepwarmStateFile(runtime.pathsEnv(), runtime.Home, sessionID)
 	state := keepwarmState{err: err}
 	if err == nil {
 		state = readKeepwarmState(
@@ -58,7 +58,7 @@ func cacheKeepwarmShield(runtime Runtime, sessionID string) string {
 			// No path was resolved: the cause names the state file itself.
 			fmt.Fprintf(warn, "statusline: %v (shield shows ERR)\n", state.err)
 		} else {
-			fmt.Fprintf(warn, "statusline: cache-keepwarm state %s (shield shows ERR): %v\n", path, state.err)
+			fmt.Fprintf(warn, "statusline: keepwarm state %s (shield shows ERR): %v\n", path, state.err)
 		}
 		return " " + cBad + "🛡 ERR" + reset
 	}

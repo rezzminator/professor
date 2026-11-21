@@ -352,16 +352,19 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 // TestClaudePluginsDoctorBareNameNamesItsSource: a bare claude.plugins name that is not enabled or
 // not installed is told where pfm install gets it from and that a failing install means the entry
 // is wrong, not only "run pfm install --yes" (a typo installs from no repository, so that repair
-// can never close the gap). An -alpha build with no checkout of it says the same, then why it
+// can never close the gap). A checkout host with no checkout of it says the same, then why it
 // installs nothing.
 func TestClaudePluginsDoctorBareNameNamesItsSource(t *testing.T) {
-	// On -alpha a listed plugin off its checkout copy fails: each line is marked FAIL.
+	// With claude.pluginSource checkout a listed plugin off its checkout copy fails: each line is marked FAIL.
 	for _, test := range []struct {
-		name, version, mark, note string
+		name     string
+		checkout bool
+		mark     string
+		note     string
 	}{
-		{"release", "", "", ""},
-		{"alpha without a checkout", "0.80.0-alpha", "FAIL ", "doctor: claude_plugins FAIL plugin agent-efort is not installed" +
-			" on this alpha build: claude.pluginCheckoutRoot unset and no source clone — " +
+		{"release", false, "", ""},
+		{"checkout source without a checkout", true, "FAIL ", "doctor: claude_plugins FAIL plugin agent-efort is not installed" +
+			" with claude.pluginSource checkout: claude.pluginCheckoutRoot unset and no source clone — " +
 			"check the plugin out where named, or set claude.pluginCheckoutRoot, then run pfm install --yes\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -377,7 +380,7 @@ func TestClaudePluginsDoctorBareNameNamesItsSource(t *testing.T) {
 			var out bytes.Buffer
 			tally := &doctorTally{}
 			printClaudePluginsDoctor(&out, store, &paths.MapEnv{}, installer.ClaudePluginBuild{
-				Version: test.version, Home: t.TempDir(), Plugins: []pfmconfig.ClaudePlugin{{ID: "agent-efort"}},
+				FromCheckout: test.checkout, Home: t.TempDir(), Plugins: []pfmconfig.ClaudePlugin{{ID: "agent-efort"}},
 			}, nil, tally)
 			want := "doctor: claude_plugins " + test.mark + "plugin agent-efort@professor not enabled in " + path + " — " +
 				bareNameFix(
@@ -494,8 +497,8 @@ func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.
 	}
 }
 
-// TestClaudePluginsDoctorChecksTheBuildsCopies: an alpha build with its
-// checkouts checks the {name}@professor ids and their copies — each gap of a
+// TestClaudePluginsDoctorChecksTheBuildsCopies: claude.pluginSource checkout
+// with its checkouts checks the {name}@professor ids and their copies — each gap of a
 // listed plugin a FAIL — a plugin with no checkout names its reason and fails,
 // an enabled id of the retired lists is named with its successor, and a
 // marketplace plugin claude.plugins does not list is checked
@@ -511,34 +514,42 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 		"professor",
 	}
 	for _, state := range []string{
-		"alpha clean", "alpha retired copy enabled", "alpha copy symlinked", "alpha copy missing", "alpha fallback",
-		"alpha from the default source clone", "alpha source clone moved away", "alpha copy differs",
-		"alpha unlisted plugin disabled", "alpha unlisted plugin enabled", "alpha unlisted plugin disabled, list unset",
-		"alpha cache behind", "alpha cache differs",
-		"alpha cache unreadable", "alpha cache unversioned", "alpha cache behind with its snapshot gone",
-		"alpha marketplace empty",
+		"checkout clean", "checkout retired copy enabled", "checkout copy symlinked", "checkout copy missing", "checkout fallback",
+		"checkout from the default source clone", "checkout source clone moved away", "checkout copy differs",
+		"checkout unlisted plugin disabled", "checkout unlisted plugin enabled", "checkout unlisted plugin disabled, list unset",
+		"checkout cache behind", "checkout cache differs",
+		"checkout cache unreadable", "checkout cache unversioned", "checkout cache behind with its snapshot gone",
+		"checkout marketplace empty",
 	} {
 		t.Run(state, func(t *testing.T) {
 			home := t.TempDir()
 			store := filepath.Join(home, ".claude")
 			root := filepath.Join(home, "src")
 			build := installer.ClaudePluginBuild{
-				Version: "0.80.0-alpha", Home: home, CheckoutRoot: root, Plugins: pfmconfig.DefaultClaudePlugins(),
+				FromCheckout: true, Home: home, CheckoutRoot: root, Plugins: pfmconfig.DefaultClaudePlugins(),
 			}
-			if state == "alpha from the default source clone" {
+			if state == "checkout from the default source clone" {
 				// No marker and no key: the clone at the default path holds the checkouts.
 				root = filepath.Join(home, ".professor", "plugins")
 				build = doctorClaudePluginBuild(
-					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
+					home,
+					pfmconfig.Claude{
+						PluginSource: pfmconfig.PluginSourceCheckout,
+						Plugins:      pfmconfig.DefaultClaudePlugins(),
+					},
 				)
 			}
-			if state == "alpha fallback" {
+			if state == "checkout fallback" {
 				// No marker, no key and no clone at the default path: the checkouts under src/ are not looked at.
 				build = doctorClaudePluginBuild(
-					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
+					home,
+					pfmconfig.Claude{
+						PluginSource: pfmconfig.PluginSourceCheckout,
+						Plugins:      pfmconfig.DefaultClaudePlugins(),
+					},
 				)
 			}
-			if state == "alpha source clone moved away" {
+			if state == "checkout source clone moved away" {
 				// The copies a prior install enabled stay; the clone it recorded is gone.
 				clone := filepath.Join(home, "moved")
 				if err := os.MkdirAll(clone, 0o700); err != nil {
@@ -551,20 +562,28 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					t.Fatal(err)
 				}
 				build = doctorClaudePluginBuild(
-					"0.80.0-alpha", home, pfmconfig.Claude{Plugins: pfmconfig.DefaultClaudePlugins()},
+					home,
+					pfmconfig.Claude{
+						PluginSource: pfmconfig.PluginSourceCheckout,
+						Plugins:      pfmconfig.DefaultClaudePlugins(),
+					},
 				)
 				if build.SourceRepoErr == nil {
 					t.Fatalf("build = %+v, want the moved clone's resolve error", build)
 				}
 			}
-			if state == "alpha unlisted plugin disabled, list unset" {
+			if state == "checkout unlisted plugin disabled, list unset" {
 				// claude.plugins unset: the config's default list, planned like the key set to it.
 				build = doctorClaudePluginBuild(
-					"0.80.0-alpha", home,
-					pfmconfig.Claude{PluginCheckoutRoot: root, Plugins: pfmconfig.DefaultClaudePlugins()},
+					home,
+					pfmconfig.Claude{
+						PluginCheckoutRoot: root,
+						PluginSource:       pfmconfig.PluginSourceCheckout,
+						Plugins:            pfmconfig.DefaultClaudePlugins(),
+					},
 				)
 			}
-			unlisted := strings.HasPrefix(state, "alpha unlisted")
+			unlisted := strings.HasPrefix(state, "checkout unlisted")
 			if unlisted {
 				// The source clone's marketplace lists buddy, which claude.plugins does not.
 				build.SourceRepo = filepath.Join(home, "clone")
@@ -584,7 +603,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if state == "alpha marketplace empty" {
+			if state == "checkout marketplace empty" {
 				build.SourceRepo = filepath.Join(home, "clone")
 				if err := os.MkdirAll(filepath.Join(build.SourceRepo, ".claude-plugin"), 0o700); err != nil {
 					t.Fatal(err)
@@ -602,7 +621,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			// Each copy holds its checkout's content.
 			for _, name := range append(slices.Clone(names), "buddy") {
 				content := `{"version":"1.0.0"}`
-				if state == "alpha cache unversioned" && name == names[0] {
+				if state == "checkout cache unversioned" && name == names[0] {
 					content = "{}"
 				}
 				for _, dir := range []string{filepath.Join(root, name, "plugins", name), mirror(name)} {
@@ -619,18 +638,18 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				}
 			}
 			switch state {
-			case "alpha copy symlinked":
+			case "checkout copy symlinked":
 				if err := os.RemoveAll(mirror(names[0])); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(filepath.Join(root, names[0], "plugins", names[0]), mirror(names[0])); err != nil {
 					t.Fatal(err)
 				}
-			case "alpha copy missing":
+			case "checkout copy missing":
 				if err := os.RemoveAll(mirror(names[0])); err != nil {
 					t.Fatal(err)
 				}
-			case "alpha copy differs":
+			case "checkout copy differs":
 				if err := os.WriteFile(
 					filepath.Join(mirror(names[0]), ".claude-plugin", "plugin.json"),
 					[]byte("{\"old\":1}"),
@@ -647,11 +666,11 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			// retiredPlugins is the retired lists' claudePlugins, its one id enabled in one state.
 			const retiredID = "old-cache@old-cache"
 			retiredPlugins := map[string][]string{names[0]: {retiredID}}
-			if state == "alpha retired copy enabled" {
+			if state == "checkout retired copy enabled" {
 				enabled[retiredID] = true
 			}
 			if unlisted {
-				enabled["buddy@professor"] = state == "alpha unlisted plugin enabled"
+				enabled["buddy@professor"] = state == "checkout unlisted plugin enabled"
 				ensured = append(slices.Clone(ensured), "buddy@professor")
 			}
 			if err := os.MkdirAll(filepath.Join(store, "plugins"), 0o700); err != nil {
@@ -671,7 +690,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			cache := filepath.Join(store, "plugins", "cache", doctorPluginIDs[0])
 			checkout := filepath.Join(root, names[0], "plugins", names[0])
 			switch state {
-			case "alpha cache behind", "alpha cache behind with its snapshot gone":
+			case "checkout cache behind", "checkout cache behind with its snapshot gone":
 				// The checkout moved to 2.0.0; Claude still records its 1.0.0 snapshot.
 				for _, dir := range []string{checkout, mirror(names[0])} {
 					if err := os.WriteFile(
@@ -689,20 +708,20 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 					"1.0.0",
 					map[string]string{manifest: `{"version":"2.0.0"}`},
 				)
-				if state == "alpha cache behind with its snapshot gone" {
+				if state == "checkout cache behind with its snapshot gone" {
 					// Not installed is the one gap: its install is the repair.
 					if err := os.RemoveAll(cache); err != nil {
 						t.Fatal(err)
 					}
 				}
-			case "alpha cache unreadable":
+			case "checkout cache unreadable":
 				// The checkout's version cannot be read, so the record is never compared.
 				for _, dir := range []string{checkout, mirror(names[0])} {
 					if err := os.WriteFile(filepath.Join(dir, manifest), []byte("{"), 0o600); err != nil {
 						t.Fatal(err)
 					}
 				}
-			case "alpha cache differs":
+			case "checkout cache differs":
 				// Claude reads a checkout copy in place, never this snapshot: no gap.
 				writeDoctorCache(t, store, doctorPluginIDs[0], "1.0.0", map[string]string{
 					manifest: "{\"old\":1}", filepath.Join("node_modules", "dep.js"): "x", ".orphaned_at": "1",
@@ -710,24 +729,24 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			}
 			want, warnings, failures := "doctor: claude_plugins ok\n", 0, 0
 			switch state {
-			case "alpha marketplace empty":
+			case "checkout marketplace empty":
 				want, failures = "doctor: claude_plugins the marketplace plugin list "+
 					filepath.Join(build.SourceRepo, ".claude-plugin", "marketplace.json")+
 					" lists no plugins — repair it, then run pfm install --yes\n", 1
-			case "alpha retired copy enabled":
+			case "checkout retired copy enabled":
 				want, warnings = "doctor: claude_plugins plugin "+retiredID+" retired (now "+names[0]+
 					") but still enabled in "+path+" — claude plugin uninstall "+retiredID+
 					" --scope user; if claude.plugins still lists it, replace that entry with "+names[0]+"\n", 1
-			case "alpha copy symlinked":
+			case "checkout copy symlinked":
 				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" copy "+mirror(names[0])+
 					" is a symlink: Claude refuses plugin files outside its marketplace — run pfm install --yes\n", 1
-			case "alpha copy missing":
+			case "checkout copy missing":
 				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" copy "+mirror(names[0])+
 					" missing — run pfm install --yes\n", 1
-			case "alpha copy differs":
+			case "checkout copy differs":
 				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" copy "+mirror(names[0])+
 					" differs from "+filepath.Join(root, names[0], "plugins", names[0])+" — run pfm install --yes\n", 1
-			case "alpha cache behind":
+			case "checkout cache behind":
 				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" cache in "+
 					filepath.Join(
 						store,
@@ -735,26 +754,26 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 						"installed_plugins.json",
 					)+" records version 1.0.0 (scope user), checkout "+
 					checkout+" is 2.0.0 — run pfm install --yes\n", 1
-			case "alpha cache unreadable":
+			case "checkout cache unreadable":
 				want, failures = "doctor: claude_plugins could not read the plugin cache: plugin "+doctorPluginIDs[0]+
 					" cache: parse "+filepath.Join(checkout, manifest)+": unexpected end of JSON input\n", 1
-			case "alpha cache unversioned":
+			case "checkout cache unversioned":
 				record := filepath.Join(store, "plugins", "installed_plugins.json")
 				plugin := filepath.Join(checkout, manifest)
 				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" cache in "+record+
 					" cannot be checked: "+plugin+" names no version, and Claude caches by version — add a version to "+
 					plugin+", then run pfm install --yes\n", 1
-			case "alpha cache behind with its snapshot gone":
+			case "checkout cache behind with its snapshot gone":
 				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" not installed in "+store+
 					" — run pfm install --yes\n", 1
-			case "alpha unlisted plugin enabled":
+			case "checkout unlisted plugin enabled":
 				want, warnings = "doctor: claude_plugins plugin buddy enabled (buddy@professor) in "+path+
 					", but claude.plugins does not list it — run pfm install --yes\n", 1
-			case "alpha fallback":
+			case "checkout fallback":
 				want, failures = "", len(names)
 				for _, name := range names {
 					checkout := filepath.Join(home, ".professor", "plugins", name, "plugins", name)
-					want += "doctor: claude_plugins FAIL plugin " + name + " is not installed on this alpha build: no checkout at " +
+					want += "doctor: claude_plugins FAIL plugin " + name + " is not installed with claude.pluginSource checkout: no checkout at " +
 						filepath.Join(
 							checkout,
 							".claude-plugin",
@@ -763,7 +782,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 						" (the source clone's plugins/; claude.pluginCheckoutRoot unset) — " +
 						"check the plugin out where named, or set claude.pluginCheckoutRoot, then run pfm install --yes\n"
 				}
-			case "alpha source clone moved away":
+			case "checkout source clone moved away":
 				want, failures = "doctor: claude_plugins marketplace plugin list unread: source clone unresolved: "+
 					build.SourceRepoErr.Error()+" — repair it, then run pfm install --yes\n", len(names)+1
 				for _, name := range names {
@@ -791,7 +810,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 
 // TestDoctorClaudePluginBuild: doctor checks the plugins of the build install
 // ensures — claude.pluginCheckoutRoot and the list from config, and the source
-// clone install recorded in its marker, whose plugins/ an -alpha build reads
+// clone install recorded in its marker, whose plugins/ a checkout host reads
 // when the key is unset. The default clone and a recorded clone that moved
 // away are states of TestClaudePluginsDoctorChecksTheBuildsCopies.
 func TestDoctorClaudePluginBuild(t *testing.T) {
@@ -810,10 +829,16 @@ func TestDoctorClaudePluginBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	build := doctorClaudePluginBuild(
-		"0.80.0-alpha", home, pfmconfig.Claude{PluginCheckoutRoot: "/opt/plugins", Plugins: plugins},
-	)
-	if build.Version != "0.80.0-alpha" || build.Home != home || build.CheckoutRoot != "/opt/plugins" ||
+	build := doctorClaudePluginBuild(home, pfmconfig.Claude{
+		PluginCheckoutRoot: "/opt/plugins", PluginSource: pfmconfig.PluginSourceCheckout, Plugins: plugins,
+	})
+	if release := doctorClaudePluginBuild(
+		home,
+		pfmconfig.Claude{PluginSource: pfmconfig.PluginSourceRelease},
+	); release.FromCheckout {
+		t.Fatalf("claude.pluginSource release: build = %+v, want FromCheckout false", release)
+	}
+	if !build.FromCheckout || build.Home != home || build.CheckoutRoot != "/opt/plugins" ||
 		!reflect.DeepEqual(build.Plugins, plugins) ||
 		build.SourceRepo != clone ||
 		build.SourceRepoErr != nil {
@@ -823,7 +848,7 @@ func TestDoctorClaudePluginBuild(t *testing.T) {
 
 // TestClaudePluginsDoctorChecksTheCallmeterBinary: an enabled callmeter checkout
 // copy runs the binary its wrapper finds at {CALLMETER_HOME}/bin/{plugin.json
-// version}/callmeter; on an -alpha build doctor fails when the binary install
+// version}/callmeter; on a checkout host doctor fails when the binary install
 // placed there is gone, naming the path and the repair.
 func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 	for _, state := range []string{"present", "missing", "not executable"} {
@@ -874,7 +899,7 @@ func TestClaudePluginsDoctorChecksTheCallmeterBinary(t *testing.T) {
 				filepath.Join(".claude-plugin", "plugin.json"): `{"version":"0.3.0"}`,
 			})
 			build := installer.ClaudePluginBuild{
-				Version: "0.80.0-alpha", Home: home, CheckoutRoot: root,
+				FromCheckout: true, Home: home, CheckoutRoot: root,
 				Plugins: []pfmconfig.ClaudePlugin{{ID: "callmeter"}},
 			}
 			want, failures := "doctor: claude_plugins ok\n", 0

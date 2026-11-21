@@ -159,7 +159,7 @@ A `null` for any key in `claude.settings` removes that shipped default; `"tui": 
 
 `pfm config validate` checks the file. `pfm config claude` prints the value each launch knob resolves to and where it came from, then an `extra claude.settings:` section listing every other `claude.settings` key a launch carries. An edit reaches each chat started after it, chats started through the `chat-professor` MCP server included; a running chat keeps its launch until it is reloaded.
 
-`claude.plugins` unset is the default list: cache-live-control, forward-compaction, auto-effort, tool-visibility-controller, engine-sync, flights and professor, each enabled. Set the key to choose another set; a plugin you disable by hand while the list names it is enabled again at the next install. On an alpha build, every other plugin in the clone's marketplace is installed and kept disabled. The full plugin rules are in the [plugins guide](docs/guide/plugins.md#plugins).
+`claude.plugins` unset is the default list: cache-live-control, forward-compaction, auto-effort, tool-visibility-controller, engine-sync, flights and professor, each enabled. Set the key to choose another set; a plugin you disable by hand while the list names it is enabled again at the next install. Under `"claude.pluginSource": "checkout"` (default `"release"`), every other plugin in the clone's marketplace is installed and kept disabled. The full plugin rules are in the [plugins guide](docs/guide/plugins.md#plugins).
 
 ### First install on a host that already used Claude
 
@@ -242,7 +242,7 @@ mkdir -p "$HOME/.local/bin"
 GOPROXY=https://proxy.golang.org go -C "$HOME/.professor/pfm" build -trimpath -ldflags "-X main.version=$TAG" -o "$HOME/.local/bin/pfm" ./cmd/pfm
 ```
 
-Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.27.1 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it. `git submodule update --init` checks out the plugins under `plugins/` at the commits that tag pins, after the checkout, so they match it: a plain clone leaves every plugin directory empty, `make -C pfm host-install` builds engine-sync from `plugins/engine-sync`, and an alpha build installs every plugin from its checkout there ([Contributing from a clone](#contributing-from-a-clone)). Run it again after every later checkout or `git pull` of the clone.
+Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.27.1 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it. `git submodule update --init` checks out the plugins under `plugins/` at the commits that tag pins, after the checkout, so they match it: a plain clone leaves every plugin directory empty, `make -C pfm host-install` builds engine-sync from `plugins/engine-sync`, and a machine set to `"claude.pluginSource": "checkout"` installs every plugin from its checkout there ([Contributing from a clone](#contributing-from-a-clone)). Run it again after every later checkout or `git pull` of the clone.
 
 After the source build, run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 
@@ -316,7 +316,7 @@ Only a host that builds `develop` or pushes to this repository needs this sectio
 
 ### Build `develop` (an alpha)
 
-`develop`'s `VERSION` ends `-alpha`, and an alpha build installs every plugin from its checkout under `plugins/` instead of from GitHub, so the submodules must be initialised. An uninitialised one is a `pfm doctor` FAIL: `submodule plugins/{p} is not initialised in {clone}: run git submodule update --init plugins/{p} there`. Path 2's clone, then:
+`develop`'s `VERSION` ends `-alpha`, which only sets pfm's default log level (debug). Which plugins a machine runs is the machine setting `"claude.pluginSource"` in `pfm.config.json`: `"release"` (the default) installs them from GitHub, `"checkout"` installs them from their checkout under `plugins/`. A source install of `develop` that works on the plugins sets `"claude.pluginSource": "checkout"`, and then the submodules must be initialised. An uninitialised one is a `pfm doctor` FAIL: `submodule plugins/{p} is not initialised in {clone}: run git submodule update --init plugins/{p} there`. The machine setting `"installPing"` in the same file (boolean, default `true`) controls the anonymous install count: `false` turns off both the ping at `pfm install` and the daily one; a project's own `pfm.config.json` cannot set it, and `pfm install` prints whether the ping is on ([what is sent](README.md#install-ping)). Path 2's clone, then:
 
 ```bash
 git -C "$HOME/.professor" switch develop

@@ -13,12 +13,11 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // claude.env is pfm's map of plugin options as environment variables. pfm
 // writes it into the chosen settings.json (normally the primary seat), plus
-// alpha plugin-log policy into every managed config dir. It owns only keys
+// checkout-host plugin-log policy into every managed config dir. It owns only keys
 // it wrote: the ledger records each physical file's keys and values, the
 // chosen target, and generated log policy separately from user claude.env.
 
@@ -240,7 +239,7 @@ func (installer *engine) ensureClaudeEnv(uninstall bool) (result error) {
 	var failures []error
 	if !uninstall {
 		wants[targetPhysical] = want
-		if obs.AlphaBuild(installer.options.Version) {
+		if installer.options.ClaudePluginsFromCheckout {
 			logDir := want[PluginLogDirEnv]
 			if logDir == "" {
 				logDir = filepath.Join(installer.options.Home, ".local", "state", "pfm", "plugin-logs")
@@ -498,7 +497,7 @@ func ClaudeEnvUnknownKeys(env map[string]string, targets []ClaudePluginTarget) [
 }
 
 // ClaudeEnvGap is one settings drift and its effective repair. Missing is
-// semantic metadata so the alpha plugin_logs check can own missing-log readiness.
+// semantic metadata so the checkout-host plugin_logs check can own missing-log readiness.
 type ClaudeEnvGap struct {
 	Key, Problem, Fix string
 	Missing           bool

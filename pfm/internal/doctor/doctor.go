@@ -4,6 +4,7 @@
 //
 // herdr_claude.go: the herdr-integration row of each Claude settings store.
 // host_overlay.go: the host_overlay rows, one per contracted overlay symlink.
+// claude_plugin_source.go: the claude_plugins source row, where Professor's plugins install from and what set it.
 // clone_checks.go: the professor clone's rows: pfm_build against VERSION and HEAD, then git_push and leak_terms.
 // clone_leak_terms.go: the leak_terms row, the clone's private leak denylist the pre-push gate reads.
 // git_push_check.go: the git_push row, whether git can push the clone's github.com origin.
@@ -278,12 +279,13 @@ func Run(
 	retiredLists, retiredFailures := loadRetiredLists(stdout, resolved.Home)
 	tally.failures += retiredFailures
 	claudeStore := installer.ClaudeStore(resolved.Home)
-	pluginBuild := doctorClaudePluginBuild(runtime.Version, resolved.Home, runtime.Config.Claude)
+	pluginBuild := doctorClaudePluginBuild(resolved.Home, runtime.Config.Claude)
 	claudeEnv := runtime.Config.EffectiveClaudeEnv(dependencies.Env, resolved.Home)
 	claudeEnvDir := primary.ConfigDir
 	if len(runtime.Config.Accounts) == 0 || claudeEnvDir == "" {
 		claudeEnvDir = filepath.Join(resolved.Home, ".claude")
 	}
+	printClaudePluginSourceDoctor(stdout, runtime.Config)
 	printClaudePluginsDoctor(
 		stdout,
 		claudeStore,
@@ -302,7 +304,7 @@ func Run(
 		installer.ManagedRoot(resolved.Home),
 		filepath.Join(claudeEnvDir, "settings.json"),
 		claudeEnv,
-		doctorClaudePluginBuild(runtime.Version, resolved.Home, runtime.Config.Claude),
+		pluginBuild,
 		tally,
 	)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)

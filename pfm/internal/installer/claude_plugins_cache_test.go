@@ -157,7 +157,7 @@ func cacheRecordVersions(t *testing.T, configDir, id string) []string {
 
 // TestEnsureClaudePluginsBringsTheCacheToTheCheckout: Claude runs an installed
 // checkout copy from the snapshot it records per scope in installed_plugins.json,
-// so an -alpha install runs `claude plugin update {id} --scope {scope} -y` for
+// so a checkout-host install runs `claude plugin update {id} --scope {scope} -y` for
 // every entry whose version is not the checkout's — a project scope's from its
 // project dir — and reads the record back: an entry still behind is a failure
 // naming both versions. An entry at the checkout's version whose snapshot
@@ -453,7 +453,7 @@ func TestEnsureClaudePluginsUpdatesCallmetersCacheAfterItsBinary(t *testing.T) {
 	}
 	var out bytes.Buffer
 	inst := pluginEngine(home, binary, first, second, runner, &out, true)
-	inst.options.Version = alphaVersion
+	inst.options.ClaudePluginsFromCheckout = true
 	inst.options.ClaudePluginCheckoutRoot = root
 	inst.options.ClaudePlugins = bareList(callmeterPlugin)
 	id := ownID(callmeterPlugin)

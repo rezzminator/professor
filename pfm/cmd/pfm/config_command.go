@@ -142,6 +142,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.Source(versionCommand),
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
+	fmt.Fprint(stdout, config.InstallPingSummary())
 	fmt.Fprint(stdout, config.ChatSummary())
 	fmt.Fprint(stdout, config.HerdrSummary())
 	for index, value := range []string{runtime.Paths.StateDB, runtime.Paths.CacheDB} {
@@ -170,6 +171,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("theme", config.Claude.Theme)
 	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)
 	printClaude("pluginCheckoutRoot", config.Claude.PluginCheckoutRoot)
+	printClaude("pluginSource", config.Claude.PluginSource)
 	plugins := make([]string, 0, len(config.Claude.Plugins))
 	for _, plugin := range config.Claude.Plugins {
 		entry := plugin.ID

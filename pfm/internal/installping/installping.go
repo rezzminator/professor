@@ -2,11 +2,12 @@
 // install id, pfm's version, OS and architecture, and the enabled plugins of
 // Professor's own marketplace, POSTed to the install-ping Worker
 // (infra/install-ping/) so real installs and daily-active installs can be
-// counted. Nothing is sent when Reason names a cause: the opt-out variables,
+// counted. Nothing is sent when Reason names a cause: "installPing": false
+// in pfm.config.json, an unreadable pfm.config.json, the opt-out variables,
 // CI, the fence, or an unstamped build.
 //
 // Entry points:
-//   - Reason: why no ping is sent, "" when one is.
+//   - Reason: why no ping is sent under Options, "" when one is.
 //   - Notice, NoticeSkipped: the one line pfm install prints about the ping.
 //   - SendInstall: the event=install ping, sent once at the end of pfm install.
 //   - SendDaily: the event=daily ping, at most once per UTC day.
@@ -46,6 +47,11 @@ const (
 	envGitHubActions = "GITHUB_ACTIONS"
 	// reasonUnstamped is Reason for a binary whose version the counter refuses.
 	reasonUnstamped = "unstamped development build"
+	// reasonConfigOff and reasonConfigUnreadable are Reason for the config switch off and a config that did not load.
+	reasonConfigOff        = `"installPing": false in pfm.config.json`
+	reasonConfigUnreadable = "pfm.config.json unreadable"
+	// optOut is the clause every notice ends on: the config key that turns both pings off.
+	optOut = `set "installPing": false in pfm.config.json to turn it off`
 )
 
 // The two events the counter takes.
@@ -58,6 +64,10 @@ const (
 // its own Endpoint, Client, Clock, Env, platform and directories.
 type Options struct {
 	Env paths.Env
+	// ConfigOff is "installPing": false in pfm.config.json; ConfigError is the
+	// error that left pfm.config.json unread. Either one sends nothing.
+	ConfigOff   bool
+	ConfigError error
 	// StateDir holds the install id and the daily marker: pfm's state directory.
 	StateDir string
 	// ClaudeConfigDir is the Claude config dir whose enabled plugins are read.
@@ -77,6 +87,8 @@ func ForRuntime(runtime pfmconfig.Runtime, env paths.Env) Options {
 	goos, goarch := paths.Platform()
 	return Options{
 		Env:             env,
+		ConfigOff:       !runtime.Config.InstallPing,
+		ConfigError:     runtime.ConfigError,
 		StateDir:        filepath.Dir(runtime.Paths.StateDB),
 		ClaudeConfigDir: claudeplugin.ConfigDirIn(env, runtime.Paths.Home),
 		Version:         runtime.Version,
@@ -88,11 +100,18 @@ func ForRuntime(runtime pfmconfig.Runtime, env paths.Env) Options {
 	}
 }
 
-// Reason is why no ping is sent under env for a binary of version, "" when
-// one is: the variable that turned it off, the CI or fence marker, or an
-// unstamped build the counter would refuse.
-func Reason(env paths.Env, version string) string {
+// Reason is why no ping is sent under options, "" when one is, the one
+// decision every caller shares: the config switch, then an unreadable config
+// (a user who wrote false and broke the file is never pinged), then the
+// variable that turned it off, the CI or fence marker, or an unstamped build
+// the counter would refuse.
+func Reason(options Options) string {
+	env := options.Env
 	switch {
+	case options.ConfigOff:
+		return reasonConfigOff
+	case options.ConfigError != nil:
+		return reasonConfigUnreadable
 	case paths.InstallPingOfflineIn(env):
 		return paths.EnvInstallPingOffline
 	case set(env.Get(EnvDoNotTrack)):
@@ -103,7 +122,7 @@ func Reason(env paths.Env, version string) string {
 		return envGitHubActions
 	case env.Get(paths.EnvDevFence) == "1":
 		return paths.EnvDevFence
-	case !versionPattern.MatchString(version):
+	case !versionPattern.MatchString(options.Version):
 		return reasonUnstamped
 	}
 	return ""
@@ -118,24 +137,24 @@ func set(value string) bool {
 // turn it off when reason is "", else what turned it off.
 func Notice(reason string) string {
 	if reason == "" {
-		return "pfm: anonymous install ping on (random id, version, OS, Professor plugins; no IP stored) — set " +
-			paths.EnvInstallPingOffline + "=1 or " + EnvDoNotTrack + "=1 to turn it off"
+		return "pfm: install ping on — an anonymous count of Professor installs (random install id, pfm version, " +
+			"OS, architecture, enabled Professor plugins; no IP, hostname, username or paths), sent at install " +
+			"and once a day; " + optOut
 	}
 	return "pfm: install ping off (" + reason + ")"
 }
 
 // NoticeSkipped is the line for an install that skips its own ping for cause
-// while the daily ping stays on: it names the switches that turn both off.
+// while the daily ping stays on: it names the config key that turns both off.
 func NoticeSkipped(cause string) string {
-	return "pfm: install ping not sent (" + cause + "); the daily ping stays on — set " +
-		paths.EnvInstallPingOffline + "=1 or " + EnvDoNotTrack + "=1 to turn it off"
+	return "pfm: install ping not sent (" + cause + "); the daily ping stays on — " + optOut
 }
 
 // SendInstall sends the event=install ping and claims today, so the daily ping
 // waits for tomorrow. Nothing is sent when Reason names a cause. A failure is
 // logged WARN and returned; the caller's command never fails on it.
 func SendInstall(ctx context.Context, options Options) error {
-	if Reason(options.Env, options.Version) != "" {
+	if Reason(options) != "" {
 		return nil
 	}
 	today := day(options.Clock)
@@ -152,7 +171,7 @@ func SendInstall(ctx context.Context, options Options) error {
 // send it once; a failed send is not retried that day. Nothing is sent when
 // Reason names a cause. A failure is logged WARN and returned.
 func SendDaily(ctx context.Context, options Options) error {
-	if Reason(options.Env, options.Version) != "" {
+	if Reason(options) != "" {
 		return nil
 	}
 	today := day(options.Clock)

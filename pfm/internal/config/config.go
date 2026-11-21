@@ -3,6 +3,8 @@
 //
 // name_sync.go: nameSync.interval, the window-name convergence schedule.
 // herdr.go: herdr.keys, the user's Herdr keymap pfm install merges over its own.
+// herdr_settings.go: herdr.settings, Herdr config.toml values pfm install adds where the file lacks them;
+// the herdr block's marshal and `pfm config show` lines.
 // scope_unread.go: the keys a file sets that its scope never reads, retired or machine-only.
 // runtime_reload.go: Runtime.Reload, the machine file read again for a long-lived process.
 package config
@@ -484,6 +486,7 @@ func defaultsWithMCPServers(
 		"chat.backend":                                       SourceDefault,
 		"chat.herdrTabStatus":                                SourceDefault,
 		KeyHerdrKeys:                                         SourceDefault,
+		KeyHerdrSettings:                                     SourceDefault,
 		"tmux.titles.enabled":                                SourceDefault,
 		"nameSync.interval":                                  SourceDefault,
 		keyDoctorIgnoreWarnings:                              SourceDefault,

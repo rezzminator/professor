@@ -31,6 +31,30 @@ func TestParseDefaults(t *testing.T) {
 				registry: []defaultValue{{"arrow", json.RawMessage(`false`), "r"}},
 			},
 		},
+		{
+			name: "a user setting carries its settings value",
+			raw: `{"settings":{"skip":true},"userSettings":["skip"],` +
+				`"reasons":{"settings.skip":"s","userSettings.skip":"u"}}`,
+			want: launchDefaults{
+				settings:     []defaultValue{{"skip", json.RawMessage(`true`), "s"}},
+				userSettings: []defaultValue{{"skip", json.RawMessage(`true`), "u"}},
+			},
+		},
+		{
+			name: "a user setting naming the env block",
+			raw:  `{"settings":{"env":{"A":"1"}},"userSettings":["env"],"reasons":{"settings.env.A":"a"}}`,
+			err:  "userSettings.env names no top-level settings value",
+		},
+		{
+			name: "a user setting naming no settings value",
+			raw:  `{"userSettings":["skip"],"reasons":{"userSettings.skip":"u"}}`,
+			err:  "userSettings.skip names no top-level settings value",
+		},
+		{
+			name: "a user setting without a reason",
+			raw:  `{"settings":{"skip":true},"userSettings":["skip"],"reasons":{"settings.skip":"s"}}`,
+			err:  "userSettings.skip has no reason",
+		},
 		{name: "a settings value without a reason", raw: `{"settings":{"style":"x"}}`, err: "settings.style has no reason"},
 		{name: "an env variable without a reason", raw: `{"settings":{"env":{"A":"1"}}}`, err: "settings.env.A has no reason"},
 		{name: "a registry value without a reason", raw: `{"registry":{"arrow":false}}`, err: "registry.arrow has no reason"},

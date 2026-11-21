@@ -144,6 +144,26 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.Settings["showThinkingSummaries"] != true {
 					t.Errorf("showThinkingSummaries=%#v, want true", parsed.Settings["showThinkingSummaries"])
 				}
+			case "skipAutoPermissionPrompt", "skipDangerousModePermissionPrompt", "skipWorkflowUsageWarning":
+				if parsed.Settings[knob.Name] != true {
+					t.Errorf("%s=%#v, want true", knob.Name, parsed.Settings[knob.Name])
+				}
+			case "env.CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF", "env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
+				"env.CLAUDE_CODE_RETRY_WATCHDOG", "env.CLAUDE_DISABLE_ADOPT":
+				if name := knob.Name[len("env."):]; parsed.SettingsEnv[name] != "1" {
+					t.Errorf("%s=%q, want 1", name, parsed.SettingsEnv[name])
+				}
+			case "env.CLAUDE_CODE_STOP_HOOK_BLOCK_CAP":
+				if parsed.SettingsEnv["CLAUDE_CODE_STOP_HOOK_BLOCK_CAP"] != "2" {
+					t.Errorf(
+						"CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=%q, want 2",
+						parsed.SettingsEnv["CLAUDE_CODE_STOP_HOOK_BLOCK_CAP"],
+					)
+				}
+			case "env.ENABLE_TOOL_SEARCH":
+				if parsed.SettingsEnv["ENABLE_TOOL_SEARCH"] != "true" {
+					t.Errorf("ENABLE_TOOL_SEARCH=%q, want true", parsed.SettingsEnv["ENABLE_TOOL_SEARCH"])
+				}
 			case "tui":
 				if parsed.Settings["tui"] != "fullscreen" {
 					t.Errorf("tui=%#v, want fullscreen", parsed.Settings["tui"])

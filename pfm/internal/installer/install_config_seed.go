@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -56,8 +57,10 @@ func seedWithoutDefaultNewKeys(loaded pfmconfig.Config) ([]byte, error) {
 		delete(document, pfmconfig.KeyHarnessPrompt)
 		removed = true
 	}
-	// An unset herdr.keys is pfm's own keymap, and a pfm before it refuses the herdr block.
-	if _, present := document[pfmconfig.KeyHerdr]; present && loaded.Herdr.Keys == nil {
+	// An unset herdr.keys is pfm's own keymap, a herdr.settings laying nothing over pfm's shipped Herdr
+	// settings changes no config.toml, and a pfm before them refuses the herdr block.
+	if _, present := document[pfmconfig.KeyHerdr]; present && loaded.Herdr.Keys == nil &&
+		reflect.DeepEqual(herdrSettingsEffective(loaded.Herdr.Settings), herdrSettingsDefault()) {
 		delete(document, pfmconfig.KeyHerdr)
 		removed = true
 	}

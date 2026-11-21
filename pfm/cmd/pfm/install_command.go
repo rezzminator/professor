@@ -259,6 +259,7 @@ func newInstallerOptions(
 		options.ClaudePluginCheckoutRoot = runtime.Config.Claude.PluginCheckoutRoot
 		installer.ConfigureClaudePlugins(&options, runtime.Config)
 		options.HerdrKeys = runtime.Config.Herdr.Keys
+		options.HerdrSettings = runtime.Config.Herdr.Settings
 		options.CodexBinary = runtime.Config.Codex.Binary
 		if options.CodexBinary == "" {
 			options.CodexBinary = pfmengine.MustLookup(pfmengine.Codex).Binary

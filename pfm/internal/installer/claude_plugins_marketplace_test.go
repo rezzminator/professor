@@ -419,6 +419,7 @@ func TestEnsureClaudePluginsAlphaMarketplacePlugins(t *testing.T) {
 				"engine-sync@professor":                true,
 				"flights@professor":                    true,
 				"professor@professor":                  true,
+				"rule-control@professor":               true,
 				"buddy@professor":                      false,
 			},
 		},

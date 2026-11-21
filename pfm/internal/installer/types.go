@@ -176,9 +176,9 @@ type Options struct {
 	// ClaudeEnv is claude.env: the plugin options as environment variables
 	// pfm writes into the primary seat's settings.json env (ensureClaudeEnv).
 	ClaudeEnv map[string]string
-	// HerdrKeys is herdr.keys, the keymap the Herdr keys step merges over
-	// pfm's; nil when unset.
-	HerdrKeys *pfmconfig.HerdrKeys
+	// HerdrKeys, HerdrSettings: herdr.keys, herdr.settings, laid over pfm's own by their Herdr steps; nil unset.
+	HerdrKeys     *pfmconfig.HerdrKeys
+	HerdrSettings map[string]any
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches

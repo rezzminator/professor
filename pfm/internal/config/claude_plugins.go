@@ -40,6 +40,7 @@ func DefaultClaudePlugins() []ClaudePlugin {
 		{ID: "engine-sync"},
 		{ID: "flights"},
 		{ID: "professor"},
+		{ID: "rule-control"},
 	}
 }
 

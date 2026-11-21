@@ -61,6 +61,15 @@ func TestInstallConfigSeedKeepsNonDefaultNewKeys(t *testing.T) {
 			t.Errorf("seed claude.%s = %q, want %q", key, got, want)
 		}
 	}
+	// herdr.settings away from pfm's shipped Herdr settings keeps the herdr block, herdr.keys unset.
+	document, _ = installSeedClaude(t, []byte(`{"version":2,"herdr":{"keys":null,"settings":{"onboarding":true}},`+
+		`"claude":{"theme":null}}`))
+	if got, want := strings.Join(
+		strings.Fields(string(document["herdr"])),
+		"",
+	), `{"keys":null,"settings":{"onboarding":true}}`; got != want {
+		t.Errorf("seed herdr = %q, want %q", got, want)
+	}
 }
 
 // snapshotTree records every path under root with its mode and content, so a read-only call can be proven to leave the tree as it was.

@@ -28,9 +28,10 @@ func examplePath(t *testing.T) string {
 
 func flattenExample(prefix string, value any, leaves map[string]any) {
 	object, ok := value.(map[string]any)
-	// claude.settings is one value, the shipped launch defaults, which claudelaunch's
-	// TestExampleClaudeSettingsAreTheDefaults holds the example to.
-	if !ok || len(object) == 0 || prefix == KeyClaudeSettings {
+	// claude.settings and herdr.settings are one value each, the shipped defaults, which claudelaunch's
+	// TestExampleConfigCarriesTheDefaults and the installer's TestExampleHerdrSettingsAreTheDefaults hold
+	// the example to.
+	if !ok || len(object) == 0 || prefix == KeyClaudeSettings || prefix == KeyHerdrSettings {
 		leaves[prefix] = value
 		return
 	}
@@ -75,7 +76,7 @@ func TestExampleConfigMatchesKeys(t *testing.T) {
 		got, found := actual[key]
 		if !found {
 			missing = append(missing, key)
-		} else if key != KeyClaudeSettings && !reflect.DeepEqual(got, expected) {
+		} else if key != KeyClaudeSettings && key != KeyHerdrSettings && !reflect.DeepEqual(got, expected) {
 			wrong = append(wrong, key)
 		}
 	}

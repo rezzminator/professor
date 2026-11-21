@@ -52,6 +52,9 @@ func Keys() []KeyDefault {
 		{"chat.backend", DefaultChatBackend},
 		{"chat.herdrTabStatus", DefaultHerdrTabStatus},
 		{KeyHerdrKeys, nil},
+		// herdr.settings defaults to pfm's shipped Herdr settings (the installer's herdrSettingsDefault),
+		// whose test holds the example's value to them.
+		{KeyHerdrSettings, nil},
 		{keyStateDB, "~/.local/state/pfm/pfm.db"},
 		{keyStateCacheDB, "~/.local/state/pfm/pfm-cache.db"},
 		{"claude.permissionMode", PermissionBypass},

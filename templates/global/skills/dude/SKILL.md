@@ -1,6 +1,6 @@
 ---
 name: dude
-description: 'Course-corrects you on the user''s anger — `/dude [what went wrong]`, typed instead of an insult, or whenever the user curses at you. Names which of ten recurring failure patterns you are in and fixes it this turn.'
+description: 'Course-corrects you on user anger — `/dude [what went wrong]`, or load it yourself whenever the user swears. Returns which of ten recurring failure patterns you are in and its fix, done this turn.'
 ---
 
 # Dude

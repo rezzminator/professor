@@ -1,7 +1,6 @@
 package hookentry
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -11,51 +10,25 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// TestInstallPingNoticeSaysOnOrWhatTurnedItOff: pfm install prints one install
-// ping line and sends the install ping only when it says on.
-func TestInstallPingNoticeSaysOnOrWhatTurnedItOff(t *testing.T) {
-	const on = `pfm: install ping on — an anonymous count of Professor installs (random install id, pfm version, OS, ` +
-		`architecture, enabled Professor plugins; no IP, hostname, username or paths), sent at install and once a ` +
-		"day; set \"installPing\": false in pfm.config.json to turn it off\n"
+// TestInstallPingSendsOnlyWhenOn: pfm install sends its ping when enabled,
+// and not under an off switch, a config error or --offline.
+func TestInstallPingSendsOnlyWhenOn(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		env       map[string]string
 		offline   bool
 		configOff bool
 		configErr error
-		want      string
 		wantSent  int
 	}{
-		{
-			name: "installPing false", env: map[string]string{}, configOff: true,
-			want: "pfm: install ping off (\"installPing\": false in pfm.config.json)\n",
-		},
-		{
-			name: "installPing false under --offline", env: map[string]string{}, configOff: true, offline: true,
-			want: "pfm: install ping off (\"installPing\": false in pfm.config.json)\n",
-		},
-		{
-			name: "unreadable config", env: map[string]string{}, configErr: errors.New("parse config /x at byte 3"),
-			want: "pfm: install ping off (pfm.config.json unreadable)\n",
-		},
-		{name: "on", env: map[string]string{}, want: on, wantSent: 1},
-		{
-			name: "PFM_INSTALL_PING_OFFLINE=1", env: map[string]string{"PFM_INSTALL_PING_OFFLINE": "1"},
-			want: "pfm: install ping off (PFM_INSTALL_PING_OFFLINE)\n",
-		},
-		{
-			name: "DO_NOT_TRACK=1", env: map[string]string{"DO_NOT_TRACK": "1"},
-			want: "pfm: install ping off (DO_NOT_TRACK)\n",
-		},
-		{
-			name: "--offline", env: map[string]string{}, offline: true,
-			want: "pfm: install ping not sent (--offline); the daily ping stays on — " +
-				"set \"installPing\": false in pfm.config.json to turn it off\n",
-		},
-		{
-			name: "--offline under DO_NOT_TRACK=1", env: map[string]string{"DO_NOT_TRACK": "1"}, offline: true,
-			want: "pfm: install ping off (DO_NOT_TRACK)\n",
-		},
+		{name: "installPing false", env: map[string]string{}, configOff: true},
+		{name: "installPing false under --offline", env: map[string]string{}, configOff: true, offline: true},
+		{name: "unreadable config", env: map[string]string{}, configErr: errors.New("parse config /x at byte 3")},
+		{name: "on", env: map[string]string{}, wantSent: 1},
+		{name: "PFM_INSTALL_PING_OFFLINE=1", env: map[string]string{"PFM_INSTALL_PING_OFFLINE": "1"}},
+		{name: "DO_NOT_TRACK=1", env: map[string]string{"DO_NOT_TRACK": "1"}},
+		{name: "--offline", env: map[string]string{}, offline: true},
+		{name: "--offline under DO_NOT_TRACK=1", env: map[string]string{"DO_NOT_TRACK": "1"}, offline: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			previous := installPingInstall
@@ -65,13 +38,12 @@ func TestInstallPingNoticeSaysOnOrWhatTurnedItOff(t *testing.T) {
 				sent++
 				return errors.New("counter unreachable")
 			}
-			var stdout bytes.Buffer
 			runtime := config.Runtime{
 				Version: "1.2.3", Config: config.Config{InstallPing: !tc.configOff}, ConfigError: tc.configErr,
 			}
-			InstallPing(context.Background(), &stdout, tc.offline, runtime, &paths.MapEnv{Values: tc.env})
-			if stdout.String() != tc.want || sent != tc.wantSent {
-				t.Fatalf("notice=%q sent=%d, want %q sent=%d", stdout.String(), sent, tc.want, tc.wantSent)
+			InstallPing(context.Background(), tc.offline, runtime, &paths.MapEnv{Values: tc.env})
+			if sent != tc.wantSent {
+				t.Fatalf("sent=%d, want %d", sent, tc.wantSent)
 			}
 		})
 	}

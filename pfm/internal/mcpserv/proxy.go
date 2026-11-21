@@ -47,10 +47,9 @@ type stdioProxy struct {
 	clock                   clock.Clock
 	retryWindow             time.Duration
 	retryDelay              time.Duration
-	initialize, initialized []byte
+	handshake               stdioHandshake
 	sessionID, protocol     string
 	sessionGeneration       uint64
-	handshakeMutex          sync.Mutex
 	sessionMutex            sync.RWMutex
 	reinitMutex             sync.Mutex
 	requestMutex            sync.Mutex
@@ -248,7 +247,10 @@ func (professor *FamilyServers) runStdioTransport(
 	if warnings == nil {
 		warnings = os.Stderr
 	}
-	const consequence = "if `pfm install` replaces this binary, this chat's MCP tools fail until the chat restarts"
+	consequence := "if `pfm install` replaces this binary, this chat's MCP tools fail until the chat restarts"
+	if options.Handover != nil {
+		consequence = "a `pfm install` that replaces this binary moves this chat onto the installed pfm"
+	}
 	inProcess := func(reason string) error {
 		fmt.Fprintf(warnings, "pfm mcp stdio: %s; using in-process MCP; %s\n", reason, consequence)
 		input := reader
@@ -323,7 +325,7 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 		return
 	}
 	if isProxyHandshake(frame.Method) {
-		proxy.storeHandshake(frame.Method, raw)
+		proxy.handshake.store(frame.Method, raw)
 	}
 	forwarded := raw
 	if frame.Method == "tools/call" {
@@ -511,24 +513,8 @@ func (proxy *stdioProxy) uncertainDelivery(cause error) error {
 	)
 }
 
-func (proxy *stdioProxy) storeHandshake(method string, frame []byte) {
-	proxy.handshakeMutex.Lock()
-	defer proxy.handshakeMutex.Unlock()
-	if method == proxyInitializeMethod {
-		proxy.initialize = append(proxy.initialize[:0], frame...)
-		return
-	}
-	proxy.initialized = append(proxy.initialized[:0], frame...)
-}
-
-func (proxy *stdioProxy) handshakeSnapshot() ([]byte, []byte) {
-	proxy.handshakeMutex.Lock()
-	defer proxy.handshakeMutex.Unlock()
-	return append([]byte(nil), proxy.initialize...), append([]byte(nil), proxy.initialized...)
-}
-
 func (proxy *stdioProxy) reinitializeLocked(ctx context.Context) (uint64, error) {
-	initialize, initialized := proxy.handshakeSnapshot()
+	initialize, initialized := proxy.handshake.snapshot()
 	if len(initialize) == 0 {
 		return proxy.session().generation, nil
 	}
@@ -722,23 +708,8 @@ func (proxy *stdioProxy) answerFailure(output io.Writer, id json.RawMessage, cau
 }
 
 func (proxy *stdioProxy) answerError(output io.Writer, id json.RawMessage, code int, message string) {
-	response := struct {
-		JSONRPC string          `json:"jsonrpc"`
-		ID      json.RawMessage `json:"id"`
-		Error   struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}{JSONRPC: "2.0", ID: id}
-	response.Error.Code = code
-	response.Error.Message = message
-	encoded, err := json.Marshal(response)
-	if err != nil {
-		proxy.warn("encode daemon failure response: %v", err)
-		return
-	}
-	if _, err := output.Write(append(encoded, '\n')); err != nil {
-		proxy.warn("write daemon failure response: %v", err)
+	if err := writeErrorResponse(output, id, code, message); err != nil {
+		proxy.warn("%v", err)
 	}
 }
 

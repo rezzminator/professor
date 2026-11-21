@@ -217,7 +217,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			Offline:    paths.PricesOffline(),
 			Clock:      clock.Real,
 		})
-		hookentry.InstallPing(context.Background(), stdout, *offline, runtime, paths.OSEnv{})
+		hookentry.InstallPing(context.Background(), *offline, runtime, paths.OSEnv{})
 	}
 	return code
 }

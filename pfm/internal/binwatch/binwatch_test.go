@@ -376,3 +376,71 @@ func TestServeRestartCutsAStuckRequestAtTheDrainBound(t *testing.T) {
 		t.Fatalf("stderr = %q, want the cut request said out loud", stderr.String())
 	}
 }
+
+// TestImageReplaced is the door every long-lived pfm process asks: an
+// untouched executable is current, a rename or a copy over it is a
+// replacement, and a vanished one is an error, never a replacement.
+func TestImageReplaced(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		install func(t *testing.T, binary string)
+		want    bool
+		wantErr string
+	}{
+		{name: "untouched executable is current", install: func(*testing.T, string) {}},
+		{name: "rename over the path is a replacement", want: true, install: func(t *testing.T, binary string) {
+			staged := binary + ".new"
+			writeFakeBuild(t, staged, "new build")
+			if err := os.Rename(staged, binary); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "copy over the path is a replacement", want: true, install: func(t *testing.T, binary string) {
+			writeFakeBuild(t, binary, "a longer new build")
+		}},
+		{name: "vanished executable is an error", wantErr: "no such file or directory", install: func(t *testing.T, binary string) {
+			if err := os.Remove(binary); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binary := filepath.Join(t.TempDir(), "pfm")
+			writeFakeBuild(t, binary, "old build")
+			image, err := ImageAt(binary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.install(t, binary)
+			got, err := image.Replaced()
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			wantErr := ""
+			if tc.wantErr != "" {
+				wantErr = "stat " + binary + ": " + tc.wantErr
+			}
+			if got != tc.want || gotErr != wantErr || image.Path != binary {
+				t.Fatalf(
+					"Replaced() = %t, %q, path %q; want %t, %q, path %q",
+					got,
+					gotErr,
+					image.Path,
+					tc.want,
+					wantErr,
+					binary,
+				)
+			}
+		})
+	}
+}
+
+func TestImageAtRefusesAnAbsentExecutable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "absent")
+	_, err := ImageAt(path)
+	want := "stat own executable " + path + ": stat " + path + ": no such file or directory"
+	if err == nil || err.Error() != want {
+		t.Fatalf("ImageAt error = %v, want %q", err, want)
+	}
+}

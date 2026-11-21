@@ -8,7 +8,6 @@
 //
 // Entry points:
 //   - Reason: why no ping is sent under Options, "" when one is.
-//   - Notice, NoticeSkipped: the one line pfm install prints about the ping.
 //   - SendInstall: the event=install ping, sent once at the end of pfm install.
 //   - SendDaily: the event=daily ping, at most once per UTC day.
 //   - ForRuntime: the production Options of a runtime.
@@ -50,8 +49,6 @@ const (
 	// reasonConfigOff and reasonConfigUnreadable are Reason for the config switch off and a config that did not load.
 	reasonConfigOff        = `"installPing": false in pfm.config.json`
 	reasonConfigUnreadable = "pfm.config.json unreadable"
-	// optOut is the clause every notice ends on: the config key that turns both pings off.
-	optOut = `set "installPing": false in pfm.config.json to turn it off`
 )
 
 // The two events the counter takes.
@@ -131,23 +128,6 @@ func Reason(options Options) string {
 // set reports an opt-out or CI value that is on: non-empty, not 0, not false.
 func set(value string) bool {
 	return value != "" && value != "0" && !strings.EqualFold(value, "false")
-}
-
-// Notice is the one line pfm install prints: what the ping sends and how to
-// turn it off when reason is "", else what turned it off.
-func Notice(reason string) string {
-	if reason == "" {
-		return "pfm: install ping on — an anonymous count of Professor installs (random install id, pfm version, " +
-			"OS, architecture, enabled Professor plugins; no IP, hostname, username or paths), sent at install " +
-			"and once a day; " + optOut
-	}
-	return "pfm: install ping off (" + reason + ")"
-}
-
-// NoticeSkipped is the line for an install that skips its own ping for cause
-// while the daily ping stays on: it names the config key that turns both off.
-func NoticeSkipped(cause string) string {
-	return "pfm: install ping not sent (" + cause + "); the daily ping stays on — " + optOut
 }
 
 // SendInstall sends the event=install ping and claims today, so the daily ping

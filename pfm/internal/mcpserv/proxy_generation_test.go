@@ -98,8 +98,8 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 	proxy.retryDelay = time.Millisecond
 	proxy.sessionID = oldSession
 	proxy.protocol = "2025-06-18"
-	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
-	proxy.storeHandshake("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
+	proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
+	proxy.handshake.store("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
 
 	oldContext, cancelOld := context.WithCancel(context.Background())
 	oldDone := make(chan error, 1)
@@ -188,8 +188,8 @@ func TestStdioProxyCurrentFailureClearsSessionBeforeRecovery(t *testing.T) {
 	proxy.retryDelay = time.Millisecond
 	proxy.sessionID = oldSession
 	proxy.protocol = "2025-06-18"
-	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
-	proxy.storeHandshake("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
+	proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
+	proxy.handshake.store("notifications/initialized", []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`))
 	if _, err := proxy.sendWithRetry(
 		context.Background(),
 		[]byte(proxyTestToolCall(2, "status", `{"target":"seat"}`)),

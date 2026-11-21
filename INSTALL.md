@@ -316,7 +316,7 @@ Only a host that builds `develop` or pushes to this repository needs this sectio
 
 ### Build `develop` (an alpha)
 
-`develop`'s `VERSION` ends `-alpha`, which only sets pfm's default log level (debug). Which plugins a machine runs is the machine setting `"claude.pluginSource"` in `pfm.config.json`: `"release"` (the default) installs them from GitHub, `"checkout"` installs them from their checkout under `plugins/`. A source install of `develop` that works on the plugins sets `"claude.pluginSource": "checkout"`, and then the submodules must be initialised. An uninitialised one is a `pfm doctor` FAIL: `submodule plugins/{p} is not initialised in {clone}: run git submodule update --init plugins/{p} there`. The machine setting `"installPing"` in the same file (boolean, default `true`) controls the anonymous install count: `false` turns off both the ping at `pfm install` and the daily one; a project's own `pfm.config.json` cannot set it, and `pfm install` prints whether the ping is on ([what is sent](README.md#install-ping)). Path 2's clone, then:
+`develop`'s `VERSION` ends `-alpha`, which only sets pfm's default log level (debug). Which plugins a machine runs is the machine setting `"claude.pluginSource"` in `pfm.config.json`: `"release"` (the default) installs them from GitHub, `"checkout"` installs them from their checkout under `plugins/`. A source install of `develop` that works on the plugins sets `"claude.pluginSource": "checkout"`, and then the submodules must be initialised. An uninitialised one is a `pfm doctor` FAIL: `submodule plugins/{p} is not initialised in {clone}: run git submodule update --init plugins/{p} there`. Path 2's clone, then:
 
 ```bash
 git -C "$HOME/.professor" switch develop

@@ -129,7 +129,6 @@ internal/hookentry/launch.go 512
 internal/hookentry/pcm_guard.go 702
 internal/hookentry/pcm_guard_code.go 582
 internal/hookentry/pcm_guard_scan.go 619
-internal/hookentry/seathost.go 542
 internal/hostcheck/function_hooks.go 256
 internal/hostcheck/store.go 615
 internal/hostcheck/tmux_servers.go 298
@@ -190,7 +189,7 @@ internal/mockengine/scenario.go 365
 internal/obs/rotate.go 302
 internal/obs/runner.go 284
 internal/obs/scrub.go 285
-internal/paths/paths.go 697
+internal/paths/paths.go 628
 internal/picker/picker.go 686
 internal/picker/pipeline.go 789
 internal/pricing/load.go 270

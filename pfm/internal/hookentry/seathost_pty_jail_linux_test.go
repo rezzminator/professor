@@ -90,12 +90,22 @@ func TestSeatHostPTY(t *testing.T) {
 		if len(os.Args) == 4 && os.Args[1] == "internal" {
 			id = os.Args[3]
 		}
+		if end, resumed := os.LookupEnv(paths.EnvSeatHostEnd); resumed {
+			// Which image the replaced seat-host handed its engine end to.
+			image, err := os.Readlink("/proc/self/exe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "end-image"), []byte(image+" "+end), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		os.Exit(SeatHost([]string{id}, os.Stdout, os.Stderr, runtime))
 	}
 	for _, mode := range []string{
 		"exit", "ordinary-stdio", "redirected-stdin", "hup", "int", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
-		"reload-failure-locked", "reload-success", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one", "failed-hangup",
+		"reload-failure-locked", "reload-success", "reload-replaced", "end-replaced", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one", "failed-hangup",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
@@ -182,7 +192,10 @@ func TestSeatHostPTY(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			hostBinary := filepath.Join(root, "pfm")
-			if err := os.Symlink(os.Args[0], hostBinary); err != nil {
+			if mode == "reload-replaced" || mode == "end-replaced" || mode == "reload-retry" || mode == "reload-close" {
+				// A copy, so an install can rename a new build over it.
+				copySeatHostBuild(t, hostBinary)
+			} else if err := os.Symlink(os.Args[0], hostBinary); err != nil {
 				t.Fatal(err)
 			}
 			args := []string{"internal", "seat-host", "native-seat"}
@@ -292,6 +305,13 @@ func TestSeatHostPTY(t *testing.T) {
 				if err != nil || !found {
 					t.Fatalf("read first seat: %v %v", found, err)
 				}
+				if mode == "reload-replaced" {
+					// make host-install renames the new build over the running one mid-chat.
+					copySeatHostBuild(t, hostBinary+".new")
+					if err := os.Rename(hostBinary+".new", hostBinary); err != nil {
+						t.Fatal(err)
+					}
+				}
 				before := seat
 				seat.ReloadPending = true
 				run, err := db.ReadSeatRun(seat.SeatID)
@@ -300,7 +320,7 @@ func TestSeatHostPTY(t *testing.T) {
 				}
 				run.Args = []string{"--model", "next-model"}
 				run.Env = append(run.Env, "PFM_S3_PASS=next")
-				if mode != "reload-success" {
+				if mode != "reload-success" && mode != "reload-replaced" {
 					run.Binary = filepath.Join(root, "missing-next-engine")
 				}
 				if err := db.WriteSeatRun(seat.SeatID, run); err != nil {
@@ -316,7 +336,7 @@ func TestSeatHostPTY(t *testing.T) {
 				); err != nil {
 					t.Fatal(err)
 				}
-				if mode != "reload-success" {
+				if mode != "reload-success" && mode != "reload-replaced" {
 					waitSeatFixture(t, done, func() bool {
 						current, found, err := db.Seat(context.Background(), seat.SeatID)
 						return err == nil && found && current.State == "failed"
@@ -337,6 +357,13 @@ func TestSeatHostPTY(t *testing.T) {
 							t.Fatal(err)
 						}
 						if err := db.UpdateSeat(context.Background(), before, current); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if mode == "reload-retry" || mode == "reload-close" {
+						// An install lands while the failed start waits at its retry prompt.
+						copySeatHostBuild(t, hostBinary+".new")
+						if err := os.Rename(hostBinary+".new", hostBinary); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -376,6 +403,14 @@ func TestSeatHostPTY(t *testing.T) {
 					if next.Pane != wantPane || next.SupervisorPID != command.Process.Pid {
 						t.Fatalf("reload moved lifetime owner: %+v", next)
 					}
+					if mode == "reload-replaced" || mode == "reload-retry" {
+						running, runErr := os.Stat("/proc/" + strconv.Itoa(command.Process.Pid) + "/exe")
+						installed, installErr := os.Stat(hostBinary)
+						if runErr != nil || installErr != nil || !os.SameFile(running, installed) {
+							t.Fatalf("supervisor %d runs %v (%v), want the installed %s %v (%v)",
+								command.Process.Pid, running, runErr, hostBinary, installed, installErr)
+						}
+					}
 					if err := os.WriteFile(
 						filepath.Join(root, "engine-report-next-release"),
 						[]byte("ready"),
@@ -383,6 +418,25 @@ func TestSeatHostPTY(t *testing.T) {
 					); err != nil {
 						t.Fatal(err)
 					}
+				}
+			}
+			if mode == "end-replaced" {
+				waitSeatFixture(
+					t,
+					done,
+					func() bool { _, err := os.Stat(filepath.Join(root, "engine-report")); return err == nil },
+				)
+				// make host-install renames the new build over the running one, then the chat ends.
+				copySeatHostBuild(t, hostBinary+".new")
+				if err := os.Rename(hostBinary+".new", hostBinary); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(
+					filepath.Join(root, "engine-report-release"),
+					[]byte("ready"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
 				}
 			}
 			if mode == "hup" || mode == "int" {
@@ -460,6 +514,12 @@ func TestSeatHostPTY(t *testing.T) {
 				if readErr != nil || len(seats) != 0 {
 					t.Fatalf("closed failed seats=%+v err=%v", seats, readErr)
 				}
+				// The close ran on the installed build, a reload it awaited never starting.
+				record := filepath.Join(root, "end-image")
+				body, err := os.ReadFile(record)
+				if want := hostBinary + " 0:faulted"; err != nil || string(body) != want {
+					t.Fatalf("%s = %q (%v), want %q; output=%s", record, body, err, want, &output)
+				}
 				return
 			}
 			if mode == "reload-retry" && !strings.Contains(output.String(), "press Enter to retry, q to close") {
@@ -467,6 +527,14 @@ func TestSeatHostPTY(t *testing.T) {
 			}
 			if command.ProcessState.ExitCode() != 7 {
 				t.Fatalf("supervisor status=%v: %s", err, &output)
+			}
+			if mode == "end-replaced" {
+				// The ended engine's close ran on the installed build, carrying its status.
+				record := filepath.Join(root, "end-image")
+				body, err := os.ReadFile(record)
+				if want := hostBinary + " 7"; err != nil || string(body) != want {
+					t.Fatalf("%s = %q (%v), want %q; output=%s", record, body, err, want, &output)
+				}
 			}
 			body, err := os.ReadFile(filepath.Join(root, "engine-report"))
 			if err != nil {
@@ -706,7 +774,8 @@ func init() {
 	if err := atomicfile.Write(filepath.Join(root, reportFile), body, 0o600); err != nil {
 		panic(err)
 	}
-	if strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "reload-") || os.Getenv("PFM_S3_MODE") == "move-start" {
+	if strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "reload-") || os.Getenv("PFM_S3_MODE") == "move-start" ||
+		os.Getenv("PFM_S3_MODE") == "end-replaced" {
 		deadline := time.Now().Add(10 * time.Second)
 		for {
 			if _, err := os.Stat(filepath.Join(root, reportFile+"-release")); err == nil {
@@ -732,4 +801,25 @@ func init() {
 		}
 	}
 	os.Exit(7)
+}
+
+// copySeatHostBuild copies this test binary, the seat-host build, to path.
+func copySeatHostBuild(t *testing.T, path string) {
+	t.Helper()
+	source, err := os.Open(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+	target, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(target, source); err != nil {
+		_ = target.Close()
+		t.Fatal(err)
+	}
+	if err := target.Close(); err != nil {
+		t.Fatalf("close the seat-host build copy %s: %v", path, err)
+	}
 }

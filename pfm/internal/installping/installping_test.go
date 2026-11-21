@@ -83,26 +83,6 @@ func TestReasonNamesTheSwitchThatTurnsThePingOff(t *testing.T) {
 	}
 }
 
-func TestNoticeSaysOnWithTheConfigKeyOrWhatTurnedItOff(t *testing.T) {
-	for reason, want := range map[string]string{
-		"": `pfm: install ping on — an anonymous count of Professor installs (random install id, pfm version, OS, ` +
-			`architecture, enabled Professor plugins; no IP, hostname, username or paths), sent at install and once a ` +
-			`day; set "installPing": false in pfm.config.json to turn it off`,
-		"DO_NOT_TRACK": "pfm: install ping off (DO_NOT_TRACK)",
-		`"installPing": false in pfm.config.json`: `pfm: install ping off ("installPing": false in pfm.config.json)`,
-		"pfm.config.json unreadable":              "pfm: install ping off (pfm.config.json unreadable)",
-	} {
-		if got := Notice(reason); got != want {
-			t.Errorf("Notice(%q) = %q, want %q", reason, got, want)
-		}
-	}
-	const wantSkipped = `pfm: install ping not sent (--offline); the daily ping stays on — ` +
-		`set "installPing": false in pfm.config.json to turn it off`
-	if got := NoticeSkipped("--offline"); got != wantSkipped {
-		t.Errorf("NoticeSkipped(--offline) = %q, want %q", got, wantSkipped)
-	}
-}
-
 func TestForRuntimeCarriesTheConfigSwitchAndLoadError(t *testing.T) {
 	loadErr := errors.New("parse config /x at byte 3")
 	for _, test := range []struct {

@@ -28,12 +28,15 @@ func professorUpdatePrompt(row compose.Row) string {
 		"4. Once the user says yes: do the `before update` actions, run `pfm update --to " + target + "` (or " +
 			"the stop's tag), do the `after update` actions, then run `pfm doctor`.",
 		"5. Ask which projects to update. `pfm doctor` prints one `project_updates` warning per Professor " +
-			"project on this machine with open rows, naming its `root=` and its `unresolved=` count. Ask with " +
-			"AskUserQuestion, multi-select, one option per project: its folder name as the label, its path and " +
-			"open-row count as the description. A question holds four projects; put more projects in further " +
-			"questions of the same call. On an engine without AskUserQuestion, list the projects numbered as the " +
-			"last block of your reply and wait for the user's pick. With no project listed, skip to step 7. " +
-			"Update only the projects the user picks.",
+			"project on this machine with open rows, naming its `root=` and its `unresolved=` count; a warning " +
+			"reading `UNREADABLE` instead names a project pfm could not read, offered all the same with that word " +
+			"as its count. Ask with AskUserQuestion, multi-select, one option per project: its folder name as the " +
+			"label, its path and open-row count as the description. A question takes two to four options and a " +
+			"call at most four questions: split the projects so every question holds two to four (five as three " +
+			"and two), ask past sixteen in a further call, and ask about a single project as one question with " +
+			"two options, update it or skip it. On an engine without AskUserQuestion, list the projects numbered " +
+			"as the last block of your reply and wait for the user's pick. With no project listed, skip to step " +
+			"7. Update only the projects the user picks.",
 		"6. Update each picked project, one at a time. In its root, run `pfm doctor --project-updates` and take " +
 			"it to `clean`, exit 0. The user's pick covers every row, so no row waits for another question, " +
 			"and every row ends in a verb:\n" +

@@ -1,7 +1,6 @@
 ---
 name: dude
-description: 'USER-ONLY Course-corrects you on user anger — `/dude [what went wrong]`. Returns which of ten recurring failure patterns you are in and its fix, done this turn.'
-disable-model-invocation: true
+description: 'Course-corrects you on user anger — `/dude [what went wrong]`, or load it yourself whenever the user swears. Returns which of ten recurring failure patterns you are in and its fix, done this turn.'
 ---
 
 # Dude

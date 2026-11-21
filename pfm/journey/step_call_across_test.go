@@ -209,9 +209,15 @@ func peerRows(c *harness.Ctx, s *State) {
 	want := entries(c, peer)
 
 	// A key typed while the peer still ends its turn is the agent's to drop: the draft and every call
-	// that is not meant to queue wait for it idle, as the owner waits for the answer to stop.
+	// that is not meant to queue wait for it idle, as the owner waits for the answer to stop. The
+	// transcript holds the answer before the Stop hook ends and the spinner clears, and a call reads
+	// the screen, so the spinner must be gone too.
 	idle := func() {
 		c.Poll(peer+" idle", stepBound, func() (bool, string) {
+			screen := read(c, "tmux", "-L", s.Mesh.PeerSock, "capture-pane", "-p", "-t", pane)
+			if strings.Contains(screen, "esc to interrupt") {
+				return false, screen
+			}
 			r := c.Read("pfm", "chat", "status", peer, "--json")
 			var status struct {
 				State string `json:"state"`

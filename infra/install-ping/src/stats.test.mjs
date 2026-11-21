@@ -58,5 +58,10 @@ test("each stats query counts the fixture rows as its title says", () => {
       { day: day(10), product: "pfm", installs: 1 },
       { day: day(3), product: "pfm", installs: 1 },
     ],
+    "every install id: first and last day seen, days, latest version and OS": [
+      { product: "harvester", id: "cccccccc", first_day: day(40), last_day: day(40), days: 1, version: "1.0.0", os: "linux", arch: "amd64" },
+      { product: "pfm", id: "aaaaaaaa", first_day: day(3), last_day: day(0), days: 2, version: "0.42.0-alpha", os: "darwin", arch: "arm64" },
+      { product: "pfm", id: "bbbbbbbb", first_day: day(10), last_day: day(10), days: 1, version: "0.41.0", os: "linux", arch: "amd64" },
+    ],
   });
 });

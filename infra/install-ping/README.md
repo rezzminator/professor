@@ -25,7 +25,7 @@ CLOUDFLARE_ACCOUNT_ID=… npx --yes wrangler@4 deploy
 
 ## Stats
 
-`./stats.sh` runs each read-only query in `stats.sql` against the live database and prints its table: unique ids per product, release vs `-alpha` builds, daily active ids over 30 days, ids active in the last 7 and 30 days, ids by OS, `pfm` ids per enabled plugin, and installs per day. A new query is a new paragraph in `stats.sql`.
+`./stats.sh` (needs `jq`; `/install-stats` runs it from a chat) runs each read-only query in `stats.sql` against the live database and prints it as an aligned table: unique ids per product, release vs `-alpha` builds, daily active ids over 30 days, ids active in the last 7 and 30 days, ids by OS, `pfm` ids per enabled plugin, installs per day, and every install id with its first and last day, version and OS. A new query is a new paragraph in `stats.sql`.
 
 ## Tests
 

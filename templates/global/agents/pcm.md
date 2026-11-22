@@ -128,6 +128,7 @@ In order: "Infrastructure updated, N files changed"; the changes (what and why);
 - Full rename: grep all occurrences, update agents, commands and `CLAUDE.md`, final grep for zero stale references, recompile the mirrors.
 - New agent: create `.claude/agents/{name}.md` (its `description:` is the registry entry, `model:` pins the tier, `tools:` names `mcp__forward-compaction__forward_compaction, mcp__forward-compaction__look_back` unless its `model:` is haiku), compile with `engine-sync codex build .`; update the pipeline if needed.
 - New skill: create `.claude/skills/{name}/SKILL.md`.
+- Skill edit: a `SKILL.md` carrying `version:` and `repo:` copies the owner's local clone of that `repo:`, the checkout whose `origin` remote is it, never one matched by name; change both, bump the patch `version:` in both, report the clone for a local commit, never a push or tag.
 - New command: create `.claude/commands/{name}.md` with a `description:`; add it to `CLAUDE.md` § Rules only as a non-obvious call.
 
 ## Authoring conventions

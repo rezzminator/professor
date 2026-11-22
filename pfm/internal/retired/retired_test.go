@@ -31,6 +31,7 @@ func TestParse(t *testing.T) {
   "hookBinaries": ["cc-fleet"],
   "hookShimHints": [{"name": "bb", "hint": "bb-hook.sh"}],
   "claudePlugins": {"new-effort": ["old-effort@professor"]},
+  "claudePluginsRemoved": ["old-pet@professor", "old-pet@inline"],
   "globalAgents": ["frr"],
   "units": ["cc-name-sync.timer"],
   "configFiles": [{"path": "bin/cx-recover.sh.pre-professor-*", "reason": "retired recovery artifact"}],
@@ -41,16 +42,19 @@ func TestParse(t *testing.T) {
 			{Name: "/old", Kind: KindCommand, Successor: "/new", Match: MatchFamily, Route: true},
 			{Name: "x agent", Kind: KindAgent, Match: MatchExact, Probe: ".claude/agents/x.md"},
 		},
-		StoreEntries:  []string{"stats-cache.json"},
-		StateDirs:     []StateDir{{Name: "call-cap", What: "retired tallies"}},
-		HookCommands:  []HookCommand{{Name: "bb", Subcommand: "chat bb"}},
-		HookBinaries:  []string{"cc-fleet"},
-		HookShimHints: []HookShimHint{{Name: "bb", Hint: "bb-hook.sh"}},
-		ClaudePlugins: map[string][]string{"new-effort": {"old-effort@professor"}},
-		GlobalAgents:  []string{"frr"},
-		Units:         []string{"cc-name-sync.timer"},
-		ConfigFiles:   []ConfigFile{{Path: "bin/cx-recover.sh.pre-professor-*", Reason: "retired recovery artifact"}},
-		Commands:      Commands{HomeBin: []string{"cc-ls"}, AccountBin: []string{"cc-launch.sh"}},
+		StoreEntries:         []string{"stats-cache.json"},
+		StateDirs:            []StateDir{{Name: "call-cap", What: "retired tallies"}},
+		HookCommands:         []HookCommand{{Name: "bb", Subcommand: "chat bb"}},
+		HookBinaries:         []string{"cc-fleet"},
+		HookShimHints:        []HookShimHint{{Name: "bb", Hint: "bb-hook.sh"}},
+		ClaudePlugins:        map[string][]string{"new-effort": {"old-effort@professor"}},
+		ClaudePluginsRemoved: []string{"old-pet@professor", "old-pet@inline"},
+		GlobalAgents:         []string{"frr"},
+		Units:                []string{"cc-name-sync.timer"},
+		ConfigFiles: []ConfigFile{
+			{Path: "bin/cx-recover.sh.pre-professor-*", Reason: "retired recovery artifact"},
+		},
+		Commands: Commands{HomeBin: []string{"cc-ls"}, AccountBin: []string{"cc-launch.sh"}},
 	}
 	got, err := ParseLists([]byte(full))
 	if err != nil || !reflect.DeepEqual(got, want) {
@@ -86,6 +90,31 @@ func TestParse(t *testing.T) {
 		{
 			"plugin id without a marketplace", `{"claudePlugins": {"new-effort": ["old-effort"]}}`,
 			`claudePlugins["new-effort"][0]: want a name@marketplace id, got "old-effort"`,
+		},
+		{
+			"removed plugin without a marketplace", `{"claudePluginsRemoved": ["old-pet"]}`,
+			`claudePluginsRemoved[0]: want a name@marketplace id, got "old-pet"`,
+		},
+		{
+			"removed plugin with an empty marketplace", `{"claudePluginsRemoved": ["old-pet@"]}`,
+			`claudePluginsRemoved[0]: want a name@marketplace id, got "old-pet@"`,
+		},
+		{
+			"removed plugin with a path", `{"claudePluginsRemoved": ["../old-pet@professor"]}`,
+			`claudePluginsRemoved[0]: want a name@marketplace id, got "../old-pet@professor"`,
+		},
+		{
+			"removed plugin with two marketplaces", `{"claudePluginsRemoved": ["old-pet@a@b"]}`,
+			`claudePluginsRemoved[0]: want a name@marketplace id, got "old-pet@a@b"`,
+		},
+		{
+			"removed plugin listed twice", `{"claudePluginsRemoved": ["old-pet@professor", "old-pet@professor"]}`,
+			`claudePluginsRemoved[1]: "old-pet@professor" is listed twice`,
+		},
+		{
+			"removed plugin a successor also retires",
+			`{"claudePlugins": {"new-pet": ["old-pet@professor"]}, "claudePluginsRemoved": ["old-pet@professor"]}`,
+			`claudePluginsRemoved: "old-pet@professor" is also retired by claudePlugins["new-pet"]; keep one`,
 		},
 		{"agent with a path", `{"globalAgents": ["../frr"]}`, `globalAgents[0]: "../frr" is not one agent name`},
 		{"unit with a path", `{"units": ["x/y.timer"]}`, `units[0]: "x/y.timer" is not one unit name`},

@@ -67,6 +67,10 @@ type Lists struct {
 	// ClaudePlugins are plugin ids once ours, keyed by their successor's bare
 	// name: doctor flags an enabled one; install disables it.
 	ClaudePlugins map[string][]string `json:"claudePlugins"`
+	// ClaudePluginsRemoved are plugin ids once ours retired with no successor,
+	// each name@marketplace: install removes every trace of each from every
+	// Claude config dir it covers, doctor reports one still there.
+	ClaudePluginsRemoved []string `json:"claudePluginsRemoved"`
 	// GlobalAgents are global Claude agent names a rename retired, removed
 	// from {config}/agents/ when the file is still Professor's.
 	GlobalAgents []string `json:"globalAgents"`
@@ -243,6 +247,24 @@ func (lists Lists) validate() error {
 		for index, id := range ids {
 			if !strings.Contains(id, "@") {
 				bad("claudePlugins[%q][%d]: want a name@marketplace id, got %q", successor, index, id)
+			}
+		}
+	}
+	removed := map[string]bool{}
+	for index, id := range lists.ClaudePluginsRemoved {
+		name, marketplace, ok := strings.Cut(id, "@")
+		switch {
+		case !ok || !baseName(name) || !baseName(marketplace) || strings.Contains(marketplace, "@"):
+			bad("claudePluginsRemoved[%d]: want a name@marketplace id, got %q", index, id)
+		case removed[id]:
+			bad("claudePluginsRemoved[%d]: %q is listed twice", index, id)
+		}
+		removed[id] = true
+	}
+	for successor, ids := range lists.ClaudePlugins {
+		for _, id := range ids {
+			if removed[id] {
+				bad("claudePluginsRemoved: %q is also retired by claudePlugins[%q]; keep one", id, successor)
 			}
 		}
 	}

@@ -32,9 +32,9 @@ func TestClaudeEnvKey(t *testing.T) {
 		},
 		{
 			name:    "upper-snake names with string values",
-			content: `{"version":2,"claude":{"env":{"FORWARD_COMPACTION_CEILING_NATIVE":"1","BUDDY_MODEL":"opus","X9":""}}}`,
+			content: `{"version":2,"claude":{"env":{"FORWARD_COMPACTION_CEILING_NATIVE":"1","AUTO_EFFORT_MODEL":"opus","X9":""}}}`,
 			want: map[string]string{
-				"FORWARD_COMPACTION_CEILING_NATIVE": "1", "BUDDY_MODEL": "opus", "X9": "",
+				"FORWARD_COMPACTION_CEILING_NATIVE": "1", "AUTO_EFFORT_MODEL": "opus", "X9": "",
 			},
 			source: SourceFile,
 		},
@@ -43,8 +43,8 @@ func TestClaudeEnvKey(t *testing.T) {
 			want: map[string]string{}, source: SourceFile,
 		},
 		{
-			name: "a lower-case name", content: `{"version":2,"claude":{"env":{"buddy_model":"opus"}}}`,
-			err: `claude.env name "buddy_model" must be upper snake: A-Z, 0-9 and _, starting with a letter`,
+			name: "a lower-case name", content: `{"version":2,"claude":{"env":{"auto_effort_model":"opus"}}}`,
+			err: `claude.env name "auto_effort_model" must be upper snake: A-Z, 0-9 and _, starting with a letter`,
 		},
 		{
 			name: "a name starting with a digit", content: `{"version":2,"claude":{"env":{"9LIVES":"1"}}}`,
@@ -55,16 +55,16 @@ func TestClaudeEnvKey(t *testing.T) {
 			err: `claude.env name "SUB-AGENT" must be upper snake: A-Z, 0-9 and _, starting with a letter`,
 		},
 		{
-			name: "a null value", content: `{"version":2,"claude":{"env":{"BUDDY_MODEL":null}}}`,
-			err: `claude.env.BUDDY_MODEL must be a string, got null`,
+			name: "a null value", content: `{"version":2,"claude":{"env":{"AUTO_EFFORT_MODEL":null}}}`,
+			err: `claude.env.AUTO_EFFORT_MODEL must be a string, got null`,
 		},
 		{
-			name: "a number value", content: `{"version":2,"claude":{"env":{"BUDDY_CHAT_TURNS_TO_READ":4}}}`,
-			err: `claude.env.BUDDY_CHAT_TURNS_TO_READ must be a string, got 4`,
+			name: "a number value", content: `{"version":2,"claude":{"env":{"AUTO_EFFORT_TURNS_TO_READ":4}}}`,
+			err: `claude.env.AUTO_EFFORT_TURNS_TO_READ must be a string, got 4`,
 		},
 		{
-			name: "a boolean value", content: `{"version":2,"claude":{"env":{"BUDDY_SAVE_ROUNDS":true}}}`,
-			err: `claude.env.BUDDY_SAVE_ROUNDS must be a string, got true`,
+			name: "a boolean value", content: `{"version":2,"claude":{"env":{"AUTO_EFFORT_SAVE_ROUNDS":true}}}`,
+			err: `claude.env.AUTO_EFFORT_SAVE_ROUNDS must be a string, got true`,
 		},
 		{
 			name:    "a variable the launch sets from claude.cache1h",
@@ -93,7 +93,7 @@ func TestClaudeEnvKey(t *testing.T) {
 		{
 			name: "an account may not set it",
 			content: `{"version":2,"accounts":[{"id":1,"configDir":"` + filepath.Join(home, ".cc", "1") +
-				`","claude":{"env":{"BUDDY_MODEL":"opus"}}}]}`,
+				`","claude":{"env":{"AUTO_EFFORT_MODEL":"opus"}}}]}`,
 			err: `accounts[0].env is machine-wide: set claude.env`,
 		},
 	} {

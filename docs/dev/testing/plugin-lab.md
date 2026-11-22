@@ -175,6 +175,5 @@ The authoritative list is `LAB_VERBS` in `infra/plugin-lab/lib/verdict.sh`.
 Two older per-plugin live scripts predate the lab and stay as they are until moved onto it:
 
 - `cache-live-control`: `scripts/live-proof.sh`.
-- `buddy`: `scripts/live-proof.sh`, `live-configs.sh`, `live-drawer.sh` and `live-lib.sh`. `live-lib.sh` and `live-configs.sh` sign in with `claude setup-token`, a login the lab's sign-in rule forbids; a migration replaces it with the lab's fd 3 token handoff.
 
 Each becomes a scenario under `scenarios/{plugin}/` whose beats replace the script's own waits and greps.

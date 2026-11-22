@@ -294,6 +294,10 @@ func Run(
 		retiredLists.ClaudePlugins,
 		tally,
 	)
+	printRetiredClaudePluginsDoctor(
+		stdout, resolved.Home, runtime.Config.ClaudeConfigDirs(), retiredLists.ClaudePluginsRemoved, pluginBuild,
+		tally,
+	)
 	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, tally)
 	printManagedPluginLogsDoctor(
 		stdout, append([]string{claudeStore}, runtime.Config.ClaudeConfigDirs()...), pluginBuild,

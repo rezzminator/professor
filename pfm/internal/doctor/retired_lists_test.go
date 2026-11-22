@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/retired"
 )
@@ -53,6 +55,78 @@ func TestLoadRetiredLists(t *testing.T) {
 			if got := stdout.String(); wantPrefix == "" && got != "" || !strings.HasPrefix(got, wantPrefix) ||
 				wantPrefix != "" && !strings.HasSuffix(got, " — restore "+retired.FileRel+" in the clone\n") {
 				t.Fatalf("stdout = %q, want a row starting %q", got, wantPrefix)
+			}
+		})
+	}
+}
+
+// A plugin retired with no successor still installed in the store is one
+// warning naming every trace and pfm install as its repair; a clean store and
+// an empty list print nothing; an unreadable record is one failure.
+func TestPrintRetiredClaudePluginsDoctor(t *testing.T) {
+	for _, testCase := range []struct {
+		name, installs, want string
+		ids                  []string
+		plugins              []pfmconfig.ClaudePlugin
+		settingsDir          bool
+		warnings, failures   int
+	}{
+		{
+			name:     "installed",
+			installs: `{"version":2,"plugins":{"tinsel@professor":[{"scope":"user","installPath":"{store}/plugins/cache/professor/tinsel/1.0"}]}}`,
+			ids:      []string{"tinsel@professor"},
+			want: "doctor: claude_plugins plugin tinsel@professor is retired with no successor but still on this host: " +
+				"plugins in {store}/plugins/installed_plugins.json — run pfm install --yes removes every trace of it\n",
+			warnings: 1,
+		},
+		{
+			name:     "still planned",
+			installs: `{"version":2,"plugins":{"tinsel@professor":[{"scope":"user","installPath":"{store}/plugins/cache/professor/tinsel/1.0"}]}}`,
+			ids:      []string{"tinsel@professor"}, plugins: []pfmconfig.ClaudePlugin{{ID: "tinsel"}},
+			want: "doctor: claude_plugins plugin tinsel@professor is retired with no successor but claude.plugins or the " +
+				"source clone's marketplace still plans it — drop it there or from claudePluginsRemoved in the retired lists\n",
+			warnings: 1,
+		},
+		{
+			name: "settings unreadable", installs: `{"version":2,"plugins":{}}`, ids: []string{"tinsel@professor"},
+			settingsDir: true,
+			want:        "doctor: claude_plugins could not look for retired plugins: read {store}/settings.json: is a directory\n",
+			failures:    1,
+		},
+		{name: "clean", installs: `{"version":2,"plugins":{}}`, ids: []string{"tinsel@professor"}},
+		{name: "nothing retired", installs: `{"plugins":`},
+		{
+			name: "unreadable", installs: `{"plugins":`, ids: []string{"tinsel@professor"},
+			want: "doctor: claude_plugins could not look for retired plugins: parse " +
+				"{store}/plugins/installed_plugins.json: unexpected EOF\n",
+			failures: 1,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			home := t.TempDir()
+			store := filepath.Join(home, ".claude")
+			fill := strings.NewReplacer("{store}", store)
+			file := filepath.Join(store, "plugins", "installed_plugins.json")
+			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file, []byte(fill.Replace(testCase.installs)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if testCase.settingsDir {
+				if err := os.Mkdir(filepath.Join(store, "settings.json"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var stdout bytes.Buffer
+			tally := &doctorTally{}
+			printRetiredClaudePluginsDoctor(&stdout, home, nil, testCase.ids,
+				installer.ClaudePluginBuild{Home: home, Plugins: testCase.plugins}, tally)
+			want := fill.Replace(testCase.want)
+			if got := stdout.String(); got != want || tally.warnings != testCase.warnings ||
+				tally.failures != testCase.failures {
+				t.Fatalf("output %q, warnings %d, failures %d\nwant %q, %d, %d (record %s)",
+					got, tally.warnings, tally.failures, want, testCase.warnings, testCase.failures, file)
 			}
 		})
 	}

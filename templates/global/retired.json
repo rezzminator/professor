@@ -232,6 +232,13 @@
       "cache-keepwarm@professor"
     ]
   },
+  "claudePluginsRemoved": [
+    "buddy@professor",
+    "buddy@inline",
+    "effort-live-control@professor",
+    "sub-agent-compact@professor",
+    "flapboard@flapboard"
+  ],
   "globalAgents": [
     "flights-foreman",
     "flights-foreman-sonnet",

@@ -442,7 +442,7 @@ func readSettingsForEdit(path string) ([]byte, map[string]any, error) {
 		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, nil, err // the *PathError names path
 	}
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {

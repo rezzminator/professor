@@ -471,7 +471,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 	simulateClaude(t, runner)
 	writeFixture(t, filepath.Join(first, "settings.json"), `{"enabledPlugins":{`+
 		`"cache-live-control@cache-live-control":true,"cache-live-control@cache-live-control-dev":true,`+
-		`"swift-lsp@claude-plugins-official":true,"buddy@buddy":false},`+
+		`"swift-lsp@claude-plugins-official":true,"callmeter@callmeter":false},`+
 		`"pluginConfigs":{"cache-live-control@cache-live-control":{"options":{"keep":1}}}}`)
 	if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
@@ -487,7 +487,7 @@ func TestEnsureClaudePluginsLeavesUnlistedPluginsUntouched(t *testing.T) {
 		"cache-live-control@cache-live-control":     true,
 		"cache-live-control@cache-live-control-dev": true,
 		"swift-lsp@claude-plugins-official":         true,
-		"buddy@buddy":                               false,
+		"callmeter@callmeter":                       false,
 		"auto-effort@professor":                     true,
 	}
 	wantConfigs := map[string]any{

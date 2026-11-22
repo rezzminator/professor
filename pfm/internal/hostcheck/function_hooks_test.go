@@ -47,13 +47,13 @@ func TestFunctionHookModulesCachedFalseWarnsWithCauseAndFix(t *testing.T) {
 	env := fixtureEnv(t)
 	path := accountStateFile(env)
 	writeFile(t, path, `{"cachedGrowthBookFeatures":{"`+hookModulesFlag+`":false}}`)
-	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@professor", true)
+	installModulePlugin(t, env.Accounts[0].ConfigDir, "auto-effort@professor", true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if row.Severity != Warn || row.Check != "function-hook-modules" || row.Path != path {
 		t.Fatalf("row=%+v, want WARN function-hook-modules at %s", row, path)
 	}
 	assertContains(t, "problem", row.Problem,
-		"cachedGrowthBookFeatures."+hookModulesFlag+" is false", "buddy@professor",
+		"cachedGrowthBookFeatures."+hookModulesFlag+" is false", "auto-effort@professor",
 		"gateway", "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override")
 	assertContains(t, "fix", row.Fix, "no Claude chat running", hookModulesFlag+" to true in "+path, "new chat")
 }
@@ -61,7 +61,7 @@ func TestFunctionHookModulesCachedFalseWarnsWithCauseAndFix(t *testing.T) {
 func TestFunctionHookModulesCachedTrueIsClean(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{"cachedGrowthBookFeatures":{"`+hookModulesFlag+`":true}}`)
-	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@professor", true)
+	installModulePlugin(t, env.Accounts[0].ConfigDir, "auto-effort@professor", true)
 	assertRows(t, detect(t, "function-hook-modules", env))
 }
 
@@ -81,12 +81,12 @@ func TestFunctionHookModulesUnsetFlagWarnsOnlyWithModulePlugins(t *testing.T) {
 
 func TestFunctionHookModulesMissingStateFileWarnsWithModulePlugins(t *testing.T) {
 	env := fixtureEnv(t)
-	installModulePlugin(t, env.Accounts[0].ConfigDir, "buddy@professor", true)
+	installModulePlugin(t, env.Accounts[0].ConfigDir, "auto-effort@professor", true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if row.Severity != Warn || row.Path != accountStateFile(env) {
 		t.Fatalf("row=%+v, want WARN at %s", row, accountStateFile(env))
 	}
-	assertContains(t, "problem", row.Problem, "does not exist", hookModulesFlag+" is unset", "buddy@professor")
+	assertContains(t, "problem", row.Problem, "does not exist", hookModulesFlag+" is unset", "auto-effort@professor")
 }
 
 func TestFunctionHookModulesUnreadableStateFileIsReportedNotClean(t *testing.T) {
@@ -146,13 +146,13 @@ func installDirectoryPlugin(t *testing.T, dir, plugin, market string, folderModu
 func TestFunctionHookModulesDirectoryMarketplaceReadsItsFolderNotTheSnapshot(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{}`)
-	installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "professor", true, true)
+	installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "auto-effort", "professor", true, true)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if got, want := strings.ReplaceAll(
 		row.Problem,
 		env.Home,
 		"{home}",
-	), "cachedGrowthBookFeatures.tengu_plugin_hooks_modules is unset while function-hook plugins buddy@professor are installed: Claude Code loads none of their modules until a GrowthBook fetch sets it, which never succeeds behind a gateway, and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag"; got != want {
+	), "cachedGrowthBookFeatures.tengu_plugin_hooks_modules is unset while function-hook plugins auto-effort@professor are installed: Claude Code loads none of their modules until a GrowthBook fetch sets it, which never succeeds behind a gateway, and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag"; got != want {
 		t.Fatalf("problem = %q, want %q", got, want)
 	}
 }
@@ -161,8 +161,8 @@ func TestFunctionHookModulesDirectoryMarketplaceFolderWithoutModulesIsClean(t *t
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{}`)
 	dir := env.Accounts[0].ConfigDir
-	installDirectoryPlugin(t, dir, "buddy", "professor", false, true)
-	snapshot := filepath.Join(dir, "plugins", "cache", "professor", "buddy", "hooks", "hooks.json")
+	installDirectoryPlugin(t, dir, "auto-effort", "professor", false, true)
+	snapshot := filepath.Join(dir, "plugins", "cache", "professor", "auto-effort", "hooks", "hooks.json")
 	writeFile(t, snapshot, `{"modules":["./old.ts"]}`)
 	assertRows(t, detect(t, "function-hook-modules", env))
 }
@@ -171,7 +171,7 @@ func TestFunctionHookModulesGithubMarketplaceStillReadsInstallPath(t *testing.T)
 	env := fixtureEnv(t)
 	dir := env.Accounts[0].ConfigDir
 	writeFile(t, accountStateFile(env), `{}`)
-	installModulePlugin(t, dir, "buddy@professor", true)
+	installModulePlugin(t, dir, "auto-effort@professor", true)
 	writeFile(t, filepath.Join(dir, "plugins", "known_marketplaces.json"),
 		`{"professor":{"source":{"source":"github","repo":"owner/professor"}}}`)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
@@ -179,7 +179,7 @@ func TestFunctionHookModulesGithubMarketplaceStillReadsInstallPath(t *testing.T)
 		row.Problem,
 		env.Home,
 		"{home}",
-	), "cachedGrowthBookFeatures.tengu_plugin_hooks_modules is unset while function-hook plugins buddy@professor are installed: Claude Code loads none of their modules until a GrowthBook fetch sets it, which never succeeds behind a gateway, and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag"; got != want {
+	), "cachedGrowthBookFeatures.tengu_plugin_hooks_modules is unset while function-hook plugins auto-effort@professor are installed: Claude Code loads none of their modules until a GrowthBook fetch sets it, which never succeeds behind a gateway, and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag"; got != want {
 		t.Fatalf("problem = %q, want %q", got, want)
 	}
 }
@@ -187,19 +187,19 @@ func TestFunctionHookModulesGithubMarketplaceStillReadsInstallPath(t *testing.T)
 func TestFunctionHookModulesUnresolvableDirectoryFolderIsReportedNotClean(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{}`)
-	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "professor", true, false)
+	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "auto-effort", "professor", true, false)
 	manifest := filepath.Join(root, ".claude-plugin", "marketplace.json")
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
 	if row.Severity != Warn || row.Path != manifest {
 		t.Fatalf("row=%+v, want WARN at %s", row, manifest)
 	}
-	assertContains(t, "problem", row.Problem, "buddy@professor", "unknown")
+	assertContains(t, "problem", row.Problem, "auto-effort@professor", "unknown")
 }
 
 func TestFunctionHookModulesUnlistedDirectoryPluginIsReportedNotClean(t *testing.T) {
 	env := fixtureEnv(t)
 	writeFile(t, accountStateFile(env), `{}`)
-	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "buddy", "professor", true, false)
+	root := installDirectoryPlugin(t, env.Accounts[0].ConfigDir, "auto-effort", "professor", true, false)
 	writeFile(
 		t,
 		filepath.Join(root, ".claude-plugin", "marketplace.json"),
@@ -209,14 +209,14 @@ func TestFunctionHookModulesUnlistedDirectoryPluginIsReportedNotClean(t *testing
 	if row.Severity != Warn {
 		t.Fatalf("row=%+v, want WARN", row)
 	}
-	assertContains(t, "problem", row.Problem, "lists no folder source for plugin buddy", "unknown")
+	assertContains(t, "problem", row.Problem, "lists no folder source for plugin auto-effort", "unknown")
 }
 
 func TestFunctionHookModulesUnparsableKnownMarketplacesIsReportedNotClean(t *testing.T) {
 	env := fixtureEnv(t)
 	dir := env.Accounts[0].ConfigDir
 	writeFile(t, accountStateFile(env), `{}`)
-	installModulePlugin(t, dir, "buddy@professor", true)
+	installModulePlugin(t, dir, "auto-effort@professor", true)
 	known := filepath.Join(dir, "plugins", "known_marketplaces.json")
 	writeFile(t, known, `{nope`)
 	row := onlyRow(t, detect(t, "function-hook-modules", env))
@@ -233,13 +233,13 @@ func TestFunctionHookModulesUnparsablePluginHooksKeepsItsSiblings(t *testing.T) 
 	env := fixtureEnv(t)
 	dir := env.Accounts[0].ConfigDir
 	writeFile(t, accountStateFile(env), `{}`)
-	good := filepath.Join(dir, "plugins", "cache", "buddy")
+	good := filepath.Join(dir, "plugins", "cache", "auto-effort")
 	bad := filepath.Join(dir, "plugins", "cache", "broken")
 	writeFile(t, filepath.Join(good, "hooks", "hooks.json"), `{"modules":["./plugin.ts"]}`)
 	badHooks := filepath.Join(bad, "hooks", "hooks.json")
 	writeFile(t, badHooks, `{"modules":`)
 	writeFile(t, filepath.Join(dir, "plugins", "installed_plugins.json"),
-		`{"version":2,"plugins":{"buddy@professor":[{"installPath":"`+good+`"}],`+
+		`{"version":2,"plugins":{"auto-effort@professor":[{"installPath":"`+good+`"}],`+
 			`"broken@professor":[{"installPath":"`+bad+`"}]}}`)
 	rows := detect(t, "function-hook-modules", env)
 	want := []Row{
@@ -252,7 +252,7 @@ func TestFunctionHookModulesUnparsablePluginHooksKeepsItsSiblings(t *testing.T) 
 		{
 			Warn, "function-hook-modules", accountStateFile(env),
 			"cachedGrowthBookFeatures." + hookModulesFlag + " is unset while function-hook plugins " +
-				"buddy@professor are installed: Claude Code loads none of their modules until a GrowthBook " +
+				"auto-effort@professor are installed: Claude Code loads none of their modules until a GrowthBook " +
 				"fetch sets it, which never succeeds behind a gateway, and " +
 				"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 does not override an unset flag",
 			"with no Claude chat running in this account (pfm chat ls), set cachedGrowthBookFeatures." +

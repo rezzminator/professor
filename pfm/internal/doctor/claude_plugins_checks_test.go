@@ -214,8 +214,8 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 				enabled[doctorPluginIDs[1]] = false
 			}
 			if state == "unmanaged duplicate" {
-				enabled["buddy@professor"] = true
-				enabled["buddy@elsewhere"] = true
+				enabled["tinsel@professor"] = true
+				enabled["tinsel@elsewhere"] = true
 				enabled["callmeter@professor"] = true
 				enabled["solo@one"] = true
 				enabled["solo@two"] = false
@@ -266,7 +266,9 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 					"professor": map[string]any{
 						"source": map[string]any{"source": "github", "repo": "someone-else/professor"},
 					},
-					"buddy": map[string]any{"source": map[string]any{"source": "github", "repo": "someone-else/buddy"}},
+					"callmeter": map[string]any{
+						"source": map[string]any{"source": "github", "repo": "someone-else/callmeter"},
+					},
 				})
 				if err := os.WriteFile(marketplaces, raw, 0o600); err != nil {
 					t.Fatal(err)
@@ -309,7 +311,7 @@ func TestClaudePluginsDoctorStore(t *testing.T) {
 				)
 			case "unmanaged duplicate":
 				warnings = 1
-				want = "doctor: claude_plugins plugin buddy enabled twice (buddy@elsewhere and buddy@professor) in " + path +
+				want = "doctor: claude_plugins plugin tinsel enabled twice (tinsel@elsewhere and tinsel@professor) in " + path +
 					" — keep one copy: claude plugin disable each other key\n"
 			case "managed plus a stranger":
 				warnings = 1
@@ -588,10 +590,10 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 			}
 			unlisted := strings.HasPrefix(state, "checkout unlisted")
 			if unlisted {
-				// The source clone's marketplace lists buddy, which claude.plugins does not.
+				// The source clone's marketplace lists callmeter, which claude.plugins does not.
 				build.SourceRepo = filepath.Join(home, "clone")
 				entries := []any{}
-				for _, name := range append(slices.Clone(names), "buddy") {
+				for _, name := range append(slices.Clone(names), "callmeter") {
 					entries = append(entries, map[string]any{"name": name, "source": "./plugins/" + name})
 				}
 				manifest, _ := json.Marshal(map[string]any{"name": "professor", "plugins": entries})
@@ -622,7 +624,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				return filepath.Join(home, ".local", "share", "professor-dev", "plugins", name)
 			}
 			// Each copy holds its checkout's content.
-			for _, name := range append(slices.Clone(names), "buddy") {
+			for _, name := range append(slices.Clone(names), "callmeter") {
 				content := `{"version":"1.0.0"}`
 				if state == "checkout cache unversioned" && name == names[0] {
 					content = "{}"
@@ -673,8 +675,8 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				enabled[retiredID] = true
 			}
 			if unlisted {
-				enabled["buddy@professor"] = state == "checkout unlisted plugin enabled"
-				ensured = append(slices.Clone(ensured), "buddy@professor")
+				enabled["callmeter@professor"] = state == "checkout unlisted plugin enabled"
+				ensured = append(slices.Clone(ensured), "callmeter@professor")
 			}
 			if err := os.MkdirAll(filepath.Join(store, "plugins"), 0o700); err != nil {
 				t.Fatal(err)
@@ -770,7 +772,7 @@ func TestClaudePluginsDoctorChecksTheBuildsCopies(t *testing.T) {
 				want, failures = "doctor: claude_plugins FAIL plugin "+doctorPluginIDs[0]+" not installed in "+store+
 					" — run pfm install --yes\n", 1
 			case "checkout unlisted plugin enabled":
-				want, warnings = "doctor: claude_plugins plugin buddy enabled (buddy@professor) in "+path+
+				want, warnings = "doctor: claude_plugins plugin callmeter enabled (callmeter@professor) in "+path+
 					", but claude.plugins does not list it — run pfm install --yes\n", 1
 			case "checkout fallback":
 				want, failures = "", len(names)

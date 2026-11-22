@@ -3,6 +3,9 @@
 //
 // herdr_claude.go: Herdr's own Claude integration, once per Claude settings store.
 // claude_plugins_unwire.go: uninstall takes back what install wrote into the Claude settings and plugin records.
+// claude_plugins_take.go: the take-back of plugin keys and copies from one Claude config dir, uninstall's and retirement's.
+// claude_plugins_retire.go: install removes every trace of a plugin retired with no successor; doctor names one left.
+// claude_plugins_retire_logs.go: the plugin log folder of a plugin retired with no successor, and whether it is still held.
 // log_root.go: install moves the logs pfm wrote before the log root into it, once.
 // claude_registry_defaults.go: install sets the launch defaults' registry values in each account's .claude.json.
 // claude_user_settings.go: install adds the launch defaults' user settings to each account's settings.json.
@@ -279,6 +282,7 @@ func (installer *engine) install(ctx context.Context) error {
 	// after every later step has landed. It runs before engine-sync global,
 	// which builds the plugin agents' Codex and OpenCode twins from the plugin
 	// copies this step refreshes.
+	installer.deferFailure(installer.retireClaudePlugins())
 	installer.deferFailure(installer.ensureClaudePlugins(ctx))
 	// The global file first: engine-sync global unions its targets'
 	// capabilities with the flags, so a stale list would keep an opted-out

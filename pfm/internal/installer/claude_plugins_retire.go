@@ -19,7 +19,7 @@ import (
 // store and every config dir install covers, each physical file once: its
 // enabledPlugins key, enabled or not (an emptied member goes too), its
 // installed_plugins.json entries, Claude's cache copy and data dir, then its
-// folder under the plugin log folder pfm set (retirePluginLogDirs). Another id of
+// folder under each plugin log folder (retirePluginLogDirs). Another id of
 // the same bare name is the owner's and stays. A dir that fails keeps its copies
 // and costs no other dir; the log folders wait until every dir is clean.
 //
@@ -164,8 +164,8 @@ func RetiredClaudePluginGaps(home string, dirs, ids []string, build ClaudePlugin
 	for _, id := range ids {
 		traces, err := retiredPluginTraces(dirs, retiredPluginTake([]string{id}))
 		failed = errors.Join(failed, err)
-		if folder, ok := folders[retiredPluginName(id)]; ok {
-			traces = append(traces, folder)
+		if found, ok := folders[retiredPluginName(id)]; ok {
+			traces = append(traces, found...)
 			delete(folders, retiredPluginName(id))
 		}
 		if len(traces) != 0 {

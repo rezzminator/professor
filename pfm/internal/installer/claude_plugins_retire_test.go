@@ -108,6 +108,20 @@ func TestRetireClaudePlugins(t *testing.T) {
 			seed: append(slices.Clone(ownCopies), "{store}/plugins/data/tinsel-inline", "{logs}/tinsel"),
 		},
 		{
+			name:     "an operator's log folder in settings loses the retired folder too",
+			ids:      []string{"tinsel@professor"},
+			settings: `{"enabledPlugins":{"tinsel@professor":false},"env":{"PLUGIN_LOG_DIR":"{ownlogs}"}}`,
+			installs: `{"version":2,"plugins":{` + ownInstalls + `}}`,
+			rows: append(slices.Clone(ownRows),
+				"  change  remove {logs}/tinsel (logs of a retired plugin)",
+				"  change  remove {ownlogs}/tinsel (logs of a retired plugin)"),
+			wantSettings: `{"env":{"PLUGIN_LOG_DIR":"{ownlogs}"}}`,
+			wantInstalls: `{"version":2,"plugins":{}}`,
+			gaps:         []ClaudePluginGap{gap("tinsel@professor", ownTraces+", {logs}/tinsel, {ownlogs}/tinsel")},
+			seed:         append(slices.Clone(ownCopies), "{logs}/tinsel", "{ownlogs}/tinsel", "{ownlogs}/flights"),
+			remain:       []string{"{ownlogs}/flights"},
+		},
+		{
 			name: "a retired id claude.plugins still names is kept and named, with its log folder",
 			ids:  []string{"tinsel@professor"}, plugins: []pfmconfig.ClaudePlugin{{ID: "tinsel"}},
 			settings: sharedSettings, installs: sharedInstalls,
@@ -164,12 +178,23 @@ func TestRetireClaudePlugins(t *testing.T) {
 			home := filepath.Join(root, "home")
 			store := filepath.Join(home, ".claude")
 			cc1, cc2 := filepath.Join(home, ".cc", "1"), filepath.Join(home, ".cc", "2")
-			logs := filepath.Join(root, "plugin-logs")
+			logs, ownLogs := filepath.Join(root, "plugin-logs"), filepath.Join(root, "own-logs")
 			managed := ManagedRoot(home)
-			fill := strings.NewReplacer("{store}", store, "{cc1}", cc1, "{cc2}", cc2, "{logs}", logs)
+			fill := strings.NewReplacer(
+				"{store}",
+				store,
+				"{cc1}",
+				cc1,
+				"{cc2}",
+				cc2,
+				"{logs}",
+				logs,
+				"{ownlogs}",
+				ownLogs,
+			)
 			settingsPath := filepath.Join(store, "settings.json")
 			installsPath := filepath.Join(store, "plugins", "installed_plugins.json")
-			writeFixture(t, settingsPath, tc.settings)
+			writeFixture(t, settingsPath, fill.Replace(tc.settings))
 			writeFixture(t, installsPath, fill.Replace(tc.installs))
 			writeFixture(t, claudeEnvOwnershipPath(managed), `{"version":1,"files":{},"pluginLogDir":"`+logs+`"}`)
 			for _, path := range tc.seed {
@@ -217,7 +242,7 @@ func TestRetireClaudePlugins(t *testing.T) {
 			if got := strings.TrimRight(output.String(), "\n"); got != wantRows {
 				t.Fatalf("rows:\n%s\nwant:\n%s", got, wantRows)
 			}
-			assertRecord(t, settingsPath, tc.wantSettings)
+			assertRecord(t, settingsPath, fill.Replace(tc.wantSettings))
 			assertRecord(t, installsPath, fill.Replace(tc.wantInstalls))
 			for _, path := range tc.seed {
 				_, statErr := os.Lstat(fill.Replace(path))

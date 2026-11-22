@@ -456,7 +456,8 @@ func ObserveCodexPanes(
 // store.NewCodexThreadResolverRoots already reads — store.CodexStateFiles then
 // store.ReadCodexThreads, over the runtime's own Codex roots — never a second
 // walker over the same stores. A lister failure is WARNed by name and leaves
-// the index empty for this pass: an empty title index only means "no title
+// the index empty for this pass (a cancelled or expired pass is no lister
+// failure and warns nothing): an empty title index only means "no title
 // can move anything this pass", and it never blocks the bare-id path this
 // file's own header describes.
 func CodexTitleThreads(
@@ -479,7 +480,9 @@ func CodexTitleThreads(
 	}
 	threads, err := store.ReadCodexThreads(ctx, files)
 	if err != nil {
-		warn(fmt.Sprintf("codex pane reconcile: read Codex state stores: %v", err))
+		if ctx.Err() == nil {
+			warn(fmt.Sprintf("codex pane reconcile: read Codex state stores: %v", err))
+		}
 		return titleThreads
 	}
 	for index := range threads {

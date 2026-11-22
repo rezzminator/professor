@@ -18,4 +18,6 @@ Typed on a Claude seat, `/pfm:space …` never reaches the model: the `pfm inter
 - `<name>`: run `pfm chat space '<name>'`, the name quoted for the shell; `~`, home's place, is refused. It records the space for this chat, creates the Herdr workspace of that name when missing, and moves this chat's tab there; while the fleet scan does not hold this chat yet, it errors naming the workspace the chat stays in, and the chat moves at its next placement.
 - No argument: run `pfm chat space`. It clears the space and returns the chat to its project space.
 
+Either way, when this chat's pane is the one focused in Herdr, the view follows the chat into its new workspace; otherwise the view stays where it is.
+
 Relay the verb's one output line as printed; outside Herdr it says the chat is not in Herdr. On a non-zero exit, relay its stderr verbatim and report nothing as done.

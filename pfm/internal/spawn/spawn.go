@@ -1,8 +1,8 @@
-// Package spawn births a chat: Run (spawn.go) in tmux (tmux.go, types.go, socket.go, seat.go) or Herdr
-// (herdr.go births its tab; herdr_place.go files it under its place's workspace, herdr_workspaces.go lists,
-// creates and relabels those; retire.go retires a replaced seat), as backend.go chooses; launcher.go and
-// rename_proof.go drive an engine's start and name, trust_dialog.go and untrusted_folder.go its folder trust
-// prompt, service_scope_command.go moves a chat server out of the user service that asked for it.
+// Package spawn births a chat: Run (spawn.go) in tmux (tmux.go, types.go, socket.go, seat.go) or Herdr (herdr.go
+// births its tab; herdr_place.go files it under its place's workspace, herdr_place_chat.go one chat's space move,
+// herdr_workspaces.go lists, creates and relabels those; retire.go retires a replaced seat), as backend.go chooses;
+// launcher.go and rename_proof.go drive an engine's start and name, trust_dialog.go and untrusted_folder.go its
+// folder trust prompt, service_scope_command.go moves a chat server out of the user service that asked for it.
 package spawn
 
 import (

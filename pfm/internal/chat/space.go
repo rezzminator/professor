@@ -25,13 +25,15 @@ const SpaceUsage = "usage: pfm chat space [name]"
 // fleet scan its placement files chats by, and the placement of the one chat.
 type spaceDoors struct {
 	places func(context.Context, *pfmconfig.Runtime) (*place.Fleet, error)
-	move   func(context.Context, paths.Values, string, place.Fleet, string) (place.Place, error)
+	move   func(context.Context, paths.Values, string, place.Fleet, string) (place.Place, bool, error)
 }
 
 // Space is `pfm chat space [name]`: the calling chat records name as its
 // space, and moves into the Herdr workspace labelled name (created, unfocused,
 // when none wears the label); an empty name clears the space and the chat
-// returns to its folder's place. The space is saved per chat, so a reload,
+// returns to its folder's place. When the chat's pane is the one the user has
+// focused in Herdr, the view follows it into the workspace; otherwise the view
+// stays where it is. The space is saved per chat, so a reload,
 // resume, restore or reconcile keeps the chat in it. It returns the one line
 // saying where the chat now sits; a chat outside Herdr records the space and
 // says it did not move. A caller that cannot be identified, or a Herdr that
@@ -104,24 +106,28 @@ func spaceCaller(
 		return "", fmt.Errorf("space %q is recorded; the deadline passed before Herdr moved the chat, "+
 			"so the next placement of the chat moves it", name)
 	}
-	filed, err := doors.move(context.WithoutCancel(ctx), runtime.Paths, socket, *places, id)
+	filed, followed, err := doors.move(context.WithoutCancel(ctx), runtime.Paths, socket, *places, id)
 	end()
 	if err != nil {
 		return "", fmt.Errorf("space %q is recorded; Herdr did not move the chat: %w", name, err)
+	}
+	view := ""
+	if followed {
+		view = "; the view moved with it"
 	}
 	switch {
 	case name == "" && filed.Root == "":
 		return "chat space cleared: its folder files under no place, so the chat stays where it sits", nil
 	case name == "":
-		return fmt.Sprintf("chat space cleared: the chat is back in its folder place, Herdr workspace %q",
-			filed.Label), nil
+		return fmt.Sprintf("chat space cleared: the chat is back in its folder place, Herdr workspace %q%s",
+			filed.Label, view), nil
 	case filed.Root != place.SpaceRoot(name):
 		// The scan files a chat by its space only once the index holds the chat
 		// (store.Store.ChatSpaces): until then it stays in its folder's place.
 		return "", fmt.Errorf("space %q is recorded, but the fleet scan does not hold chat %s yet, so it stays "+
 			"in Herdr workspace %q; the next placement of the chat moves it", name, id, filed.Label)
 	}
-	return fmt.Sprintf("chat is in space %q, Herdr workspace %q", name, filed.Label), nil
+	return fmt.Sprintf("chat is in space %q, Herdr workspace %q%s", name, filed.Label, view), nil
 }
 
 // notInHerdrSpaceLine words a space change for a chat no Herdr holds: nothing

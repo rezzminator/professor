@@ -51,20 +51,45 @@ func TestCodexStateFilesOrderNewestGenerationFirst(t *testing.T) {
 }
 
 // A Codex home whose every state generation is unreadable leaves the
-// resolver no candidates, and says so: the pane still resolves by its id.
+// resolver no candidates, and says so: the pane still resolves by its id. A
+// pass its context cancelled leaves none either, and says it was cancelled,
+// never that the store is unreadable.
 func TestCodexThreadResolverNamesUnreadableThreads(t *testing.T) {
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "state_5.sqlite"), []byte("not a database"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, recorder := obs.Test(t)
-	resolver := NewCodexThreadResolverRoots(ctx, []string{home}, nil)
-	if id, rollout := resolver("exported", "", 0, "", ""); id != "exported" || rollout != "" {
-		t.Fatalf("resolver = %q, %q; want the exported id with no rollout", id, rollout)
-	}
-	want := []string{"WARN: read Codex state: all 1 generation(s) were unreadable"}
-	if got := warnings(recorder, "store.codex_threads.unreadable"); !slices.Equal(got, want) {
-		t.Fatalf("records = %q, want %q\n%s", got, want, recorder.Raw())
+	for _, test := range []struct {
+		name            string
+		cancelled       bool
+		wantUnreadable  []string
+		wantCancelledAs []string
+	}{
+		{
+			name:           "every generation unreadable",
+			wantUnreadable: []string{"WARN: read Codex state: all 1 generation(s) were unreadable"},
+		},
+		{
+			name: "a pass the context cancelled", cancelled: true,
+			wantCancelledAs: []string{"INFO: context canceled"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "state_5.sqlite"), []byte("not a database"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ctx, recorder := obs.Test(t)
+			if test.cancelled {
+				ctx = &cancelledAfterFirstCheck{Context: ctx}
+			}
+			resolver := NewCodexThreadResolverRoots(ctx, []string{home}, nil)
+			if id, rollout := resolver("exported", "", 0, "", ""); id != "exported" || rollout != "" {
+				t.Fatalf("resolver = %q, %q; want the exported id with no rollout", id, rollout)
+			}
+			if got := warnings(recorder, "store.codex_threads.unreadable"); !slices.Equal(got, test.wantUnreadable) {
+				t.Fatalf("unreadable records = %q, want %q\n%s", got, test.wantUnreadable, recorder.Raw())
+			}
+			if got := warnings(recorder, "store.codex_threads.cancelled"); !slices.Equal(got, test.wantCancelledAs) {
+				t.Fatalf("cancelled records = %q, want %q\n%s", got, test.wantCancelledAs, recorder.Raw())
+			}
+		})
 	}
 }
 
@@ -87,49 +112,94 @@ func warnings(recorder *obs.Recorder, message string, fields ...string) []string
 	return got
 }
 
+// cancelledAfterFirstCheck is a context cancelled while a read runs: its
+// first Err (ReadCodexThreads' check before a generation) finds it live, every
+// later one cancelled.
+type cancelledAfterFirstCheck struct {
+	context.Context
+	checks int
+}
+
+func (ctx *cancelledAfterFirstCheck) Err() error {
+	ctx.checks++
+	if ctx.checks == 1 {
+		return nil
+	}
+	return context.Canceled
+}
+
 // L1-F4: skipping every generation is not the same as there being nothing to
 // read — an all-unusable state store must be reported as an error, never as
-// an empty Codex fleet, and each skip is visible on stderr.
+// an empty Codex fleet, and each skip is visible on stderr. A read its context
+// cancelled is no unusable generation: it comes back as the context's own
+// error, with no skip line.
 func TestReadCodexThreadsErrorsWhenEveryGenerationIsUnreadable(t *testing.T) {
-	root := t.TempDir()
-	for _, name := range []string{"state_1.sqlite", "state_2.sqlite"} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte("not a database"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	skip := func(generation int) string {
+		return fmt.Sprintf("store: skip unusable Codex state generation {root}/state_%[1]d.sqlite: "+
+			"open Codex state store \"{root}/state_%[1]d.sqlite\": sqlite database {root}/state_%[1]d.sqlite is a "+
+			"file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\n",
+			generation)
 	}
-	files, err := CodexStateFiles(root)
-	if err != nil {
-		t.Fatalf("CodexStateFiles() error = %v", err)
-	}
-	if len(files) != 2 {
-		t.Fatalf("CodexStateFiles() = %v, want 2 generations", files)
-	}
+	for _, test := range []struct {
+		name string
+		ctx  context.Context
+		want string // threads | error | stderr
+	}{
+		{
+			name: "every generation unreadable", ctx: context.Background(),
+			want: "[]store.CodexThread(nil) | read Codex state: all 2 generation(s) were unreadable | " +
+				skip(2) + skip(1),
+		},
+		{
+			name: "a read the context cancelled", ctx: &cancelledAfterFirstCheck{Context: context.Background()},
+			want: "[]store.CodexThread(nil) | context canceled | ",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, name := range []string{"state_1.sqlite", "state_2.sqlite"} {
+				if err := os.WriteFile(filepath.Join(root, name), []byte("not a database"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			files, err := CodexStateFiles(root)
+			if err != nil {
+				t.Fatalf("CodexStateFiles() error = %v", err)
+			}
+			if len(files) != 2 {
+				t.Fatalf("CodexStateFiles() = %v, want 2 generations", files)
+			}
 
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousStderr := os.Stderr
-	os.Stderr = writer
-	threads, err := ReadCodexThreads(context.Background(), files)
-	os.Stderr = previousStderr
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	logged, readErr := io.ReadAll(reader)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if err := reader.Close(); err != nil {
-		t.Fatal(err)
-	}
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			previousStderr := os.Stderr
+			os.Stderr = writer
+			threads, err := ReadCodexThreads(test.ctx, files)
+			os.Stderr = previousStderr
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			logged, readErr := io.ReadAll(reader)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if cancelled, ok := test.ctx.(*cancelledAfterFirstCheck); ok && !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v (context checked %d times), want context.Canceled", err, cancelled.checks)
+			}
 
-	if got, want := strings.ReplaceAll(
-		fmt.Sprintf("%#v | %v | %s", threads, err, logged),
-		root,
-		"{root}",
-	), "[]store.CodexThread(nil) | read Codex state: all 2 generation(s) were unreadable | store: skip unusable Codex state generation {root}/state_2.sqlite: open Codex state store \"{root}/state_2.sqlite\": sqlite database {root}/state_2.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\nstore: skip unusable Codex state generation {root}/state_1.sqlite: open Codex state store \"{root}/state_1.sqlite\": sqlite database {root}/state_1.sqlite is a file this test process did not write; a test that needs SQLite's own file calls testjail.DatabaseFiles\n"; got != want {
-		t.Fatalf("threads | error | stderr = %q, want %q", got, want)
+			if got := strings.ReplaceAll(
+				fmt.Sprintf("%#v | %v | %s", threads, err, logged),
+				root,
+				"{root}",
+			); got != test.want {
+				t.Fatalf("threads | error | stderr = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

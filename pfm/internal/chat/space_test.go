@@ -36,11 +36,25 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 		unheld   bool   // the scan does not hold the chat yet, so files it by its folder
 		homeless bool   // the chat's folder files under no place
 		late     bool   // a prompt hook's deadline closed the commit gate before the move
+		followed bool   // the chat's pane was the one Herdr has focused, so the view moved with it
 	}{
 		{
 			name: "a Herdr chat moves into its space", identity: herdr, space: " glass ",
 			line:   `chat is in space "glass", Herdr workspace "glass"`,
 			spaces: map[string]string{"seat-session": "glass"}, moved: "SOCKET seat-session glass",
+		},
+		{
+			name: "a Herdr chat the user is looking at moves into its space with the view", identity: herdr,
+			space: "glass", followed: true,
+			line:   `chat is in space "glass", Herdr workspace "glass"; the view moved with it`,
+			spaces: map[string]string{"seat-session": "glass"}, moved: "SOCKET seat-session glass",
+		},
+		{
+			name: "clearing returns a Herdr chat the user is looking at with the view", identity: herdr,
+			recorded: "glass", followed: true,
+			line: `chat space cleared: the chat is back in its folder place, Herdr workspace "atlas"; ` +
+				`the view moved with it`,
+			spaces: map[string]string{}, moved: "SOCKET seat-session ",
 		},
 		{
 			name: "clearing returns a Herdr chat to its folder place", identity: herdr, recorded: "glass",
@@ -141,16 +155,16 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 					return &place.Fleet{Spaces: recorded}, err
 				},
 				move: func(_ context.Context, _ paths.Values, socket string, fleet place.Fleet, id string) (
-					place.Place, error,
+					place.Place, bool, error,
 				) {
 					moved = socket + " " + id + " " + fleet.Spaces[id]
 					switch space := fleet.Spaces[id]; {
 					case space != "":
-						return place.Place{Root: place.SpaceRoot(space), Label: space}, test.moveErr
+						return place.Place{Root: place.SpaceRoot(space), Label: space}, test.followed, test.moveErr
 					case test.homeless:
-						return place.Place{}, test.moveErr
+						return place.Place{}, false, test.moveErr
 					}
-					return place.Place{Root: "/fixture/atlas", Label: "atlas"}, test.moveErr
+					return place.Place{Root: "/fixture/atlas", Label: "atlas"}, test.followed, test.moveErr
 				},
 			}
 			line, err := spaceCaller(ctx, config.Runtime{Paths: values}, test.identity, test.space, doors)

@@ -42,18 +42,31 @@ func TestPromptHooksAnswerWithinTheirDeadline(t *testing.T) {
 			},
 		},
 		{
-			name: "reload-intercept blocks the prompt while the reload is scheduled",
-			wantStderr: "pfm internal reload-intercept: schedule reload (it may still be scheduled: " +
+			name: "command-intercept blocks the prompt while the reload is scheduled",
+			wantStderr: "pfm internal command-intercept: schedule reload (it may still be scheduled: " +
 				"its worker logs to reload-*.log in /jail/sid) timed out after 100ms\n",
 			wantCode: 2,
 			call: func(block func(), stdout, stderr io.Writer) int {
 				front := func(context.Context, []string, io.Writer, io.Writer, config.Runtime) int { block(); return 0 }
-				return ReloadIntercept(
-					strings.NewReader(`{"prompt":"/reload"}`),
+				return CommandIntercept(
+					strings.NewReader(`{"prompt":"/pfm:reload"}`),
 					stdout,
 					stderr,
 					config.Runtime{Paths: paths.Values{SIDDir: "/jail/sid"}},
 					front,
+					nil,
+				)
+			},
+		},
+		{
+			name: "command-intercept blocks the prompt while the space is set",
+			wantStderr: "pfm internal command-intercept: set the chat's space (it may still be set: " +
+				"check `pfm chat ls`) timed out after 100ms\n",
+			wantCode: 2,
+			call: func(block func(), stdout, stderr io.Writer) int {
+				space := func(context.Context, *config.Runtime, string) (string, error) { block(); return "", nil }
+				return CommandIntercept(
+					strings.NewReader(`{"prompt":"/pfm:space work"}`), stdout, stderr, config.Runtime{}, nil, space,
 				)
 			},
 		},
@@ -123,7 +136,7 @@ func TestPromptHooksAnswerWithinTheirDeadline(t *testing.T) {
 // finishes in time keeps its own output and exit code.
 func TestPromptHookPassesTheBodyAnswerThroughWithinTheDeadline(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := RunPromptHook("pfm internal reload-intercept", &stdout, &stderr, 2,
+	code := RunPromptHook("pfm internal command-intercept", &stdout, &stderr, 2,
 		func(_ context.Context, step func(string), stdout, stderr io.Writer) int {
 			step("schedule reload")
 			_ = json.NewEncoder(stdout).Encode(map[string]string{"decision": "block"})
@@ -239,8 +252,8 @@ func TestPromptInterceptsHandTheirFrontTheCommitGate(t *testing.T) {
 		call func(front func(context.Context)) int
 	}{
 		{name: "reload", call: func(front func(context.Context)) int {
-			return ReloadIntercept(strings.NewReader(`{"prompt":"/reload"}`), io.Discard, io.Discard, config.Runtime{},
-				func(ctx context.Context, _ []string, _, _ io.Writer, _ config.Runtime) int { front(ctx); return 0 })
+			return CommandIntercept(strings.NewReader(`{"prompt":"/pfm:reload"}`), io.Discard, io.Discard, config.Runtime{},
+				func(ctx context.Context, _ []string, _, _ io.Writer, _ config.Runtime) int { front(ctx); return 0 }, nil)
 		}},
 		{name: "exit", call: func(front func(context.Context)) int {
 			return ExitIntercept(strings.NewReader(`{"prompt":"e"}`), io.Discard, io.Discard, config.Runtime{},

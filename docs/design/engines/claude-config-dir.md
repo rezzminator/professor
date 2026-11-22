@@ -170,7 +170,6 @@ Each item is written once under the store. Every account sees the same agents, c
 
 | Path under `{store}` | Target or content |
 | --- | --- |
-| `commands/reload.md` | `~/.local/share/pfm/install/reload.command.md` |
 | `commands/*` | `{clone}/templates/global/commands/` entries, `handoff.md` among them |
 | `skills/*` | `{clone}/templates/global/skills/` dirs with a `SKILL.md` |
 | `skills/{name}` | `~/.local/share/pfm/install/skills/{name}/` source clone |

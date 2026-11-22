@@ -79,8 +79,8 @@ var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill", "clear-name",
 	"codex-launch", "codex-transport", "cost-launch", "cost-sink", "engine-guard", "epic-inject", "schedule-fire",
 	"exit-intercept", "git-guard", "herdr-indicators", "herdr-places", "herdr-shell", "herdr-state",
-	"kill-exit", "launch", "pcm-guard", "seat-host", "restart-run",
-	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
+	"kill-exit", "launch", "pcm-guard", "seat-host", "restart-run", "command-intercept",
+	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "resume-unkill", "rr-dir",
 	reloadRunCommand, staleCommand, statuslineCommand, "store-guard", thenAction, "tmux-title-renudge",
 	"update-check",
 }
@@ -505,11 +505,11 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "epic-inject" {
 		return hookentry.EpicInject(os.Stdin, stdout, stderr)
 	}
-	if len(args) != 0 && args[0] == "reload-intercept" {
+	if len(args) != 0 && args[0] == "command-intercept" {
 		reloadFront := func(ctx context.Context, args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
 			return runChatReloadWithRuntime(ctx, args, stdout, stderr, runtime, paths.OSEnv{})
 		}
-		return hookentry.ReloadIntercept(os.Stdin, stdout, stderr, runtime, reloadFront)
+		return hookentry.CommandIntercept(os.Stdin, stdout, stderr, runtime, reloadFront, pfmchat.Space)
 	}
 	if len(args) != 0 && args[0] == "exit-intercept" {
 		return hookentry.ExitIntercept(os.Stdin, stdout, stderr, runtime, runKill)
@@ -577,7 +577,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|clear-name|codex-launch|codex-transport|cost-launch|cost-sink|engine-guard|epic-inject|exit-intercept|git-guard|herdr-indicators|herdr-places|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|pcm-guard|primary-get|primary-set|reload-intercept|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|clear-name|codex-launch|codex-transport|command-intercept|cost-launch|cost-sink|engine-guard|epic-inject|exit-intercept|git-guard|herdr-indicators|herdr-places|herdr-shell|herdr-state|kill-exit|launch|launcher-repair|orchestrator-wait|pcm-guard|primary-get|primary-set|reload-run|restart-run|schedule-fire|resume-unkill|rr-dir|seat-host|stale|statusline|store-guard|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

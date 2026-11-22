@@ -344,7 +344,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		), nil
 	}
 	return fmt.Sprintf(
-		"⚠ usage limit approaching — account %d: %s. Plan around it: wrap up soon or /reload to another account before the cap hits.\n",
+		"⚠ usage limit approaching — account %d: %s. Plan around it: wrap up soon or /pfm:reload to another account before the cap hits.\n",
 		account,
 		line,
 	), nil

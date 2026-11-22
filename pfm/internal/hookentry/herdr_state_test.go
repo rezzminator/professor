@@ -141,12 +141,6 @@ func TestHerdrStateSendsNothingForEventsThatDoNotChangeThePane(t *testing.T) {
 		{"unmapped notification", []string{"--engine", "claude", "notification"}, `{"session_id":"` + session + `","notification_type":"auth_success"}`},
 		// A compaction restarts the session mid-turn: the pane stays working.
 		{"compaction restart", []string{"--engine", "claude", "start"}, `{"session_id":"` + session + `","source":"compact"}`},
-		// reload-intercept and exit-intercept block these prompts, so no turn
-		// starts and no Stop would ever report the pane idle again.
-		{"a /reload prompt", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/reload"}`},
-		{"a /reload prompt with options", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":" /reload --account 2 "}`},
-		{"an exit word", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"e"}`},
-		{"a slash exit word", []string{"--engine", "claude", "working"}, `{"session_id":"` + session + `","hook_event_name":"UserPromptSubmit","prompt":"/e"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newFakeHerdr(t)
@@ -458,6 +452,34 @@ func TestHerdrStateInsideTmuxFollowsTheSessionEnvironment(t *testing.T) {
 		rig.wantQuiet(rig.engine("working", payload))
 		rig.wantCalls(listCall, reportCall("w1:p1", "working", ""))
 	})
+	// command-intercept and exit-intercept block these prompts, so no turn
+	// starts and no Stop would ever report the pane idle again; a near miss
+	// starts a turn like any other prompt.
+	for _, test := range []struct {
+		prompt string
+		want   []string
+	}{
+		{"/pfm:reload", nil},
+		{" /pfm:reload --account 2 ", nil},
+		{"/pfm:space", nil},
+		{" /pfm:space work ", nil},
+		{"e", nil},
+		{"/e", nil},
+		{"/pfm:spaces work", []string{listCall, reportCall("w1:p1", "working", "")}},
+		{"/reload", []string{listCall, reportCall("w1:p1", "working", "")}},
+	} {
+		t.Run("a typed "+test.prompt+" prompt", func(t *testing.T) {
+			rig := newChatRig(t)
+			rig.seed(rig.registered("idle", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
+			prompt, err := json.Marshal(test.prompt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			submit := `{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":` + string(prompt) + `}`
+			rig.wantQuiet(rig.engine("working", submit))
+			rig.wantCalls(test.want...)
+		})
+	}
 	for _, test := range []struct{ failing, session string }{
 		{"display-message", "no-session"},
 		{"show-options", "cc-1"},

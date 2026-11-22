@@ -72,8 +72,8 @@ type Lists struct {
 	GlobalAgents []string `json:"globalAgents"`
 	// Units are systemd user units pfm renamed away from; install disables and unlinks each.
 	Units []string `json:"units"`
-	// ConfigFiles are files under the Claude config dir install removes; a
-	// path may be a filepath.Match glob.
+	// ConfigFiles are files under the Claude config dir install removes, a
+	// regular file backed up first; a path may be a filepath.Match glob.
 	ConfigFiles []ConfigFile `json:"configFiles"`
 	// Commands are retired executables install removes, a customised regular
 	// file backed up first.

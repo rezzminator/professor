@@ -1,9 +1,10 @@
 ---
-name: reload
-description: 'USER-ONLY — the user types /reload; never run this without the user''s permission. {{RELOAD_USAGE}}'
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through the `pcm` agent); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+name: pfm:reload
+description: 'USER-ONLY — the user types /pfm:reload; never run this without the user''s permission. usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then "prompt"] [--sock socket] with no --sock, the calling chat''s own pane is detected automatically; --hide (with --new) hides the conversation left behind from the picker'
 ---
 
-# `/reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
+# `/pfm:reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
 
 Run this ONCE via the Bash tool — and make it your LAST action, the chat is about to exit:
 
@@ -34,9 +35,9 @@ words.
 itself — Claude panes from tmux, Codex from the fleet-bound thread identity. `--sock` exists only
 to reboot a DIFFERENT chat from outside it, which is not what this command is for.
 
-**Typed by the human, `/reload …` never reaches the model** — the `pfm internal reload-intercept`
-UserPromptSubmit hook executes it and blocks the prompt (Claude seats only; a Codex seat still
-routes through this body). This body is for the calls the user asked the model to make — a limit
+**Typed by the human, `/pfm:reload …` never reaches the model** — the `pfm internal command-intercept`
+UserPromptSubmit hook executes it and blocks the prompt (Claude seats only; Codex and OpenCode seats
+still route through this body). This body is for the calls the user asked the model to make — a limit
 rescue, a config change that needs a fresh session.
 
 With no flags, the current engine account is preserved. The chat auto-exits and reboots in the
@@ -52,17 +53,17 @@ tmux chat, `reload-herdr-<seat>.log` for a native Herdr chat (beside its `reload
 schedule record; ending the chat removes the record and keeps the log). In-flight sub-agents, background shells, and
 session crons die with the reboot.
 
-## Cache-only reboot — `/reload --cache 1h|5m`
+## Cache-only reboot — `/pfm:reload --cache 1h|5m`
 
 For Claude, `--cache` selects the reborn chat's starting prompt-cache TTL,
 handed to the cache-live-control plugin as `CACHE_LIVE_CONTROL_MAIN_TTL=1h|5m`
 in the launch's process environment; the plugin owns every TTL from then on,
 main chat and sub-agents alike.
-With no `--account`, `/reload --cache 5m` keeps the current account.
+With no `--account`, `/pfm:reload --cache 5m` keeps the current account.
 With no `--cache`, reload carries the chat's recorded cache choice. A chat
 without a launch record uses its selected account's configured cache.
 
-## Fresh conversation — `/reload --new [--hide]`
+## Fresh conversation — `/pfm:reload --new [--hide]`
 
 `--new` reboots into a NEW session id in the same pane, account, and cwd — the old conversation
 is untouched and stays resumable from the picker. Add `--hide` and the conversation left behind is
@@ -71,7 +72,7 @@ so a reload that fails leaves the live chat listed; `pfm chat unkill <id>` bring
 `--hide` needs `--new`: a reload that resumes the same conversation cannot hide it. Pairs with
 `--then`: reboot fresh, hide the chat being replaced, hand the reborn chat its first prompt.
 
-## Model and effort — `/reload --model M --effort E`
+## Model and effort — `/pfm:reload --model M --effort E`
 
 Both pin what the REBORN pane is born with; neither changes the conversation. `--model` takes the
 engine's own model name. `--effort` takes one of `low`, `medium`, `high`, `xhigh`, `max` on Claude,

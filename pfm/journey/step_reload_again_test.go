@@ -9,7 +9,7 @@ import (
 )
 
 // reloadAgain: with a background agent running behind the idle box, which Herdr reads as working, the
-// owner types /reload a second time; the reload is not refused, and the conversation /clear started
+// owner types /pfm:reload a second time; the reload is not refused, and the conversation /clear started
 // comes back under one new engine resumed on it (reloadTyped's checks), its status line drawn.
 func reloadAgain(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)

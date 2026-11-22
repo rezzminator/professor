@@ -43,12 +43,7 @@ const (
 	e2eCommandRoot     = ".claude/commands"
 )
 
-var commandLinks = []string{
-	"reload.md",
-}
-
 var managedAssets = []string{
-	"reload.command.md",
 	"bin/claude",
 }
 
@@ -737,7 +732,6 @@ func (h *e2eHarness) assertUninstalled(home string) {
 			h.t.Fatalf("uninstall failed; differing paths: %s; status: %v", relative, err)
 		}
 	}
-	h.assertCommandLinksUninstalled(home)
 	canonical := filepath.Join(home, e2eCanonicalClaude)
 	target, err := os.Readlink(canonical)
 	if err != nil || !strings.HasSuffix(filepath.ToSlash(target), "/.local/share/claude/versions/2.1.238") {

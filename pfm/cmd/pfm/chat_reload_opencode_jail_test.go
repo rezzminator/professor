@@ -72,7 +72,7 @@ func TestChatReloadRefusesAnOpenCodeSocketUpFront(t *testing.T) {
 	}
 }
 
-// `/reload --account 99` used to print "reload scheduled" and exit 0; the
+// `/pfm:reload --account 99` used to print "reload scheduled" and exit 0; the
 // detached worker then refused the roster miss into its log, so the chat
 // simply never rebooted. The front refuses it where the caller reads.
 func TestChatReloadRefusesAnUnknownAccountUpFront(t *testing.T) {

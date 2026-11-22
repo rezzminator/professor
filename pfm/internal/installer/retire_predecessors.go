@@ -16,20 +16,59 @@ import (
 // config dir and their commands. A failed read is deferred once by Run.
 func (installer *engine) retirePredecessors() error {
 	lists, _ := installer.retiredLists()
-	if err := installer.retireHandoffSkill(); err != nil {
+	if err := installer.retireEmbeddedAssets(); err != nil {
 		return err
 	}
 	if err := installer.retireLegacyCommands(lists.Commands); err != nil {
 		return err
 	}
 	for _, file := range lists.ConfigFiles {
-		if err := installer.retireGlob(
-			filepath.Join(installer.options.ConfigDir, filepath.FromSlash(file.Path)), file.Reason,
-		); err != nil {
-			return err
+		pattern := filepath.Join(installer.options.ConfigDir, filepath.FromSlash(file.Path))
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return fmt.Errorf("match retired config file %s: %w", pattern, err)
+		}
+		for _, match := range matches {
+			if err := installer.retireConfigFile(match, file.Reason); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// retireConfigFile removes one retired config file: a link goes as it is, a
+// regular file is backed up under the state dir first, since an operator may
+// have written their own at a name pfm once owned. A path this pass already
+// retired (retireEmbeddedAssets) is not retired twice.
+func (installer *engine) retireConfigFile(path, reason string) error {
+	if installer.removedPaths[filepath.Clean(path)] {
+		return nil
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect retired config file %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return installer.retire(path, reason)
+	}
+	backup := availableBackup(
+		filepath.Join(installer.options.Home, ".local", "state", "pfm", "retired-config", filepath.Base(path)),
+		installer.stamp,
+	)
+	installer.markRemoved(path)
+	return installer.change("retire "+path+" ("+reason+"; backup: "+backup+")", func() error {
+		if err := copyBackup(path, backup); err != nil {
+			return fmt.Errorf("backup retired config file %s: %w", path, err)
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove retired config file %s after backup %s: %w", path, backup, err)
+		}
+		return nil
+	})
 }
 
 // Retire executable predecessors across the configured account roster while
@@ -90,37 +129,74 @@ func (installer *engine) retireLegacyCommand(path string) error {
 	})
 }
 
-// retireHandoffSkill removes what the embedded /handoff skill left: the link
-// {config}/skills/handoff/SKILL.md into the managed root, the then-empty
-// skills/handoff directory, and the stale managed handoff.skill.md. It walks
-// every Claude config directory the installer fans out to. A skills/handoff
-// entry that is not that link stays. Not gated on live chats: it unlinks, as
-// the installer does when it replaces its own links.
-func (installer *engine) retireHandoffSkill() error {
-	owned := filepath.Join(installer.managedRoot, "handoff.skill.md")
+// embeddedRetirement is one asset an older pfm embedded and staged in the
+// managed root, asset relative to it; link, relative to a Claude config
+// directory, is where install linked it.
+type embeddedRetirement struct {
+	link, asset, linkReason, assetReason string
+	// removeEmptyDir retires the link's directory once the link leaves it empty.
+	removeEmptyDir bool
+}
+
+// embeddedRetirements are the embedded assets install and uninstall retire.
+var embeddedRetirements = []embeddedRetirement{
+	{
+		link: "skills/handoff/SKILL.md", asset: "handoff.skill.md", removeEmptyDir: true,
+		linkReason: "the /handoff skill is a global command now", assetReason: "embedded /handoff skill retired",
+	},
+	// Uninstall retires the link here alone; install's configFiles row for it
+	// finds it gone.
+	{
+		link: "commands/reload.md", asset: "reload.command.md",
+		linkReason: "the /reload command is /pfm:reload now", assetReason: "embedded /reload command retired",
+	},
+}
+
+// embeddedLinkOwned reports whether link points at retirement's staged copy.
+func (installer *engine) embeddedLinkOwned(link string, retirement embeddedRetirement) bool {
+	owned := filepath.Join(installer.managedRoot, retirement.asset)
+	target, linked := resolvedLink(link)
+	return linked && paths.PhysicalPath(target) == paths.PhysicalPath(owned)
+}
+
+// retireEmbeddedAssets removes what each retired embedded asset left: its link
+// in every Claude config directory the installer fans out to, then the stale
+// managed copy. An entry at the link's place that is not that link stays. Not
+// gated on live chats: it unlinks, as the installer does when it replaces its
+// own links.
+func (installer *engine) retireEmbeddedAssets() error {
 	configDirs := []string{installer.options.ConfigDir}
 	for _, account := range installer.options.ClaudeAccounts {
 		configDirs = append(configDirs, account.ConfigDir)
 	}
-	seen := map[string]bool{}
-	for _, configDir := range configDirs {
-		if strings.TrimSpace(configDir) == "" {
-			continue
-		}
-		dir := filepath.Join(paths.PhysicalPath(configDir), "skills", "handoff")
-		if seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		link := filepath.Join(dir, "SKILL.md")
-		if target, linked := resolvedLink(link); linked && paths.PhysicalPath(target) == paths.PhysicalPath(owned) {
-			if err := installer.retire(link, "the /handoff skill is a global command now"); err != nil {
+	for _, retirement := range embeddedRetirements {
+		seen := map[string]bool{}
+		for _, configDir := range configDirs {
+			if strings.TrimSpace(configDir) == "" {
+				continue
+			}
+			link := filepath.Join(paths.PhysicalPath(configDir), filepath.FromSlash(retirement.link))
+			if seen[link] {
+				continue
+			}
+			seen[link] = true
+			if !installer.embeddedLinkOwned(link, retirement) {
+				continue
+			}
+			if err := installer.retire(link, retirement.linkReason); err != nil {
 				return err
 			}
-			if err := installer.retireEmptyDirTolerant(dir); err != nil {
-				return err
+			if retirement.removeEmptyDir {
+				if err := installer.retireEmptyDirTolerant(filepath.Dir(link)); err != nil {
+					return err
+				}
 			}
+		}
+		if err := installer.retire(
+			filepath.Join(installer.managedRoot, retirement.asset), retirement.assetReason,
+		); err != nil {
+			return err
 		}
 	}
-	return installer.retire(owned, "embedded /handoff skill retired")
+	return nil
 }

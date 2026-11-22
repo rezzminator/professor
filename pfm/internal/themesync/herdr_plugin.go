@@ -2,7 +2,6 @@ package themesync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -28,7 +27,6 @@ const (
 	herdrPluginName      = "Professor sidebar indicators"
 	herdrPluginVersion   = "1.0.0"
 	herdrPluginMinHerdr  = "0.9.5"
-	herdrRegistryName    = "plugins.json"
 	herdrPluginNotLinked = "applies when Herdr is running"
 )
 
@@ -59,30 +57,14 @@ func herdrPluginRender(pfmBinary string) string {
 	return out.String()
 }
 
-// herdrPluginLinked reads Herdr's plugin registry (plugins.json, a JSON array
-// of entries carrying plugin_id): whether the indicator plugin is in it. A
-// missing registry is no plugin; an unreadable or malformed one is an error.
+// herdrPluginLinked reports whether Herdr's plugin registry lists the
+// indicator plugin (herdr.PluginLinked).
 func (s *session) herdrPluginLinked() (bool, error) {
-	path := filepath.Join(s.herdrConfigDir(), herdrRegistryName)
-	content, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
+	linked, err := herdr.PluginLinked(s.env.Home, herdr.IndicatorPluginID)
 	if err != nil {
-		return false, fmt.Errorf("themesync: read %s: %w", path, err)
+		return false, fmt.Errorf("themesync: %w", err)
 	}
-	var entries []struct {
-		PluginID string `json:"plugin_id"`
-	}
-	if err := json.Unmarshal(content, &entries); err != nil {
-		return false, fmt.Errorf("themesync: parse %s: %w", path, err)
-	}
-	for _, entry := range entries {
-		if entry.PluginID == herdr.IndicatorPluginID {
-			return true, nil
-		}
-	}
-	return false, nil
+	return linked, nil
 }
 
 // herdrPluginCommand runs `herdr plugin <verb> <arg>`; deferred says no herdr
@@ -103,10 +85,8 @@ func (s *session) herdrPluginCommand(ctx context.Context, verb, arg string) (def
 		return false, nil
 	}
 	text := strings.TrimSpace(string(result.Stderr) + " " + string(result.Stdout))
-	for _, marker := range herdrNotRunning {
-		if strings.Contains(strings.ToLower(text), marker) {
-			return true, nil
-		}
+	if herdr.ServerNotRunning(text) {
+		return true, nil
 	}
 	return false, fmt.Errorf("themesync: %s exited %d: %s", strings.Join(argv[1:], " "), result.ExitCode, text)
 }

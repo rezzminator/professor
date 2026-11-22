@@ -13,7 +13,7 @@ import (
 // runChatSpace is `pfm chat space [name]`: the calling chat moves into the
 // named space, or with no name back to its folder's place (chat.Space).
 func runChatSpace(ctx context.Context, args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := cli.NewFlagSet("chat space", "usage: pfm chat space [name]", stderr)
+	flags := cli.NewFlagSet("chat space", pfmchat.SpaceUsage, stderr)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}

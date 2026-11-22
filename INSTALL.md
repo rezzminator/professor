@@ -2,7 +2,7 @@
 
 Two independent things live in this repo. Install what you need.
 
-- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `chat-professor` MCP server and multi-account tooling. Binary or source, touches only your `$HOME`, no project files. Harvester is an independent plugin; see its [native install guide](plugins/harvester/README.md).
+- **`pfm`** — the host fleet CLI: statusline, `/pfm:reload`, the `chat-professor` MCP server and multi-account tooling. Binary or source, touches only your `$HOME`, no project files. Harvester is an independent plugin; see its [native install guide](plugins/harvester/README.md).
 - **Professor, the discipline layer** — `CLAUDE.md`, agents, commands, the pipeline. Installed into YOUR project through a Claude-guided interview.
 
 Shortest path first.

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/place"
@@ -34,6 +35,7 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 		moved    string // "socket id" the placement ran for; "" for none
 		unheld   bool   // the scan does not hold the chat yet, so files it by its folder
 		homeless bool   // the chat's folder files under no place
+		late     bool   // a prompt hook's deadline closed the commit gate before the move
 	}{
 		{
 			name: "a Herdr chat moves into its space", identity: herdr, space: " glass ",
@@ -79,6 +81,13 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 			spaces:  map[string]string{"seat-session": "glass"}, moved: "SOCKET seat-session glass",
 		},
 		{
+			name: "a deadline past before the move keeps the space and moves nothing", identity: herdr,
+			space: "glass", late: true,
+			err: `space "glass" is recorded; the deadline passed before Herdr moved the chat, ` +
+				`so the next placement of the chat moves it`,
+			spaces: map[string]string{"seat-session": "glass"},
+		},
+		{
 			name: "a name with a control character is refused", identity: tmux, space: "gla\nss",
 			err: `the space name "gla\nss" must be one printable line`, spaces: map[string]string{},
 		},
@@ -96,6 +105,9 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			testjail.Fleet(t)
 			ctx := context.Background()
+			if test.late {
+				ctx = deps.WithCommitGate(ctx, func() (func(), bool) { return func() {}, false })
+			}
 			values, err := paths.Resolve()
 			if err != nil {
 				t.Fatal(err)

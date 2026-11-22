@@ -28,11 +28,6 @@ const (
 var (
 	herdrOpenPattern   = regexp.MustCompile(`^# >>> pfm theme · \S+ · gen (\d+) >>>$`)
 	herdrHeaderPattern = regexp.MustCompile(`^\s*\[\[?\s*([^\]\s][^\]]*?)\s*\]\]?\s*(#.*)?$`)
-	// herdrNotRunning matches the texts `herdr server reload-config` prints when no server is up.
-	herdrNotRunning = []string{
-		"not running", "no server", "no running", "connection refused", "no such file", "could not connect",
-		"couldn't connect", "failed to connect", "server_not_running",
-	}
 )
 
 // herdrToken is one `[theme.custom]` token.
@@ -244,10 +239,8 @@ func (s *session) herdrReload(ctx context.Context) (string, error) {
 		return herdrReloadAcknowledgement(result.Stdout, result.Stderr)
 	}
 	text := strings.TrimSpace(string(result.Stderr) + " " + string(result.Stdout))
-	for _, marker := range herdrNotRunning {
-		if strings.Contains(strings.ToLower(text), marker) {
-			return herdrDeferred, nil
-		}
+	if herdr.ServerNotRunning(text) {
+		return herdrDeferred, nil
 	}
 	return "", fmt.Errorf("themesync: herdr server reload-config exited %d: %s", result.ExitCode, text)
 }

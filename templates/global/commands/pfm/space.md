@@ -11,6 +11,8 @@ Arguments: $ARGUMENTS
 
 A chat joins a space only by this command; a new chat starts in its folder-derived project space and never inherits one. A joined chat stays in its space through reload, resume, restore and reconcile, and the picker's rail groups it under the space's name. Outside Herdr the space is still recorded and grouped in the rail.
 
+Typed on a Claude seat, `/pfm:space …` never reaches the model: the `pfm internal command-intercept` UserPromptSubmit hook runs it and blocks the prompt, showing the verb's line. This body serves Codex and OpenCode seats and a model asked to move the chat.
+
 ## Run
 
 - `<name>`: run `pfm chat space '<name>'`, the name quoted for the shell; `~`, home's place, is refused. It records the space for this chat, creates the Herdr workspace of that name when missing, and moves this chat's tab there; while the fleet scan does not hold this chat yet, it errors naming the workspace the chat stays in, and the chat moves at its next placement.

@@ -72,7 +72,7 @@ func (installer *engine) deferEngineSyncUninstallFault(fault error) {
 // as the commands step would see it. Every event is rendered through this
 // installer's own transcript; a conflict blocks the apply and is a plan error
 // of a preview.
-func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr error) {
+func (installer *engine) wireEngineSyncGlobal() (returnErr error) {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
 		return fmt.Errorf("resolve the engine-sync global source repository: %w", err)
@@ -126,7 +126,7 @@ func (installer *engine) wireEngineSyncGlobal(assets []assetFile) (returnErr err
 			filepath.Clean(installer.options.Home),
 			".claude",
 		) {
-		sourceHome, cleanup, err := installer.futureCommandSource(assets)
+		sourceHome, cleanup, err := installer.futureCommandSource()
 		if err != nil {
 			return err
 		}

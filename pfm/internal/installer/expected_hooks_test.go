@@ -30,25 +30,25 @@ func TestClaudeHookTemplatesMatchLaunchRegistry(t *testing.T) {
 	}
 }
 
-func TestClaudeHookTemplatesIncludesReloadIntercept(t *testing.T) {
+func TestClaudeHookTemplatesIncludesCommandIntercept(t *testing.T) {
 	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	templates := claudeHookTemplates(home)
-	if got := commandByName(templates, "reload-intercept"); got != home+"/.local/bin/pfm internal reload-intercept" {
-		t.Fatalf("reload-intercept command=%q", got)
+	if got := commandByName(templates, "command-intercept"); got != home+"/.local/bin/pfm internal command-intercept" {
+		t.Fatalf("command-intercept command=%q", got)
 	}
 	found := false
 	for _, template := range templates {
-		if template.Name != "reload-intercept" {
+		if template.Name != "command-intercept" {
 			continue
 		}
 		found = true
 		if template.Event != "UserPromptSubmit" || template.Matcher != "" {
-			t.Fatalf("reload-intercept template=%#v, want UserPromptSubmit with an empty matcher", template)
+			t.Fatalf("command-intercept template=%#v, want UserPromptSubmit with an empty matcher", template)
 		}
 	}
 	if !found {
-		t.Fatal("claudeHookTemplates dropped the reload-intercept hook")
+		t.Fatal("claudeHookTemplates dropped the command-intercept hook")
 	}
 }
 

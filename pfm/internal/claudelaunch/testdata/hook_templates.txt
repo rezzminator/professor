@@ -10,7 +10,7 @@
 {Event:PreToolUse Matcher:Edit|Write|MultiEdit|NotebookEdit|Bash Command:{home}/.local/bin/pfm internal pcm-guard Name:pcm-guard Async:false}
 {Event:SubagentStart Matcher:rr|rr-pro|rr-pro-max Command:{home}/.local/bin/pfm internal rr-dir Name:rr-dir Async:false}
 {Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal epic-inject Name:epic-inject Async:false}
-{Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal reload-intercept Name:reload-intercept Async:false}
+{Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal command-intercept Name:command-intercept Async:false}
 {Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal exit-intercept Name:exit-intercept Async:false}
 {Event:SessionStart Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude start Name:herdr-start Async:false}
 {Event:UserPromptSubmit Matcher: Command:{home}/.local/bin/pfm internal herdr-state --engine claude working Name:herdr-working-prompt Async:true}

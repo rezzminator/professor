@@ -390,7 +390,7 @@ func TestOpenNativeOutsideReportsLocationWhenAttachFails(t *testing.T) {
 }
 
 // plantNativeReloadFiles writes seatID's reload schedule record and log into
-// sidDir, as a native /reload leaves them, and returns their paths.
+// sidDir, as a native /pfm:reload leaves them, and returns their paths.
 func plantNativeReloadFiles(t *testing.T, sidDir, seatID string) []string {
 	t.Helper()
 	if err := os.MkdirAll(sidDir, 0o700); err != nil {

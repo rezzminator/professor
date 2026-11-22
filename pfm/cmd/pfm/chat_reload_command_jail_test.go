@@ -500,7 +500,7 @@ func TestChatEndRetryPendingIntentRunsRealDetachedCLIWorker(t *testing.T) {
 }
 
 // TestNativeChatReloadRefusesASecondScheduleForTheSameSeat: a native chat's
-// /reload schedules one worker; a second /reload while that worker lives is
+// /pfm:reload schedules one worker; a second /pfm:reload while that worker lives is
 // refused by name, and a record whose worker is gone is replaced.
 func TestNativeChatReloadRefusesASecondScheduleForTheSameSeat(t *testing.T) {
 	jail := newRunJail(t)

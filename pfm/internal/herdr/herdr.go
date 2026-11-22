@@ -9,6 +9,8 @@
 // is restore.go's. Whether a server runs at a socket is server.go's. The nudge
 // that makes a socket's blinker re-read its tabs is nudge.go's; which tabs a
 // tick reconciles from its tab observations is indicators_tab_observations.go's.
+// Which plugins Herdr's registry lists, and whether a command's text says no
+// server is up, is plugin_registry.go's.
 package herdr
 
 import (

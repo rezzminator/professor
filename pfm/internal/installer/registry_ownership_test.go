@@ -179,14 +179,6 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 			want: []string{"ORPHAN .agents/skills/stale", "ORPHAN .claude/skills/nomd"},
 		},
 		{
-			name: "embedded command asset is planned",
-			setup: func(t *testing.T, h ownershipHome) {
-				managed := managedRootForHome(h.home)
-				writeFixture(t, filepath.Join(managed, "reload.command.md"), "reload")
-				symlinkFixture(t, filepath.Join(managed, "reload.command.md"), filepath.Join(h.store, "commands", "reload.md"))
-			},
-		},
-		{
 			name: "a regular skill directory is judged by its SKILL.md link",
 			setup: func(t *testing.T, h ownershipHome) {
 				old := filepath.Join(h.clone, "templates", "global", "skills", "old", "SKILL.md")

@@ -192,7 +192,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 		t.Fatalf("rewarn=%q err=%v", rewarn, err)
 	}
 	// REGRESSION (2026-09-10, observed live): fable at 95% printed "This window is nearly
-	// exhausted: finish the in-flight step, then /reload" on every prompt while the 5-hour
+	// exhausted: finish the in-flight step, then /pfm:reload" on every prompt while the 5-hour
 	// window was 1% used. Severity by max() is correct; asserting it about the LIVE window was
 	// not. A model-scoped cap must name the model and report the real 5-hour headroom.
 	seedNamed := func(five, seven int, fable, fableReset string) {
@@ -286,7 +286,7 @@ func TestEvaluateKeepsItsNoticeWhenTheWarnedFlagFails(t *testing.T) {
 				}
 			},
 			wantMessage: "⚠ usage limit approaching — account 1: 5h 85% (resets 05:00) · 7d 12% (resets Mon 05:00). " +
-				"Plan around it: wrap up soon or /reload to another account before the cap hits.\n",
+				"Plan around it: wrap up soon or /pfm:reload to another account before the cap hits.\n",
 			wantLog: "record warned flag {flag}: ",
 		},
 		{

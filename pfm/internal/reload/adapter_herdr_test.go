@@ -252,7 +252,7 @@ func TestLockWorkerScheduleOpensOnlyPrivateFilesAndBoundsTheWait(t *testing.T) {
 			},
 		},
 		{
-			name: "record held by another scheduler", want: "another /reload is scheduling this chat right now",
+			name: "record held by another scheduler", want: "another /pfm:reload is scheduling this chat right now",
 			plant: func(t *testing.T, _, record, _ string) {
 				held, err := os.OpenFile(record, os.O_CREATE|os.O_RDWR, 0o600)
 				if err != nil {

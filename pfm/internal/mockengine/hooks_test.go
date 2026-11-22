@@ -29,7 +29,7 @@ case "$event" in
   SessionStart)
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"CTX-FIXTURE"}}' ;;
   UserPromptSubmit)
-    if printf '%s' "$payload" | grep -q '"prompt":"/reload'; then
+    if printf '%s' "$payload" | grep -q '"prompt":"/pfm:reload'; then
       printf '%s\n' '{"decision":"block","reason":"reload scheduled — this chat reboots when the current turn ends","suppressOriginalPrompt":true}'
     fi ;;
   PreToolUse)

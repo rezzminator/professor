@@ -482,29 +482,6 @@ func TestUninstallPreflightRefusesOwnedHookBeforeTeardown(t *testing.T) {
 	assertLink(t, keep, filepath.Join(filepath.Dir(keep), "operator-launcher"))
 }
 
-func TestFailedAssetStageDoesNotWireDependentRegistries(t *testing.T) {
-	home := t.TempDir()
-	managed := managedRootForHome(home)
-	writer := &storeMutationWriter{match: "  change  write " + managed, mutate: func() {
-		if err := os.RemoveAll(managed); err != nil {
-			t.Fatal(err)
-		}
-		writeFixture(t, managed, "blocked")
-	}}
-	_, err := Run(
-		context.Background(),
-		Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}, MCPConfigPath: testConfigPath(t), Stdout: writer},
-	)
-	if err == nil {
-		t.Fatal("staging failure was hidden")
-	}
-	for _, path := range []string{filepath.Join(home, ".claude", "commands", "reload.md")} {
-		if target, err := os.Readlink(path); err == nil {
-			t.Errorf("failed asset stage published dependent link %s -> %s", path, target)
-		}
-	}
-}
-
 // An operator's own "PFM" profile fails that settings file alone: the install
 // keeps it untouched, merges every other settings file, records the merged one
 // in the ledger, and lands every other step.

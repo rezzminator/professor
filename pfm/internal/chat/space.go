@@ -9,12 +9,17 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
+
+// SpaceUsage is the usage line of `pfm chat space` and of the typed
+// /pfm:space the command-intercept hook runs.
+const SpaceUsage = "usage: pfm chat space [name]"
 
 // spaceDoors are the two reads and moves a space change makes on Herdr: the
 // fleet scan its placement files chats by, and the placement of the one chat.
@@ -91,7 +96,16 @@ func spaceCaller(
 	if err != nil {
 		return "", fmt.Errorf("space %q is recorded; scan the fleet to place the chat: %w", name, err)
 	}
-	filed, err := doors.move(ctx, runtime.Paths, socket, *places, id)
+	// The move is one commit span (deps.BeginCommit): a prompt hook's deadline
+	// applies before it starts, and once Herdr starts moving the chat the move
+	// runs to its end, so the typed /pfm:space never exits halfway through it.
+	end, ok := deps.BeginCommit(ctx)
+	if !ok {
+		return "", fmt.Errorf("space %q is recorded; the deadline passed before Herdr moved the chat, "+
+			"so the next placement of the chat moves it", name)
+	}
+	filed, err := doors.move(context.WithoutCancel(ctx), runtime.Paths, socket, *places, id)
+	end()
 	if err != nil {
 		return "", fmt.Errorf("space %q is recorded; Herdr did not move the chat: %w", name, err)
 	}

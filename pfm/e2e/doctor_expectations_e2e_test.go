@@ -252,7 +252,6 @@ func (h *e2eHarness) assertInstalled(home string) {
 		}
 		h.readJSON(filepath.Join(home, relative))
 	}
-	h.assertCommandLinksInstalled(home)
 	// The shim is static and sourced straight from the clone the marker names;
 	// nothing is staged under the managed root.
 	clone, err := pfmpaths.ReadSourceRepoMarker(home)

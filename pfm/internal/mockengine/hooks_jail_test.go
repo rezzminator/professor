@@ -143,7 +143,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 		t.Fatalf("the SessionStart additionalContext counted as a human prompt: %+v", meta)
 	}
 
-	session.typeLine("/reload --model opus")
+	session.typeLine("/pfm:reload --model opus")
 	session.waitFrame(
 		"the block reason",
 		func(frame string) bool { return strings.Contains(frame, "reload scheduled") },
@@ -156,16 +156,17 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 		}
 		return 0
 	}
-	if code := hookentry.ReloadIntercept(
+	if code := hookentry.CommandIntercept(
 		strings.NewReader(reload),
 		&blocked,
 		&blockErr,
 		config.Runtime{},
 		front,
+		nil,
 	); code != 0 ||
 		!strings.Contains(blocked.String(), `"decision":"block"`) {
 		t.Fatalf(
-			"pfm's reload-intercept read the payload as exit=%d out=%q err=%q",
+			"pfm's command-intercept read the payload as exit=%d out=%q err=%q",
 			code,
 			blocked.String(),
 			blockErr.String(),

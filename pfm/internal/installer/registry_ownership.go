@@ -130,15 +130,6 @@ func PlanRegistryLinks(home, store, clone, releaseURL string) (RegistryPlan, err
 		plan.Links[filepath.Join(store, globalSkillsRegistry, source.Name)] = true
 		plan.Links[filepath.Join(home, ".agents", globalSkillsRegistry, source.Name)] = true
 	}
-	assets, err := assetFiles(nativeScheduler())
-	if err != nil {
-		return RegistryPlan{}, fmt.Errorf("plan registry host assets: %w", err)
-	}
-	for _, asset := range assets {
-		if target, found := commandTargetIn(store, asset.path); found {
-			plan.Links[target] = true
-		}
-	}
 	return plan, nil
 }
 

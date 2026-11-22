@@ -570,7 +570,7 @@ func TestRunWaitsForTheCallerTurnToEndBeforeTypingExit(t *testing.T) {
 	}
 }
 
-// A mid-turn /reload used to hold /exit with the wait logged only to the
+// A mid-turn /pfm:reload used to hold /exit with the wait logged only to the
 // worker's own stderr; the pane itself must announce the wait, then the reboot.
 func TestRunAnnouncesTheHoldAndTheRebootOnThePane(t *testing.T) {
 	tmux := &busyThenIdleTmux{busyCaptures: 3, typedAfter: -1}

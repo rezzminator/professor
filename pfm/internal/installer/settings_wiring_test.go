@@ -162,6 +162,7 @@ func TestUninstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 var fixtureRetiredHooks = retired.Lists{
 	HookCommands: []retired.HookCommand{
 		{Name: "clear-hide", Subcommand: "internal clear-hide"},
+		{Name: "reload-intercept", Subcommand: "internal reload-intercept"},
 		{Name: "compact-nudge", Subcommand: "internal compact-nudge"},
 		{Name: "dream-agent-inject", Subcommand: "dream hook agent-inject"},
 		{Name: "dream-nudge", Subcommand: "dream hook nudge"},

@@ -254,7 +254,7 @@ func OptionsForWorker(values paths.Values, env paths.Env, duration func(string, 
 // NativeSchedule is a native seat's held record of its scheduled reload
 // worker, {SIDDir}/reload-herdr-{seat}.pid holding "{pid} {start}". The
 // scheduler holds its flock across reading the record, starting the worker
-// and writing the record, so two /reloads typed close together start one
+// and writing the record, so two /pfm:reload commands typed close together start one
 // worker; the worker publishes its own pending state only after the chat goes
 // idle, too late to guard the second schedule.
 type NativeSchedule struct {
@@ -262,7 +262,7 @@ type NativeSchedule struct {
 	proc gather.ProcFS
 }
 
-// ScheduledError refuses a /reload while the seat's recorded worker still runs.
+// ScheduledError refuses a /pfm:reload while the seat's recorded worker still runs.
 type ScheduledError struct {
 	PID int
 	Log string
@@ -271,7 +271,7 @@ type ScheduledError struct {
 func (err *ScheduledError) Error() string {
 	if err.PID == 0 {
 		return fmt.Sprintf(
-			"another /reload is scheduling this chat right now (log %s); try again once it has answered",
+			"another /pfm:reload is scheduling this chat right now (log %s); try again once it has answered",
 			err.Log,
 		)
 	}
@@ -326,7 +326,7 @@ func LockWorkerSchedule(
 
 // scheduleLockWait bounds the wait for another scheduler's hold on the record
 // (its read, start and record take milliseconds), well inside the 5 s budget
-// of the /reload prompt hook.
+// of the /pfm:reload prompt hook.
 var scheduleLockWait = 2 * time.Second
 
 // maxScheduleRecord caps the record read: "{pid} {start}\n" is far shorter.
@@ -472,7 +472,7 @@ func (s *NativeSchedule) Record(pid int, stderr io.Writer) {
 	if err != nil {
 		fmt.Fprintf(
 			stderr,
-			"pfm chat reload: a second /reload is not refused until this one runs: record worker %d: %v\n",
+			"pfm chat reload: a second /pfm:reload is not refused until this one runs: record worker %d: %v\n",
 			pid,
 			err,
 		)

@@ -2,14 +2,17 @@ package installer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -121,4 +124,49 @@ func jsonStringLiteral(value string) ([]byte, error) {
 		return nil, fmt.Errorf("encode Claude hook command %q: %w", value, err)
 	}
 	return bytes.TrimRight(out.Bytes(), "\n"), nil
+}
+
+// herdrShieldUnlinkBound caps one `herdr plugin unlink herdr-shield` run.
+const herdrShieldUnlinkBound = 30 * time.Second
+
+// retireHerdrShieldPlugin unlinks the herdr-shield plugin its own installer
+// registered in Herdr: a registry (herdr.PluginLinked) that lists it gets
+// `herdr plugin unlink herdr-shield`; one that does not gets nothing. No herdr
+// on PATH, or none with a server up to answer, leaves the entry and says so.
+func (installer *engine) retireHerdrShieldPlugin(ctx context.Context) error {
+	linked, err := herdr.PluginLinked(installer.options.Home, retiredShieldProgram)
+	if err != nil {
+		return installer.fail(fmt.Errorf("herdr plugin %s: %w", retiredShieldProgram, err))
+	}
+	if !linked {
+		return nil
+	}
+	runner := installer.processRunner()
+	command := "herdr plugin unlink " + retiredShieldProgram
+	stays := "herdr plugin " + retiredShieldProgram + " stays registered until `" + command + "` runs: "
+	binary, lookErr := runner.LookPath(herdr.HostBinary(installer.env().Get))
+	if lookErr != nil {
+		installer.skip(stays + "herdr is not on PATH")
+		return nil
+	}
+	if !installer.apply {
+		return installer.change(command, nil)
+	}
+	bounded, cancel := context.WithTimeout(ctx, herdrShieldUnlinkBound)
+	defer cancel()
+	result, err := runner.Run(bounded, []string{binary, "plugin", "unlink", retiredShieldProgram}, deps.RunOptions{})
+	if err != nil {
+		return installer.fail(fmt.Errorf("%s: %w", command, err))
+	}
+	text := strings.TrimSpace(string(result.Stderr) + " " + string(result.Stdout))
+	switch {
+	case result.ExitCode == 0:
+		return installer.change(command, nil)
+	case herdr.ServerNotRunning(text):
+		// Herdr's own words ride along: the markers are server-down texts, so a
+		// different failure they happen to match still shows what it was.
+		installer.skip(stays + "no Herdr server is up (herdr said: " + text + ")")
+		return nil
+	}
+	return installer.fail(fmt.Errorf("%s exited %d: %s", command, result.ExitCode, text))
 }

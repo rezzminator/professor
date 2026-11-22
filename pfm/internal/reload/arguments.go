@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// The /reload flags, as a person types them and the worker's argv carries them.
+// The /pfm:reload flags, as a person types them and the worker's argv carries them.
 const (
 	ArgumentAccount = "--account"
 	ArgumentModel   = "--model"
@@ -62,7 +62,7 @@ func NormalizeArguments(args []string) []string {
 	return normalized
 }
 
-// argumentFlags holds every /reload flag by its bare name, true for the ones
+// argumentFlags holds every /pfm:reload flag by its bare name, true for the ones
 // followed by a value.
 var argumentFlags = map[string]bool{
 	"account": true, "model": true, "effort": true, "cache": true, "then": true, "sock": true, "pane": true,

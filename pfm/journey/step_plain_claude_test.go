@@ -26,13 +26,13 @@ func plainClaude(c *harness.Ctx, s State) State {
 	return plainClaudeLive(c, s, attached(c, term))
 }
 
-// plainReloadTyped: the owner types /reload in the plain chat; the chat comes back in the same
+// plainReloadTyped: the owner types /pfm:reload in the plain chat; the chat comes back in the same
 // terminal, on the same socket, seat and session, under a new engine, and draws its status line. The
 // step ends once pfm's reload run has exited, so the next step's /exit meets the reborn chat.
 func plainReloadTyped(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	before, socket := s.Chat, plainSocket(c, s)
-	term.Type("/reload\r")
+	term.Type("/pfm:reload\r")
 	c.Poll("a new engine for session "+s.Chat.Session, 20*time.Second, func() (bool, string) {
 		for pid, session := range engines(processes(c)) {
 			if session == s.Chat.Session && pid != before.Engine {
@@ -45,7 +45,7 @@ func plainReloadTyped(c *harness.Ctx, s State) State {
 		run := reloadRun(c, socket)
 		return run == "", run
 	})
-	term.WaitGone("/reload", 20*time.Second)
+	term.WaitGone("/pfm:reload", 20*time.Second)
 	plainStatusRow(c, s)
 	s = plainClaudeLive(c, s, socket)
 	if s.Chat.Seat != before.Seat || s.Chat.Engine == before.Engine {
@@ -106,14 +106,14 @@ func plainResumeFromCLI(c *harness.Ctx, s State) State {
 	return s
 }
 
-// plainExitDuringReload: in the resumed chat the owner types /reload, then /exit while pfm's reload
+// plainExitDuringReload: in the resumed chat the owner types /pfm:reload, then /exit while pfm's reload
 // run still waits for the chat's turn to end; the owner's exit wins. The box leaves the screen and the
 // terminal is back at its prompt; no reload run, live row, live seat, engine or tmux process of the chat
 // is left, so nothing was respawned.
 func plainExitDuringReload(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := plainSocket(c, s)
-	term.Type("/reload\r")
+	term.Type("/pfm:reload\r")
 	c.Poll("pfm's reload run on "+socket+" started", 20*time.Second, func() (bool, string) {
 		return reloadRun(c, socket) != "", "no reload run"
 	})

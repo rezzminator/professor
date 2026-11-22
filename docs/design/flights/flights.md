@@ -50,7 +50,7 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 
 | Member | Kind | Model · effort | Does |
 | --- | --- | --- | --- |
-| `flights:foreman-sonnet` | agent | sonnet · high | Foreman for a clear path: the pattern is in the code; the same protocol as `flights:foreman`, in its own file |
+| `flights:foreman-sonnet` | agent | sonnet · medium | Foreman for a clear path: the pattern is in the code; the same protocol as `flights:foreman`, in its own file |
 | `flights:foreman` | agent | opus · medium | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
 | `flights:lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
 | `flights:speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
@@ -160,7 +160,7 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 
 | Agent | `effortControl` |
 | --- | --- |
-| `flights:foreman`, `flights:foreman-sonnet` | floor medium, ceiling xhigh; `flights:foreman` starts at medium, `flights:foreman-sonnet` at high |
+| `flights:foreman`, `flights:foreman-sonnet` | floor medium, ceiling xhigh; both start at medium |
 | `documenter` | `on` |
 
 `pcm` does not carry `effortControl`. `flights:lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort__` prefix; the two foremen carry no effort buttons and a `tools:` line without them. The plugin steers a foreman: one step up at a failing test run, home at the next green ([flights-foreman.md](flights-foreman.md#effort)).

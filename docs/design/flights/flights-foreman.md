@@ -25,7 +25,7 @@ A foreman turns one request into tested code where its parent points it, by its 
 | Agent | Model · effort | For |
 | --- | --- | --- |
 | `flights:foreman` | opus · medium | design choices or ambiguity, unfamiliar code, an unknown cause, work across several modules |
-| `flights:foreman-sonnet` | sonnet · high | a clear path: the pattern is in the code |
+| `flights:foreman-sonnet` | sonnet · medium | a clear path: the pattern is in the code |
 
 Difficulty and ambiguity choose the tier, never size. Both files carry the same body, byte for byte (pinned by `test_sonnet_foreman_carries_the_foreman_manual`).
 
@@ -36,6 +36,8 @@ Ledger § Results: on five tasks in five repositories the foreman before this ch
 What the cut costs: on the two hard tasks the earlier foreman was graded 9 and 9 (merge as is); the law on opus · medium 6 to 8 and 7 to 9 over two graded runs each, on sonnet · high 5 to 7 and 8 (merge after small fixes, one fail), so the lander's review carries more on hard work.
 
 Heavy work (ledger § Heavy rungs): `flights:foreman` on opus · medium is the heavy-work foreman. On the list rung the shipped text costs $6.70 and $7.71 on opus · medium against $12.64 for the foreman before the price law, with 4 and 4 of 24 minor items open; `flights:foreman-sonnet` on sonnet · high costs $4.01 and $5.38, about two thirds of that (the two-runs-each means are $4.70 against $7.21), and is not reliable on a heavy list: 4 to 14 of 24 minor items open over six runs, four of six returns of 45 to 73 lines with bullets against the 25-line block, one opening with other words before `PARTIAL`. The brief's difficulty still chooses the tier; a heavy list that must come back complete goes to opus.
+
+Sonnet foreman effort (bench 2026-11-22): one brief, a 42-row fault-fix job over two Go packages (22 and 20 rows), fresh `flights:foreman-sonnet` runs from the same base commit, priced from their transcripts at Sonnet sub-agent prices. At effort high (auto-effort raising to xhigh at failing test runs): 2 runs, $6.46 and $7.26 (212 and 222 requests). At effort medium (raised the same way): 2 runs, $4.46 and $5.08 (137 and 171 requests). Mean $4.77 against $6.86, 30% less. All four runs closed all 42 rows; both packages' tests and static checks pass in the fence from each medium run's tree; blind readers found the diff supports the sampled rows in 15 of 16 cases at medium (one partly); the watched-failing-first test rule was skipped for part of the work in three of the four runs, at both efforts. The two high runs ran one forward-compaction build earlier and without the host's foreman skill-listing rule, together worth about 3.6% by computation. `flights:foreman-sonnet` ships at effort medium. The $4.01 and $5.38 of the heavy-work paragraph above, and the $2.68 above, are sonnet · high runs of earlier benches.
 
 A spawn tagged `[effort: high]` scored 7 and 9 on those two tasks for 46% more dollars than medium, mean grade 7.5 against 7.1 over four runs each: medium is the default, and the tag is the caller's for work where one missed rule costs more than a dollar.
 
@@ -193,12 +195,14 @@ Why the status rule: without it 2 of 4 list-rung runs opened with `DONE` while a
 ## Declaration
 
 - **`plugins/flights/plugins/flights/agents/foreman.md`:** opus, effort medium, `effortControl` floor medium and ceiling xhigh, the `tools:` line of [Tools](#tools).
-- **`plugins/flights/plugins/flights/agents/foreman-sonnet.md`:** a full file, sonnet at effort high, the same band, tools and body.
+- **`plugins/flights/plugins/flights/agents/foreman-sonnet.md`:** a full file, sonnet at effort medium, the same band, tools and body.
 
 ## Open items
 
 Open after the heavy-rung bench:
 
+- The Sonnet foreman's effort medium rests on one brief; a second brief is not benched.
+- The Opus foreman's effort is not re-benched since the Sonnet effort bench.
 - The work list's folder is not pinned: "a file outside the tree" landed in the session scratch folder (2 runs), the shared temp root (2 runs) and the brief's own folder (2 runs).
 - Sonnet on a heavy list is not reliable: 4 to 14 of 24 minor items open over six runs; four of six Sonnet returns run 45 to 73 lines with bullets against the 25-line block; one opened with other words before `PARTIAL`.
 - One tool call a request is still the norm on heavy runs; the reading rounds become ten and more single-call reads on a many-item brief.

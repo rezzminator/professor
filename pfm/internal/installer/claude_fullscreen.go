@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
@@ -37,7 +38,7 @@ func ClaudeRegistryFor(home string, account pfmconfig.Account) string {
 // path: nil when the file or the key is absent, an error when the file cannot
 // be read or parsed — its real state is then unknown.
 func ReadFullscreenAutoDisable(path string) (*FullscreenAutoDisable, error) {
-	raw, _, err := readRegularFile(path)
+	raw, _, err := atomicfile.ReadRegular(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -87,7 +88,7 @@ func (installer *engine) clearFullscreenAutoDisable() error {
 			continue
 		}
 		seen[physical] = true
-		raw, info, err := readRegularFile(physical)
+		raw, info, err := atomicfile.ReadRegular(physical)
 		if errors.Is(err, fs.ErrNotExist) {
 			installer.ok("claude fullscreen renderer not auto-disabled in " + path + " (no registry yet)")
 			continue

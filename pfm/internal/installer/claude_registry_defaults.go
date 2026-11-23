@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
 
@@ -28,7 +29,7 @@ func (installer *engine) wireClaudeRegistryDefaults() error {
 			continue
 		}
 		seen[physical] = true
-		raw, info, err := readRegularFile(physical)
+		raw, info, err := atomicfile.ReadRegular(physical)
 		if errors.Is(err, fs.ErrNotExist) {
 			installer.ok("claude registry defaults: no registry yet in " + path)
 			continue

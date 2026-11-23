@@ -40,7 +40,8 @@ func (installer *engine) retirePredecessors() error {
 // retireConfigFile removes one retired config file: a regular file or a link
 // is backed up under the state dir first (a link as a link to the same
 // target), since an operator may have written or linked their own at a name pfm
-// once owned; anything else goes as it is. A path this pass already retired
+// once owned; anything else (an operator's directory, a FIFO) cannot be backed
+// up, so it stays, named in a skip row. A path this pass already retired
 // (retireEmbeddedAssets, which names it through the config dir's physical
 // path) is not retired twice.
 func (installer *engine) retireConfigFile(path, reason string) error {
@@ -57,7 +58,13 @@ func (installer *engine) retireConfigFile(path, reason string) error {
 	}
 	link := info.Mode()&os.ModeSymlink != 0
 	if !info.Mode().IsRegular() && !link {
-		return installer.retire(path, reason)
+		what := "not a regular file or link"
+		if info.IsDir() {
+			what = "a directory, not a file or link"
+		}
+		installer.skip(path + " kept — " + reason + ", but it is " + what +
+			" pfm can back up; remove it by hand if it is not yours")
+		return nil
 	}
 	backup := availableBackup(
 		filepath.Join(installer.options.Home, ".local", "state", "pfm", "retired-config", filepath.Base(path)),

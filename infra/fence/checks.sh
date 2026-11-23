@@ -936,7 +936,8 @@ internal/store TestClearNameReservationsAreUniqueAcrossCaches'
 # checks_pfm_unit_proof <pfm dir> <run dir>: the unit tier in place, as on any host, under
 # scripts/unit-proof.sh's hostile ambient and syscall trace, its out directory {run dir}/unit-proof.
 # Its FAIL (a failing test, a reach row, a missing-tool skip) or ERROR (it could not look) fails the
-# step with the verdict line and the first 40 reach rows.
+# step with the verdict line, the first 40 reach rows and every `--- FAIL {package} {test}` block of
+# the proof's log, so the step log names the failing test where the run directory is gone.
 checks_pfm_unit_proof() {
   local d="$1" run_dir="$2" out="$2/unit-proof" rc=0 verdict
   head_ "pfm — unit proof (scripts/unit-proof.sh)"
@@ -948,6 +949,7 @@ checks_pfm_unit_proof() {
   fi
   info "first 40 reach rows of $out/reach.tsv (package, kind, target, count):"
   head -n 40 "$out/reach.tsv" 2>&1 | cut -f1-4
+  awk '/^--- FAIL / { on = 1 } /^(UNIT-PROOF |… )/ { on = 0 } on' "$run_dir/unit-proof.log" 2>&1
   fail_step "pfm: unit proof exit $rc — $verdict (log $run_dir/unit-proof.log)"
 }
 

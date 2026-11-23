@@ -260,9 +260,11 @@ func TestRunHookCommandTimeoutDoesNotWaitForOrphan(t *testing.T) {
 	started := filepath.Join(dir, "started")
 	clk := clock.NewFake(time.Unix(0, 0))
 	done := make(chan error, 1)
+	// The subshell writes the marker itself, so the marker proves the process that becomes the orphan cat
+	// exists: a timeout landing right after it kills the hook's sh, never an sh that had not forked yet.
+	command := `( : > "` + started + `"; exec cat "` + fifo + `" ); true`
 	go func() {
-		_, err := runHookCommand(context.Background(), clk, `: > "`+started+`"; cat "`+fifo+`"; true`, nil, dir,
-			os.Environ(), 200*time.Millisecond)
+		_, err := runHookCommand(context.Background(), clk, command, nil, dir, os.Environ(), 200*time.Millisecond)
 		done <- err
 	}()
 	testwait.Until(t, "the hook to start and arm its timeout on the mock's clock", func() (bool, string) {

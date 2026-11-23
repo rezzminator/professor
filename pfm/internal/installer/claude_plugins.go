@@ -199,7 +199,7 @@ func (target ClaudePluginTarget) UndecidedNote() string {
 }
 
 func pluginEnabled(document map[string]any, id string) bool {
-	enabled, _ := document["enabledPlugins"].(map[string]any)
+	enabled, _ := document[claudeEnabledPlugins].(map[string]any)
 	return enabled[id] == true
 }
 

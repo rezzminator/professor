@@ -14,13 +14,14 @@ import (
 // a config dir's settings.json or settings.local.json, or installed there (a
 // project-scope install too); a longer name sharing its prefix, or a retired
 // id, holds nothing; an unreadable record, a FIFO too, is an error at once,
-// never an answer.
+// never an answer, but an unreadable settings.local.json is named in unread
+// and leaves the others to answer.
 func TestPluginNameHeld(t *testing.T) {
 	retiredIDs := []string{"tinsel@professor", "tinsel@inline"}
 	for _, tc := range []struct {
-		name, settings, local, installs, wantErr string
-		fifo                                     bool
-		held                                     bool
+		name, settings, local, installs, wantErr, wantUnread string
+		fifo                                                 bool
+		held                                                 bool
 	}{
 		{
 			name:  "another marketplace's id enabled in settings.local.json holds it",
@@ -34,7 +35,8 @@ func TestPluginNameHeld(t *testing.T) {
 		},
 		{
 			name: "a settings.json that is a FIFO is an error", fifo: true,
-			wantErr: "read {second}/settings.json: not a regular file",
+			wantErr: "{second}/settings.json blocks the check that no other plugin named tinsel still writes there: " +
+				"read {second}/settings.json: not a regular file",
 		},
 		{
 			name:     "another marketplace's id keyed disabled holds it",
@@ -55,8 +57,20 @@ func TestPluginNameHeld(t *testing.T) {
 			installs: `{"version":2,"plugins":{"tinsel-x@other":[]}}`,
 		},
 		{
+			name:  "a settings.local.json that does not parse is unread, never an error",
+			local: `{"enabledPlugins":`,
+			wantUnread: "{second}/settings.local.json blocks the check that no other plugin named tinsel still " +
+				"writes there: parse {second}/settings.local.json: unexpected EOF",
+		},
+		{
+			name:  "an unread settings.local.json still lets another record hold it",
+			local: `{"enabledPlugins":`, installs: `{"version":2,"plugins":{"tinsel@other":[]}}`, held: true,
+		},
+		{
 			name:     "an unreadable settings file is an error",
-			settings: `{"enabledPlugins":`, wantErr: "parse {second}/settings.json: unexpected EOF",
+			settings: `{"enabledPlugins":`,
+			wantErr: "{second}/settings.json blocks the check that no other plugin named tinsel still writes there: " +
+				"parse {second}/settings.json: unexpected EOF",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,23 +90,26 @@ func TestPluginNameHeld(t *testing.T) {
 				writeFixture(t, filepath.Join(second, "plugins", "installed_plugins.json"), tc.installs)
 			}
 			type answer struct {
-				held bool
-				err  error
+				held   bool
+				unread []string
+				err    error
 			}
 			answered := make(chan answer, 1)
 			go func() {
-				held, err := pluginNameHeld([]string{first, second}, "tinsel", retiredIDs)
-				answered <- answer{held, err}
+				held, unread, err := pluginNameHeld([]string{first, second}, "tinsel", retiredIDs)
+				answered <- answer{held, unread, err}
 			}()
 			got, _ := testwait.Receive(t, "pluginNameHeld answers without blocking on "+second, answered)
-			held, err := got.held, got.err
 			gotErr := ""
-			if err != nil {
-				gotErr = err.Error()
+			if got.err != nil {
+				gotErr = got.err.Error()
 			}
+			gotUnread := strings.Join(got.unread, "; ")
 			wantErr := strings.ReplaceAll(tc.wantErr, "{second}", second)
-			if held != tc.held || gotErr != wantErr {
-				t.Fatalf("pluginNameHeld = %t, %q; want %t, %q (dir %s)", held, gotErr, tc.held, wantErr, second)
+			wantUnread := strings.ReplaceAll(tc.wantUnread, "{second}", second)
+			if got.held != tc.held || gotErr != wantErr || gotUnread != wantUnread {
+				t.Fatalf("pluginNameHeld = %t, unread %q, %q; want %t, %q, %q (dir %s)",
+					got.held, gotUnread, gotErr, tc.held, wantUnread, wantErr, second)
 			}
 		})
 	}

@@ -3,15 +3,11 @@ package installer
 import (
 	"errors"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/retired"
 )
@@ -19,8 +15,9 @@ import (
 // retireClaudePlugins removes every trace of each plugin id the retired lists
 // retired with no successor (retired.Lists ClaudePluginsRemoved) from the Claude
 // store and every config dir install covers, each physical file once: its
-// enabledPlugins key, enabled or not (an emptied member goes too), its
-// installed_plugins.json entries, Claude's cache copy and data dir, then its
+// enabledPlugins key in settings.json and settings.local.json, enabled or not
+// (an emptied member goes too; a settings.local.json that cannot be read is a
+// skip row, retiredPluginLocalUnread), its installed_plugins.json entries, Claude's cache copy and data dir, then its
 // folder under each plugin log folder (retirePluginLogDirs). Another id of
 // the same bare name is the owner's and stays. A dir that fails keeps its copies
 // and costs no other dir; the log folders wait until every dir is clean.
@@ -61,6 +58,13 @@ func (installer *engine) retireClaudePlugins() error {
 	return installer.retirePluginLogDirs(dirs, ids)
 }
 
+// retiredPluginLocalUnread is install's skip row and doctor's gap for a
+// settings.local.json that cannot be read or parsed: pfm's only business in
+// that file is retiring a plugin, so it never fails an install (or rolls an
+// update back) over it, as an unread Herdr plugin registry does not.
+const retiredPluginLocalUnread = "pfm only retires plugins there, so the file stays as it is; " +
+	"a retired plugin it enables stays enabled until the file reads and pfm install --yes runs again"
+
 // retiredPluginPlanned and retiredPluginPlannedFix are why install keeps a
 // retired id it still plans and the repair, its skip line's and doctor's.
 const (
@@ -96,58 +100,25 @@ func retiredPluginDirs(home string, dirs []string) []string {
 	return dirs
 }
 
-// retiredPluginTake is the take-back of ids: their keys in settings.json's
-// enabledPlugins and installed_plugins.json, then their copies (retiredPluginCopies).
+// retiredPluginTake is the take-back of ids: their keys in the enabledPlugins
+// of settings.json and settings.local.json and in installed_plugins.json, then
+// their copies (retiredPluginCopies). Doctor's retiredPluginTraces reads the same.
+// A settings.local.json that cannot be read stays, named (retiredPluginLocalUnread).
 func retiredPluginTake(ids []string) claudePluginTake {
 	retiredID := func(key string) bool { return slices.Contains(ids, key) }
 	return claudePluginTake{
 		edits: []claudeRecordEdit{
-			{file: claudeSettingsName, member: "enabledPlugins", ours: retiredID, dropEmpty: true},
+			{file: claudeSettingsName, member: claudeEnabledPlugins, ours: retiredID, dropEmpty: true},
+			{
+				file: claudeLocalSettingsName, member: claudeEnabledPlugins, ours: retiredID, dropEmpty: true,
+				unread: retiredPluginLocalUnread,
+			},
 			{file: filepath.Join(claudePlugins, "installed_plugins.json"), member: claudePlugins, ours: retiredID},
 		},
 		copies: func(dir string) ([]string, error) { return retiredPluginCopies(dir, ids) },
 		within: []string{claudePluginCopies, "data"},
 	}
 }
-
-// retiredPluginCopies lists each installPath of dir's records of ids, then per
-// id Claude's cache dir {plugins}/cache/{marketplace}/{name} and its data dir
-// {plugins}/data/{name}-{marketplace} (retiredPluginDataName), unless an id
-// dir's install record keeps has that data dir's name too.
-func retiredPluginCopies(dir string, ids []string) ([]string, error) {
-	installs, err := claudeplugin.ReadInstalls(dir)
-	if err != nil {
-		return nil, err
-	}
-	var copies []string
-	for _, id := range ids {
-		for _, record := range installs[id] {
-			copies = append(copies, record.InstallPath)
-		}
-	}
-	sort.Strings(copies)
-	for _, id := range ids {
-		name, marketplace, _ := strings.Cut(id, "@") // validated by retired.ParseLists
-		copies = append(copies, filepath.Join(dir, claudePlugins, claudePluginCopies, marketplace, name))
-		// a-b@c and a@b-c share the data dir a-b-c: one an install record keeps holds it.
-		if !slices.ContainsFunc(slices.Collect(maps.Keys(installs)), func(key string) bool {
-			return !slices.Contains(ids, key) && retiredPluginDataName(key) == retiredPluginDataName(id)
-		}) {
-			copies = append(copies, filepath.Join(dir, claudePlugins, "data", retiredPluginDataName(id)))
-		}
-	}
-	return copies, nil
-}
-
-// retiredPluginDataName is the name of id's data dir as Claude Code names it:
-// id with every character outside [a-zA-Z0-9_-] a "-", so {name}-{marketplace}.
-func retiredPluginDataName(id string) string {
-	return claudePluginDataUnsafe.ReplaceAllString(id, "-")
-}
-
-// claudePluginDataUnsafe is what Claude Code (2.1.330, its plugin data dir
-// helper) replaces in a plugin id to name its data dir.
-var claudePluginDataUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
 // RetiredClaudePluginGaps names, per id of ids (retired.Lists
 // ClaudePluginsRemoved), every trace retireClaudePlugins removes that is still
@@ -169,10 +140,20 @@ func RetiredClaudePluginGaps(home string, dirs, ids []string, build ClaudePlugin
 	}
 	dirs = retiredPluginDirs(home, dirs)
 	// a kept folder is no trace: install leaves it
-	folders, _, failed := retiredPluginLogFolders(ManagedRoot(home), dirs, ids)
+	folders, _, failed := retiredPluginLogFolders(home, ManagedRoot(home), dirs, ids)
+	var unreadGaps []ClaudePluginGap
 	for _, id := range ids {
-		traces, err := retiredPluginTraces(dirs, retiredPluginTake([]string{id}))
+		traces, unread, err := retiredPluginTraces(dirs, retiredPluginTake([]string{id}))
 		failed = errors.Join(failed, err)
+		for _, cause := range unread {
+			gap := ClaudePluginGap{
+				Problem: cause.Error() + ", so pfm cannot tell whether it still enables a plugin retired with no successor",
+				Fix:     "repair or remove that file, then " + ClaudePluginRepair,
+			}
+			if !slices.Contains(unreadGaps, gap) {
+				unreadGaps = append(unreadGaps, gap)
+			}
+		}
 		if found, ok := folders[retiredPluginName(id)]; ok {
 			traces = append(traces, found...)
 			delete(folders, retiredPluginName(id))
@@ -185,17 +166,17 @@ func RetiredClaudePluginGaps(home string, dirs, ids []string, build ClaudePlugin
 			})
 		}
 	}
-	return gaps, failed
+	return append(gaps, unreadGaps...), failed
 }
 
 // retiredPluginTraces names each record of dirs holding one of take's keys
-// ("{member} in {path}") and each of its copies on disk, each physical path once.
-func retiredPluginTraces(dirs []string, take claudePluginTake) ([]string, error) {
+// ("{member} in {path}") and each of its copies on disk, each physical path
+// once; a record an edit with unread set cannot read is returned in unread,
+// as install skips it, and leaves that dir's copies judged.
+func retiredPluginTraces(dirs []string, take claudePluginTake) (traces []string, unread []error, failed error) {
 	seen := map[string]bool{}
-	var traces []string
-	var failed error
 	for _, dir := range dirs {
-		unread := false // a record that cannot be read leaves its copies unjudged
+		unjudged := false // a record that cannot be read leaves its copies unjudged
 		for _, edit := range take.edits {
 			path := filepath.Join(dir, edit.file)
 			physical := paths.PhysicalPath(path)
@@ -204,15 +185,19 @@ func retiredPluginTraces(dirs []string, take claudePluginTake) ([]string, error)
 			}
 			seen[physical] = true
 			_, document, err := readSettingsForEdit(path)
+			if err != nil && edit.unread != "" {
+				unread = append(unread, err)
+				continue
+			}
 			if err != nil {
-				failed, unread = errors.Join(failed, err), true
+				failed, unjudged = errors.Join(failed, err), true
 				continue
 			}
 			if keys, _ := edit.held(document); len(keys) != 0 {
 				traces = append(traces, edit.member+" in "+path)
 			}
 		}
-		if unread {
+		if unjudged {
 			continue
 		}
 		copies, err := take.copies(dir)
@@ -233,5 +218,5 @@ func retiredPluginTraces(dirs []string, take claudePluginTake) ([]string, error)
 			}
 		}
 	}
-	return traces, failed
+	return traces, unread, failed
 }

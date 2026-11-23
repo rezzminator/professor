@@ -46,6 +46,19 @@ func HerdrConfig(home string, env Env) (string, error) {
 	return absolute, nil
 }
 
+// HerdrPluginRegistry is Herdr's plugin registry: plugins.json, a JSON array
+// of entries carrying plugin_id, in {XDG_CONFIG_HOME}/herdr when env sets
+// XDG_CONFIG_HOME, else {home}/.config/herdr. HERDR_CONFIG_PATH moves only
+// config.toml (Herdr 0.9.5's `herdr plugin link` writes plugins.json here
+// under each).
+func HerdrPluginRegistry(home string, env Env) string {
+	directory := env.Get("XDG_CONFIG_HOME")
+	if directory == "" {
+		directory = filepath.Join(home, ".config")
+	}
+	return filepath.Join(directory, "herdr", "plugins.json")
+}
+
 // HerdrServerSocket is the socket the `herdr` command itself serves and
 // attaches to from env: HERDR_SOCKET_PATH, else the named session
 // HERDR_SESSION's socket, else the default session's, all under

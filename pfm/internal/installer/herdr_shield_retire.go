@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -137,20 +138,22 @@ func jsonStringLiteral(value string) ([]byte, error) {
 	return bytes.TrimRight(out.Bytes(), "\n"), nil
 }
 
-// herdrShieldUnlinkBound caps one `herdr plugin unlink herdr-shield` run.
-const herdrShieldUnlinkBound = 30 * time.Second
+// herdrShieldUnlinkBound caps one `herdr plugin unlink herdr-shield` run; a
+// variable so a test can bound a hung Herdr in milliseconds.
+var herdrShieldUnlinkBound = 30 * time.Second
 
 // retireHerdrShieldPlugin unlinks the herdr-shield plugin its own installer
 // registered in Herdr: a registry (herdr.PluginLinked) that lists it gets
 // `herdr plugin unlink herdr-shield`; one that does not gets nothing. A
 // registry that cannot be read or parsed, a Herdr whose default_shell still
 // runs herdr-shield (the hook step's own gate, RetireHerdrShieldHook), no herdr
-// on PATH, or none with a server up to answer, leaves the entry and says so; a
+// on PATH, none with a server up to answer, or a herdr that does not answer
+// within herdrShieldUnlinkBound (a hung server), leaves the entry and says so; a
 // Herdr config that cannot be read fails, as it fails the hook step.
 func (installer *engine) retireHerdrShieldPlugin(ctx context.Context) error {
 	command := "herdr plugin unlink " + retiredShieldProgram
 	stays := "herdr plugin " + retiredShieldProgram + " stays registered until `" + command + "` runs: "
-	linked, err := herdr.PluginLinked(installer.options.Home, retiredShieldProgram)
+	linked, err := herdr.PluginLinked(installer.options.Home, installer.env(), retiredShieldProgram)
 	if err != nil {
 		// The step only retires a plugin: a registry it cannot judge is named, never an install failure.
 		installer.skip(stays + err.Error())
@@ -180,6 +183,11 @@ func (installer *engine) retireHerdrShieldPlugin(ctx context.Context) error {
 	bounded, cancel := context.WithTimeout(ctx, herdrShieldUnlinkBound)
 	defer cancel()
 	result, err := runner.Run(bounded, []string{binary, "plugin", "unlink", retiredShieldProgram}, deps.RunOptions{})
+	if errors.Is(bounded.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		installer.skip(fmt.Sprintf("%sherdr did not answer within %s, so its server may be hung; restart Herdr",
+			stays, herdrShieldUnlinkBound))
+		return nil
+	}
 	if err != nil {
 		return installer.fail(fmt.Errorf("%s: %w", command, err))
 	}

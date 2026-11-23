@@ -241,7 +241,7 @@ func ClaudePluginsUnresolved(configDir string, targets []ClaudePluginTarget) (ma
 // install enables each listed key again. A key from the file prints with its
 // control characters escaped.
 func claudePluginDuplicateGaps(document map[string]any, path string, targets []ClaudePluginTarget) []ClaudePluginGap {
-	enabled, _ := document["enabledPlugins"].(map[string]any)
+	enabled, _ := document[claudeEnabledPlugins].(map[string]any)
 	byName := map[string][]string{}
 	for id, value := range enabled {
 		if value != true {

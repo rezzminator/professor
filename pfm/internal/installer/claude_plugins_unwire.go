@@ -67,7 +67,7 @@ var professorTake = claudePluginTake{
 }
 
 var claudeRecordEdits = []claudeRecordEdit{
-	{file: claudeSettingsName, member: "enabledPlugins", ours: professorPluginID, dropEmpty: true},
+	{file: claudeSettingsName, member: claudeEnabledPlugins, ours: professorPluginID, dropEmpty: true},
 	{file: filepath.Join(claudePlugins, "installed_plugins.json"), member: claudePlugins, ours: professorPluginID},
 	{file: filepath.Join(claudePlugins, "known_marketplaces.json"), ours: func(key string) bool {
 		return key == pfmconfig.ProfessorMarketplace

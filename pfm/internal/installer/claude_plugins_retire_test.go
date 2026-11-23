@@ -53,6 +53,16 @@ func TestRetireClaudePlugins(t *testing.T) {
 			"marketplace still plans it",
 		Fix: `drop it there or from claudePlugins["(none)"] in the retired lists`,
 	}
+	keptRow := "  skip    claude plugins: {ownlogs}/tinsel kept — it holds files other than plugin logs, under a " +
+		"PLUGIN_LOG_DIR other than pfm's own default; remove the retired plugin's logs there by hand"
+	localSkipRow := "  skip    claude plugins: parse {cc2}/settings.local.json: unexpected EOF — pfm only retires " +
+		"plugins there, so the file stays as it is; a retired plugin it enables stays enabled until the file reads " +
+		"and pfm install --yes runs again"
+	localGap := ClaudePluginGap{
+		Problem: "parse {cc2}/settings.local.json: unexpected EOF, so pfm cannot tell whether it still enables a " +
+			"plugin retired with no successor",
+		Fix: "repair or remove that file, then run pfm install --yes",
+	}
 	sharedSettings := `{"enabledPlugins":{"flights@professor":true,"tinsel@other":true,"tinsel@professor":false},"theme":"dark"}`
 	sharedInstalls := `{"version":2,"plugins":{` + ownInstalls + `,` + otherInstalls + `}}`
 	for _, tc := range []struct {
@@ -71,7 +81,60 @@ func TestRetireClaudePlugins(t *testing.T) {
 		// plugins is claude.plugins; again the rows of the second run.
 		plugins []pfmconfig.ClaudePlugin
 		again   []string
+		// ledger is the claude env ledger's pluginLogDir, "" pfm's default
+		// {logs}; local is {cc2}/settings.local.json, "" none, wantLocal it
+		// after the step; dangling makes {cc2}/settings.json a dangling link;
+		// gapErr is doctor's exact error before the step.
+		ledger, local, wantLocal, gapErr string
+		dangling                         bool
 	}{
+		{
+			name:   "a folder under a PLUGIN_LOG_DIR pfm.config chose that holds more than plugin logs stays",
+			ids:    []string{"tinsel@professor"},
+			ledger: "{ownlogs}", settings: `{"enabledPlugins":{"tinsel@professor":false},"theme":"dark"}`,
+			installs:     `{"version":2,"plugins":{` + ownInstalls + `}}`,
+			rows:         append(slices.Clone(ownRows), keptRow),
+			again:        []string{keptRow},
+			wantSettings: `{"theme":"dark"}`, wantInstalls: `{"version":2,"plugins":{}}`,
+			gaps:   []ClaudePluginGap{gap("tinsel@professor", ownTraces)},
+			seed:   append(slices.Clone(ownCopies), "{ownlogs}/tinsel"),
+			remain: []string{"{ownlogs}/tinsel"},
+		},
+		{
+			name: "a retired id enabled in an account's settings.local.json goes, its other keys stay",
+			ids:  []string{"tinsel@professor"}, settings: `{"theme":"dark"}`, installs: `{"version":2,"plugins":{}}`,
+			local:        `{"enabledPlugins":{"flights@professor":true,"tinsel@professor":true}}`,
+			wantLocal:    `{"enabledPlugins":{"flights@professor":true}}`,
+			rows:         []string{"  change  remove tinsel@professor from enabledPlugins in {cc2}/settings.local.json"},
+			wantSettings: `{"theme":"dark"}`, wantInstalls: `{"version":2,"plugins":{}}`,
+			gaps: []ClaudePluginGap{gap("tinsel@professor", "enabledPlugins in {cc2}/settings.local.json")},
+		},
+		{
+			name: "a settings.local.json that does not parse is a skip row, the store's copies go and the log folder stays",
+			ids:  []string{"tinsel@professor"}, settings: `{"enabledPlugins":{"tinsel@professor":false},"theme":"dark"}`,
+			installs: `{"version":2,"plugins":{` + ownInstalls + `}}`,
+			local:    `{"enabledPlugins":`, wantLocal: `{"enabledPlugins":`,
+			rows: append(slices.Clone(ownRows), localSkipRow, "  skip    claude plugins: {logs}/tinsel kept — "+
+				"{cc2}/settings.local.json blocks the check that no other plugin named tinsel still writes there: "+
+				"parse {cc2}/settings.local.json: unexpected EOF"),
+			again: []string{localSkipRow, "  skip    claude plugins: {logs}/tinsel kept — " +
+				"{cc2}/settings.local.json blocks the check that no other plugin named tinsel still writes there: " +
+				"parse {cc2}/settings.local.json: unexpected EOF"},
+			wantSettings: `{"theme":"dark"}`, wantInstalls: `{"version":2,"plugins":{}}`,
+			gaps:      []ClaudePluginGap{gap("tinsel@professor", ownTraces), localGap},
+			gapsAfter: []ClaudePluginGap{localGap},
+			seed:      append(slices.Clone(ownCopies), "{logs}/tinsel"), remain: []string{"{logs}/tinsel"},
+		},
+		{
+			name: "a dangling settings.json link reads as absent, as the take reads it",
+			ids:  []string{"tinsel@professor"}, dangling: true,
+			settings:     `{"enabledPlugins":{"tinsel@professor":false},"theme":"dark"}`,
+			installs:     `{"version":2,"plugins":{` + ownInstalls + `}}`,
+			rows:         append(slices.Clone(ownRows), "  change  remove {logs}/tinsel (logs of a retired plugin)"),
+			wantSettings: `{"theme":"dark"}`, wantInstalls: `{"version":2,"plugins":{}}`,
+			gaps: []ClaudePluginGap{gap("tinsel@professor", ownTraces+", {logs}/tinsel")},
+			seed: append(slices.Clone(ownCopies), "{logs}/tinsel"),
+		},
 		{
 			name: "a disabled retired plugin goes everywhere, another marketplace's of its name and its log folder stay",
 			ids:  []string{"tinsel@professor"}, settings: sharedSettings, installs: sharedInstalls,
@@ -129,16 +192,14 @@ func TestRetireClaudePlugins(t *testing.T) {
 			settings: `{"enabledPlugins":{"tinsel@professor":false},"env":{"PLUGIN_LOG_DIR":"{ownlogs}"}}`,
 			installs: `{"version":2,"plugins":{` + ownInstalls + `}}`,
 			rows: append(slices.Clone(ownRows),
-				"  skip    claude plugins: {ownlogs}/tinsel kept — it holds files other than plugin logs, under a "+
-					"PLUGIN_LOG_DIR pfm did not set; remove the retired plugin's logs there by hand",
+				keptRow,
 				"  change  remove {logs}/tinsel (logs of a retired plugin)"),
 			wantSettings: `{"env":{"PLUGIN_LOG_DIR":"{ownlogs}"}}`,
 			wantInstalls: `{"version":2,"plugins":{}}`,
 			gaps:         []ClaudePluginGap{gap("tinsel@professor", ownTraces+", {logs}/tinsel")},
-			again: []string{"  skip    claude plugins: {ownlogs}/tinsel kept — it holds files other than plugin logs, " +
-				"under a PLUGIN_LOG_DIR pfm did not set; remove the retired plugin's logs there by hand"},
-			seed:   append(slices.Clone(ownCopies), "{logs}/tinsel", "{ownlogs}/tinsel/errors.jsonl", "{ownlogs}/tinsel"),
-			remain: []string{"{ownlogs}/tinsel/errors.jsonl", "{ownlogs}/tinsel"},
+			again:        []string{keptRow},
+			seed:         append(slices.Clone(ownCopies), "{logs}/tinsel", "{ownlogs}/tinsel/errors.jsonl", "{ownlogs}/tinsel"),
+			remain:       []string{"{ownlogs}/tinsel/errors.jsonl", "{ownlogs}/tinsel"},
 		},
 		{
 			name:     "a marketplace name Claude rewrites names its data dir as Claude does",
@@ -210,7 +271,8 @@ func TestRetireClaudePlugins(t *testing.T) {
 			home := filepath.Join(root, "home")
 			store := filepath.Join(home, ".claude")
 			cc1, cc2 := filepath.Join(home, ".cc", "1"), filepath.Join(home, ".cc", "2")
-			logs, ownLogs := filepath.Join(root, "plugin-logs"), filepath.Join(root, "own-logs")
+			logs := filepath.Join(home, ".local", "state", "pfm", "plugin-logs")
+			ownLogs := filepath.Join(root, "own-logs")
 			managed := ManagedRoot(home)
 			fill := strings.NewReplacer(
 				"{store}",
@@ -228,7 +290,15 @@ func TestRetireClaudePlugins(t *testing.T) {
 			installsPath := filepath.Join(store, "plugins", "installed_plugins.json")
 			writeFixture(t, settingsPath, fill.Replace(tc.settings))
 			writeFixture(t, installsPath, fill.Replace(tc.installs))
-			writeFixture(t, claudeEnvOwnershipPath(managed), `{"version":1,"files":{},"pluginLogDir":"`+logs+`"}`)
+			ledger := logs
+			if tc.ledger != "" {
+				ledger = fill.Replace(tc.ledger)
+			}
+			writeFixture(t, claudeEnvOwnershipPath(managed), `{"version":1,"files":{},"pluginLogDir":"`+ledger+`"}`)
+			localPath := filepath.Join(cc2, "settings.local.json")
+			if tc.local != "" {
+				writeFixture(t, localPath, tc.local)
+			}
 			for _, path := range tc.seed {
 				if strings.Contains(filepath.Base(path), ".jsonl") {
 					writeFixture(t, fill.Replace(path), "{}\n")
@@ -239,6 +309,15 @@ func TestRetireClaudePlugins(t *testing.T) {
 			for _, dir := range []string{cc1, cc2} {
 				for _, entry := range []string{"settings.json", "plugins"} {
 					writeLink(t, filepath.Join(store, entry), filepath.Join(dir, entry))
+				}
+			}
+			if tc.dangling {
+				if err := os.Remove(filepath.Join(cc2, "settings.json")); err != nil {
+					t.Fatal(err)
+				}
+				dangling := filepath.Join(cc2, "settings.json")
+				if err := os.Symlink(filepath.Join(root, "missing.json"), dangling); err != nil {
+					t.Fatal(err)
 				}
 			}
 			fillGaps := func(gaps []ClaudePluginGap) []ClaudePluginGap {
@@ -253,11 +332,18 @@ func TestRetireClaudePlugins(t *testing.T) {
 				got, gapErr := RetiredClaudePluginGaps(
 					home, []string{cc1, cc2}, tc.ids, ClaudePluginBuild{Home: home, Plugins: tc.plugins},
 				)
-				if (gapErr != nil) != tc.wantErr || !reflect.DeepEqual(got, fillGaps(want)) {
+				if tc.gapErr != "" {
+					if gapErr == nil || gapErr.Error() != fill.Replace(tc.gapErr) {
+						t.Fatalf("gaps error %s = %v\nwant %s", when, gapErr, fill.Replace(tc.gapErr))
+					}
+				} else if (gapErr != nil) != tc.wantErr {
+					t.Fatalf("gaps error %s = %v, want error %t", when, gapErr, tc.wantErr)
+				}
+				if !reflect.DeepEqual(got, fillGaps(want)) {
 					t.Fatalf("gaps %s = %#v, %v\nwant %#v (error %t)", when, got, gapErr, fillGaps(want), tc.wantErr)
 				}
 			}
-			if !tc.wantErr {
+			if !tc.wantErr || tc.gapErr != "" {
 				assertGaps("before the step", tc.gaps)
 			}
 			var output bytes.Buffer
@@ -280,6 +366,9 @@ func TestRetireClaudePlugins(t *testing.T) {
 			}
 			assertRecord(t, settingsPath, fill.Replace(tc.wantSettings))
 			assertRecord(t, installsPath, fill.Replace(tc.wantInstalls))
+			if tc.local != "" {
+				assertRecord(t, localPath, tc.wantLocal)
+			}
 			for _, path := range tc.seed {
 				_, statErr := os.Lstat(fill.Replace(path))
 				if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {

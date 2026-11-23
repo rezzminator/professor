@@ -72,7 +72,7 @@ With the default `STEPPROF_TRACE=err`, every bash the step starts writes one ERR
 | `cg_psi_*_s`, `vm_psi_*_s` | cgroup and VM pressure `total=` in seconds (cpu some, io some/full, memory some/full) |
 | `spin_us`, `load1` | wall µs of a fixed `SAMPLER_SPIN_ITERS` bash loop; `/proc/loadavg` field 1 |
 
-Counters are cumulative; take differences over a window. An unreadable source is `NA` in every row of its column, never `0`, and its reason is written once to `resources.err`. The unit and e2e runners also sample VM busy and own CPU into `unit.load` and `e2e.load` for the timing checks' load correction.
+On a stop signal (`TERM` or `INT`) the sampler writes one final row and exits 0, whenever the signal lands: each loop is row, wait, parent check, then the stop check that writes the final row. Counters are cumulative; take differences over a window. An unreadable source is `NA` in every row of its column, never `0`, and its reason is written once to `resources.err`. The unit and e2e runners also sample VM busy and own CPU into `unit.load` and `e2e.load` for the timing checks' load correction.
 
 ### `gate.meta`
 
@@ -123,7 +123,7 @@ The step's `steps/<name>.xtrace` (see [Per step](#per-step)). For a red shell st
 
 ## Reading a red gate
 
-1. **The step table.** Each non-PASS row carries its pointers: the step log, `steps/<name>.hang/tree.txt` for `TIMEOUT`, and `steps/<name>.xtrace` when it holds ERR records. The fence prints `/pfm-timing/…`; read the same path under `/tmp/{project}/fence/shared/<worktree>/timing/` on the host.
+1. **The step table.** Each non-PASS row carries its pointers: the step log (a failing `pfm.unit-proof` step's log holds the first 40 reach rows and every `--- FAIL {package} {test}` block of the proof's log, so it names its tests there), `steps/<name>.hang/tree.txt` for `TIMEOUT`, and `steps/<name>.xtrace` when it holds ERR records. The fence prints `/pfm-timing/…`; read the same path under `/tmp/{project}/fence/shared/<worktree>/timing/` on the host.
 2. **`PROFILE` lines under a red Go step's report.** `profile-report.sh failures` prints, per failing package, `PROFILE <import path>: <dir>/<reason>/DIAGNOSIS.txt` per bundle, `no bundle — <dir>/summary.json (event <e>, exit <c>)`, or `NOT RECORDED — no <label>.* under <profile-dir>`.
 3. **The `PROFILE` block after the table.** `PROFILE gate` gives the run's verdict, wall, CPU, I/O, memory peak, swap and attribution; one `PROFILE step` line per non-PASS step, then the five slowest PASS steps, each with its attribution and its `· xtrace`, `· hang` or `· profiles` pointer (`MISSING` when the artifact is not there); `PROFILE index` names `profile/INDEX.txt`.
 4. **`profile/INDEX.txt`.** Three sections: `## Go test processes` (each process directory with event, exit, wall and run delay), `## Steps` (verdict, how it ended, rc, wall, CPU, and the first ERR record), `## Resources` (the sample count, or why there is none). `profile.tsv` holds the same per-step numbers, plus a `GATE` row: `step verdict wall_s cpu_s io_mb psi_cpu_s psi_io_s psi_mem_s attribution evidence`.

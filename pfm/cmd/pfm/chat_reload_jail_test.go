@@ -46,6 +46,7 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read probe pane: %v", err)
 	}
+	waitProbePaneText(t, socket, "❯ 1. choose")
 	resolved, err := paths.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -391,6 +392,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 		t.Fatalf("start probe socket: %v: %s", err, output)
 	}
 	cleanupProbeReloadSocket(t, socket)
+	waitProbePaneText(t, socket, "❯")
 
 	paneOutput, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_id}").Output()
 	if err != nil {
@@ -462,6 +464,20 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	if !strings.HasPrefix(content, targetCWD+"\n") {
 		t.Fatalf("fresh reload lost the transcript's cwd: got %q, want it to start with %q", content, targetCWD+"\n")
 	}
+}
+
+// waitProbePaneText returns once the probe pane on socket shows want. The
+// reload worker judges a pane off its first captures and a blank pane reads
+// as no input box, so a worker runs only once its fixture has drawn.
+func waitProbePaneText(t *testing.T, socket, want string) {
+	t.Helper()
+	testwait.Until(t, "probe pane on "+socket+" to draw "+want, func() (bool, string) {
+		capture, err := exec.Command("tmux", "-S", socket, "capture-pane", "-p").Output()
+		if err != nil {
+			return false, "capture probe pane: " + err.Error()
+		}
+		return strings.Contains(string(capture), want), "last capture=" + string(capture)
+	})
 }
 
 func probeReloadSocket(t *testing.T, suffix string) string {

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -84,8 +85,10 @@ func TestRetireHerdrShieldPlugin(t *testing.T) {
 	for _, tc := range []struct {
 		name, registry string
 		// config is Herdr's config.toml, "" none.
-		config    string
-		noHerdr   bool
+		config  string
+		noHerdr bool
+		// hang keeps `herdr plugin unlink` running until its bound ends it.
+		hang      bool
 		result    deps.RunResult
 		wantRows  string
 		wantCalls [][]string
@@ -137,6 +140,12 @@ func TestRetireHerdrShieldPlugin(t *testing.T) {
 			wantErr:   "herdr plugin unlink herdr-shield exited 1: error: open /opt/herdr-shield/plugin.toml: no such file or directory",
 		},
 		{
+			name: "a hung Herdr server is named and the entry stays", registry: `[{"plugin_id":"herdr-shield"}]`,
+			hang:      true,
+			wantRows:  stays + "herdr did not answer within 10ms, so its server may be hung; restart Herdr\n",
+			wantCalls: [][]string{unlink},
+		},
+		{
 			name: "unlink exits non-zero", registry: `[{"plugin_id":"herdr-shield"}]`,
 			result:    deps.RunResult{ExitCode: 2, Stderr: []byte("plugin is locked\n")},
 			wantRows:  "  FAIL    herdr plugin unlink herdr-shield exited 2: plugin is locked\n",
@@ -152,9 +161,10 @@ func TestRetireHerdrShieldPlugin(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			fill := strings.NewReplacer("{registry}", herdr.PluginRegistryPath(home), "{config}", config)
+			env := &paths.MapEnv{Values: map[string]string{"HERDR_CONFIG_PATH": config}}
+			fill := strings.NewReplacer("{registry}", paths.HerdrPluginRegistry(home, env), "{config}", config)
 			if tc.registry != "" {
-				path := herdr.PluginRegistryPath(home)
+				path := paths.HerdrPluginRegistry(home, env)
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -168,10 +178,21 @@ func TestRetireHerdrShieldPlugin(t *testing.T) {
 			} else {
 				runner.ScriptLookPath("herdr", fakeHerdrBinary, nil)
 			}
-			runner.Script(unlink, tc.result, nil)
+			if !tc.hang {
+				runner.Script(unlink, tc.result, nil)
+			} else {
+				bound := herdrShieldUnlinkBound
+				herdrShieldUnlinkBound = 10 * time.Millisecond
+				t.Cleanup(func() { herdrShieldUnlinkBound = bound })
+				// The real runner answers a run its context kills as exit -1, no error.
+				runner.Handle(unlink, func(ctx context.Context, _ deps.RunCall) (deps.RunResult, error) {
+					<-ctx.Done()
+					return deps.RunResult{ExitCode: -1}, nil
+				})
+			}
 			var output bytes.Buffer
 			installer := &engine{apply: true, options: Options{
-				Mode: ModeApply, Home: home, Env: &paths.MapEnv{Values: map[string]string{"HERDR_CONFIG_PATH": config}},
+				Mode: ModeApply, Home: home, Env: env,
 				ProcessRunner: runner, Stdout: &output,
 			}}
 			err := installer.retireHerdrShieldPlugin(context.Background())

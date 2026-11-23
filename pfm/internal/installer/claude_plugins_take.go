@@ -4,12 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -18,10 +21,13 @@ const claudePluginCopies = "cache"
 
 // claudeRecordEdit is one record the take-back edits: its path in the config dir, the member
 // holding the keys (the document itself when empty), which are pfm's, and whether an emptied member goes.
+// unread, when set, makes a record that cannot be read or parsed a skip row ending in it, never a
+// failure: a file whose only business for pfm is this edit.
 type claudeRecordEdit struct {
 	file, member string
 	ours         func(key string) bool
 	dropEmpty    bool
+	unread       string
 }
 
 // claudePlugins is a config dir's plugins dir and installed_plugins.json's id-keyed member.
@@ -57,7 +63,8 @@ func (installer *engine) takeClaudePluginDir(dir string, seen map[string]bool, t
 }
 
 // takeClaudeRecord removes pfm's keys from the record at path through a
-// symlinked file (writeSettingsDocument); an absent file or one holding none stays.
+// symlinked file (writeSettingsDocument); an absent file or one holding none
+// stays, and so does one that cannot be read when edit.unread is set, named.
 func (installer *engine) takeClaudeRecord(path string, edit claudeRecordEdit, seen map[string]bool) error {
 	physical := paths.PhysicalPath(path)
 	if seen[physical] {
@@ -65,6 +72,10 @@ func (installer *engine) takeClaudeRecord(path string, edit claudeRecordEdit, se
 	}
 	seen[physical] = true
 	raw, document, err := readSettingsForEdit(path)
+	if err != nil && edit.unread != "" {
+		installer.skip("claude plugins: " + err.Error() + " — " + edit.unread)
+		return nil
+	}
 	if err != nil || document == nil {
 		return err
 	}
@@ -144,3 +155,42 @@ func (installer *engine) removeClaudeCopy(plugins string, within []string, path 
 	installer.markRemoved(path)
 	return installer.change("remove "+path, func() error { return os.RemoveAll(path) })
 }
+
+// retiredPluginCopies lists each installPath of dir's records of ids, then per
+// id Claude's cache dir {plugins}/cache/{marketplace}/{name} and its data dir
+// {plugins}/data/{name}-{marketplace} (retiredPluginDataName), unless an id
+// dir's install record keeps has that data dir's name too.
+func retiredPluginCopies(dir string, ids []string) ([]string, error) {
+	installs, err := claudeplugin.ReadInstalls(dir)
+	if err != nil {
+		return nil, err
+	}
+	var copies []string
+	for _, id := range ids {
+		for _, record := range installs[id] {
+			copies = append(copies, record.InstallPath)
+		}
+	}
+	sort.Strings(copies)
+	for _, id := range ids {
+		name, marketplace, _ := strings.Cut(id, "@") // validated by retired.ParseLists
+		copies = append(copies, filepath.Join(dir, claudePlugins, claudePluginCopies, marketplace, name))
+		// a-b@c and a@b-c share the data dir a-b-c: one an install record keeps holds it.
+		if !slices.ContainsFunc(slices.Collect(maps.Keys(installs)), func(key string) bool {
+			return !slices.Contains(ids, key) && retiredPluginDataName(key) == retiredPluginDataName(id)
+		}) {
+			copies = append(copies, filepath.Join(dir, claudePlugins, "data", retiredPluginDataName(id)))
+		}
+	}
+	return copies, nil
+}
+
+// retiredPluginDataName is the name of id's data dir as Claude Code names it:
+// id with every character outside [a-zA-Z0-9_-] a "-", so {name}-{marketplace}.
+func retiredPluginDataName(id string) string {
+	return claudePluginDataUnsafe.ReplaceAllString(id, "-")
+}
+
+// claudePluginDataUnsafe is what Claude Code (2.1.330, its plugin data dir
+// helper) replaces in a plugin id to name its data dir.
+var claudePluginDataUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)

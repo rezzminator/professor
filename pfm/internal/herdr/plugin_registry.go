@@ -5,26 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// PluginRegistryPath is Herdr's plugin registry under home: plugins.json, a
-// JSON array of entries carrying plugin_id.
-func PluginRegistryPath(home string) string {
-	return filepath.Join(home, ".config", "herdr", "plugins.json")
-}
-
-// PluginLinked reports whether Herdr's plugin registry under home lists id. A
-// missing registry is no plugin; an unreadable or malformed one is an error.
-func PluginLinked(home, id string) (bool, error) {
-	path := PluginRegistryPath(home)
-	content, err := os.ReadFile(path)
+// PluginLinked reports whether Herdr's plugin registry under home and env
+// (paths.HerdrPluginRegistry) lists id. A missing registry is no plugin; an unreadable or malformed one,
+// a FIFO or a folder too, is an error naming it, never a wait.
+func PluginLinked(home string, env paths.Env, id string) (bool, error) {
+	path := paths.HerdrPluginRegistry(home, env)
+	content, _, err := atomicfile.ReadRegular(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("herdr: read %s: %w", path, err)
+		return false, fmt.Errorf("herdr: %w", err) // names path
 	}
 	var entries []struct {
 		PluginID string `json:"plugin_id"`

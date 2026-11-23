@@ -136,7 +136,19 @@ func (jail *killTmuxJail) startReader(
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.TrimSpace(string(output))
+	paneID := strings.TrimSpace(string(output))
+	// The finisher judges the pane's composer off its first idle captures; a
+	// blank pane reads as idle with no composer, so the reader is handed over
+	// only once its shell has drawn the box.
+	testwait.Until(t, "pane "+paneID+" on "+socket+" drew its empty composer", func() (bool, string) {
+		screen, err := jail.command("-L", socket, "capture-pane", "-p", "-t", paneID).Output()
+		if err != nil {
+			return false, fmt.Sprintf("capture pane %s: %v", paneID, err)
+		}
+		capture := string(screen)
+		return pfmcall.LastComposerLine(capture) != "" && pfmcall.ComposerBoxEmpty(capture), capture
+	})
+	return paneID
 }
 
 func shellQuote(value string) string {

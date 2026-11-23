@@ -666,6 +666,9 @@ cat > "$T/up/pfm/scripts/unit-proof.sh" <<'STUB'
 out="$2"; mkdir -p "$out"
 if [ "${STUB_PROOF_PASS:-0}" = 1 ]; then echo 'UNIT-PROOF PASS · tests 3 pass 0 fail 0 skip · reach 0 rows'; exit 0; fi
 printf 'internal/x\texec\tgit status\t1\texecve("/usr/bin/git", ["git", "status"], 0x0 /* 3 vars */) = 0\n' > "$out/reach.tsv"
+echo 'git status ×1 (internal/x)'
+echo '--- FAIL internal/x TestReach'
+echo '    reach_test.go:7: want 1, got 2'
 echo 'UNIT-PROOF FAIL · tests 3 pass 0 fail 0 skip · reach 1 rows (1 exec · 0 read · 0 write · 0 socket · 0 tripwire)'
 exit 1
 STUB
@@ -675,8 +678,10 @@ up_case() { (FAILURES=0; head_() { :; }; info() { printf '%s\n' "$*"; }; ok() { 
 up_case
 if grep -Fxq "$(printf 'internal/x\texec\tgit status\t1')" "$T/up.out" &&
   grep -Fxq "FAILSTEP pfm: unit proof exit 1 — UNIT-PROOF FAIL · tests 3 pass 0 fail 0 skip · reach 1 rows (1 exec · 0 read · 0 write · 0 socket · 0 tripwire) (log $T/up/run/unit-proof.log)" "$T/up.out" &&
+  [[ "$(grep -c -e '^--- FAIL ' -e '^    reach_test' -e '^git status ×1' "$T/up.out")" == 2 ]] &&
+  grep -Fxq -- '--- FAIL internal/x TestReach' "$T/up.out" && grep -Fxq '    reach_test.go:7: want 1, got 2' "$T/up.out" &&
   grep -Fxq 'FAILURES=1' "$T/up.out"; then
-  ok 'pfm.unit-proof: a traced exec of git fails the step with the verdict and prints exec git'
+  ok 'pfm.unit-proof: a traced exec of git fails the step with the verdict and prints exec git and the failing test'
 else bad 'pfm.unit-proof, exec git' "$(cat "$T/up.out")"; fi
 STUB_PROOF_PASS=1 up_case
 if grep -Fxq 'OK pfm: unit proof — UNIT-PROOF PASS · tests 3 pass 0 fail 0 skip · reach 0 rows' "$T/up.out" && grep -Fxq 'FAILURES=0' "$T/up.out"; then

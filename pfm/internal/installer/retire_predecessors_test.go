@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -14,7 +15,8 @@ import (
 // TestRetirePredecessorsRemovesConfigFiles pins the configFiles door: a
 // literal path and every glob match retire under their reason, a regular file
 // or a link backed up first (an operator's own link stays restorable), and a
-// file the lists do not name stays. Each retired embedded asset's link goes
+// file the lists do not name stays; an operator's directory or FIFO at a
+// listed path is a named skip row and stays. Each retired embedded asset's link goes
 // from every account's config dir before it.
 func TestRetirePredecessorsRemovesConfigFiles(t *testing.T) {
 	home := t.TempDir()
@@ -43,6 +45,12 @@ func TestRetirePredecessorsRemovesConfigFiles(t *testing.T) {
 	writeFixture(t, operatorFile, "operator's own\n")
 	operatorLink := filepath.Join(config, "commands", "old.md")
 	symlinkFixture(t, operatorFile, operatorLink)
+	operatorDir := filepath.Join(config, "commands", "kept.md")
+	writeFixture(t, filepath.Join(operatorDir, "notes.txt"), "operator's own\n")
+	pipe := filepath.Join(config, "commands", "pipe.md")
+	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var output bytes.Buffer
 	installer := &engine{
 		managedRoot: managed,
@@ -54,6 +62,8 @@ func TestRetirePredecessorsRemovesConfigFiles(t *testing.T) {
 				{Path: "bin/cx-recover.sh.pre-professor-*", Reason: "retired recovery artifact"},
 				{Path: "commands/reload.md", Reason: "retired /reload command link; successor /pfm:reload"},
 				{Path: "commands/old.md", Reason: "retired command link"},
+				{Path: "commands/kept.md", Reason: "retired command link"},
+				{Path: "commands/pipe.md", Reason: "retired command link"},
 			}},
 		},
 		apply: true,
@@ -74,7 +84,11 @@ func TestRetirePredecessorsRemovesConfigFiles(t *testing.T) {
 		"  change  retire " + staleReload + " (embedded /reload command retired)\n" +
 		"  change  retire " + literal + " (native pfm command; backup: " + literalSaved + ")\n" +
 		"  change  retire " + backup + " (retired recovery artifact; backup: " + backupSaved + ")\n" +
-		"  change  retire " + operatorLink + " (retired command link; backup: " + linkSaved + ")\n"
+		"  change  retire " + operatorLink + " (retired command link; backup: " + linkSaved + ")\n" +
+		"  skip    " + operatorDir + " kept — retired command link, but it is a directory, not a file or link " +
+		"pfm can back up; remove it by hand if it is not yours\n" +
+		"  skip    " + pipe + " kept — retired command link, but it is not a regular file or link " +
+		"pfm can back up; remove it by hand if it is not yours\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
@@ -96,6 +110,12 @@ func TestRetirePredecessorsRemovesConfigFiles(t *testing.T) {
 	}
 	if got := readFixture(t, foreign); got != "user's own\n" {
 		t.Fatalf("foreign %s = %q, want it untouched", foreign, got)
+	}
+	if got := readFixture(t, filepath.Join(operatorDir, "notes.txt")); got != "operator's own\n" {
+		t.Fatalf("operator's directory %s holds %q, want it untouched", operatorDir, got)
+	}
+	if info, err := os.Lstat(pipe); err != nil || info.Mode().Type() != os.ModeNamedPipe {
+		t.Fatalf("operator's FIFO %s = %v, %v; want it kept", pipe, info, err)
 	}
 	if got := readFixture(t, kept); got != "old\n" {
 		t.Fatalf("unlisted %s = %q, want it untouched", kept, got)

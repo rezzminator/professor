@@ -60,7 +60,7 @@ func herdrPluginRender(pfmBinary string) string {
 // herdrPluginLinked reports whether Herdr's plugin registry lists the
 // indicator plugin (herdr.PluginLinked).
 func (s *session) herdrPluginLinked() (bool, error) {
-	linked, err := herdr.PluginLinked(s.env.Home, herdr.IndicatorPluginID)
+	linked, err := herdr.PluginLinked(s.env.Home, paths.OSEnv{}, herdr.IndicatorPluginID)
 	if err != nil {
 		return false, fmt.Errorf("themesync: %w", err)
 	}

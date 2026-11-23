@@ -18,6 +18,7 @@ import (
 const (
 	claudeSettingsName      = "settings.json"
 	claudeLocalSettingsName = "settings.local.json"
+	claudeEnabledPlugins    = "enabledPlugins" // the settings member keying each plugin id on or off
 	stateStore              = "store"
 	stateElsewhere          = "elsewhere"
 	stateForeign            = "foreign"

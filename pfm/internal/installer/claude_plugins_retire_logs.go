@@ -15,14 +15,13 @@ import (
 // retirePluginLogDirs removes {root}/{name} for each bare name of ids and each
 // plugin log folder (retiredPluginLogFolders).
 func (installer *engine) retirePluginLogDirs(dirs, ids []string) error {
-	folders, kept, err := retiredPluginLogFolders(installer.managedRoot, dirs, ids)
+	folders, kept, err := retiredPluginLogFolders(installer.options.Home, installer.managedRoot, dirs, ids)
 	var failed error
 	if err != nil {
 		failed = installer.fail(fmt.Errorf("claude plugins: retired plugin logs: %w", err))
 	}
-	for _, path := range kept {
-		installer.skip("claude plugins: " + path + " kept — it holds files other than plugin logs, under a " +
-			"PLUGIN_LOG_DIR pfm did not set; remove the retired plugin's logs there by hand")
+	for _, row := range kept {
+		installer.skip("claude plugins: " + row)
 	}
 	for _, name := range retiredPluginNames(ids) {
 		for _, path := range folders[name] {
@@ -39,15 +38,19 @@ func (installer *engine) retirePluginLogDirs(dirs, ids []string) error {
 // retiredPluginLogFolders maps each bare name of ids to its folders under the
 // plugin log folders (retiredPluginLogRoots) while they are there and no id of
 // that name ids do not list is still keyed or installed in dirs: that plugin
-// writes to the same folder, which is then its own. Under a folder an operator
-// set rather than pfm, {root}/{name} counts only while it holds plugin log
-// files alone (pluginLogsOnly): that root may hold anything, and such a folder
-// holding more is returned in kept. An error names what could not be read,
-// beside every folder that could.
-func retiredPluginLogFolders(managedRoot string, dirs, ids []string) (
+// writes to the same folder, which is then its own. Under any folder but pfm's
+// own default (pluginLogDirDefault), an operator's choice in pfm.config or in
+// settings alike, {root}/{name} counts only while it holds plugin log files
+// alone (pluginLogsOnly): that root may hold anything, and such a folder
+// holding more is returned in kept, as "{path} kept — {why}". An error names
+// what could not be read, beside every folder that could; a record
+// pluginNameHeld cannot read keeps that name's folders, named in the error,
+// or in kept when it is a settings.local.json (retiredPluginLocalUnread): the
+// folder stays either way, since another plugin of that name may write there.
+func retiredPluginLogFolders(home, managedRoot string, dirs, ids []string) (
 	folders map[string][]string, kept []string, failed error,
 ) {
-	roots, pfmRoot, failed := retiredPluginLogRoots(managedRoot, dirs)
+	roots, pfmRoot, failed := retiredPluginLogRoots(home, managedRoot, dirs)
 	folders = map[string][]string{}
 	for _, name := range retiredPluginNames(ids) {
 		var present, others []string
@@ -75,19 +78,28 @@ func retiredPluginLogFolders(managedRoot string, dirs, ids []string) (
 		if len(present) == 0 && len(others) == 0 {
 			continue
 		}
-		held, err := pluginNameHeld(dirs, name, ids)
+		held, unread, err := pluginNameHeld(dirs, name, ids)
 		if err != nil {
-			failed = errors.Join(failed, fmt.Errorf("keep or remove %s: %w",
+			failed = errors.Join(failed, fmt.Errorf("%s kept: %w",
 				strings.Join(append(slices.Clone(present), others...), ", "), err))
 			continue
 		}
 		if held {
 			continue // another plugin of that name writes there: the folders are its own
 		}
+		if len(unread) != 0 {
+			for _, path := range slices.Concat(present, others) {
+				kept = append(kept, path+" kept — "+strings.Join(unread, "; "))
+			}
+			continue
+		}
 		if len(present) != 0 {
 			folders[name] = present
 		}
-		kept = append(kept, others...)
+		for _, path := range others {
+			kept = append(kept, path+" kept — it holds files other than plugin logs, under a PLUGIN_LOG_DIR "+
+				"other than pfm's own default; remove the retired plugin's logs there by hand")
+		}
 	}
 	return folders, kept, failed
 }
@@ -117,22 +129,27 @@ func pluginLogsOnly(path string) (bool, error) {
 }
 
 // retiredPluginLogRoots are the plugin log folders, each once: the one pfm set
-// (the claude env ledger's pluginLogDir in managedRoot, also returned alone as
-// pfmRoot, "" when there is none), then each absolute
+// (the claude env ledger's pluginLogDir in managedRoot; returned alone as
+// pfmRoot only while it is pfm's own default under home, pluginLogDirDefault,
+// since pfm.config's claude.env may name any folder), then each absolute
 // PLUGIN_LOG_DIR the settings.json of dirs holds, an operator's value pfm keeps
 // (planClaudeEnv) and the folder plugins then write to. An error names what
 // could not be read, beside every folder that could; a settings.json that does
-// not read or parse is left to the callers' own read of it (the dir's take,
-// retiredPluginTraces), which reports it once.
-func retiredPluginLogRoots(managedRoot string, dirs []string) (roots []string, pfmRoot string, failed error) {
+// not read or parse, or that the take reads as absent (a dangling link), is
+// left to the callers' own read of it (the dir's take, retiredPluginTraces),
+// which reports it once.
+func retiredPluginLogRoots(home, managedRoot string, dirs []string) (roots []string, pfmRoot string, failed error) {
 	ledger, failed := readClaudeEnvOwnership(managedRoot)
 	if failed == nil && ledger.PluginLogDir != "" {
-		pfmRoot = filepath.Clean(ledger.PluginLogDir)
-		roots = append(roots, pfmRoot)
+		root := filepath.Clean(ledger.PluginLogDir)
+		roots = append(roots, root)
+		if root == pluginLogDirDefault(home) {
+			pfmRoot = root
+		}
 	}
 	for _, setting := range ReadPluginLogEnv(dirs) {
 		if setting.Err != nil {
-			if _, _, err := readSettingsForEdit(setting.Settings); err == nil {
+			if _, document, err := readSettingsForEdit(setting.Settings); err == nil && document != nil {
 				failed = errors.Join(failed, setting.Err)
 			}
 			continue
@@ -165,33 +182,44 @@ func retiredPluginName(id string) string {
 // settings.local.json, or an installed_plugins.json, of dirs still holds an id
 // named name@… that ids do not list. A plugin a project's own settings enable
 // runs once installed, and installed_plugins.json records a project-scope
-// install too (scope, projectPath).
-func pluginNameHeld(dirs []string, name string, ids []string) (bool, error) {
+// install too (scope, projectPath). A record it cannot read is an error naming
+// that file as what blocks the check; a settings.local.json is that text in
+// unread instead (retiredPluginLocalUnread), while held stays an answer only
+// once another record holds the name.
+func pluginNameHeld(dirs []string, name string, ids []string) (held bool, unread []string, failed error) {
 	holds := func(key string) bool {
 		return strings.HasPrefix(key, name+"@") && !slices.Contains(ids, key)
 	}
+	blocks := func(path string, err error) error {
+		return fmt.Errorf("%s blocks the check that no other plugin named %s still writes there: %w", path, name, err)
+	}
 	for _, dir := range dirs {
-		for _, file := range []string{claudeSettingsName, "settings.local.json"} {
-			_, settings, err := readSettingsForEdit(filepath.Join(dir, file))
-			if err != nil {
-				return false, err
+		for _, file := range []string{claudeSettingsName, claudeLocalSettingsName} {
+			path := filepath.Join(dir, file)
+			_, settings, err := readSettingsForEdit(path)
+			if err != nil && file == claudeLocalSettingsName {
+				unread = append(unread, blocks(path, err).Error())
+				continue
 			}
-			enabled, _ := settings["enabledPlugins"].(map[string]any)
+			if err != nil {
+				return false, nil, blocks(path, err)
+			}
+			enabled, _ := settings[claudeEnabledPlugins].(map[string]any)
 			for key := range enabled {
 				if holds(key) {
-					return true, nil
+					return true, nil, nil
 				}
 			}
 		}
 		installs, err := claudeplugin.ReadInstalls(dir)
 		if err != nil {
-			return false, err
+			return false, nil, blocks(filepath.Join(dir, claudePlugins, "installed_plugins.json"), err)
 		}
 		for key := range installs {
 			if holds(key) {
-				return true, nil
+				return true, nil, nil
 			}
 		}
 	}
-	return false, nil
+	return false, unread, nil
 }

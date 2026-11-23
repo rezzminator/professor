@@ -64,6 +64,7 @@ func TestChatReloadWorkerMissingCWDOpensInFleetHomeWithNotice(t *testing.T) {
 		t.Fatalf("start probe socket: %v: %s", err, output)
 	}
 	cleanupProbeReloadSocket(t, socket)
+	waitProbePaneText(t, socket, "❯")
 	paneOutput, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_id}").Output()
 	if err != nil {
 		t.Fatalf("read probe pane: %v", err)

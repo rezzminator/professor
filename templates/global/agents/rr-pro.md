@@ -4,6 +4,7 @@ from: rr
 extends:
   - shared/repo-lane.md
 description: rr tier 2 on opus medium
+model: opus
 effort: medium
 pins:
   Budget: sha256:ea5a57c79f160b22bd0c863d70265d53845c945510c7d410706197cb95d3a8d3

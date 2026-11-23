@@ -27,10 +27,11 @@ A change lands in this file first, then in the templates, then in every surface 
 
 | Member | Kind | Does | Runs at | Design |
 | --- | --- | --- | --- | --- |
-| `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only writer of the run's synthesis, and it holds no `Read` | smart (`opus`), effort `low` | this file |
-| `rr-pro` | variant of `rr` | The same body at higher effort with wider caps and the repository lane set in `rr.md`'s § Budget and § Spawning by `rr-pro.md` and its shared `shared/repo-lane.md` section overrides, rendered by `pfm install` | `opus`, effort `medium` | [rr-pro.md](rr-pro.md) |
+| `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only writer of the run's synthesis, and it holds no `Read` | `sonnet`, effort `medium` | this file |
+| `rr-pro` | variant of `rr` | The same body on `opus` with wider caps and the repository lane set in `rr.md`'s § Budget and § Spawning by `rr-pro.md` and its shared `shared/repo-lane.md` section overrides, rendered by `pfm install` | `opus`, effort `medium` | [rr-pro.md](rr-pro.md) |
 | `rr-pro-max` | variant of `rr` | As `rr-pro`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [rr-pro-max.md](rr-pro-max.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, writes its full report into the run directory, returns the report's path, findings and rabbit holes | collector (`haiku`), effort `medium` | [sub-rr.md](sub-rr.md) |
+| `rr-mini` | agent | The direct reader: the caller already knows where the data lives (a named documentation page, a repository file) and it reads that source itself, returning each fact with its URL; it spawns no sub-agent and saves no run directory | `haiku`, effort `high` | [rr-mini.md](rr-mini.md) |
 | `clone-distiller` | agent | The general repository digger, the code lane of `rr-pro` and `rr-pro-max`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [clone-distiller.md](../clone-distiller/clone-distiller.md) |
 | `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|rr-pro\|rr-pro-max` | `pfm internal rr-dir` | this file |
 
@@ -237,4 +238,5 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 - A run directory made unique by a mechanism for `rr-pro-max`, whose `Read` lifts the claim's refusal: the `rr-dir` hook handing the lead a run token for the directory name.
 - The lens has no measured run: the next runs set the source-class share under [Measuring a run](#measuring-a-run).
+- The lead on `sonnet` at effort `medium` has no measured run: the two runs below were on `opus` at effort `low`.
 - The three numbers under [Measuring a run](#measuring-a-run) have two measured runs behind them: 13 lead calls against a budget of 13 for rounds of 4 and 2 diggers, counted before the claim Write, and one `NOT ON PAGE` in 25 facts on the other run. The next ten runs set the baseline.

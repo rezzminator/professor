@@ -28,7 +28,7 @@ Description, verbatim: `rr tier 3 on opus medium`
 
 ## How the variant is built
 
-`pfm install` renders it from `rr.md` by the same mechanism as `rr-pro`: its frontmatter overrides `description` and `effort`, its `add` appends `Read` to `tools`, its body replaces § Budget, and `extends: [shared/repo-lane.md]` supplies § Spawning. Both sections carry their base-text hash in `pins:`:
+`pfm install` renders it from `rr.md` by the same mechanism as `rr-pro`: its frontmatter overrides `description` and pins `model: opus` and `effort: medium`, its `add` appends `Read` to `tools`, its body replaces § Budget, and `extends: [shared/repo-lane.md]` supplies § Spawning. Both sections carry their base-text hash in `pins:`:
 
 | `rr.md` section | `rr-pro-max` text |
 | --- | --- |

@@ -4,6 +4,7 @@ from: rr
 extends:
   - shared/repo-lane.md
 description: rr tier 3 on opus medium
+model: opus
 effort: medium
 add:
   tools:

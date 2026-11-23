@@ -36,6 +36,9 @@
     "global/agents/documenter.md": {
       "curated": true
     },
+    "global/agents/rr-mini.md": {
+      "curated": true
+    },
     "global/agents/rr-pro-max.md": {
       "curated": true
     },

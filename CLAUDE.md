@@ -20,8 +20,8 @@ Where Vocabulary, Runtime or On demand disagrees with the code on a path, comman
 - fleet prompt: the main chat's system layer per engine, gitignored at `pfm/harness-prompts/generated/{engine}.md`; sub-agents never receive it, so the dispatch law lives under § Rules here · generated from `pfm/harness-prompts/` by `pfm install`
 - host assets: the files `pfm install` stages onto the host, owned here alone · `pfm/internal/installer/assets/`
 - harvester: the standalone web and document harvester, over a pinned Python conversion sidecar · `plugins/harvester/`
-- flights: the foreman tiers and the lander that build and land work, the tracer with its tracetree kit and caller manual, the reviewers, and `/flights:doctor`, their meter, shipped by the flights plugin · `plugins/flights/plugins/flights/{agents,commands,skills}/` · design `docs/design/flights/`
-- laws: the `/law:{x}` command family, the rule set every prompt and orientation-file edit loads before writing its subject; `/design:{x}` returns a design document; `/flights:trace-guide`, the tracer caller's manual, ships in the flights plugin · `templates/global/commands/law/`, `templates/global/commands/design/` · design `docs/design/law/`
+- flights: the foreman tiers and the lander that build and land work, the tracer with its tracetree kit and caller manual, the reviewers, `/flights:doctor`, their meter, its coding, testing and life-cycle rules, linked as `~/.claude/rules/flights-{x}.md`, shipped by the flights plugin · `plugins/flights/plugins/flights/{agents,commands,skills,rules,rule_links}/` · design `docs/design/flights/`
+- laws: the `/law:{x}` command family, the rule set every prompt and orientation-file edit loads before writing its subject; `/design:{x}` returns a design document · `templates/global/commands/law/`, `templates/global/commands/design/` · design `docs/design/law/`
 - fence: the shared `pfm-dev` container, own namespaces, HOME and `/tmp` per call, and the `pfm-sim` browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
 - install record: this repo's own pfm install (`VERSION`, `manifest.json`, whose `installed_from.repo` pfm's theme install reads) and its saved rr reports (`.professor/RR/`) · `.professor/`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
@@ -102,7 +102,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 - Every dispatch carries all five: the goal in one sentence and the artifact it returns, its shape named; the boundary, in scope and explicitly out; the anchors — exact files, symbols or commands, never "find the relevant code"; the tier and effort, plus a budget when the task can run away; what its own failure looks like — a dead end, an empty result, a tool that would not run.
 - All sibling agents of a round go in one message; agents dispatched and reports received are counted and must match, and a missing report is a named coverage hole.
-- An invariant enforced across layers (Go + shell + prompt) is mapped closed-world before the build dispatch; the brief carries every enumerated door, per `templates/global/rules/coding.md`.
+- An invariant enforced across layers (Go + shell + prompt) is mapped closed-world before the build dispatch; the brief carries every enumerated door, per the flights coding rule.
 - Agent reports are evidence, not truth: verify a claim against what you can read yourself before relaying it.
 
 ## Prompt & template code
@@ -113,7 +113,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - No dangling pointers: grep before you cite; a pointer to a file, agent or command the install does not produce is deleted, or its target ships.
 - The judge is never the thing being judged: read the artifact from disk, never a verdict asserted in a brief; an empty enumeration is clean only once the enumerator provably ran, and the parent reports which.
 - Surgical changes: every changed line traces to the task; fix broken things you hit; remove dead code, references and deps end to end, including `README.md`, `docs/SETUP.md` and `templates/refresh-map.json`.
-- No duplication: grep for the existing rule or section and reference it; a near-copy drifts; code and scripts follow `coding.md`.
+- No duplication: grep for the existing rule or section and reference it; a near-copy drifts; code and scripts follow the flights coding rule.
 - Twins move together: a `.claude/**` change any adopter could use lands in its `templates/{project|global}/**` twin in the same pass, the commit message carrying the adopter-facing change; a customization only this repo wants stays local; unsure → ask.
 - Right-size and finish: the simplest thing that works, no speculative abstractions, no stubs or deferred TODOs; where correct and convenient diverge, take correct, even at re-architecting cost.
 
@@ -130,7 +130,7 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 - Code builds and tests run in the fence through `.claude/scripts/dev.sh iso`; the full gate is the lander's on a flight, the main chat's on small work.
 - Fence runs leave the host's `~/.local/bin` and the real `$HOME` untouched; a live config change the user orders is edited in place.
 - Before hand-setting a host flag, a user-ordered one too: would a fresh `pfm install` break or block without it? Yes → a pfm default in `pfm/internal/claudelaunch/defaults.json`, `templates/global/codex/config.toml` or `pfm.config.json`'s `herdr` section, mirrored in `example.pfm.config.json`, routed by install or launch, test-held; no → the user's config — a live-file edit is lost on the next machine.
-- Template, doc, prompt and config-file changes are non-code work, placed by `templates/global/rules/flights-life-cycle.md`.
+- Template, doc, prompt and config-file changes are non-code work, placed by the flights life-cycle rule.
 - Once a fenced flight merges, the main chat runs the host mirror build under § Host.
 - At every milestone, checkpoint the plan to a file and store the frontier with `forward_compaction`, which works mid-turn.
 - AskUserQuestion is the user's whole screen: context travels inside the question text; each round simpler and more concrete, never a rephrase.

@@ -426,7 +426,7 @@ Outside this blueprint, the owner assigns the review, the build and the runs. La
 | The command | `templates/global/commands/design/test-suite.md` | Inputs, terms, names, the tier names unit / hermetic / live, laws, procedure, output, hand-off, seed evidence, checks, the threat model |
 | Its neighbour | `templates/global/commands/design/codebase.md` | § Protocol, cited as it stands |
 | The testing-manual template | `templates/project/commands/per-project/testing-manual.md` | § Tiers in the tier names unit / hermetic / live, § Suite duties, § What not to test |
-| The test-writing rules | `templates/global/rules/testing.md`, `templates/global/rules/integration-tests.md` | The laws every agent writing a test carries, in the rules' own words: `testing` for every tier, `integration-tests` path-scoped to suites above the unit tier and pointing to the command for the design |
+| The test-writing rules | `plugins/flights/plugins/flights/rules/testing.md`, `templates/global/rules/integration-tests.md` | The laws every agent writing a test carries, in the rules' own words: `testing` for every tier, `integration-tests` path-scoped to suites above the unit tier and pointing to the command for the design |
 | Registries | `templates/refresh-map.json`, `docs/SETUP.md`, `docs/README.md` | The command's entry |
 | This directory | `docs/design/integration-suite/` | How the command works and why its laws are shaped as they are |
 

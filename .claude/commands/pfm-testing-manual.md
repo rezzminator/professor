@@ -5,7 +5,7 @@ description: Governs how pfm (the Go fleet engine) is tested — tiers, test hom
 
 # pfm testing manual
 
-Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `pfm/internal/mockengine/README.md` and `docs/dev/testing/`; this file states what a change owes. How to write a test is the `testing` rule's (`~/.claude/rules/testing.md`); this manual holds pfm's facts and how its tests run.
+Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `pfm/internal/mockengine/README.md` and `docs/dev/testing/`; this file states what a change owes. How to write a test is the flights testing rule's (`plugins/flights/plugins/flights/rules/testing.md`); this manual holds pfm's facts and how its tests run.
 
 ## Tiers
 

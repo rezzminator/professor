@@ -5,7 +5,7 @@ description: Governs how {project} ({PROJECT_ROLE}) is tested — tiers, test ho
 
 # {project} testing manual
 
-Fixed headings, fixed order; a section that does not apply says `none`. State the current law only — no history. Stack detail lives in the project's runbook; cite it, never restate it. How to write a test is the `testing` rule's (`~/.claude/rules/testing.md`); this manual holds {project}'s facts and how its tests run.
+Fixed headings, fixed order; a section that does not apply says `none`. State the current law only — no history. Stack detail lives in the project's runbook; cite it, never restate it. How to write a test is the `flights-testing` rule's (`~/.claude/rules/flights-testing.md`); this manual holds {project}'s facts and how its tests run.
 
 ## Tiers
 

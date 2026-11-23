@@ -6,7 +6,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 - fake engine: what it plays and the real-engine flows no suite plays · `internal/mockengine/README.md`
 - CLI adapters: stdlib `flag` dispatch plus the end-to-end jail tests; a file name starts with its unit (`chat_` is the one multi-file unit), so `ls cmd/pfm/{unit}_*` lists a unit; `pfm help` lists the subcommands · `cmd/pfm/`
-- package map: each package's front door, `{package}.go` (`main.go` for `package main`), opens with its `// Package` menu per the `coding` rule, C31 ratcheting it; `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` prints the map · `internal/doctor/`, `internal/hookentry/`, `internal/picker/`, `internal/update/`, `internal/professor/`
+- package map: each package's front door, `{package}.go` (`main.go` for `package main`), opens with its `// Package` menu per the flights coding rule, C31 ratcheting it; `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` prints the map · `internal/doctor/`, `internal/hookentry/`, `internal/picker/`, `internal/update/`, `internal/professor/`
 - tagged e2e: the `-tags e2e` tier, run serially · `e2e/`
 - journey: the live tier, one tree of owner steps on a disposable machine · `journey/`
 - jail: a test run with every filesystem location redirected by `PFM_*` overrides (§ Environment Variables); reference harness `testdata/e2e.sh`, fixtures `testdata/{claude-store|codex-store|crumbs|proc|golden}/`

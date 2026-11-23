@@ -13,7 +13,7 @@ Next steps, in order:
 1. Take the owner's next step on the brief; record his ruling in `manifest.md` § Key Decisions and the result in `briefs.md`.
 2. Likely follow-ups on the brief, each a script beside `b1.py`: split each brief into its work half and its process half by bytes; join each brief's paths to the files the run edited (were the paths the right ones); read the dispatcher from a fresh callmeter snapshot (main chat or another agent).
 3. On the owner's go: the bench of `standard.md` § 7. State the dollar cap first; pick 6 recorded tasks per repo from runs of 6 to 20 edit calls; arms: front-door contract blocks, the brief that quotes, the narrow runner with quiet output, the first two together; two runs per arm and task.
-4. After the bench: the laws that won go to `pcm` as the replacement of `templates/global/commands/design/codebase.md`; the brief levers go into the flights prompts and `templates/global/rules/flights-life-cycle.md`.
+4. After the bench: the laws that won go to `pcm` as the replacement of `templates/global/commands/design/codebase.md`; the brief levers go into the flights prompts and `plugins/flights/plugins/flights/rules/life-cycle.md`.
 5. Measure again on new recorded runs against the baseline of `findings.md` § 3.
 
 To rerun any number: `method.md` § Pipeline; a fresh callmeter snapshot is needed for `build.py`, the derived data is enough for every other script.

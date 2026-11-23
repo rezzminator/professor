@@ -781,7 +781,7 @@ chk_C31() {
 # C35 exact assertions: scripts/testassert reads every test function with go/parser and classes it by
 # its checks, through the helpers it calls; a test whose every value check is a substring or regexp
 # match (strings/bytes Contains, HasPrefix, HasSuffix, Index…, a regexp Match/Find) is substring-only
-# (testing.md: assert the exact value). The set only shrinks: a substring-only test, `{file} {Func}`,
+# (the flights testing rule: assert the exact value). The set only shrinks: a substring-only test, `{file} {Func}`,
 # that .arch/substring-tests.txt lacks FAILs naming it. ERROR when testassert cannot parse a file or
 # the Go toolchain cannot run it.
 chk_C35() {

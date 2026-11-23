@@ -174,6 +174,8 @@ The labels, in order:
 - `TESTS`: command and printed result line, or `COULD NOT RUN: {first error line}`;
 - `PROBES`: input and printed result, `none: {the change runs no code}`, or `COULD NOT RUN`;
 - `UNTESTED`: behaviour neither a test nor a probe ran, with why;
+- `SKIPPED`: what was left out or not checked;
+- `RISK`: any risk the change carries;
 - `OUTSIDE`.
 
 `DONE` only when every acceptance row is `met`. One `open` row makes the status `PARTIAL`, whoever owns the item and however sound its why: an item narrowed, deferred, met in part or left to another owner is `open`. `UNTESTED` and the `open:` rows are the foreman's NOT READ.

@@ -16,7 +16,7 @@ The owner's ask, 2026-11-18: tests must not depend on timing and timeouts, so a 
 Done means: no pfm test passes or fails because of how much wall-clock time elapsed, and the gate check with no allowlist reads zero.
 
 - A test of time-dependent logic owns a fake clock.
-- A test that drives a real process (tmux, the tagged e2e tier, the journey) waits as a bounded poll on a named condition, never a fixed sleep. The law: `templates/global/rules/testing.md` ("Poll a named condition, bounded; never a fixed sleep or wait") and `.claude/rules/pfm-os-doors.md` ("A test waits on a named condition, never on the Linux fence's speed").
+- A test that drives a real process (tmux, the tagged e2e tier, the journey) waits as a bounded poll on a named condition, never a fixed sleep. The law: `plugins/flights/plugins/flights/rules/testing.md` ("Poll a named condition, bounded; never a fixed sleep or wait") and `.claude/rules/pfm-os-doors.md` ("A test waits on a named condition, never on the Linux fence's speed").
 - The full gate passes at high host load without a TIMEOUT attributed to contention.
 
 ## Key Decisions

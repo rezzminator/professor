@@ -2,7 +2,7 @@
 
 ## State of work
 
-The sweep is built and merge-ready. It is committed on branch `flight/timing-free-tests` (worktree `.worktrees/timing-free-tests`), not merged into `develop`. It lands only after a green macOS run, `bash infra/fence/journey/run.sh --ci-mac`, which pushes and is the owner's order: four macOS-only test files changed and never ran (listed in `manifest.md` § Open Questions), and the macOS journey step of `.github/workflows/ci.yml` now runs `infra/fence/journey/budget.sh`. After the merge the main chat runs the host mirror build.
+The sweep is landed: `develop` holds it as commit `4d43dbee4` (one fast-forward commit), and the host's pfm is rebuilt from it (`make -C pfm host-install`). The macOS run, `bash infra/fence/journey/run.sh --ci-mac` (GitHub Actions run 45144839658), passed on that commit on 2026-11-23: `journey (macos)`, `macos (unit)` and `macos (e2e)` all success, so the four macOS-only test files changed by the sweep have run on macOS and the macOS journey step of `.github/workflows/ci.yml` that calls `infra/fence/journey/budget.sh` is proven.
 
 | Count | Before | Now |
 | --- | --- | --- |

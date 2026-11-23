@@ -11,7 +11,7 @@ flights: [timing-free-tests]
 
 ## Vision & Scope
 
-The owner's ask, 2026-11-18: tests must not depend on timing and timeouts, so a loaded host stops faking red gates ("so we won't be having this headache"). The same day he ruled: land the first fix and park all the rest as this epic. The epic resumed on 2026-11-22 as the flight `timing-free-tests`, in progress.
+The owner's ask, 2026-11-18: tests must not depend on timing and timeouts, so a loaded host stops faking red gates ("so we won't be having this headache"). The same day he ruled: land the first fix and park all the rest as this epic. The epic resumed on 2026-11-22 as the flight `timing-free-tests`, which landed on 2026-11-23.
 
 Done means: no pfm test passes or fails because of how much wall-clock time elapsed, and the gate check with no allowlist reads zero.
 
@@ -61,7 +61,7 @@ Every wait a test needs goes through a door; three checks hold it, none with an 
 ## Progress Log
 
 - 2026-11-18 — session: first fix landed, the watch-ladder tests run on a fake clock (`8e52471d1`)
-- 2026-11-23 — flight: the sweep is built and gated on `flight/timing-free-tests`, merge-ready pending a macOS run (commit on the branch, not merged)
+- 2026-11-23 — flight: the sweep landed on `develop` as one fast-forward commit, macOS journey and unit and e2e jobs green on it (`4d43dbee4`)
 
 ## Discoveries
 
@@ -71,10 +71,9 @@ Every wait a test needs goes through a door; three checks hold it, none with an 
 
 ## Open Questions
 
-1. The macOS run, `bash infra/fence/journey/run.sh --ci-mac` (it pushes, so only on the owner's order): four macOS-only test files changed and never ran (`pfm/internal/deps/runner_group_darwin_jail_test.go`, `pfm/internal/gather/procfs_darwin_jail_test.go`, `pfm/internal/stats/stats_darwin_jail_test.go`, `pfm/internal/index/stress_peak_darwin_jail_test.go`), and the macOS journey step of `.github/workflows/ci.yml` now runs `infra/fence/journey/budget.sh`. The landing waits on it.
-2. Two budget rows of `pfm/.testtiming.yml` are exceeded at rest and were not raised: `internal/call` (24 s against 16 s) and `internal/reload` (10.5 s against 8 s). Whether to raise them or build the `fleetdb` speed-up is not asked.
-3. The stress tests run only with `PFM_STRESS=1`, which the gate never sets.
-4. The plugins under `plugins/` are out of this sweep: each is its own repository.
+1. Two budget rows of `pfm/.testtiming.yml` are exceeded at rest and were not raised: `internal/call` (24 s against 16 s) and `internal/reload` (10.5 s against 8 s). Whether to raise them or build the `fleetdb` speed-up is not asked.
+2. The stress tests run only with `PFM_STRESS=1`, which the gate never sets.
+3. The plugins under `plugins/` are out of this sweep: each is its own repository.
 
 ## Files
 
@@ -83,6 +82,6 @@ Every wait a test needs goes through a door; three checks hold it, none with an 
 Private, outside the repo, in `~/.local/state/pfm/flights/professor/timing-free-tests/`:
 
 - `plan.md` — the flight's plan and rulings, the source of `update.md` § Rulings.
-- `census.py`, `census.tsv` — the clock census before the work; regenerate with `python3 census.py {worktree}/pfm {out.tsv}`.
+- `census.py`, `census.tsv` — the clock census before the work; regenerate with `python3 census.py {checkout}/pfm {out.tsv}`.
 - `patterns.md` — the pattern catalogue for converting a test.
 - `herdr-test-contention.patch` — an unproven 87-line patch that raises wall-clock bounds instead of removing the dependence; reference only, not the fix.

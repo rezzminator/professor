@@ -55,23 +55,26 @@ Every wait a test needs goes through a door; three checks hold it, none with an 
 "Zero" means no test outcome decided by elapsed time. Real time remains in three places:
 
 - Inside the door: look pacing (1 ms doubling to 50 ms) and the one 2-minute hung-only limit, cut by the test's own deadline. A test waiting on another process must look again somehow; the limit ends a hung test, it never decides a pass.
-- Production's own limits, where a test runs the real binary and does not replace the clock: the journey (pfm's 5 s launch watch) and three jail-tier tests that wait 3 to 10 s for a production limit to fire against a frozen real server (`TestHerdrBridgeTmuxGivesUpOnAFrozenServer`, `TestOpenRefusesAnUnresponsiveLiveServer`, `TestWatchLadderAFrozenTmuxServerIsNeverAnExit`). Load cannot fail them; a slow machine only makes them slower.
+- Production's own limits, where a test runs the real binary and does not replace the clock: the journey (pfm's 5 s launch watch) and two jail-tier tests that wait for a production limit to fire against a frozen real server (`TestOpenRefusesAnUnresponsiveLiveServer`, `TestWatchLadderAFrozenTmuxServerIsNeverAnExit`). Load cannot fail them; a slow machine only makes them slower.
 - Limits whose timer lives outside pfm, kept short on purpose and verified by hand, not by a check: `pfm/cmd/pfm/headless_exec_jail_test.go` (`--timeout 0.05`, enforced by the child) and the os/exec grace periods (`WaitDelay`) in `pfm/internal/deps/runner_jail_test.go`, `pfm/internal/installer/skill_sources_jail_test.go` and `pfm/internal/headless/run/web_search_budget_test.go`. The clock check does not see a `WaitDelay` set inside an options literal.
 
 ## Progress Log
 
 - 2026-11-18 — session: first fix landed, the watch-ladder tests run on a fake clock (`8e52471d1`)
 - 2026-11-23 — flight: the sweep landed on `develop` as one fast-forward commit, macOS journey and unit and e2e jobs green on it (`4d43dbee4`)
+- 2026-11-23 — session: the fleet database brings its schema once per process and `internal/call` is back under its budget row (`14236aa30`, local `develop`, not pushed)
 
 ## Discoveries
 
 - The census before the work, at develop `388901f5f15e`: about 880 real-clock sites in 341 of 1,745 Go test files, 108 sites in 22 shell test files, 379 unit tests in 21 of 103 packages that made production code wait on the real clock. The tool: `census.py` in the private folder.
 - A second, older time override exists beside `pfm/internal/clock`: the scan clock `PFM_TEST_NOW_NS` in `pfm/internal/fleet/scan.go`.
-- The rest of `reload`'s time is CPU, not a wait: `fleetdb` re-runs its whole schema on every open. One schema init per database per process is a found speed-up, not built.
+- The rest of `reload`'s time is CPU, not a wait. `fleetdb` now brings a schema once per process (`schemaFingerprint` and `schemasBrought` in `pfm/internal/fleetdb/open.go`), which did not bring `internal/reload` under its row.
+- `testwait.Drive`'s looks are the remaining time of the Herdr unit tests of `internal/call` (`TestHerdrCallNative`, about 1.1 s) and 44 % of `internal/reload`'s unit-tier CPU profile; curing it changes the shared wait door `pfm/internal/testwait`. Found, not built.
+- A new shared database still costs 8 to 9 ms (the schema script and its steps): paid once per machine in production, once per database in tests. Found, not built.
 
 ## Open Questions
 
-1. Two budget rows of `pfm/.testtiming.yml` are exceeded at rest and were not raised: `internal/call` (24 s against 16 s) and `internal/reload` (10.5 s against 8 s). Whether to raise them or build the `fleetdb` speed-up is not asked.
+1. One budget row of `pfm/.testtiming.yml` is exceeded at rest and was not raised: `internal/reload` (8 s row; 10.5 s on a quiet host before the schema change, 15.5 s and 18.0 s in two loaded gates after it). Whether to raise it or cure `testwait.Drive`'s looks is not asked.
 2. The stress tests run only with `PFM_STRESS=1`, which the gate never sets.
 3. The plugins under `plugins/` are out of this sweep: each is its own repository.
 

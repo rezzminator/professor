@@ -13,6 +13,8 @@ The sweep is landed: `develop` holds it as commit `4d43dbee4` (one fast-forward 
 - No test was skipped or renamed. One test left, `TestBudgetFailsOnlyARunOverIt`, because its subject moved to a shell test (`infra/fence/tests/journey-budget_test.sh`).
 - The change is 637 paths: 577 modified, 82 new files; 69 production Go files gained a clock seam or one of the fixes under § Delivered.
 
+Landed after it, in `14236aa30` on local `develop` (not pushed): the fleet database brings a schema once per process, and `internal/call` is back under its budget row. `internal/reload` still exceeds its 8 s row (§ Faster after the sweep); no row of `pfm/.testtiming.yml` was edited.
+
 ### Rulings that still bind a later change
 
 1. Done means: no pfm test passes or fails because of how much wall-clock time elapsed, on a loaded host as on an idle one.
@@ -48,6 +50,13 @@ Speed, fenced:
 | `internal/reload` | 18 to 27 s | 10.5 s |
 | `internal/hookentry` | 60 to 72 s | 33 s |
 | `internal/chat` | 43 to 50 s | 17 s |
+
+### Faster after the sweep (`14236aa30`)
+
+- `initDatabase` (`pfm/internal/fleetdb/open.go`) reads one schema fingerprint per open (`schemaFingerprint`: `user_version` plus every `sqlite_master` row) and skips `bringToSchema` for a database whose fingerprint this process already holds in `schemasBrought`. `retireMovedTmuxSeats` and the newer-version refusal still run at every open, a fingerprint still holding the retired `issues` table is never held, and the connection is not cached.
+- `internal/call` no longer exceeds its 16 s row and the gate no longer warns on it: the package alone in the fence 9.0 s (22.9 s before); two full gates on a loaded host (load average 49) 16.4 s and 19.1 s with no warning. No full gate on a quiet host was measured after the change.
+- Cause cured in three tests: `TestJailedLongCompactFocusFiresWithFullTranscript` 8.89 s to 0.53 s and `TestJailedBusyCodexQueuesAndLongFileDeliversByPaste` 2.47 s to 0.82 s (their fixture panes open at 200x50; at tmux's 80x24 a long body scrolled the composer row off screen and the render-settle loop ran every try), and `TestHerdrBridgeTmuxGivesUpOnAFrozenServer` 3.01 s to 0.01 s (`bridgeTmux` in `pfm/internal/call/herdr_bridge.go` makes its bound through `gather.ProbeContext`; the test moves a fake clock).
+- `internal/reload` still exceeds its 8 s row: 10.5 s on a quiet host before this change, 15.5 s and 18.0 s in the two loaded gates after it.
 
 ### Faults found and fixed in the same change
 

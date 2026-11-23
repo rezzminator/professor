@@ -731,11 +731,11 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
       plugins: [{ name: "p", source: { source: "git-subdir", url: url ?? plugin, path: "./plugins/p", ref: "main" } }],
     };
     const base = await commit(r0, {
-      "README.md": "Run `/prompt:use check`, `/handy` or `/reload --account 2`; see `/dev/null`.\n",
+      "README.md": "Run `/prompt:use check`, `/handy` or `/swap --account 2`; see `/dev/null`.\n",
       ".claude-plugin/marketplace.json": JSON.stringify(market, null, 2),
       "templates/global/commands/prompt/use.md": "q\n",
       "templates/global/skills/handy/SKILL.md": "h\n",
-      "pfm/internal/installer/assets/reload.command.md": "r\n",
+      "pfm/internal/installer/assets/swap.command.md": "r\n",
       "templates/global/agents/old-agent.md": "a\n",
       "scripts/old.sh": "echo old\n",
     });
@@ -793,7 +793,7 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
       "templates/global/agents/scout.md": null,
       "templates/global/commands/p/doc.md": null,
       "templates/global/skills/kit/SKILL.md": null,
-      "README.md": "Run `/prompt:use check`, `/handy`, `/reload --account 2` or `/p:doc`.\n",
+      "README.md": "Run `/prompt:use check`, `/handy`, `/swap --account 2` or `/p:doc`.\n",
       "docs/moved.md": "Codex runs p-mover; Claude runs `/p:doc`, the kit skill and p:scout, the scout.\n",
     }, "move the roles into plugin p");
     const r = await run(f.r0, "preflight", "--base", before, "--head", "HEAD");
@@ -836,7 +836,7 @@ describe("preflight S1, D1, T1", { concurrency: availableParallelism() }, () => 
       ".claude-plugin/marketplace.json": JSON.stringify(market),
       "plugins/ip/plugins/ip/.claude-plugin/plugin.json": '{"name":"ip"}\n',
       "plugins/ip/plugins/ip/commands/doc.md": "d\n",
-      "README.md": "Run `/prompt:use check`, `/handy`, `/reload --account 2` or `/ip:doc`.\n",
+      "README.md": "Run `/prompt:use check`, `/handy`, `/swap --account 2` or `/ip:doc`.\n",
     });
     assertClean(r, "preflight");
     for (const line of ["README 4 commands checked", "PLUGINS 1 checked, 0 unlistable, 1 in-tree"])

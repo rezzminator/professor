@@ -1,6 +1,6 @@
 ---
 epic: timing-free-tests
-status: IN_PROGRESS
+status: SHIPPED
 created: 2026-11-18
 updated: 2026-11-23
 pipelines: []
@@ -11,7 +11,7 @@ flights: [timing-free-tests]
 
 ## Vision & Scope
 
-The owner's ask, 2026-11-18: tests must not depend on timing and timeouts, so a loaded host stops faking red gates ("so we won't be having this headache"). The same day he ruled: land the first fix and park all the rest as this epic. The epic resumed on 2026-11-22 as the flight `timing-free-tests`, which landed on 2026-11-23.
+The owner's ask, 2026-11-18: tests must not depend on timing and timeouts, so a loaded host stops faking red gates ("so we won't be having this headache"). The same day he ruled: land the first fix and park all the rest as this epic. The epic resumed on 2026-11-22 as the flight `timing-free-tests`, which landed on 2026-11-23. The owner closed the epic that day: what § Open Questions lists stays unbuilt and waits for a new order.
 
 Done means: no pfm test passes or fails because of how much wall-clock time elapsed, and the gate check with no allowlist reads zero.
 
@@ -63,6 +63,7 @@ Every wait a test needs goes through a door; three checks hold it, none with an 
 - 2026-11-18 — session: first fix landed, the watch-ladder tests run on a fake clock (`8e52471d1`)
 - 2026-11-23 — flight: the sweep landed on `develop` as one fast-forward commit, macOS journey and unit and e2e jobs green on it (`4d43dbee4`)
 - 2026-11-23 — session: the fleet database brings its schema once per process and `internal/call` is back under its budget row (`14236aa30`, local `develop`, not pushed)
+- 2026-11-23 — session: the owner closed the epic, status `SHIPPED`, the three open questions left unbuilt
 
 ## Discoveries
 

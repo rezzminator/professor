@@ -71,7 +71,9 @@ func RefreshMCPFiles(args []string, home string, machine pfmconfig.Config) error
 			value = args[index]
 		}
 		name := filepath.Base(value)
-		if filepath.Clean(value) == value && filepath.Dir(value) == dir &&
+		// A recipe recorded under another spelling of home (a symlink to it) names the same directory.
+		inDir := filepath.Dir(value) == dir || paths.PhysicalPath(filepath.Dir(value)) == paths.PhysicalPath(dir)
+		if filepath.Clean(value) == value && inDir &&
 			strings.HasPrefix(name, mcpFilePrefix) && strings.HasSuffix(name, mcpFileSuffix) {
 			owned = append(owned, value)
 		}

@@ -5,6 +5,7 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -115,6 +116,13 @@ func childNew(c *harness.Ctx, s State) State {
 			parentEnv["TERM"],
 		)
 	}
+	// The child records its launch prompt only once its UserPromptSubmit hooks return, after Herdr paints
+	// its tab working; until then its status is working with no last line, so the doors wait for it.
+	firstPrompt := []entry{{"user", `mock-engine: {"type":"hold","until_gone":"` + hold + `"}`}}
+	c.Poll(s.Mesh.ChildName+"'s transcript holding its launch prompt", func() (bool, string) {
+		got := entries(c, s.Mesh.ChildName)
+		return slices.Equal(got, firstPrompt), fmt.Sprintf("%+v\nwant %+v", got, firstPrompt)
+	})
 	queued := c.Unique("queued")
 	busyDoors(c, term, &s, hold, queued)
 	if r := c.Read("rm", hold); r.Code != 0 {

@@ -56,11 +56,19 @@ func TestStateComesFromTheTranscriptNotAClock(t *testing.T) {
 		lines []string
 		live  bool
 		want  string
+		last  string
 	}{
-		{"answered", []string{userLine("go"), assistantLine("done")}, true, StateIdle},
-		{"mid tool run", []string{userLine("go"), toolLine("Bash")}, true, StateWorking},
-		{"just asked", []string{userLine("go")}, true, StateWorking},
-		{"server gone", []string{userLine("go"), assistantLine("done")}, false, StateDead},
+		{"answered", []string{userLine("go"), assistantLine("done")}, true, StateIdle, "A done"},
+		{"mid tool run", []string{userLine("go"), toolLine("Bash")}, true, StateWorking, "T Bash|{}"},
+		{"just asked", []string{userLine("go")}, true, StateWorking, "U go"},
+		// A launch prompt is recorded only once its UserPromptSubmit hooks return: until then the
+		// transcript holds the session's title alone, a live chat working with no last line.
+		{
+			"first prompt in its hooks",
+			[]string{`{"type":"custom-title","customTitle":"child","sessionId":"s"}`},
+			true, StateWorking, "",
+		},
+		{"server gone", []string{userLine("go"), assistantLine("done")}, false, StateDead, "A done"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			chat := Chat{
@@ -73,8 +81,9 @@ func TestStateComesFromTheTranscriptNotAClock(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Inspect() error = %v", err)
 			}
-			if status.State != testCase.want {
-				t.Fatalf("state = %q, want %q (%#v)", status.State, testCase.want, status)
+			if status.State != testCase.want || status.Last != testCase.last {
+				t.Fatalf("state, last = %q, %q; want %q, %q (%#v)", status.State, status.Last, testCase.want,
+					testCase.last, status)
 			}
 			if status.Alive() != (testCase.want != StateDead) {
 				t.Fatalf("Alive() disagrees with state %q", status.State)

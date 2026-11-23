@@ -37,12 +37,15 @@ func (installer *engine) retirePredecessors() error {
 	return nil
 }
 
-// retireConfigFile removes one retired config file: a link goes as it is, a
-// regular file is backed up under the state dir first, since an operator may
-// have written their own at a name pfm once owned. A path this pass already
-// retired (retireEmbeddedAssets) is not retired twice.
+// retireConfigFile removes one retired config file: a regular file or a link
+// is backed up under the state dir first (a link as a link to the same
+// target), since an operator may have written or linked their own at a name pfm
+// once owned; anything else goes as it is. A path this pass already retired
+// (retireEmbeddedAssets, which names it through the config dir's physical
+// path) is not retired twice.
 func (installer *engine) retireConfigFile(path, reason string) error {
-	if installer.removedPaths[filepath.Clean(path)] {
+	physical := filepath.Join(paths.PhysicalPath(filepath.Dir(path)), filepath.Base(path))
+	if installer.removedPaths[filepath.Clean(path)] || installer.removedPaths[physical] {
 		return nil
 	}
 	info, err := os.Lstat(path)
@@ -52,7 +55,8 @@ func (installer *engine) retireConfigFile(path, reason string) error {
 	if err != nil {
 		return fmt.Errorf("inspect retired config file %s: %w", path, err)
 	}
-	if !info.Mode().IsRegular() {
+	link := info.Mode()&os.ModeSymlink != 0
+	if !info.Mode().IsRegular() && !link {
 		return installer.retire(path, reason)
 	}
 	backup := availableBackup(
@@ -61,7 +65,7 @@ func (installer *engine) retireConfigFile(path, reason string) error {
 	)
 	installer.markRemoved(path)
 	return installer.change("retire "+path+" ("+reason+"; backup: "+backup+")", func() error {
-		if err := copyBackup(path, backup); err != nil {
+		if err := backupRetiredConfigFile(path, backup, link); err != nil {
 			return fmt.Errorf("backup retired config file %s: %w", path, err)
 		}
 		if err := os.Remove(path); err != nil {
@@ -69,6 +73,25 @@ func (installer *engine) retireConfigFile(path, reason string) error {
 		}
 		return nil
 	})
+}
+
+// backupRetiredConfigFile saves path at backup: a link as a link to its
+// target, a regular file as a copy.
+func backupRetiredConfigFile(path, backup string, link bool) error {
+	if !link {
+		return copyBackup(path, backup)
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return fmt.Errorf("read link %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(backup), err)
+	}
+	if err := os.Symlink(target, backup); err != nil {
+		return fmt.Errorf("link %s: %w", backup, err)
+	}
+	return nil
 }
 
 // Retire executable predecessors across the configured account roster while

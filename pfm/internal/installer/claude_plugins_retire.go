@@ -6,12 +6,14 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/retired"
 )
 
 // retireClaudePlugins removes every trace of each plugin id the retired lists
@@ -63,7 +65,8 @@ func (installer *engine) retireClaudePlugins() error {
 // retired id it still plans and the repair, its skip line's and doctor's.
 const (
 	retiredPluginPlanned    = "claude.plugins or the source clone's marketplace still plans it"
-	retiredPluginPlannedFix = "drop it there or from claudePluginsRemoved in the retired lists"
+	retiredPluginPlannedFix = "drop it there or from claudePlugins[\"" + retired.ClaudePluginsNoSuccessor +
+		"\"] in the retired lists"
 )
 
 // RetiredClaudePluginsPlanned splits ids (retired.Lists ClaudePluginsRemoved)
@@ -96,11 +99,11 @@ func retiredPluginDirs(home string, dirs []string) []string {
 // retiredPluginTake is the take-back of ids: their keys in settings.json's
 // enabledPlugins and installed_plugins.json, then their copies (retiredPluginCopies).
 func retiredPluginTake(ids []string) claudePluginTake {
-	retired := func(key string) bool { return slices.Contains(ids, key) }
+	retiredID := func(key string) bool { return slices.Contains(ids, key) }
 	return claudePluginTake{
 		edits: []claudeRecordEdit{
-			{file: claudeSettingsName, member: "enabledPlugins", ours: retired, dropEmpty: true},
-			{file: filepath.Join(claudePlugins, "installed_plugins.json"), member: claudePlugins, ours: retired},
+			{file: claudeSettingsName, member: "enabledPlugins", ours: retiredID, dropEmpty: true},
+			{file: filepath.Join(claudePlugins, "installed_plugins.json"), member: claudePlugins, ours: retiredID},
 		},
 		copies: func(dir string) ([]string, error) { return retiredPluginCopies(dir, ids) },
 		within: []string{claudePluginCopies, "data"},
@@ -136,10 +139,15 @@ func retiredPluginCopies(dir string, ids []string) ([]string, error) {
 	return copies, nil
 }
 
-// retiredPluginDataName is the name of id's data dir, Claude's {name}-{marketplace}.
+// retiredPluginDataName is the name of id's data dir as Claude Code names it:
+// id with every character outside [a-zA-Z0-9_-] a "-", so {name}-{marketplace}.
 func retiredPluginDataName(id string) string {
-	return strings.Replace(id, "@", "-", 1)
+	return claudePluginDataUnsafe.ReplaceAllString(id, "-")
 }
+
+// claudePluginDataUnsafe is what Claude Code (2.1.330, its plugin data dir
+// helper) replaces in a plugin id to name its data dir.
+var claudePluginDataUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
 // RetiredClaudePluginGaps names, per id of ids (retired.Lists
 // ClaudePluginsRemoved), every trace retireClaudePlugins removes that is still
@@ -160,7 +168,8 @@ func RetiredClaudePluginGaps(home string, dirs, ids []string, build ClaudePlugin
 		})
 	}
 	dirs = retiredPluginDirs(home, dirs)
-	folders, failed := retiredPluginLogFolders(ManagedRoot(home), dirs, ids)
+	// a kept folder is no trace: install leaves it
+	folders, _, failed := retiredPluginLogFolders(ManagedRoot(home), dirs, ids)
 	for _, id := range ids {
 		traces, err := retiredPluginTraces(dirs, retiredPluginTake([]string{id}))
 		failed = errors.Join(failed, err)

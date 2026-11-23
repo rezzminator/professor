@@ -49,6 +49,8 @@ func TestServerNotRunning(t *testing.T) {
 		"error: Herdr server is NOT running": true,
 		"plugin is locked":                   false,
 		"":                                   false,
+		"dial unix /run/herdr.sock: connect: no such file or directory":         true,
+		"open /opt/plugins/herdr-shield/plugin.toml: no such file or directory": false,
 	} {
 		if got := ServerNotRunning(text); got != want {
 			t.Fatalf("ServerNotRunning(%q) = %t; want %t", text, got, want)

@@ -75,17 +75,21 @@ func TestRetireHerdrShieldHook(t *testing.T) {
 
 // A registry listing herdr-shield gets exactly one unlink; a registry without
 // it gets no command (beside a linked run proving the step ran); no herdr on
-// PATH or no server up is a skip row; a failed unlink is an error naming the
-// command and Herdr's text.
+// PATH, no server up, a registry that does not parse or a Herdr whose
+// default_shell still runs herdr-shield is a skip row; a failed unlink is an
+// error naming the command and Herdr's text.
 func TestRetireHerdrShieldPlugin(t *testing.T) {
 	unlink := []string{fakeHerdrBinary, "plugin", "unlink", "herdr-shield"}
+	stays := "  skip    herdr plugin herdr-shield stays registered until `herdr plugin unlink herdr-shield` runs: "
 	for _, tc := range []struct {
 		name, registry string
-		noHerdr        bool
-		result         deps.RunResult
-		wantRows       string
-		wantCalls      [][]string
-		wantErr        string
+		// config is Herdr's config.toml, "" none.
+		config    string
+		noHerdr   bool
+		result    deps.RunResult
+		wantRows  string
+		wantCalls [][]string
+		wantErr   string
 	}{
 		{
 			name: "registry lists herdr-shield", registry: `[{"plugin_id":"professor.indicators"},{"plugin_id":"herdr-shield"}]`,
@@ -104,6 +108,35 @@ func TestRetireHerdrShieldPlugin(t *testing.T) {
 			wantCalls: [][]string{unlink},
 		},
 		{
+			name: "registry that does not parse", registry: `{`,
+			wantRows: stays + "herdr: parse {registry}: unexpected end of JSON input\n",
+		},
+		{
+			name: "Herdr still runs herdr-shield", registry: `[{"plugin_id":"herdr-shield"}]`,
+			config: "[terminal]\ndefault_shell = \"/opt/bin/herdr-shield -l\"\n",
+			wantRows: stays + "Herdr's default_shell in {config} still names herdr-shield — end the chats in Herdr," +
+				` remove default_shell = "/opt/bin/herdr-shield -l" from {config}, restart Herdr, then run pfm install --yes again` + "\n",
+		},
+		{
+			name: "Herdr runs another shell", registry: `[{"plugin_id":"herdr-shield"}]`,
+			config:   "[terminal]\ndefault_shell = \"zsh\"\n",
+			wantRows: "  change  herdr plugin unlink herdr-shield\n", wantCalls: [][]string{unlink},
+		},
+		{
+			name: "Herdr config that does not parse", registry: `[{"plugin_id":"herdr-shield"}]`, config: "[terminal\n",
+			wantRows: "  FAIL    herdr plugin herdr-shield: read Herdr's default_shell: parse Herdr config {config}: " +
+				`toml: line 2: expected '.' or ']' to end table name, but got '\n' instead` + "\n",
+			wantErr: "herdr plugin herdr-shield: read Herdr's default_shell: parse Herdr config {config}: " +
+				`toml: line 2: expected '.' or ']' to end table name, but got '\n' instead`,
+		},
+		{
+			name: "unlink fails on a missing file", registry: `[{"plugin_id":"herdr-shield"}]`,
+			result:    deps.RunResult{ExitCode: 1, Stderr: []byte("error: open /opt/herdr-shield/plugin.toml: no such file or directory\n")},
+			wantRows:  "  FAIL    herdr plugin unlink herdr-shield exited 1: error: open /opt/herdr-shield/plugin.toml: no such file or directory\n",
+			wantCalls: [][]string{unlink},
+			wantErr:   "herdr plugin unlink herdr-shield exited 1: error: open /opt/herdr-shield/plugin.toml: no such file or directory",
+		},
+		{
 			name: "unlink exits non-zero", registry: `[{"plugin_id":"herdr-shield"}]`,
 			result:    deps.RunResult{ExitCode: 2, Stderr: []byte("plugin is locked\n")},
 			wantRows:  "  FAIL    herdr plugin unlink herdr-shield exited 2: plugin is locked\n",
@@ -113,6 +146,13 @@ func TestRetireHerdrShieldPlugin(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
+			config := filepath.Join(t.TempDir(), "config.toml")
+			if tc.config != "" {
+				if err := os.WriteFile(config, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fill := strings.NewReplacer("{registry}", herdr.PluginRegistryPath(home), "{config}", config)
 			if tc.registry != "" {
 				path := herdr.PluginRegistryPath(home)
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -131,7 +171,7 @@ func TestRetireHerdrShieldPlugin(t *testing.T) {
 			runner.Script(unlink, tc.result, nil)
 			var output bytes.Buffer
 			installer := &engine{apply: true, options: Options{
-				Mode: ModeApply, Home: home, Env: &paths.MapEnv{Values: map[string]string{}},
+				Mode: ModeApply, Home: home, Env: &paths.MapEnv{Values: map[string]string{"HERDR_CONFIG_PATH": config}},
 				ProcessRunner: runner, Stdout: &output,
 			}}
 			err := installer.retireHerdrShieldPlugin(context.Background())
@@ -139,11 +179,11 @@ func TestRetireHerdrShieldPlugin(t *testing.T) {
 			if err != nil {
 				gotErr = err.Error()
 			}
-			if gotErr != tc.wantErr {
-				t.Fatalf("error %q; want %q", gotErr, tc.wantErr)
+			if want := fill.Replace(tc.wantErr); gotErr != want {
+				t.Fatalf("error %q; want %q", gotErr, want)
 			}
-			if output.String() != tc.wantRows {
-				t.Fatalf("rows %q; want %q", output.String(), tc.wantRows)
+			if want := fill.Replace(tc.wantRows); output.String() != want {
+				t.Fatalf("rows %q; want %q", output.String(), want)
 			}
 			var calls [][]string
 			for _, call := range runner.Calls() {

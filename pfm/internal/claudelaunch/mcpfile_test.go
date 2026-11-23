@@ -157,9 +157,14 @@ func TestWriteMCPFileRefusesASymlinkedDirectory(t *testing.T) {
 // TestRefreshMCPFilesRewritesRecordedLaunchFiles pins the restore door: every
 // launch MCP file a recorded recipe names in pfm's directory holds the current
 // rendering at its recorded path, whether pruned or stale; a path pfm did not
-// name stays as it is.
+// name stays as it is. A path recorded under another spelling of the same
+// home (a symlink to it) is pfm's too.
 func TestRefreshMCPFilesRewritesRecordedLaunchFiles(t *testing.T) {
 	home, machine := renderMachine(t)
+	alias := filepath.Join(t.TempDir(), "home-link")
+	if err := os.Symlink(home, alias); err != nil {
+		t.Fatal(err)
+	}
 	machine.MCPServers[pfmconfig.MCPServerChat] = pfmconfig.MCPServer{Enabled: true}
 	dir := paths.ClaudeMCPConfigDir(home)
 	rendered := `{"mcpServers":{"chat-professor":{"args":["mcp","serve","--stdio","--family","chat"],"command":"` +
@@ -181,6 +186,10 @@ func TestRefreshMCPFilesRewritesRecordedLaunchFiles(t *testing.T) {
 		},
 		{
 			"stale rendering", filepath.Join(dir, "claude-mcp-13.json"), `{"mcpServers":{}}`,
+			func(p string) []string { return []string{"--mcp-config", p} }, rendered,
+		},
+		{
+			"recorded under a linked home", filepath.Join(paths.ClaudeMCPConfigDir(alias), "claude-mcp-16.json"), "",
 			func(p string) []string { return []string{"--mcp-config", p} }, rendered,
 		},
 		{

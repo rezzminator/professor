@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -68,8 +69,10 @@ func TestPrintRetiredClaudePluginsDoctor(t *testing.T) {
 		name, installs, want string
 		ids                  []string
 		plugins              []pfmconfig.ClaudePlugin
-		settingsDir          bool
-		warnings, failures   int
+		// sourceErr is a checkout host whose source clone, and so its marketplace list, is unread.
+		sourceErr          string
+		settingsDir        bool
+		warnings, failures int
 	}{
 		{
 			name:     "installed",
@@ -80,11 +83,21 @@ func TestPrintRetiredClaudePluginsDoctor(t *testing.T) {
 			warnings: 1,
 		},
 		{
+			name:     "marketplace list unread",
+			installs: `{"version":2,"plugins":{"tinsel@professor":[{"scope":"user","installPath":"{store}/plugins/cache/professor/tinsel/1.0"}]}}`,
+			ids:      []string{"tinsel@professor"}, sourceErr: "no clone marker",
+			want: "doctor: claude_plugins plugin tinsel@professor is retired with no successor but still on this host: " +
+				"plugins in {store}/plugins/installed_plugins.json — pfm install --yes removes no retired plugin while " +
+				"the marketplace plugin list is unread (marketplace plugin list unread: source clone unresolved: no clone marker); " +
+				"repair that first, then run pfm install --yes\n",
+			warnings: 1,
+		},
+		{
 			name:     "still planned",
 			installs: `{"version":2,"plugins":{"tinsel@professor":[{"scope":"user","installPath":"{store}/plugins/cache/professor/tinsel/1.0"}]}}`,
 			ids:      []string{"tinsel@professor"}, plugins: []pfmconfig.ClaudePlugin{{ID: "tinsel"}},
 			want: "doctor: claude_plugins plugin tinsel@professor is retired with no successor but claude.plugins or the " +
-				"source clone's marketplace still plans it — drop it there or from claudePluginsRemoved in the retired lists\n",
+				"source clone's marketplace still plans it — drop it there or from claudePlugins[\"(none)\"] in the retired lists\n",
 			warnings: 1,
 		},
 		{
@@ -120,8 +133,11 @@ func TestPrintRetiredClaudePluginsDoctor(t *testing.T) {
 			}
 			var stdout bytes.Buffer
 			tally := &doctorTally{}
-			printRetiredClaudePluginsDoctor(&stdout, home, nil, testCase.ids,
-				installer.ClaudePluginBuild{Home: home, Plugins: testCase.plugins}, tally)
+			build := installer.ClaudePluginBuild{Home: home, Plugins: testCase.plugins}
+			if testCase.sourceErr != "" {
+				build.FromCheckout, build.SourceRepoErr = true, errors.New(testCase.sourceErr)
+			}
+			printRetiredClaudePluginsDoctor(&stdout, home, nil, testCase.ids, build, tally)
 			want := fill.Replace(testCase.want)
 			if got := stdout.String(); got != want || tally.warnings != testCase.warnings ||
 				tally.failures != testCase.failures {

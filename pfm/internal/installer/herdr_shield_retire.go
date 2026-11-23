@@ -52,12 +52,23 @@ func RetireHerdrShieldHook(store herdr.ClaudeStore, home string, env paths.Env) 
 	}
 	if retiredShieldShell(status.Value) {
 		verdict.Skip = fmt.Sprintf(
-			"herdr claude integration in %s: Herdr's default_shell in %s still names %s, so its guarded hook stays"+
-				" — end the chats in Herdr, remove default_shell = %q from %s, restart Herdr, then run pfm install --yes again",
-			store.Settings, status.Path, retiredShieldProgram, status.Value, status.Path,
+			"herdr claude integration in %s: Herdr's default_shell in %s still names %s, so its guarded hook stays — %s",
+			store.Settings,
+			status.Path,
+			retiredShieldProgram,
+			retiredShieldShellRepair(status),
 		)
 	}
 	return verdict
+}
+
+// retiredShieldShellRepair is the owner's steps off a default_shell that still
+// runs herdr-shield, the hook's and the plugin's skip alike.
+func retiredShieldShellRepair(status HerdrShellStatus) string {
+	return fmt.Sprintf(
+		"end the chats in Herdr, remove default_shell = %q from %s, restart Herdr, then run pfm install --yes again",
+		status.Value, status.Path,
+	)
 }
 
 // retiredShieldShell reports whether a default_shell value runs herdr-shield.
@@ -131,19 +142,33 @@ const herdrShieldUnlinkBound = 30 * time.Second
 
 // retireHerdrShieldPlugin unlinks the herdr-shield plugin its own installer
 // registered in Herdr: a registry (herdr.PluginLinked) that lists it gets
-// `herdr plugin unlink herdr-shield`; one that does not gets nothing. No herdr
-// on PATH, or none with a server up to answer, leaves the entry and says so.
+// `herdr plugin unlink herdr-shield`; one that does not gets nothing. A
+// registry that cannot be read or parsed, a Herdr whose default_shell still
+// runs herdr-shield (the hook step's own gate, RetireHerdrShieldHook), no herdr
+// on PATH, or none with a server up to answer, leaves the entry and says so; a
+// Herdr config that cannot be read fails, as it fails the hook step.
 func (installer *engine) retireHerdrShieldPlugin(ctx context.Context) error {
+	command := "herdr plugin unlink " + retiredShieldProgram
+	stays := "herdr plugin " + retiredShieldProgram + " stays registered until `" + command + "` runs: "
 	linked, err := herdr.PluginLinked(installer.options.Home, retiredShieldProgram)
 	if err != nil {
-		return installer.fail(fmt.Errorf("herdr plugin %s: %w", retiredShieldProgram, err))
+		// The step only retires a plugin: a registry it cannot judge is named, never an install failure.
+		installer.skip(stays + err.Error())
+		return nil
 	}
 	if !linked {
 		return nil
 	}
+	status, err := InspectHerdrShell(installer.options.Home, installer.env())
+	if err != nil {
+		return installer.fail(fmt.Errorf("herdr plugin %s: read Herdr's default_shell: %w", retiredShieldProgram, err))
+	}
+	if retiredShieldShell(status.Value) {
+		installer.skip(stays + "Herdr's default_shell in " + status.Path + " still names " + retiredShieldProgram +
+			" — " + retiredShieldShellRepair(status))
+		return nil
+	}
 	runner := installer.processRunner()
-	command := "herdr plugin unlink " + retiredShieldProgram
-	stays := "herdr plugin " + retiredShieldProgram + " stays registered until `" + command + "` runs: "
 	binary, lookErr := runner.LookPath(herdr.HostBinary(installer.env().Get))
 	if lookErr != nil {
 		installer.skip(stays + "herdr is not on PATH")

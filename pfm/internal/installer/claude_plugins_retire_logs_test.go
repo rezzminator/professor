@@ -3,19 +3,39 @@ package installer
 import (
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestPluginNameHeld: a retired plugin's log folder is still held while an id
-// of its bare name the retired list does not name is keyed, enabled or not, or
-// installed in any config dir; a longer name sharing its prefix, or a retired
-// id, holds nothing; an unreadable record is an error, never an answer.
+// of its bare name the retired list does not name is keyed, enabled or not, in
+// a config dir's settings.json or settings.local.json, or installed there (a
+// project-scope install too); a longer name sharing its prefix, or a retired
+// id, holds nothing; an unreadable record, a FIFO too, is an error at once,
+// never an answer.
 func TestPluginNameHeld(t *testing.T) {
 	retiredIDs := []string{"tinsel@professor", "tinsel@inline"}
 	for _, tc := range []struct {
-		name, settings, installs, wantErr string
-		held                              bool
+		name, settings, local, installs, wantErr string
+		fifo                                     bool
+		held                                     bool
 	}{
+		{
+			name:  "another marketplace's id enabled in settings.local.json holds it",
+			local: `{"enabledPlugins":{"tinsel@other":true}}`, held: true,
+		},
+		{
+			name: "another marketplace's id installed for one project holds it",
+			installs: `{"version":2,"plugins":{"tinsel@other":[{"scope":"project","projectPath":"/work/app",` +
+				`"installPath":"/x/cache/other/tinsel/1.0"}]}}`,
+			held: true,
+		},
+		{
+			name: "a settings.json that is a FIFO is an error", fifo: true,
+			wantErr: "read {second}/settings.json: not a regular file",
+		},
 		{
 			name:     "another marketplace's id keyed disabled holds it",
 			settings: `{"enabledPlugins":{"tinsel@other":false}}`, held: true,
@@ -44,10 +64,28 @@ func TestPluginNameHeld(t *testing.T) {
 			if tc.settings != "" {
 				writeFixture(t, filepath.Join(second, "settings.json"), tc.settings)
 			}
+			if tc.local != "" {
+				writeFixture(t, filepath.Join(second, "settings.local.json"), tc.local)
+			}
+			if tc.fifo {
+				if err := syscall.Mkfifo(filepath.Join(second, "settings.json"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if tc.installs != "" {
 				writeFixture(t, filepath.Join(second, "plugins", "installed_plugins.json"), tc.installs)
 			}
-			held, err := pluginNameHeld([]string{first, second}, "tinsel", retiredIDs)
+			type answer struct {
+				held bool
+				err  error
+			}
+			answered := make(chan answer, 1)
+			go func() {
+				held, err := pluginNameHeld([]string{first, second}, "tinsel", retiredIDs)
+				answered <- answer{held, err}
+			}()
+			got, _ := testwait.Receive(t, "pluginNameHeld answers without blocking on "+second, answered)
+			held, err := got.held, got.err
 			gotErr := ""
 			if err != nil {
 				gotErr = err.Error()

@@ -47,11 +47,11 @@ func TestRetireClaudePlugins(t *testing.T) {
 		}
 	}
 	plannedRow := "  skip    claude plugins: retired plugin tinsel@professor kept — claude.plugins or the source " +
-		"clone's marketplace still plans it; drop it there or from claudePluginsRemoved in the retired lists"
+		"clone's marketplace still plans it; drop it there or from claudePlugins[\"(none)\"] in the retired lists"
 	plannedGap := ClaudePluginGap{
 		Problem: "plugin tinsel@professor is retired with no successor but claude.plugins or the source clone's " +
 			"marketplace still plans it",
-		Fix: "drop it there or from claudePluginsRemoved in the retired lists",
+		Fix: `drop it there or from claudePlugins["(none)"] in the retired lists`,
 	}
 	sharedSettings := `{"enabledPlugins":{"flights@professor":true,"tinsel@other":true,"tinsel@professor":false},"theme":"dark"}`
 	sharedInstalls := `{"version":2,"plugins":{` + ownInstalls + `,` + otherInstalls + `}}`
@@ -65,7 +65,8 @@ func TestRetireClaudePlugins(t *testing.T) {
 		wantSettings, wantInstalls string
 		// gaps are doctor's before the step, gapsAfter after it.
 		gaps, gapsAfter []ClaudePluginGap
-		// seed is every copy made before the step, remain each still there after it.
+		// seed is every copy made before the step, a folder holding seed.json or
+		// a .jsonl file itself; remain each still there after it.
 		seed, remain []string
 		// plugins is claude.plugins; again the rows of the second run.
 		plugins []pfmconfig.ClaudePlugin
@@ -118,8 +119,39 @@ func TestRetireClaudePlugins(t *testing.T) {
 			wantSettings: `{"env":{"PLUGIN_LOG_DIR":"{ownlogs}"}}`,
 			wantInstalls: `{"version":2,"plugins":{}}`,
 			gaps:         []ClaudePluginGap{gap("tinsel@professor", ownTraces+", {logs}/tinsel, {ownlogs}/tinsel")},
-			seed:         append(slices.Clone(ownCopies), "{logs}/tinsel", "{ownlogs}/tinsel", "{ownlogs}/flights"),
-			remain:       []string{"{ownlogs}/flights"},
+			seed: append(slices.Clone(ownCopies), "{logs}/tinsel", "{ownlogs}/tinsel/errors.jsonl",
+				"{ownlogs}/tinsel/info.jsonl.1", "{ownlogs}/flights"),
+			remain: []string{"{ownlogs}/flights"},
+		},
+		{
+			name:     "an operator's folder holding more than plugin logs stays",
+			ids:      []string{"tinsel@professor"},
+			settings: `{"enabledPlugins":{"tinsel@professor":false},"env":{"PLUGIN_LOG_DIR":"{ownlogs}"}}`,
+			installs: `{"version":2,"plugins":{` + ownInstalls + `}}`,
+			rows: append(slices.Clone(ownRows),
+				"  skip    claude plugins: {ownlogs}/tinsel kept — it holds files other than plugin logs, under a "+
+					"PLUGIN_LOG_DIR pfm did not set; remove the retired plugin's logs there by hand",
+				"  change  remove {logs}/tinsel (logs of a retired plugin)"),
+			wantSettings: `{"env":{"PLUGIN_LOG_DIR":"{ownlogs}"}}`,
+			wantInstalls: `{"version":2,"plugins":{}}`,
+			gaps:         []ClaudePluginGap{gap("tinsel@professor", ownTraces+", {logs}/tinsel")},
+			again: []string{"  skip    claude plugins: {ownlogs}/tinsel kept — it holds files other than plugin logs, " +
+				"under a PLUGIN_LOG_DIR pfm did not set; remove the retired plugin's logs there by hand"},
+			seed:   append(slices.Clone(ownCopies), "{logs}/tinsel", "{ownlogs}/tinsel/errors.jsonl", "{ownlogs}/tinsel"),
+			remain: []string{"{ownlogs}/tinsel/errors.jsonl", "{ownlogs}/tinsel"},
+		},
+		{
+			name:     "a marketplace name Claude rewrites names its data dir as Claude does",
+			ids:      []string{"tinsel@my.market"},
+			settings: `{"theme":"dark"}`, installs: `{"version":2,"plugins":{}}`,
+			rows: []string{
+				"  change  remove {cc1}/plugins/cache/my.market/tinsel",
+				"  change  remove {cc1}/plugins/data/tinsel-my-market",
+			},
+			wantSettings: `{"theme":"dark"}`, wantInstalls: `{"version":2,"plugins":{}}`,
+			gaps: []ClaudePluginGap{gap("tinsel@my.market",
+				"{cc1}/plugins/cache/my.market/tinsel, {cc1}/plugins/data/tinsel-my-market")},
+			seed: []string{"{store}/plugins/cache/my.market/tinsel", "{store}/plugins/data/tinsel-my-market"},
 		},
 		{
 			name: "a retired id claude.plugins still names is kept and named, with its log folder",
@@ -198,6 +230,10 @@ func TestRetireClaudePlugins(t *testing.T) {
 			writeFixture(t, installsPath, fill.Replace(tc.installs))
 			writeFixture(t, claudeEnvOwnershipPath(managed), `{"version":1,"files":{},"pluginLogDir":"`+logs+`"}`)
 			for _, path := range tc.seed {
+				if strings.Contains(filepath.Base(path), ".jsonl") {
+					writeFixture(t, fill.Replace(path), "{}\n")
+					continue
+				}
 				writeFixture(t, filepath.Join(fill.Replace(path), "seed.json"), "{}")
 			}
 			for _, dir := range []string{cc1, cc2} {

@@ -42,12 +42,13 @@ func PluginLinked(home, id string) (bool, error) {
 
 // serverNotRunning are the texts a herdr command prints when no server is up.
 var serverNotRunning = []string{
-	"not running", "no server", "no running", "connection refused", "no such file", "could not connect",
+	"not running", "no server", "no running", "connection refused", "could not connect",
 	"couldn't connect", "failed to connect", "server_not_running",
 }
 
 // ServerNotRunning reports whether text, a herdr command's output, says no
-// server is up.
+// server is up; "no such file" says so only about a socket (`dial unix
+// {path}.sock: … no such file`), never about another missing file.
 func ServerNotRunning(text string) bool {
 	lower := strings.ToLower(text)
 	for _, marker := range serverNotRunning {
@@ -55,5 +56,5 @@ func ServerNotRunning(text string) bool {
 			return true
 		}
 	}
-	return false
+	return strings.Contains(lower, "no such file") && strings.Contains(lower, "sock")
 }

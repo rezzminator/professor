@@ -11,7 +11,8 @@
 // StaleHerdrIndicators and ConvergeHerdrIndicators (herdr_indicators.go) serve doctor and install.
 // Files:
 //   - discover.go: the plan, family by family: helpers, services, the MCP daemon, pfm.
-//   - chats.go: the chats family: which chat comes back with Herdr's restore, and its verification.
+//   - chats.go: the chats family: which chat comes back with Herdr's restore.
+//   - chats_wait.go: the verification that each such chat is live again, within one shared deadline.
 //   - herdr.go: the Herdr server family: its status, stop and start.
 //   - herdr_tree.go: what one Herdr session's server runs, and the outlivers its stop proves gone.
 //   - herdr_indicators.go: the stale Herdr indicator painters.

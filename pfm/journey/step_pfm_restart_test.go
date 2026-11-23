@@ -53,7 +53,8 @@ func pfmRestart(c *harness.Ctx, s State) State {
 	for _, chat := range s.Chats {
 		unit := `chats +claude ` + regexp.QuoteMeta(chat.Name) + ` session ` + regexp.QuoteMeta(chat.Session)
 		stop := regexp.MustCompile(`(?m)^stop +\d+ +` + unit + `\n.*\n +stop: +left running: the Herdr server ` +
-			`stop hangs up its pane, which Herdr keeps in its saved session with the resume pfm registered$`)
+			`stop hangs up its pane, which Herdr keeps in its saved session with its resume \(the line pfm registered, ` +
+			`or Herdr's own Claude resume\)$`)
 		start := regexp.MustCompile(`(?m)^start +\d+ +` + unit + `  restart \(was up: live in Herdr pane ` +
 			regexp.QuoteMeta(chat.Pane) + `\)$`)
 		if !stop.MatchString(plan.Stdout) || !start.MatchString(plan.Stdout) {

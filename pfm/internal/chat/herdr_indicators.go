@@ -422,10 +422,13 @@ func (reader *tabViewReader) liveness(
 
 // unproved records, through the painter's diagnostic writer (the Herdr plugin
 // log and the persistent Herdr error log), why a chat's tab was left untouched;
-// a pane Herdr no longer lists is the seat's pane closed, a lifecycle outcome.
+// a pane Herdr no longer lists is the seat's pane closed, and a pane whose
+// seat-host has not started inside its birth window a birth or a restore: both
+// lifecycle outcomes.
 func (reader *tabViewReader) unproved(target headless.Chat, proof error) error {
 	out := reader.warn
-	if reader.lifecycle != nil && errors.Is(proof, gather.ErrHerdrPaneAbsent) {
+	if reader.lifecycle != nil &&
+		(errors.Is(proof, gather.ErrHerdrPaneAbsent) || errors.Is(proof, herdr.ErrSeatUnbound)) {
 		out = reader.lifecycle
 	}
 	if _, err := fmt.Fprintf(

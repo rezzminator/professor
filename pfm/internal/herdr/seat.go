@@ -18,6 +18,11 @@ import (
 // SupportedProtocol is the native-seat wire contract, independent of release lifetime safety.
 const SupportedProtocol = 22
 
+// ErrSeatUnbound is a native seat whose pane runs no seat-host of it yet: a
+// birth, or a pane a restarted server restored, inside its birth window. Its
+// reporters skip the pane without naming it as an error.
+var ErrSeatUnbound = errors.New("supervisor ownership unproved")
+
 // InputNotSentError marks a failure before a request could write any bytes.
 // An ordinary transport error, especially a failed write/read, is not this proof.
 type InputNotSentError struct{ Cause error }

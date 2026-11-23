@@ -438,6 +438,11 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 			"pane closed", false, true, nil, fmt.Errorf("seat seat1 ownership unproved: %w", gather.ErrHerdrPaneAbsent), 0, "",
 			"Herdr tab of s1 left untouched: seat seat1 ownership unproved: seat seat1 ownership unproved: terminal not present in pane.list",
 		},
+		// A pane a restarted server restored, its restored launch not started yet: no fault either.
+		{
+			"restored launch not started", false, true, nil, fmt.Errorf("seat seat1 %w", herdr.ErrSeatUnbound), 0, "",
+			"Herdr tab of s1 left untouched: seat seat1 ownership unproved: seat seat1 supervisor ownership unproved",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			warnings := &bytes.Buffer{}

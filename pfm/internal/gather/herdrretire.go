@@ -57,14 +57,14 @@ func herdrBirthPending(seat fleetdb.Seat) bool {
 }
 
 // herdrReservationErr judges a seat with no saved supervisor that Herdr lists no pane for: a reservation that
-// names no pane yet is mid-birth inside its birth window (errHerdrSeatUnbound) and a failed birth past it
+// names no pane yet is mid-birth inside its birth window (herdr.ErrSeatUnbound) and a failed birth past it
 // (errHerdrBirthFailed); nil for a seat that once named a pane, which its pane's absence judges.
 func herdrReservationErr(seat fleetdb.Seat) error {
 	switch {
 	case seat.HerdrPane != "":
 		return nil
 	case herdrBirthPending(seat):
-		return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+		return fmt.Errorf("seat %s %w", seat.SeatID, herdr.ErrSeatUnbound)
 	}
 	return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrBirthFailed)
 }
@@ -88,12 +88,12 @@ func retireFailedHerdrBirth(ctx context.Context, db *fleetdb.Store, seat fleetdb
 	return nil
 }
 
-// herdrSupervisorUnproved is a seat whose pane runs no seat-host of it: errHerdrSeatUnbound, a birth whose
+// herdrSupervisorUnproved is a seat whose pane runs no seat-host of it: herdr.ErrSeatUnbound, a birth whose
 // seat-host has not started yet, while the row changed inside the birth window; past it, a listing failure,
 // since a chat whose supervisor is gone from its pane is never hidden as "not a chat yet".
 func herdrSupervisorUnproved(seat fleetdb.Seat) error {
 	if clock.Real.Now().Sub(time.Unix(seat.UpdatedAt, 0)) < herdrBirthGrace {
-		return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+		return fmt.Errorf("seat %s %w", seat.SeatID, herdr.ErrSeatUnbound)
 	}
 	return fmt.Errorf("seat %s supervisor ownership unproved: its pane runs no seat-host past the %s birth window",
 		seat.SeatID, herdrBirthGrace)
@@ -102,10 +102,6 @@ func herdrSupervisorUnproved(seat fleetdb.Seat) error {
 // ErrHerdrSeatGone marks a seat ended, replaced or moved off Herdr while it
 // was read: no longer a live native seat of that read, and never its failure.
 var ErrHerdrSeatGone = errors.New("ownership changed or disappeared")
-
-// errHerdrSeatUnbound: a Herdr chat mid-birth — a reservation that names no pane
-// yet, or whose pane shell runs no `pfm internal seat-host` yet.
-var errHerdrSeatUnbound = errors.New("supervisor ownership unproved")
 
 // errHerdrBirthFailed: a reservation that named no pane within its birth window, a birth that never finished.
 var errHerdrBirthFailed = errors.New("birth failed: no pane within the birth window")

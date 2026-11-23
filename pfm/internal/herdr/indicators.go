@@ -467,6 +467,9 @@ func (painter *indicatorPainter) report(
 			}
 			return false, err
 		}
+		if errors.Is(err, ErrSeatUnbound) { // a seat-host not started yet: skipped, neither named nor remembered
+			return false, fmt.Errorf("%w: pane %s: %w", errIndicatorOwnership, target.id, err)
+		}
 		if err != nil {
 			if last, named := painter.unproved[target.id]; !named || last.Status != target.status {
 				painter.logf(
@@ -540,13 +543,7 @@ func (painter *indicatorPainter) loadUnproved() {
 	}
 	read := painter.serverStart
 	if read == nil {
-		read = func() (int64, error) {
-			info, err := os.Stat(painter.socket)
-			if err != nil {
-				return 0, fmt.Errorf("stat Herdr socket %s: %w", painter.socket, err)
-			}
-			return info.ModTime().UnixNano(), nil
-		}
+		read = func() (int64, error) { return ServerStart(painter.socket) }
 	}
 	server, err := read()
 	if err != nil {

@@ -14,8 +14,10 @@ import (
 
 // chatBackWithin bounds the wait for every chat the restart brings back: one
 // deadline all of them share, counted from the first wait, which starts once
-// the Herdr server is up again. Each resume starts its engine afresh.
-const chatBackWithin = 90 * time.Second
+// the Herdr server is up again. Each resume starts its engine afresh, and a
+// chat reads back only once its new seat host outlived chat.SeatStartWindow,
+// so a seat host born by the 90 s mark gets that window on top.
+const chatBackWithin = 90*time.Second + pfmchat.SeatStartWindow
 
 // Fleet is the chat roster the restart ends or brings back: every live chat,
 // the sockets the scan could not read (with why), the end of one chat,
@@ -72,8 +74,9 @@ func (finder *discoverer) findChats(ctx context.Context) {
 
 // chatUnit is one chat's step. Unless the restart runs --no-restore, a chat
 // Herdr can restore is left running: the Herdr server stop hangs up its pane,
-// which Herdr keeps, with the resume pfm registered, in its saved session, and
-// its start verifies the restored pane resumed it. Every other chat is ended,
+// which Herdr keeps in its saved session with its resume, the line pfm
+// registered or Herdr's own Claude resume, whose launch pfm's launcher turns
+// into the same restored open; its start verifies the restored pane resumed it. Every other chat is ended,
 // named with why it does not come back.
 func (finder *discoverer) chatUnit(ctx context.Context, chat headless.Chat, wait *chatWait) Unit {
 	engine := string(chat.Engine)
@@ -117,8 +120,8 @@ func (finder *discoverer) chatUnit(ctx context.Context, chat headless.Chat, wait
 	socket := chat.Socket
 	unit.Before = "live in Herdr pane " + chat.Pane
 	unit.StopHow = "left running: the Herdr server stop hangs up its pane, which Herdr keeps in its saved session " +
-		"with the resume pfm registered"
-	unit.StartHow = fmt.Sprintf("Herdr restores pane %s and runs its resume (pfm chat open --restored); "+
+		"with its resume (the line pfm registered, or Herdr's own Claude resume)"
+	unit.StartHow = fmt.Sprintf("Herdr restores pane %s and runs its resume, which reaches pfm chat open --restored; "+
 		"verified: seat %s reads live on %s with a new running seat host", chat.Pane, chat.SeatID, socket)
 	unit.Stop = func(context.Context) (string, error) { return "left running for the Herdr server stop", nil }
 	unit.Start = func(ctx context.Context) (string, error) { return wait.back(ctx, chat, socket, before) }
@@ -175,62 +178,4 @@ func (finder *discoverer) resumeWhy() string {
 	}
 	finder.resume = &why
 	return why
-}
-
-// chatWait is the one deadline every brought-back chat shares, and how the
-// Herdr server start they all wait on went.
-type chatWait struct {
-	tools    serviceTools
-	fleet    Fleet
-	herdr    *herdrStarted
-	deadline time.Time
-}
-
-// back polls until chat is live again on socket under a seat host other than
-// before, within what is left of the shared deadline. A read that fails is
-// kept as what was last seen and the poll goes on: the resume may still be
-// writing the seat. A Herdr server that did not start again restores nothing,
-// so no poll waits on it.
-func (wait *chatWait) back(ctx context.Context, chat headless.Chat, socket string, before pfmchat.RestartSeatHost,
-) (string, error) {
-	if wait.herdr != nil && wait.herdr.err != nil {
-		return "", fmt.Errorf("the Herdr server did not start again, so Herdr restored nothing; "+
-			"reopen it by hand: pfm chat open %s", chat.ID)
-	}
-	if wait.deadline.IsZero() {
-		wait.deadline = wait.tools.clock.Now().Add(chatBackWithin)
-	}
-	seen := "nothing read"
-	up, err := wait.tools.waitFor(ctx, wait.deadline.Sub(wait.tools.clock.Now()), func() (bool, error) {
-		back, detail, err := wait.fleet.Back(ctx, chat, socket, before)
-		if err != nil {
-			seen = err.Error()
-			return false, nil
-		}
-		seen = detail
-		return back, nil
-	})
-	if err != nil {
-		return "", err
-	}
-	if !up {
-		return "", fmt.Errorf("not live again within %s of the Herdr server start (last seen: %s); "+
-			"reopen it by hand: pfm chat open %s", chatBackWithin, seen, chat.ID)
-	}
-	return "live again: " + seen, nil
-}
-
-// herdrStarted is how the restart's Herdr server start went: its error once it failed.
-type herdrStarted struct {
-	err error
-}
-
-// track wraps the Herdr server's start so every brought-back chat's start,
-// which runs after it, reads how it went.
-func (started *herdrStarted) track(start func(context.Context) (string, error)) func(context.Context) (string, error) {
-	return func(ctx context.Context) (string, error) {
-		detail, err := start(ctx)
-		started.err = err
-		return detail, err
-	}
 }

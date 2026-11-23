@@ -140,3 +140,25 @@ func FlattenPromptText(content json.RawMessage) string {
 	}
 	return naming.SquashTabsAndNewlines(strings.Join(texts, " "))
 }
+
+// IsPrompt reports whether a user record is a prompt someone sent Claude: one
+// the owner typed (origin kind human) or a program sent (no origin, a
+// promptSource other than system). An entry a plugin or the harness writes (a
+// plugin's slash command, a compaction frontier, a task notification, a local
+// command's echo) carries another origin, a system promptSource, or neither.
+// shortcut: a Claude build that stamps neither on a typed prompt (none measured from 2.1.22 on) reads
+// as no prompt; upgrade when such a build must be read.
+func (record *ClaudeRecord) IsPrompt() bool {
+	if raw := bytes.TrimSpace(record.Origin); len(raw) != 0 && raw[0] == '{' {
+		var origin struct {
+			Kind json.RawMessage `json:"kind"`
+		}
+		if json.Unmarshal(raw, &origin) != nil {
+			return false
+		}
+		kind, _ := stringMember(origin.Kind)
+		return kind == "human"
+	}
+	source, _ := stringMember(record.PromptSource)
+	return source != "" && source != "system"
+}

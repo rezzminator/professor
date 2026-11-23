@@ -668,3 +668,34 @@ func TestAnUnprovedPaneIsNamedOncePerServerStart(t *testing.T) {
 		t.Fatalf("a restarted server names the pane anew: proofs=%d stderr=%q", proofs, restartedErr)
 	}
 }
+
+func TestUnboundSeatPaneIsSkippedUnnamedUntilItsProofFails(t *testing.T) {
+	server := &fakeIndicatorHerdr{panes: []*fakeTarget{{ID: "w1:p1", Status: "working"}}}
+	painter, _, stderr := newTestPainter(t, server, phaseOn)
+	proofErr := fmt.Errorf("herdr seat seat-restored ownership unproved: %w", ErrSeatUnbound)
+	proofs := 0
+	painter.provePane = func(context.Context, string, string) error { proofs++; return proofErr }
+	paint := func() {
+		t.Helper()
+		if _, _, err := painter.paint(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paint()
+	if proofs != 1 || stderr.String() != "" || len(painter.unproved) != 0 || len(server.paneWrites("w1:p1")) != 0 {
+		t.Fatalf(
+			"unbound pane: proofs=%d stderr=%q memo=%v writes=%v, want 1 proof, nothing named, remembered or written",
+			proofs,
+			stderr,
+			painter.unproved,
+			server.writes,
+		)
+	}
+	// Past its birth window the same pane's proof fails for real: it is named at once, its status unchanged.
+	proofErr = errors.New("herdr seat seat-restored ownership unproved: supervisor retired or unbound pane absent")
+	paint()
+	if want := "herdr indicators: socket /fake/herdr.sock: pane w1:p1 ownership unproved: herdr seat seat-restored ownership unproved: supervisor retired or unbound pane absent\n"; proofs != 2 ||
+		stderr.String() != want {
+		t.Fatalf("proofs %d, stderr = %q, want %q", proofs, stderr, want)
+	}
+}

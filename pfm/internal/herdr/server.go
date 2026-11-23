@@ -12,6 +12,16 @@ import (
 // or refuses the connection.
 var ErrServerDown = errors.New("no Herdr server runs")
 
+// ServerStart reads the start identity of the Herdr server at socket: its
+// socket file's mtime, in Unix nanoseconds.
+func ServerStart(socket string) (int64, error) {
+	info, err := os.Stat(socket)
+	if err != nil {
+		return 0, fmt.Errorf("stat Herdr socket %s: %w", socket, err)
+	}
+	return info.ModTime().UnixNano(), nil
+}
+
 // ServerUp reads whether a Herdr server answers at socket by its ping: nil
 // when it answers with the supported protocol, ErrServerDown when nothing
 // listens there, and any other error when pfm cannot tell (a socket that

@@ -3,7 +3,6 @@ package restart
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"testing"
 
@@ -103,13 +102,13 @@ func TestAChatUnitComesBackOnlyWhenHerdrCanRestoreIt(t *testing.T) {
 		{
 			name: "brought back", chat: herdrChat, onPath: true, status: running, resume: true,
 			stopHow: "left running: the Herdr server stop hangs up its pane, which Herdr keeps in its saved session " +
-				"with the resume pfm registered",
+				"with its resume (the line pfm registered, or Herdr's own Claude resume)",
 		},
 		{
 			name: "the chat that typed the restart brought back", chat: herdrChat, onPath: true, status: running,
 			resume: true, launched: true,
 			stopHow: "left running: the Herdr server stop hangs up its pane, which Herdr keeps in its saved session " +
-				"with the resume pfm registered",
+				"with its resume (the line pfm registered, or Herdr's own Claude resume)",
 		},
 	} {
 		t.Run(row.name, func(t *testing.T) {
@@ -172,7 +171,7 @@ func TestAChatUnitComesBackOnlyWhenHerdrCanRestoreIt(t *testing.T) {
 				t.Fatal(err)
 			}
 			if row.stopHow != herdrEnd && row.stopHow != tmuxEnd {
-				wantStart := "Herdr restores pane w1:p2 and runs its resume (pfm chat open --restored); " +
+				wantStart := "Herdr restores pane w1:p2 and runs its resume, which reaches pfm chat open --restored; " +
 					"verified: seat seat-1 reads live on /run/herdr.sock with a new running seat host"
 				if stopped != "left running for the Herdr server stop" || len(fleet.ended) != 0 ||
 					!unit.restarts() || unit.StartHow != wantStart || unit.Before != "live in Herdr pane w1:p2" {
@@ -192,67 +191,5 @@ func TestAChatUnitComesBackOnlyWhenHerdrCanRestoreIt(t *testing.T) {
 				t.Fatalf("an ended chat: stop %q, ended %v, restarts %v", stopped, fleet.ended, unit.restarts())
 			}
 		})
-	}
-}
-
-// TestChatBackWaitsWithinOneSharedDeadline: every chat the restart brings
-// back is polled until it is live again, all within one deadline; a read that
-// fails is what was last seen, never the end of the wait, and a chat polled
-// once the deadline is spent gets its one look. Once the Herdr server start
-// failed, Herdr restored nothing, so a chat fails at once, never polled.
-func TestChatBackWaitsWithinOneSharedDeadline(t *testing.T) {
-	polls := map[string]int{}
-	fleet := &fakeFleet{back: func(chat headless.Chat, socket string) (bool, string, error) {
-		polls[chat.ID]++
-		if socket != "/run/herdr.sock" {
-			return false, "", fmt.Errorf("polled on %s", socket)
-		}
-		switch chat.ID {
-		case "sess-slow":
-			return polls[chat.ID] == 3, fmt.Sprintf("seat seat-slow poll %d", polls[chat.ID]), nil
-		case "sess-unreadable":
-			return false, "", errors.New("database is locked")
-		case "sess-late":
-			return true, "seat seat-late live", nil
-		}
-		return false, "seat " + chat.SeatID + " reads lost", nil
-	}}
-	started := &herdrStarted{}
-	wait := &chatWait{tools: serviceTools{clock: newTickClock()}, fleet: fleet, herdr: started}
-	before := pfmchat.RestartSeatHost{PID: 41, Start: 7}
-	for _, row := range []struct {
-		id         string
-		herdrFails bool
-		want       string
-		err        string
-		polls      int
-	}{
-		{id: "sess-slow", want: "live again: seat seat-slow poll 3", polls: 3},
-		{id: "sess-never", polls: 899, err: "not live again within 1m30s of the Herdr server start " +
-			"(last seen: seat seat-never reads lost); reopen it by hand: pfm chat open sess-never"},
-		{id: "sess-unreadable", polls: 1, err: "not live again within 1m30s of the Herdr server start " +
-			"(last seen: database is locked); reopen it by hand: pfm chat open sess-unreadable"},
-		{id: "sess-late", want: "live again: seat seat-late live", polls: 1},
-		{id: "sess-herdr-down", herdrFails: true, err: "the Herdr server did not start again, so Herdr restored " +
-			"nothing; reopen it by hand: pfm chat open sess-herdr-down"},
-	} {
-		if row.herdrFails {
-			start := started.track(func(context.Context) (string, error) {
-				return "", errors.New("herdr server pid 9 not running 10s after start")
-			})
-			if _, err := start(context.Background()); err == nil {
-				t.Fatal("the tracked Herdr start hid its failure")
-			}
-		}
-		got, err := wait.back(context.Background(), headless.Chat{ID: row.id, SeatID: "seat-" + row.id[5:]},
-			"/run/herdr.sock", before)
-		gotErr := ""
-		if err != nil {
-			gotErr = err.Error()
-		}
-		if got != row.want || gotErr != row.err || polls[row.id] != row.polls {
-			t.Fatalf("%s: back = %q, err %q, %d poll(s)\nwant %q, err %q, %d poll(s)",
-				row.id, got, gotErr, polls[row.id], row.want, row.err, row.polls)
-		}
 	}
 }

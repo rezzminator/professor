@@ -58,7 +58,7 @@ func (fleet liveFleet) Back(
 	socket string,
 	before pfmchat.RestartSeatHost,
 ) (bool, string, error) {
-	return pfmchat.RestartBack(ctx, chat, socket, before, fleet.runtime.Paths)
+	return pfmchat.RestartBack(ctx, chat, socket, before, fleet.runtime.Paths, clock.Real)
 }
 
 // LiveDeps is the host's real doors for one restart.

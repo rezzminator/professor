@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"syscall"
 	"time"
 
@@ -135,10 +136,37 @@ func failedSeatStart(
 	seat = current
 	before := seat
 	seat.State = "failed"
-	seat.LostNote = cause.Error()
+	seat.LostNote = failedSeatNote(cause, current)
 	seat.UpdatedAt = clock.Real.Now().Unix()
 	if err := db.UpdateSeat(ctx, before, seat); err != nil {
 		fmt.Fprintf(stderr, "pfm internal seat-host: record failed seat %s: %v\n", seat.SeatID, err)
 	}
 	return 1
+}
+
+// failedSeatNoteKept joins a failed start's cause to the note the seat held
+// before it failed (a restore's loss note): a start that later succeeds keeps
+// that note (startedSeatNote), never the cause.
+const failedSeatNoteKept = " — before the failed start: "
+
+// failedSeatNote is a failed start's loss note: its cause, then the note the
+// seat held before its first failed start, kept across repeated failures.
+func failedSeatNote(cause error, seat fleetdb.Seat) string {
+	kept := seat.LostNote
+	if seat.State == "failed" {
+		kept = startedSeatNote(seat.LostNote)
+	}
+	if kept == "" {
+		return cause.Error()
+	}
+	return cause.Error() + failedSeatNoteKept + kept
+}
+
+// startedSeatNote is the loss note a failed seat keeps once its engine
+// starts: the note it held before its failed start, or none.
+func startedSeatNote(note string) string {
+	if _, kept, found := strings.Cut(note, failedSeatNoteKept); found {
+		return kept
+	}
+	return ""
 }

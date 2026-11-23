@@ -33,7 +33,7 @@ func TestOpenRestoredIDRejectsMissingSession(t *testing.T) {
 }
 
 func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
-	for _, history := range []string{"never-bound absent", "unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing", "unknown legacy", "same address legacy", "same address never-bound", "same address live legacy", "unlearned restore", "unrelated caller", "unnamed"} {
+	for _, history := range []string{"never-bound absent", "unanswered", "answered", "malformed", "protocol mismatch", "unsafe live owner", "unsafe old probe", "agent missing", "agent denied", "pane agent missing", "unknown legacy", "same address legacy", "same address never-bound", "same address live legacy", "same address older conversation", "same address live older conversation", "same address refused", "unlearned restore", "unrelated caller", "unnamed"} {
 		t.Run(history, func(t *testing.T) {
 			testjail.Fleet(t)
 			notices := make(chan string, 4)
@@ -55,7 +55,7 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				case "ping":
 					protocol := 22
 
-					if history == "protocol mismatch" {
+					if history == "protocol mismatch" || history == "same address refused" {
 						protocol = 23
 					}
 					return map[string]any{"type": "pong", "protocol": protocol, "version": "fixture"}, ""
@@ -103,7 +103,7 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 					if history == "agent missing" {
 						return nil, "agent_not_found"
 					}
-					if history == "agent denied" {
+					if strings.HasPrefix(history, "agent denied") {
 						return nil, "permission_denied"
 					}
 					return map[string]any{"agent": map[string]any{"pane_id": "w9:p2", "name": "integration"}}, ""
@@ -122,6 +122,7 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				history != "unlearned restore" {
 				seat = nativeChatHost(t, db, seat, history == "unsafe live owner" || history == "unsafe old probe")
 			}
+			// A seat pfm restart left running reads live, its host gone with the old server.
 			if history == "unnamed" {
 				seat.Name = ""
 				if err := db.PutSeat(context.Background(), seat); err != nil {
@@ -137,6 +138,10 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				}
 				seat.HerdrPane = "w9:p2"
 				seat.HerdrWorkspace = "w9"
+				// The old server's live record: the restored pane is a new terminal.
+				if strings.HasSuffix(history, "older conversation") || history == "same address refused" {
+					seat.State, seat.HerdrTerminalID = "live", "pre-restart-terminal"
+				}
 				if err := db.PutSeat(context.Background(), seat); err != nil {
 					t.Fatal(err)
 				}
@@ -163,7 +168,7 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := filepath.Join(t.TempDir(), "session.jsonl")
-			body := `{"type":"user","message":{"content":"private prompt"}}` + "\n"
+			body := `{"type":"user","origin":{"kind":"human"},"promptSource":"typed","message":{"content":"private prompt"}}` + "\n"
 			if history == "answered" {
 				body += `{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}` + "\n"
 			}
@@ -191,7 +196,7 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 			t.Setenv("HERDR_PANE_ID", "w9:p2")
 			t.Setenv("TMUX", "")
 			nativeChatRestoredCaller(t, history != "unrelated caller")
-			if history == "same address live legacy" {
+			if history == "same address live legacy" || history == "same address live older conversation" {
 				dir := filepath.Join(runtime.Paths.ProcRoot, "700002")
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
@@ -207,9 +212,13 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 			if target == "" {
 				target = seat.SeatID
 			}
+			// Herdr's saved line names an older conversation of the pane.
+			if strings.HasSuffix(history, "older conversation") {
+				target = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+			}
 			code := OpenRestoredID(context.Background(), target, &stdout, &stderr, &runtime)
 			if history == "unsafe live owner" || history == "unsafe old probe" || history == "unknown legacy" ||
-				history == "same address live legacy" ||
+				history == "same address live legacy" || history == "same address live older conversation" ||
 				history == "unrelated caller" {
 				current, _, err := db.Seat(context.Background(), seat.SeatID)
 				recipe, recipeErr := db.ReadSeatRun(seat.SeatID)
@@ -224,7 +233,7 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 					want = "still owns a live supervisor"
 				}
 				if code != 1 || !strings.Contains(stderr.String(), want) || err != nil || recipeErr != nil ||
-					current.HerdrPane != seat.HerdrPane ||
+					current.HerdrPane != seat.HerdrPane || current.State != seat.State ||
 					!slices.Equal(recipe.Args, run.Args) {
 					t.Fatalf(
 						"unsafe recovery code=%d seat=%+v recipe=%+v err=%v/%v stderr=%q",
@@ -238,6 +247,19 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				}
 				return
 			}
+			if history == "same address refused" {
+				// The restore in the seat's own pane was refused and nothing retries it: the
+				// seat reads failed with the refusal, for pfm restart.
+				current, _, err := db.Seat(context.Background(), seat.SeatID)
+				note := "restore refused: " + strings.TrimSuffix(
+					strings.TrimPrefix(stderr.String(), "pfm chat open: restored recovery: "), "\n")
+				if code != 1 || !strings.Contains(stderr.String(), "DIVERGES") || err != nil ||
+					current.State != "failed" || current.LostNote != note {
+					t.Fatalf("own-pane refusal code=%d seat=%+v err=%v stderr=%q, want failed %q",
+						code, current, err, stderr.String(), note)
+				}
+				return
+			}
 			if history == "protocol mismatch" {
 				current, _, err := db.Seat(context.Background(), seat.SeatID)
 				if code != 1 || !strings.Contains(stderr.String(), "DIVERGES") || err != nil ||
@@ -246,13 +268,23 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				}
 				return
 			}
-			if history == "agent denied" || history == "pane agent missing" {
+			if strings.HasPrefix(history, "agent denied") || history == "pane agent missing" {
 				want := "permission_denied"
 				if history == "pane agent missing" {
 					want = "agent_not_found"
 				}
 				if code != 1 || !strings.Contains(stderr.String(), want) || stdout.Len() != 0 {
 					t.Fatalf("rename failure code=%d out=%q err=%q", code, stdout.String(), stderr.String())
+				}
+				// The open rebound the seat, then nothing execs its seat host: it reads failed
+				// with the refusal before its loss note, for pfm restart.
+				current, _, err := db.Seat(context.Background(), seat.SeatID)
+				note := "restore refused: " + strings.TrimSuffix(
+					strings.TrimPrefix(stderr.String(), "pfm chat open: restored recovery: "), "\n") +
+					"; your last message was not answered — re-send it"
+				if err != nil || current.State != "failed" || current.LostNote != note {
+					t.Fatalf("refused restore seat state=%q note=%q err=%v, want failed %q",
+						current.State, current.LostNote, err, note)
 				}
 				return
 			}
@@ -283,6 +315,13 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				current.Name != seat.Name {
 				t.Fatalf("rebound seat=%+v found=%t err=%v", current, found, err)
 			}
+			if current.UpdatedAt <= seat.UpdatedAt {
+				t.Fatalf(
+					"rebound seat written at %d, want after %d: the restored launch's birth window counts from the rebind",
+					current.UpdatedAt,
+					seat.UpdatedAt,
+				)
+			}
 			recipe, err := db.ReadSeatRun(seat.SeatID)
 			if err != nil {
 				t.Fatal(err)
@@ -312,6 +351,12 @@ func TestOpenRestoredIDRebindsRecipeWithoutKeys(t *testing.T) {
 				t.Fatalf("resume argv=%q", recipe.Args)
 			}
 			switch history {
+			case "same address older conversation":
+				want := "pfm chat open: Herdr pane w9:p2 belongs to seat " + seat.SeatID + ", whose conversation is " +
+					seat.SessionID + ": restoring it instead of 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d\n"
+				if !strings.HasPrefix(stderr.String(), want) {
+					t.Fatalf("restored stderr=%q, want it to open with %q", stderr.String(), want)
+				}
 			case "unanswered":
 				want := "your last message was not answered — re-send it"
 				if current.LostNote != want || len(notices) != 1 || <-notices != want {

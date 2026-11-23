@@ -99,6 +99,10 @@ func proveHerdrOwner(
 	if err != nil {
 		return target, fmt.Errorf("herdr seat %s ownership unproved: %w", owner.SeatID, err)
 	}
+	if !owned && gather.HerdrRestorePending(proved) {
+		return target, fmt.Errorf("herdr seat %s ownership unproved: awaiting its restored launch: %w",
+			owner.SeatID, herdr.ErrSeatUnbound)
+	}
 	if !owned {
 		return target, fmt.Errorf(
 			"herdr seat %s ownership unproved: supervisor retired or unbound pane absent",

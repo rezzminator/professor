@@ -12,7 +12,9 @@
 // --eval) by the paths it names, for pcm-guard.
 // seathost_close.go decides what an ended engine does to its seat: restart the reload it awaits, or close it.
 // seathost_engine.go builds and runs a seat's foreground engine from its recipe and the current pane.
+// seathost_exit.go logs an engine's non-zero exit with the pane's last lines, and judges a resumed start that died.
 // seathost_image.go re-execs a seat-host from the installed pfm when an install replaced its binary,
 // an ended engine's close resuming there.
+// seathost_recipe.go is a seat's recorded recipe as each engine start runs it: config reread, MCP file rewritten.
 // seathost_retry.go asks the pane, after a failed engine start, whether to retry or close.
 package hookentry

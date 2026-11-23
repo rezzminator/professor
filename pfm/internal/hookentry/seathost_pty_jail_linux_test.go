@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -127,7 +129,7 @@ func TestSeatHostPTY(t *testing.T) {
 	for _, mode := range []string{
 		"exit", "ordinary-stdio", "redirected-stdin", "hup", "int", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
-		"reload-failure-locked", "reload-success", "reload-replaced", "end-replaced", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one", "failed-hangup",
+		"reload-failure-locked", "reload-success", "reload-replaced", "end-replaced", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one", "failed-hangup", "resume-dies",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
@@ -202,6 +204,9 @@ func TestSeatHostPTY(t *testing.T) {
 				}
 				if mode == "failed-missing-executable" || mode == "failed-hangup" {
 					run.Binary = filepath.Join(root, "missing-engine")
+				}
+				if mode == "resume-dies" {
+					run.Args = []string{"--resume", "fixture-session"}
 				}
 				if mode != "failed-missing-recipe" {
 					if err := db.WriteSeatRun("native-seat", run); err != nil {
@@ -279,7 +284,7 @@ func TestSeatHostPTY(t *testing.T) {
 				}
 				return
 			}
-			if strings.HasPrefix(mode, "failed-") {
+			if strings.HasPrefix(mode, "failed-") || mode == "resume-dies" {
 				if _, err := master.Write([]byte{4}); err != nil {
 					t.Fatal(err)
 				}
@@ -502,6 +507,33 @@ func TestSeatHostPTY(t *testing.T) {
 				return
 			}
 			err = <-done
+			if mode == "resume-dies" {
+				// A resumed engine that died at start failed its start: the seat, its recipe and the
+				// pane stay, the exit and the pane's lines its loss note.
+				seat, found, readErr := db.Seat(context.Background(), "native-seat")
+				note := regexp.MustCompile(
+					`^the engine exited 1 after [0-9.]+[mµn]?s, inside its 10s start window: .+$`,
+				)
+				if command.ProcessState.ExitCode() != 1 || readErr != nil || !found || seat.State != "failed" ||
+					!note.MatchString(
+						seat.LostNote,
+					) || !strings.Contains(output.String(), "press Enter to retry, q to close") {
+					t.Fatalf(
+						"resumed start death status=%v seat=%+v found=%t err=%v, want failed with note %s; output=%s",
+						err,
+						seat,
+						found,
+						readErr,
+						note,
+						&output,
+					)
+				}
+				run, err := db.ReadSeatRun(seat.SeatID)
+				if err != nil || !slices.Equal(run.Args, []string{"--resume", "fixture-session"}) {
+					t.Fatalf("resumed start death recipe=%+v err=%v", run, err)
+				}
+				return
+			}
 			if strings.HasPrefix(mode, "failed-") {
 				cause := map[string]string{
 					"failed-missing-recipe":     "read seat run",
@@ -677,6 +709,10 @@ func init() {
 		return
 	}
 	root := os.Getenv("PFM_S3_ROOT")
+	if os.Getenv("PFM_S3_MODE") == "resume-dies" {
+		fmt.Fprintln(os.Stderr, "Error: Invalid MCP configuration: fixture config file not found")
+		os.Exit(1)
+	}
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP, syscall.SIGINT)
 	if os.Args[0] == "seat-descendant" {

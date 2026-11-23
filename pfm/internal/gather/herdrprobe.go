@@ -485,7 +485,7 @@ func proveHerdrSeats(
 			if row.Err = retireFailedHerdrBirth(ctx, db, canonical, readOnly); row.Err == nil {
 				continue // a reservation that never named a pane: a failed birth, never a chat
 			}
-		case errors.Is(err, errHerdrSeatUnbound):
+		case errors.Is(err, herdr.ErrSeatUnbound):
 			continue // a reservation with no pane or no supervisor yet: not a chat yet
 		case err != nil && canonical.EndPending && (herdr.PaneGone(err) || errors.Is(err, ErrHerdrPaneAbsent)):
 			continue // its end worker closed the pane during this listing: the end is landing

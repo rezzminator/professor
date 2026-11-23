@@ -179,6 +179,11 @@ func resumesInPlace(request Request) bool {
 	return false
 }
 
+// ArgvResumesInPlace is resumesInPlace over a recorded Claude argv's own words.
+func ArgvResumesInPlace(args []string) bool {
+	return resumesInPlace(Request{Args: args})
+}
+
 // readInlineSettings reads an inline --settings object into parsed. A word that is
 // not a JSON object stays in Rest for Claude to judge; an env or hooks part that
 // cannot be read, or one entry of either, is left out and named in Warnings.

@@ -17,7 +17,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
@@ -115,31 +114,7 @@ func SeatHostWith(args []string, stdout, stderr io.Writer, runtime config.Runtim
 		var argv []string
 		var options deps.StartOptions
 		if runErr == nil {
-			machine := runtime.Config
-			// The supervisor can outlive a preference change and restart without the
-			// restore door. Read the pinned config again before every engine start.
-			var policyErr error
-			if pfmengine.ID(seat.Engine) == pfmengine.Claude && machine.Path != "" {
-				machine, policyErr = config.Load(
-					machine.Path,
-					runtime.Paths.Home,
-					runtime.Paths.Roots[pfmengine.Claude],
-					runtime.Paths.FirstRoot(pfmengine.Codex),
-				)
-			}
-			if policyErr != nil {
-				run = reload.DisableRecipeRemoteControl(
-					run,
-					seat.Name,
-					fmt.Sprintf("refresh seat launch preferences: %v", policyErr),
-					stderr,
-				)
-			} else {
-				run = reload.RefreshRecipeRemoteControl(run, pfmengine.ID(seat.Engine), machine, seat.Name, stderr)
-			}
-			if pfmengine.ID(seat.Engine) == pfmengine.Claude {
-				run.Binary, runErr = currentClaudeBinary(run.Binary, runtime.Paths.Home, machine.Claude.Binary)
-			}
+			run, runErr = refreshSeatRun(run, seat, runtime, stderr)
 		}
 		if runErr == nil {
 			argv, options, runErr = seatCommand(run, descriptor.Binary, terminal, stdout, stderr)
@@ -166,6 +141,7 @@ func SeatHostWith(args []string, stdout, stderr io.Writer, runtime config.Runtim
 			)
 			options.Env = armSeatCostLedger(options.Env, run.CostLedger, stderr)
 			acknowledge := seat.ReloadPending
+			engineStart := clock.Real.Now()
 			status, started, runErr = runSeatEngine(runner, argv, options, tty, func() error {
 				current, found, err := db.Seat(ctx, seat.SeatID)
 				if err != nil {
@@ -180,7 +156,7 @@ func SeatHostWith(args []string, stdout, stderr io.Writer, runtime config.Runtim
 				}
 				before := current
 				if current.State == "failed" {
-					current.LostNote = ""
+					current.LostNote = startedSeatNote(current.LostNote)
 				}
 				current.State = nativeSeatLive
 				if acknowledge {
@@ -193,6 +169,22 @@ func SeatHostWith(args []string, stdout, stderr io.Writer, runtime config.Runtim
 				seat = current
 				return nil
 			})
+			if started && runErr == nil {
+				exited := clock.Real.Now()
+				current, found, readErr := db.Seat(ctx, seat.SeatID)
+				if readErr != nil {
+					// Unread, the exit is judged as one no end awaits.
+					fmt.Fprintf(stderr, "pfm internal seat-host: read exited seat %s: %v\n", seat.SeatID, readErr)
+				}
+				ended := seatExit{
+					run: run, seat: seat, status: status, ran: exited.Sub(engineStart),
+					window: exited.Sub(seatStartWindowOpened(seat, engineStart)),
+					ending: readErr == nil && (!found || current.EndPending),
+				}
+				if failed := seatEngineExit(ctx, ended, seatScreen(runtime, seat)); failed != nil {
+					started, runErr = false, failed
+				}
+			}
 		}
 		if !started {
 			failedSeatStart(ctx, db, seat, runErr, stderr)

@@ -3,7 +3,6 @@ package claudelaunch
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -161,12 +160,11 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	}
 	result.Argv = append(append(result.Argv, args...), flagSettings, payload)
 	if request.Purpose != PurposeQuery {
-		mcp := mcpConfig(request.Home, machine)
-		if len(mcp) != 0 {
-			encoded, err := json.Marshal(map[string]any{"mcpServers": mcp})
-			if err != nil {
-				return Launch{}, fmt.Errorf("render --mcp-config: %w", err)
-			}
+		encoded, err := renderMCPPayload(request.Home, machine)
+		if err != nil {
+			return Launch{}, err
+		}
+		if encoded != nil {
 			// The payload rides a private file, never argv: a third-party
 			// entry's env and headers would show in ps and /proc/{pid}/cmdline.
 			path, err := writeMCPFile(request.Home, encoded)

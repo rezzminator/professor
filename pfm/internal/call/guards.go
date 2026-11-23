@@ -323,14 +323,7 @@ func isClaudeTrustSelector(capture, line string) bool {
 	if !claudeTrustOption.MatchString(line) || !pfmengine.ClaudeTrustDialog(capture) {
 		return false
 	}
-	lines := strings.Split(capture, "\n")
-	row := lastComposerRow(lines)
-	if row > 0 && ComposerBoxRule(ansi.Strip(lines[row-1])) {
-		if _, bounded := ComposerBoxText(capture); bounded {
-			return false
-		}
-	}
-	return true
+	return !ComposerBoxed(capture)
 }
 
 func rawLastComposerLine(capture string) string {

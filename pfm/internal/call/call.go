@@ -10,7 +10,8 @@
 //   - refusal.go words each refusal of a chat function once, as both its CLI and its MCP door answer it.
 //   - body.go prepares the exact text a pane or a dormant transcript receives, a long body spilled to a file.
 //   - guards.go holds the message guards: harness and /compact commands, the composer and the exit dialog.
-//   - composer_wait.go waits for a booting chat's composer before anything is typed, and cuts a capture to its composer.
+//   - composer_wait.go waits for a booting chat's composer before anything is typed, and cuts a capture to its composer;
+//     ComposerBoxed tells Claude's input box from a shell line.
 //   - agentpanel.go reads Claude Code's agents panel holding keyboard focus.
 //   - trust_dialog.go refuses a pane held at Claude Code's folder-trust dialog.
 //   - modal.go selects a modal's choice through the target's backend-aware key door.

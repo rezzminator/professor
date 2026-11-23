@@ -42,7 +42,10 @@ rescue, a config change that needs a fresh session.
 
 With no flags, the current engine account is preserved. The chat auto-exits and reboots in the
 same window and pane; split siblings are untouched. With `--then`, the script waits for the reborn
-chat's input box, then types and submits the prompt.
+chat's input box, then types and submits the prompt. On a native Herdr Claude chat the worker
+stores the prompt in `reload-herdr-<seat>.then`, beside its log, before typing `/exit`; a prompt it
+could not type is never lost — its error names that file, and the reborn chat's next prompt carries
+it once, marked `PFM RELOAD FOLLOW-UP NOT TYPED`.
 
 After running it, reply with ONE short line and END YOUR TURN immediately. The worker types `/exit`
 only once your turn has ended (it holds up to two minutes for the pane to go idle, then refuses

@@ -276,6 +276,8 @@ func TestDoctorCrumbsAcceptNativeReloadSchedule(t *testing.T) {
 	}{
 		{name: paths.SIDReloadHerdrPrefix + "restore-seat.pid"},
 		{name: paths.SIDReloadHerdrPrefix + "restore-seat.log"},
+		{name: paths.SIDReloadHerdrPrefix + "restore-seat.then"},
+		{name: paths.SIDReloadHerdrPrefix + ".then", wantInvalid: 1},
 		{name: paths.SIDReloadHerdrPrefix + "6fafd8a7-5059-4288-bf58-23e60c5fdb88.log"},
 		{name: paths.SIDReloadHerdrPrefix + ".pid", wantInvalid: 1},
 		{name: paths.SIDReloadHerdrPrefix + ".log", wantInvalid: 1},

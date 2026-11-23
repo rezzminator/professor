@@ -2,12 +2,92 @@ package reload
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+// thenBackstop is a native Claude reload's --then message, stored before its
+// /exit and removed once typed: a message the reload could not type reaches
+// the reborn chat with its first prompt (ClaimThen, read by the epic-inject
+// prompt hook). Socket and Pane name the reload's pane mutex; Session is the
+// reborn chat's session id.
+type thenBackstop struct {
+	Socket  string `json:"socket"`
+	Pane    string `json:"pane"`
+	Session string `json:"session"`
+	Message string `json:"message"`
+}
+
+// ThenBackstopPath is a native seat's stored --then message,
+// {SIDDir}/reload-herdr-{seat}.then, beside its reload schedule and log.
+func ThenBackstopPath(sidDir, seatID string) string {
+	return filepath.Join(sidDir, paths.SIDReloadHerdrPrefix+seatID+".then")
+}
+
+func storeThen(sidDir, seatID string, backstop thenBackstop) error {
+	encoded, err := json.Marshal(backstop)
+	if err != nil {
+		return fmt.Errorf("encode the reload --then message: %w", err)
+	}
+	if err := atomicfile.Write(ThenBackstopPath(sidDir, seatID), encoded, 0o600); err != nil {
+		return fmt.Errorf("store the reload --then message before /exit: %w", err)
+	}
+	return nil
+}
+
+func dropThen(sidDir, seatID string) error {
+	path := ThenBackstopPath(sidDir, seatID)
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove the stored reload --then message %s: %w", path, err)
+	}
+	return nil
+}
+
+// ClaimThen takes the --then message a native reload of seatID stored and
+// could not type, for the prompt of session sessionID: only the reborn chat's
+// session takes it, never while the reload still holds the pane (its typed
+// --then, or the old chat's /exit, is that prompt), and only once — the claim
+// is the file's removal. ok is false when there is nothing to take.
+func ClaimThen(sidDir, seatID, sessionID string) (message string, ok bool, err error) {
+	if seatID == "" || seatID == "." || seatID == ".." || strings.ContainsAny(seatID, "/\x00") || sessionID == "" {
+		return "", false, nil
+	}
+	path := ThenBackstopPath(sidDir, seatID)
+	encoded, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read the stored reload --then message: %w", err)
+	}
+	var backstop thenBackstop
+	if err := json.Unmarshal(encoded, &backstop); err != nil {
+		return "", false, fmt.Errorf("decode the stored reload --then message %s: %w", path, err)
+	}
+	if backstop.Session != sessionID {
+		return "", false, nil
+	}
+	inFlight, err := InFlight(sidDir, nativeReloadLockKey(backstop.Socket, backstop.Pane), "seat")
+	if err != nil || inFlight {
+		return "", false, err
+	}
+	if err := os.Remove(path); errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	} else if err != nil {
+		return "", false, fmt.Errorf("claim the stored reload --then message %s: %w", path, err)
+	}
+	return backstop.Message, true, nil
+}
 
 // then sends the --then turn to the reborn native chat once its composer is
 // ready.

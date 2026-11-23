@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -18,6 +17,8 @@ import (
 var epicNamePattern = regexp.MustCompile(`^E_([A-Za-z0-9][A-Za-z0-9-]*)_`)
 
 type epicInjectPayload struct {
+	SessionID      string `json:"session_id"`
+	Prompt         string `json:"prompt"`
 	TranscriptPath string `json:"transcript_path"`
 	CWD            string `json:"cwd"`
 }
@@ -53,8 +54,11 @@ var epicInjectWindowName = func(ctx context.Context, identity resolve.Identity) 
 	return (pfmcall.TmuxCaller{}).WindowName(ctx, identity.SocketPath, target)
 }
 
-// EpicInject injects an epic manifest once per session and epic name. It
-// fails open, so a step past promptHookDeadline lets the prompt through.
+// EpicInject is the UserPromptSubmit hook that carries text into a prompt's
+// context: a native reload's --then message it could not type, on the reborn
+// chat's first prompt (reload.ClaimThen), and an epic manifest once per
+// session and epic name. It fails open, so a step past promptHookDeadline lets
+// the prompt through.
 func EpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
 	return RunPromptHook("pfm internal epic-inject", stdout, stderr, 0,
 		func(ctx context.Context, step func(string), stdout, stderr io.Writer) int {
@@ -69,79 +73,31 @@ func epicInjectBody(ctx context.Context, step func(string), stdin io.Reader, std
 		fmt.Fprintf(stderr, "pfm internal epic-inject: decode hook payload: %v\n", err)
 		return 0
 	}
-	if strings.TrimSpace(payload.CWD) == "" {
-		return 0
-	}
 	step("identify chat")
 	identity, err := epicInjectIdentify(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal epic-inject: identify chat: %v\n", err)
-		return 0
-	}
-	step("read window name")
-	window, err := epicInjectWindowName(ctx, identity)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal epic-inject: read window name: %v\n", err)
-		return 0
-	}
-	match := epicNamePattern.FindStringSubmatch(window)
-	if len(match) != 2 {
-		return 0
-	}
-	slug := match[1]
-	step("read manifest")
-	root, err := gitRootFrom(payload.CWD)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal epic-inject: find git root from %s: %v\n", payload.CWD, err)
-		return 0
-	}
-	manifestPath, err := epicManifestPath(root, slug)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0
+		if strings.TrimSpace(payload.CWD) != "" {
+			fmt.Fprintf(stderr, "pfm internal epic-inject: identify chat: %v\n", err)
 		}
-		fmt.Fprintf(stderr, "pfm internal epic-inject: locate manifest: %v\n", err)
 		return 0
 	}
-	manifest, err := os.ReadFile(manifestPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal epic-inject: read %s: %v\n", manifestPath, err)
-		return 0
-	}
-	sessionID := identity.ID
-	if sessionID == "" {
-		sessionID = identity.Session
-	}
-	if sessionID == "" && payload.TranscriptPath != "" {
-		sessionID = strings.TrimSuffix(filepath.Base(payload.TranscriptPath), filepath.Ext(payload.TranscriptPath))
-	}
-	if sessionID == "" {
-		return 0
-	}
-	step("record state")
-	database := epicInjectStore
-	if database == nil {
-		opened, err := store.Open()
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm internal epic-inject: open state: %v\n", err)
-			return 0
+	manifest := epicContext(ctx, step, identity, payload, stderr)
+	// The claim removes the stored follow-up, so it is the last step, inside
+	// a commit span that ends once its text is in the hook's output.
+	step("claim reload --then message")
+	var contexts []string
+	if end, open := deps.BeginCommit(ctx); open {
+		defer end()
+		if message := reloadThenContext(ctx, identity, payload, stderr); message != "" {
+			contexts = append(contexts, reloadThenNotTyped+message)
 		}
-		database = opened
-		defer func() {
-			if err := database.Close(); err != nil {
-				fmt.Fprintf(stderr, "pfm internal epic-inject: close state (fail-open): %v\n", err)
-			}
-		}()
 	}
-	seen, err := database.EpicInjected(ctx, sessionID, slug)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal epic-inject: check state: %v\n", err)
+	if manifest != "" {
+		contexts = append(contexts, manifest)
+	}
+	if len(contexts) == 0 {
 		return 0
 	}
-	if seen {
-		return 0
-	}
-	contextText := "INJECTED EPIC " + slug + "/manifest.md\n" + string(manifest)
 	response := struct {
 		HookSpecificOutput struct {
 			HookEventName     string `json:"hookEventName"`
@@ -149,14 +105,10 @@ func epicInjectBody(ctx context.Context, step func(string), stdin io.Reader, std
 		} `json:"hookSpecificOutput"`
 	}{}
 	response.HookSpecificOutput.HookEventName = "UserPromptSubmit"
-	response.HookSpecificOutput.AdditionalContext = contextText
+	response.HookSpecificOutput.AdditionalContext = strings.Join(contexts, "\n\n")
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: encode context: %v\n", err)
-		return 0
-	}
-	if err := database.RecordEpicInjection(ctx, sessionID, slug); err != nil {
-		fmt.Fprintf(stderr, "pfm internal epic-inject: record state: %v\n", err)
 		return 0
 	}
 	if _, err := fmt.Fprintln(stdout, string(encoded)); err != nil {
@@ -164,45 +116,4 @@ func epicInjectBody(ctx context.Context, step func(string), stdin io.Reader, std
 		return 1
 	}
 	return 0
-}
-
-func gitRootFrom(start string) (string, error) {
-	current, err := filepath.Abs(start)
-	if err != nil {
-		return "", err
-	}
-	if info, statErr := os.Stat(current); statErr == nil && !info.IsDir() {
-		current = filepath.Dir(current)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(current, ".git")); err == nil {
-			return current, nil
-		} else if !os.IsNotExist(err) {
-			return "", err
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", fmt.Errorf("no .git directory above %s", start)
-		}
-		current = parent
-	}
-}
-
-func epicManifestPath(root, slug string) (string, error) {
-	path := filepath.Join(root, "docs", "epics", slug, "manifest.md")
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
-	} else if !os.IsNotExist(err) {
-		return "", err
-	}
-	lower := strings.ToLower(slug)
-	if lower != slug {
-		path = filepath.Join(root, "docs", "epics", lower, "manifest.md")
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		} else if !os.IsNotExist(err) {
-			return "", err
-		}
-	}
-	return "", os.ErrNotExist
 }

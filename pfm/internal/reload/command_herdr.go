@@ -217,7 +217,7 @@ func RunHerdr(
 			db.WriteSeatRun(seat.SeatID, old),
 		)
 	}
-	submitted := false
+	submitted, stored := false, false
 	defer func() {
 		// After an Enter attempt the engine may already have exited even if its
 		// acknowledgement was lost. Never revoke the supervisor's durable work.
@@ -225,8 +225,25 @@ func RunHerdr(
 			cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			returnErr = errors.Join(returnErr, n.rollback(cleanup, seat, pending, old, oldPID, retry))
+			if stored {
+				returnErr = errors.Join(returnErr, dropThen(n.options.SIDDir, seat.SeatID))
+			}
+		}
+		// Past /exit a failed reload keeps the --then message for the reborn
+		// chat's first prompt, whichever step failed.
+		if submitted && stored && returnErr != nil {
+			fmt.Fprintf(stderr, "pfm chat reload: the --then message is kept in %s for the chat's first prompt\n",
+				ThenBackstopPath(n.options.SIDDir, seat.SeatID))
 		}
 	}()
+	if n.request.Then != "" && n.request.Engine == pfmengine.Claude {
+		if err := storeThen(n.options.SIDDir, seat.SeatID, thenBackstop{
+			Socket: request.SocketPath, Pane: request.Pane, Session: n.request.SessionID, Message: n.request.Then,
+		}); err != nil {
+			return Result{}, err
+		}
+		stored = true
+	}
 	if retry {
 		submitted, err = pressEnter(ctx, n.pane(), "submit native reload retry")
 	} else {
@@ -247,6 +264,11 @@ func RunHerdr(
 		if err := n.then(ctx); err != nil {
 			return Result{}, err
 		}
+		if stored {
+			if err := dropThen(n.options.SIDDir, seat.SeatID); err != nil {
+				fmt.Fprintf(stderr, "pfm chat reload: --then was typed, but its stored copy stays: %v\n", err)
+			}
+		}
 	}
 	n.labelLeftBehind(request.LeftBehind, stderr)
 	return Result{
@@ -257,12 +279,17 @@ func RunHerdr(
 	}, nil
 }
 
+// nativeReloadLockKey names a native pane's reload mutex, held for the whole
+// reboot: lockNativeReload takes it, ClaimThen probes it.
+func nativeReloadLockKey(socket, pane string) string {
+	return fmt.Sprintf("herdr-%x", sha256.Sum256([]byte(socket+"\x00"+pane)))
+}
+
 func lockNativeReload(ctx context.Context, request Request, options Options) (*os.File, error) {
 	if err := os.MkdirAll(options.SIDDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create native reload mutex directory: %w", err)
 	}
-	key := fmt.Sprintf("herdr-%x", sha256.Sum256([]byte(request.SocketPath+"\x00"+request.Pane)))
-	path := LockPath(options.SIDDir, key, "seat")
+	path := LockPath(options.SIDDir, nativeReloadLockKey(request.SocketPath, request.Pane), "seat")
 	lock, err := herdr.OpenStateFile(options.SIDDir, filepath.Base(path), os.O_CREATE|os.O_RDWR, "native reload mutex")
 	if err != nil {
 		return nil, err

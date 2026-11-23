@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -36,6 +37,30 @@ func hangingTmux() *deps.FakeRunner {
 		return deps.RunResult{ExitCode: -1}, ctx.Err()
 	})
 	return fake
+}
+
+// panes is the output a list-panes client printed before it exited.
+const panes = "%0\n%1\n"
+
+// errHeldPipe is how deps.RealRunner returns a tmux client that exited 0 while
+// its server kept the client's output pipe open past the wait delay.
+var errHeldPipe = fmt.Errorf("run %q: %w", Binary, exec.ErrWaitDelay)
+
+// answeringTmux is a deps.FakeRunner playing tmux, found on the runner's PATH,
+// that answers every call as answer says.
+func answeringTmux(answer func(ctx context.Context) (deps.RunResult, error)) *deps.FakeRunner {
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath(Binary, "/usr/bin/tmux", nil)
+	fake.Handle([]string{Binary}, func(ctx context.Context, _ deps.RunCall) (deps.RunResult, error) {
+		return answer(ctx)
+	})
+	return fake
+}
+
+// heldPipe answers as a client that printed panes and exited 0 while its
+// server held the pipe: the output, exit -1 and the error as RealRunner reads them.
+func heldPipe(context.Context) (deps.RunResult, error) {
+	return deps.RunResult{Stdout: []byte(panes), ExitCode: -1}, errHeldPipe
 }
 
 // reached waits until the fake runner has recorded a call: the client is at the runner.
@@ -125,6 +150,8 @@ func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 		// "context deadline exceeded"), or cut off a client left waiting ("signal: killed").
 		{"deadline passed before start", func() *deps.FakeRunner { return fakeTmux(0) }, time.Millisecond, false, -time.Second, "WARN"},
 		{"deadline cut off a waiting client", hangingTmux, time.Millisecond, false, time.Millisecond, "WARN"},
+		// The client exited 0; its server let go of the client's output pipe only past the wait delay.
+		{"server held a finished client's pipe", func() *deps.FakeRunner { return answeringTmux(heldPipe) }, time.Millisecond, false, 0, "WARN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := clock.NewFake(time.Unix(1700000000, 0))
@@ -157,39 +184,99 @@ func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 	}
 }
 
-// TestExecRunAndCombinedOutputCarryTheExitCode: a tmux that exits non-zero
-// is the command answering — INFO with the exit code, err carried, the
-// caller's error untouched.
+// TestExecRunAndCombinedOutputCarryTheExitCode: what every completing method
+// hands its caller, and the exit and err its one record carries. A tmux that
+// exits non-zero is the command answering, its error untouched; a client that
+// exited 0 while its server held the output pipe past the wait delay
+// succeeded: its output whole, a nil error, exit 0 with the hold named; the
+// same hold met by the call's deadline stays the deadline's failed call.
 func TestExecRunAndCombinedOutputCarryTheExitCode(t *testing.T) {
-	ctx, recorder := obs.Test(t)
-	ctx, binary := WithClientRunner(ctx, fakeTmux(3)), Binary
-	killServer := Exec(ctx, binary, "/sockets/cc-1", "kill-server")
-	if err := killServer.Run(); err == nil {
-		t.Fatal("Run swallowed the exit status")
+	const heldText = `run "tmux": exec: WaitDelay expired before I/O complete`
+	completions := map[string]func(*Cmd) ([]byte, error){
+		"Run": func(command *Cmd) ([]byte, error) {
+			var out bytes.Buffer
+			command.Stdout = &out
+			err := command.Run()
+			return out.Bytes(), err
+		},
+		"Output":         (*Cmd).Output,
+		"CombinedOutput": (*Cmd).CombinedOutput,
+		"Wait": func(command *Cmd) ([]byte, error) {
+			var out bytes.Buffer
+			command.Stdout = &out
+			if err := command.Start(); err != nil {
+				return nil, err
+			}
+			err := command.Wait()
+			return out.Bytes(), err
+		},
 	}
-	if killServer.TimedOut() {
-		t.Fatal("TimedOut() = true for a tmux that exited 3 on its own, want false")
-	}
-	if _, err := Exec(ctx, binary, "/sockets/cc-1", "list-panes", "-a").CombinedOutput(); err == nil {
-		t.Fatal("CombinedOutput swallowed the exit status")
-	}
-	records := recorder.Records()
-	if len(records) != 2 {
-		t.Fatalf("records = %d, want one per invocation: %s", len(records), recorder.Raw())
-	}
-	for _, record := range records {
-		if exit, _ := record.Field(obs.FieldExit); exit != float64(3) {
-			t.Fatalf("exit = %v, want 3", exit)
+	for _, tc := range []struct {
+		name         string
+		answer       func(ctx context.Context) (deps.RunResult, error)
+		deadline     bool
+		wantErr      string // "" is a nil error
+		wantExit     float64
+		wantErrField string
+		wantTimedOut bool
+	}{
+		{"tmux exits 3", func(context.Context) (deps.RunResult, error) {
+			return deps.RunResult{Stdout: []byte(panes), ExitCode: 3}, nil
+		}, false, "exit status 3", 3, "exit status 3", false},
+		{"server held a finished client's pipe", heldPipe, false, "", 0, heldText, false},
+		{"deadline fired while the server held the pipe", func(ctx context.Context) (deps.RunResult, error) {
+			<-ctx.Done()
+			return heldPipe(ctx)
+		}, true, heldText, -1, heldText, true},
+	} {
+		for method, complete := range completions {
+			t.Run(tc.name+"/"+method, func(t *testing.T) {
+				fake := clock.NewFake(time.Unix(1700000000, 0))
+				ctx, recorder := obs.Test(t, obs.WithTestClock(fake))
+				if tc.deadline {
+					var cancel context.CancelFunc
+					ctx, cancel = clock.WithTimeout(ctx, fake, time.Millisecond)
+					defer cancel()
+				}
+				runner := answeringTmux(tc.answer)
+				command := Exec(WithClientRunner(ctx, runner), Binary, "/sockets/cc-1", "list-panes", "-a")
+				type outcome struct {
+					output []byte
+					err    error
+				}
+				done := make(chan outcome, 1)
+				go func() {
+					output, err := complete(command)
+					done <- outcome{output, err}
+				}()
+				if tc.deadline {
+					reached(t, runner)
+					fake.Advance(time.Millisecond)
+				}
+				got := <-done
+				gotErr := ""
+				if got.err != nil {
+					gotErr = got.err.Error()
+				}
+				if string(got.output) != panes || gotErr != tc.wantErr {
+					t.Fatalf("%s = %q, %q; want %q, %q", method, got.output, gotErr, panes, tc.wantErr)
+				}
+				if command.TimedOut() != tc.wantTimedOut {
+					t.Fatalf("TimedOut() = %t, want %t", command.TimedOut(), tc.wantTimedOut)
+				}
+				record := oneRecord(t, recorder)
+				exit, _ := record.Field(obs.FieldExit)
+				errField, _ := record.Field(obs.FieldErr)
+				subcmd, _ := record.Field("subcmd")
+				if subcmd != "list-panes" || exit != tc.wantExit || errField != tc.wantErrField {
+					t.Fatalf("record subcmd = %v, exit = %v, err = %v; want list-panes, %v, %q: %s",
+						subcmd, exit, errField, tc.wantExit, tc.wantErrField, recorder.Raw())
+				}
+				if target, found := record.Field("target"); found {
+					t.Fatalf("list-panes -a has no -t target, yet the record carries %v: %s", target, recorder.Raw())
+				}
+			})
 		}
-		if _, found := record.Field(obs.FieldErr); !found {
-			t.Fatalf("no err on a failed invocation: %v", record.Fields)
-		}
-	}
-	if subcmd, _ := records[0].Field("subcmd"); subcmd != "kill-server" {
-		t.Fatalf("subcmd = %v", subcmd)
-	}
-	if _, found := records[0].Field("target"); found {
-		t.Fatalf("kill-server has no -t target, yet one was recorded: %v", records[0].Fields)
 	}
 }
 

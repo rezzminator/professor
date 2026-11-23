@@ -122,8 +122,7 @@ func (command *Cmd) Run() error {
 	} else if err == nil {
 		err = command.Cmd.Run()
 	}
-	command.finish(err)
-	return err
+	return command.finish(err)
 }
 
 // Output completes the command and records it; the output is returned to
@@ -148,8 +147,7 @@ func (command *Cmd) complete(combined bool) (output []byte, err error) {
 	default:
 		output, err = command.Cmd.Output()
 	}
-	command.finish(err)
-	return output, err
+	return output, command.finish(err)
 }
 
 // Start launches the command; the record is written by Wait, when the
@@ -170,9 +168,7 @@ func (command *Cmd) Start() error {
 
 // Wait completes a started command and records it.
 func (command *Cmd) Wait() error {
-	err := command.completion()
-	command.finish(err)
-	return err
+	return command.finish(command.completion())
 }
 
 func (command *Cmd) begin() {
@@ -186,11 +182,19 @@ func (command *Cmd) begin() {
 // wedged server never answered — its caller names that server, as
 // gather.ErrServerUnresponsive does, and pfm itself did not fail),
 // and a clean exit is DEBUG unless it took obs.SlowCall or longer (INFO) —
-// obs.RoutineLevel, the rule db.statement follows too. A second completion of
+// obs.RoutineLevel, the rule db.statement follows too. A client that exited 0
+// while its server held the client's output pipe past waitDelay
+// (exec.ErrWaitDelay, the deadline not passed) succeeded: exit 0, WARN with
+// err naming the hold — the server was slow to let go, pfm did not fail. finish
+// returns the error the caller gets, nil for that hold. A second completion of
 // the same Cmd writes nothing.
-func (command *Cmd) finish(err error) {
+func (command *Cmd) finish(err error) (settled error) {
+	held := errors.Is(err, exec.ErrWaitDelay) && !command.TimedOut()
+	if settled = err; held {
+		settled = nil
+	}
 	if command.done {
-		return
+		return settled
 	}
 	command.done = true
 	if command.cancel != nil {
@@ -201,6 +205,8 @@ func (command *Cmd) finish(err error) {
 	var runnerExit *ExitError
 	switch {
 	case err == nil:
+	case held:
+		failure = slog.LevelWarn
 	case errors.As(err, &exitErr):
 		exit = exitErr.ExitCode()
 	case errors.As(err, &runnerExit):
@@ -225,4 +231,5 @@ func (command *Cmd) finish(err error) {
 	}
 	scoped := obs.Component(command.ctx, comp)
 	obs.Logger(scoped).LogAttrs(scoped, obs.RoutineLevel(err, failure, 0, elapsed), "tmux.exec", attrs...)
+	return settled
 }

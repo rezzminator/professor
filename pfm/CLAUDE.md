@@ -4,7 +4,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 # Vocabulary
 
-- flow matrix: every flow, its test tier and its jail status · `TESTPLAN.md`
+- test plan: the tier tokens, what the fake engine plays and does not play, known divergences, seams and host fixtures · `TESTPLAN.md`
 - CLI adapters: stdlib `flag` dispatch plus the end-to-end jail tests; a file name starts with its unit (`chat_` is the one multi-file unit), so `ls cmd/pfm/{unit}_*` lists a unit; `pfm help` lists the subcommands · `cmd/pfm/`
 - package map: each package's front door, `{package}.go` (`main.go` for `package main`), opens with its `// Package` menu per the `coding` rule, C31 ratcheting it; `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` prints the map · `internal/doctor/`, `internal/hookentry/`, `internal/picker/`, `internal/update/`, `internal/professor/`
 - tagged e2e: the `-tags e2e` tier, run serially · `e2e/`
@@ -85,6 +85,6 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 ## Testing Rules
 
-- Package tests sit beside every package; the end-to-end jail tests under `cmd/pfm/`; tiers per `TESTPLAN.md` § Legend — the SAFETY column.
+- Package tests sit beside every package; the end-to-end jail tests under `cmd/pfm/`; tiers per `TESTPLAN.md` § Legend — the SAFETY tokens.
 - Keep scratch socket paths short: a long `TMUX_TMPDIR` hits "File name too long", and the failure looks like a tmux bug.
 - Every K3 rule gets table-driven tests; every emitted shell line a golden file.

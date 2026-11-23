@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The flow-matrix gate: every test and file TESTPLAN.md cites must exist. A matrix
+# The test-plan gate: every test and file TESTPLAN.md cites must exist. A plan
 # row citing a deleted test or a renamed file reads as coverage that is not there.
 #   scripts/testplan-check.sh [TESTPLAN.md]
 # Checked: each `Test…` identifier is a `func Test…` in some pfm/ *_test.go (a

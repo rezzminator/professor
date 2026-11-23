@@ -30,7 +30,7 @@
 
 ```
 pfm/
-  CLAUDE.md AGENTS.md TESTPLAN.md      # binary-level law and flow matrix (AGENTS.md compiled from CLAUDE.md)
+  CLAUDE.md AGENTS.md TESTPLAN.md      # binary-level law and test plan (AGENTS.md compiled from CLAUDE.md)
   Makefile go.mod .golangci.yml .testcoverage.yml
   .arch/                               # C1–C21 baselines, only shrink; re-keyed by hand when a file moves (§ e)
   scripts/arch-check.sh                # the ratchet

@@ -18,7 +18,7 @@ import (
 )
 
 // TestBootingRowJailedTSV is the red-first, gather-through-render proof for
-// the booting-chat blind spot (TESTPLAN.md "Residual known divergences" #9):
+// the booting-chat blind spot:
 // a chat still sitting at a startup prompt has a live pane and a live claude
 // process, but no SID crumb — the statusline writes that only once boot
 // completes. Before this fix, crumb-driven gather was blind to it and

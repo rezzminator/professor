@@ -6,7 +6,7 @@ import (
 )
 
 // TestDetectCrumblessLiveNoCrumbEmitsOneEntry is the red-first proof for the
-// booting-chat blind spot (TESTPLAN.md "Residual known divergences" #9): a
+// booting-chat blind spot: a
 // live Claude pane whose socket carries no crumb at all — the shape of a chat
 // still sitting at a startup prompt — must surface as exactly one
 // CrumblessLive entry carrying the pane's own display fields, not silently

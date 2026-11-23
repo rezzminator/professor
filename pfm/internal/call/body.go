@@ -158,8 +158,8 @@ func (engine *Engine) prepareMessage(
 	}, nil
 }
 
-// inlineThreshold is the measured composer edge (TESTPLAN.md's "Measured
-// composer edges" table): on the live path it is the inline-vs-paste
+// inlineThreshold is the measured composer edge (TESTPLAN.md § Composer
+// transport boundaries): on the live path it is the inline-vs-paste
 // boundary, on the resume path the inline-vs-file boundary — see
 // prepareMessage's own comment for which caller means which.
 func (engine *Engine) inlineThreshold(engineName string) int {

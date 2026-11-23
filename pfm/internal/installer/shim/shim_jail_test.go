@@ -281,7 +281,7 @@ case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID"; exit "$SHIM_
 }
 
 // TestPfmOwnTerminalClosesOwnedAndPreservesOthers pins `_pfm_own_terminal`
-// itself (TESTPLAN.md's J row), not just a caller that happens to reach it: a
+// itself, not just a caller that happens to reach it: a
 // Herdr pane's own shell and a vsct bunker pane are closed (the process exits,
 // nothing after it runs), while every other shell is preserved and the
 // function returns the exit status: a terminal outside Herdr, a chat's tmux

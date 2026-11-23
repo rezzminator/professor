@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -291,14 +292,23 @@ func (kernel *fakeKernel) sent() []string {
 	return slices.Clone(kernel.signals)
 }
 
-// fakeFleet is the chat roster: the chats it lists and every End it took.
+// fakeFleet is the chat roster: the chats it lists, every End it took, why a
+// chat's seat could not resume and the seat host it names (by session id),
+// and every poll of whether a chat is back, with the seat host from before
+// it was handed, answered by back (back at the first poll when nil).
 type fakeFleet struct {
-	mu         sync.Mutex
-	chats      []headless.Chat
-	unreadable map[string]string
-	scanErr    error
-	endErr     map[string]error
-	ended      []string
+	mu            sync.Mutex
+	chats         []headless.Chat
+	unreadable    map[string]string
+	scanErr       error
+	endErr        map[string]error
+	ended         []string
+	notRestorable map[string]string
+	restorableErr map[string]error
+	hosts         map[string]pfmchat.RestartSeatHost
+	back          func(chat headless.Chat, socket string) (bool, string, error)
+	polled        []string
+	before        []pfmchat.RestartSeatHost
 }
 
 func (fleet *fakeFleet) Live(context.Context) ([]headless.Chat, map[string]string, error) {
@@ -310,6 +320,24 @@ func (fleet *fakeFleet) End(_ context.Context, chat headless.Chat) error {
 	defer fleet.mu.Unlock()
 	fleet.ended = append(fleet.ended, chat.ID)
 	return fleet.endErr[chat.ID]
+}
+
+func (fleet *fakeFleet) Restorable(_ context.Context, chat headless.Chat) (string, pfmchat.RestartSeatHost, error) {
+	return fleet.notRestorable[chat.ID], fleet.hosts[chat.ID], fleet.restorableErr[chat.ID]
+}
+
+func (fleet *fakeFleet) Back(_ context.Context, chat headless.Chat, socket string, before pfmchat.RestartSeatHost) (
+	bool, string, error,
+) {
+	fleet.mu.Lock()
+	fleet.polled = append(fleet.polled, chat.ID)
+	fleet.before = append(fleet.before, before)
+	back := fleet.back
+	fleet.mu.Unlock()
+	if back == nil {
+		return true, "seat " + chat.SeatID + " live", nil
+	}
+	return back(chat, socket)
 }
 
 // testDeps is a Deps whose every door is a fake; a test overrides the doors it drives.
@@ -326,5 +354,7 @@ func testDeps(t *testing.T, runner *hostRunner, kernel *fakeKernel, fleet *fakeF
 		Self:       1,
 		Executable: testBinary,
 		LogDir:     t.TempDir(),
+		// Herdr's restore is on unless a test turns it off.
+		ResumeOnRestore: func() (bool, error) { return true, nil },
 	}
 }

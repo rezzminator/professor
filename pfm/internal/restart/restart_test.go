@@ -91,34 +91,62 @@ func TestExecuteFailsOnAFailedFindingWithoutHidingIt(t *testing.T) {
 	}
 }
 
+// TestExecuteListsEveryEndedChatOnly: the closing report lists a chat as
+// ended only once its end was verified, with why it does not come back when
+// the restart brings chats back; a chat brought back is listed back once its
+// verification passed, and one that failed it is lost, with its reopen line.
 func TestExecuteListsEveryEndedChatOnly(t *testing.T) {
-	var order []string
-	ended := recordedUnit(&order, FamilyChats, "claude a", false, nil, nil)
-	ended.Chat = &EndedChat{Engine: "claude", Name: "a", SessionID: "sess-a"}
-	survivor := recordedUnit(&order, FamilyChats, "codex b", false, errors.New("socket still answers"), nil)
-	survivor.Chat = &EndedChat{Engine: "codex", Name: "b", SessionID: "sess-b"}
-	var out bytes.Buffer
-	(Plan{Units: []Unit{ended, survivor}}).Execute(context.Background(), &out)
-	text := out.String()
-	if text != `stop   chats          claude a  ok  stopped
+	for _, row := range []struct {
+		name    string
+		restore bool
+		want    string
+	}{
+		{name: "no restore", want: `stop   chats          claude a  ok  stopped
 stop   chats          codex b  FAILED  socket still answers
 restart: ended 1 chat(s)
   ended  claude   a                        sess-a
 last   pfm            
 restart: 1 step(s) FAILED
 restart: exit 1
-` {
-		t.Fatalf("the ended chat is not listed with engine, name and session id:\n%s", text)
-	}
-	if text != `stop   chats          claude a  ok  stopped
+`},
+		{name: "restore", restore: true, want: `stop   chats          claude a  ok  stopped
 stop   chats          codex b  FAILED  socket still answers
+stop   chats          opencode c  ok  stopped
+stop   chats          claude d  ok  stopped
+start  chats          claude d  FAILED  not live again
+start  chats          opencode c  ok  verified up
 restart: ended 1 chat(s)
-  ended  claude   a                        sess-a
+  ended  claude   a                        sess-a  not brought back: it runs in tmux, and only a chat in a Herdr pane comes back with Herdr's restore
+restart: brought back 1 chat(s)
+  back   opencode c                        sess-c
+restart: 1 chat(s) did not come back; reopen each by hand
+  lost   claude   d                        sess-d  pfm chat open sess-d
 last   pfm            
-restart: 1 step(s) FAILED
+restart: 2 step(s) FAILED
 restart: exit 1
-` {
-		t.Fatalf("a chat that failed to end is listed as ended:\n%s", text)
+`},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var order []string
+			ended := recordedUnit(&order, FamilyChats, "claude a", false, nil, nil)
+			ended.Chat = &ChatReport{Engine: "claude", Name: "a", SessionID: "sess-a"}
+			survivor := recordedUnit(&order, FamilyChats, "codex b", false, errors.New("socket still answers"), nil)
+			survivor.Chat = &ChatReport{Engine: "codex", Name: "b", SessionID: "sess-b"}
+			units := []Unit{ended, survivor}
+			if row.restore {
+				ended.Chat.NotBack = "it runs in tmux, and only a chat in a Herdr pane comes back with Herdr's restore"
+				back := recordedUnit(&order, FamilyChats, "opencode c", true, nil, nil)
+				back.Chat = &ChatReport{Engine: "opencode", Name: "c", SessionID: "sess-c"}
+				lost := recordedUnit(&order, FamilyChats, "claude d", true, nil, errors.New("not live again"))
+				lost.Chat = &ChatReport{Engine: "claude", Name: "d", SessionID: "sess-d"}
+				units = append(units, back, lost)
+			}
+			var out bytes.Buffer
+			(Plan{Units: units, Restore: row.restore}).Execute(context.Background(), &out)
+			if text := out.String(); text != row.want {
+				t.Fatalf("closing report:\n%s\nwant:\n%s", text, row.want)
+			}
+		})
 	}
 }
 

@@ -1,12 +1,15 @@
 package mockengine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/mockengine/control/controltest"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestClaudeHoldStaysBusyUntilTheGateFileIsGone(t *testing.T) {
@@ -32,9 +35,16 @@ func TestClaudeHoldStaysBusyUntilTheGateFileIsGone(t *testing.T) {
 	if err := os.Remove(gate); err != nil {
 		t.Fatal(err)
 	}
-	fix.nudge()
-	session.waitFrame("the reply once the gate is gone", func(frame string) bool {
-		return !pfmcall.IsBusy(frame) && strings.Contains(frame, "released")
+	// The look the second nudge handed may not have statted the gate yet: finding it gone ends the hold with
+	// no wait left to take a nudge, which blocks until one does. So each look that misses the reply offers a
+	// look instead (advance 0s, acked at once, dropped when nothing is looking).
+	testwait.Until(t, "the pane to show the reply once the gate is gone", func() (bool, string) {
+		frame := session.out.frame()
+		if !pfmcall.IsBusy(frame) && strings.Contains(frame, "released") {
+			return true, ""
+		}
+		controltest.AdvanceBy(t, fix.control, 0)
+		return false, fmt.Sprintf("frame:\n%s\nstderr=%q", frame, session.stderr.String())
 	})
 }
 

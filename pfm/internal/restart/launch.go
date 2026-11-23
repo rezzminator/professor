@@ -17,35 +17,34 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
-	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 const (
-	usage = "usage: pfm restart [--dry-run]"
+	usage = "usage: pfm restart [--dry-run] [--no-restore]"
 	// WorkerCommand is the `pfm internal` entry of the detached worker a plain
 	// `pfm restart` starts; no user types it.
 	WorkerCommand = "restart-run"
 	workerUsage   = "usage: pfm internal " + WorkerCommand +
-		" --front PID [--launched-from SOCKET [--launched-pane PANE]]"
+		" --front PID [--launched-from SOCKET [--launched-pane PANE]] [--no-restore]"
 )
 
 // Main is `pfm restart`. --dry-run prints the plan and changes nothing; a
 // plain run hands the restart to a detached worker and follows its log, so
-// the restart finishes even when the chat that typed it ends.
+// the restart finishes even when the chat that typed it ends. A chat in a
+// Herdr pane comes back with Herdr's restore; --no-restore ends every chat.
 func Main(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	flags := cli.NewFlagSet("restart", usage, stderr)
 	dryRun := flags.Bool("dry-run", false, "print the ordered plan and change nothing")
+	noRestore := flags.Bool("no-restore", false, "end every chat and bring none back")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
@@ -62,6 +61,7 @@ func Main(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 		}
 		dependencies := LiveDeps(runtime, stderr, nil, launched)
 		dependencies.DryRun = true
+		dependencies.NoRestore = *noRestore
 		plan := BuildPlan(ctx, dependencies)
 		plan.Print(stdout)
 		for _, finding := range plan.Findings {
@@ -71,7 +71,7 @@ func Main(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 		}
 		return 0
 	}
-	return launchFront(ctx, stdout, stderr, runtime)
+	return launchFront(ctx, stdout, stderr, runtime, *noRestore)
 }
 
 // sessionLeader reports whether this process leads its own session, as the
@@ -89,6 +89,7 @@ func Worker(args []string, stdout, stderr io.Writer, runtime config.Runtime) int
 	front := flags.Int("front", 0, "the pid of the pfm restart that launched this worker")
 	socket := flags.String("launched-from", "", "the tmux socket name or Herdr socket path of the chat that typed it")
 	pane := flags.String("launched-pane", "", "the Herdr pane of that chat")
+	noRestore := flags.Bool("no-restore", false, "end every chat and bring none back")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
@@ -103,7 +104,9 @@ func Worker(args []string, stdout, stderr io.Writer, runtime config.Runtime) int
 	}
 	ctx := context.Background()
 	launchedFrom := chatAddress{Socket: *socket, Pane: *pane}
-	plan := BuildPlan(ctx, LiveDeps(runtime, stdout, []int{*front}, launchedFrom))
+	dependencies := LiveDeps(runtime, stdout, []int{*front}, launchedFrom)
+	dependencies.NoRestore = *noRestore
+	plan := BuildPlan(ctx, dependencies)
 	plan.Print(stdout)
 	return plan.Execute(ctx, stdout)
 }
@@ -167,28 +170,18 @@ func restartWorkerEnv(environ []string) []string {
 }
 
 // launchFront starts the detached worker and follows its log.
-func launchFront(ctx context.Context, stdout, stderr io.Writer, runtime config.Runtime) int {
+func launchFront(ctx context.Context, stdout, stderr io.Writer, runtime config.Runtime, noRestore bool) int {
 	executable, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm restart: resolve this binary: %v\n", err)
 		return 1
 	}
-	argv := []string{executable}
-	if runtime.Config.Path != "" {
-		argv = append(argv, "--config", runtime.Config.Path)
-	}
-	argv = append(argv, "internal", WorkerCommand, "--front", strconv.Itoa(os.Getpid()))
 	launched, err := launchingChat()
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm restart: identify launcher: %v\n", err)
 		return 1
 	}
-	if launched.Socket != "" {
-		argv = append(argv, "--launched-from", launched.Socket)
-		if launched.Pane != "" {
-			argv = append(argv, "--launched-pane", launched.Pane)
-		}
-	}
+	argv := workerArgv(executable, runtime.Config.Path, os.Getpid(), launched, noRestore)
 	logDir := restartLogDir(runtime.Paths)
 	name := fmt.Sprintf("restart-%s-%d.log", clock.Real.Now().UTC().Format("20060102T150405Z"), os.Getpid())
 	launcher := Launcher{Runner: obs.Runner(deps.RealRunner{}), Clock: clock.Real, Exited: childExited}
@@ -199,6 +192,27 @@ func launchFront(ctx context.Context, stdout, stderr io.Writer, runtime config.R
 	}
 	fmt.Fprintf(stderr, "pfm restart: worker pid %d, detached; log %s\n", pid, logPath)
 	return launcher.Follow(ctx, pid, logPath, stdout, stderr)
+}
+
+// workerArgv is the detached worker's command line: this binary and its
+// config, the front's pid, the chat that typed the restart and whether it
+// brings chats back.
+func workerArgv(executable, configPath string, front int, launched chatAddress, noRestore bool) []string {
+	argv := []string{executable}
+	if configPath != "" {
+		argv = append(argv, "--config", configPath)
+	}
+	argv = append(argv, "internal", WorkerCommand, "--front", strconv.Itoa(front))
+	if launched.Socket != "" {
+		argv = append(argv, "--launched-from", launched.Socket)
+		if launched.Pane != "" {
+			argv = append(argv, "--launched-pane", launched.Pane)
+		}
+	}
+	if noRestore {
+		argv = append(argv, "--no-restore")
+	}
+	return argv
 }
 
 // restartLogDir is where restart logs and the logs of what it starts go: the
@@ -312,73 +326,4 @@ func childExited(pid int) (bool, error) {
 		return false, fmt.Errorf("wait4: %w", err)
 	}
 	return reaped == pid, nil
-}
-
-// liveFleet is the real chat roster: the fleet scan, and chat.EndForRestart.
-type liveFleet struct {
-	runtime config.Runtime
-	warn    io.Writer
-}
-
-func (fleet liveFleet) Live(ctx context.Context) ([]headless.Chat, map[string]string, error) {
-	scan, err := pfmchat.ScanRows(ctx, fleet.warn, &fleet.runtime)
-	if err != nil {
-		return nil, nil, err
-	}
-	var chats []headless.Chat
-	for index := range scan.Rows {
-		row := scan.Rows[index]
-		// The shared addressable set, minus an agent row: restart ends chats, never an agent it did not start.
-		if row.Kind.IsAddressable() && row.Kind != compose.Agent {
-			chats = append(chats, pfmchat.FromRow(row))
-		}
-	}
-	return chats, scan.Unreadable, nil
-}
-
-func (fleet liveFleet) End(ctx context.Context, chat headless.Chat) error {
-	return pfmchat.EndForRestart(ctx, chat, fleet.runtime.Paths)
-}
-
-// LiveDeps is the host's real doors for one restart.
-func LiveDeps(runtime config.Runtime, warn io.Writer, spare []int, launchedFrom chatAddress) Deps {
-	runner := obs.Runner(deps.RealRunner{})
-	executable, err := os.Executable()
-	if err != nil {
-		fmt.Fprintf(warn, "pfm restart: resolve this binary (pfm processes are matched by name only): %v\n", err)
-	}
-	services := nativeServiceManager(
-		servicemanager.Native(),
-		runner,
-		clock.Real,
-		runtime.Paths.Home,
-		servicemanager.UID(),
-	)
-	dependencies := Deps{
-		Runner:       runner,
-		Procs:        gather.NewProcFS(runtime.Paths.ProcRoot),
-		Kernel:       gather.NativeKernel(),
-		Probe:        gather.ProbeProcess,
-		Install:      gather.InstallAt(runtime.Paths.Home),
-		Clock:        clock.Real,
-		Fleet:        liveFleet{runtime: runtime, warn: warn},
-		Services:     services,
-		Self:         os.Getpid(),
-		EffectiveUID: uint32(os.Geteuid()),
-		Spare:        spare,
-		Executable:   executable,
-		ConfigPath:   runtime.Config.Path,
-		HerdrBinary:  (paths.OSEnv{}).Get(herdr.EnvBin),
-		LaunchedFrom: launchedFrom,
-		LogDir:       restartLogDir(runtime.Paths),
-		Env:          restartWorkerEnv(os.Environ()),
-	}
-	if config.MCPServerEnabled(runtime.Config, config.MCPServerChat) {
-		address := "127.0.0.1:" + strconv.Itoa(runtime.Config.MCP.HTTP.Port)
-		dependencies.DaemonProbe = func(context.Context) error {
-			_, err := mcpserv.ProbeDaemon(address)
-			return err
-		}
-	}
-	return dependencies
 }

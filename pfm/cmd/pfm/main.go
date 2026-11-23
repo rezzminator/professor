@@ -248,7 +248,7 @@ func printUsage(w io.Writer) {
 		"  generate  regenerate prompts, agents and the Codex fleet prompt from the source clone: --plan",
 		"  update    update the binary; check, adopt, pin, ignore, drop or accept project template baselines",
 		"  init      scaffold project templates once and pin their baselines",
-		"  restart   end every chat, restart Herdr and every pfm service that ran, each verified up: --dry-run",
+		"  restart   restart Herdr and every pfm service that ran; Herdr chats come back: --dry-run --no-restore",
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",

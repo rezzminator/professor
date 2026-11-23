@@ -50,6 +50,8 @@ type reloadHerdrFixture struct {
 	typed     []string
 	submitted bool
 	processes int
+	// badReads counts the version-named rows without argv served before /exit.
+	badReads  int
 	mode      string
 	canonical string
 	terminal  string
@@ -95,6 +97,10 @@ func (f *reloadHerdrFixture) assertLaunchRecorded(recorded bool) {
 			f.request.SessionID, f.values.StateDB, record, err)
 	}
 }
+
+// bundledRgRow is the child Claude native runs its bundled rg as: its own
+// executable under argv0 rg, so its name is Claude's version.
+const bundledRgRow = `{"pid":303,"name":"2.1.330","argv0":"rg","argv":["rg","--files"]}`
 
 func newReloadHerdrFixture(t *testing.T) *reloadHerdrFixture {
 	t.Helper()
@@ -267,11 +273,24 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 			strings.HasPrefix(f.mode, "failed-retry") && !f.submitted {
 			return f.processResult([]any{}), ""
 		}
+		// Claude native runs its bundled rg from its own executable under argv0
+		// rg, so the child carries Claude's version as its name.
+		if f.mode == "bundled-rg-alone" {
+			return f.processResult([]any{json.RawMessage(bundledRgRow)}), ""
+		}
 		if f.mode == "omitted-process" {
 			return map[string]any{
 				"type":         "pane_process_info",
 				"process_info": map[string]any{"pane_id": f.canonical, "shell_pid": 90},
 			}, ""
+		}
+		// Herdr now and then lists a live Claude by its version name with an
+		// empty argv (Herdr 0.9.5, Claude Code 2.1.330): the two seat proofs, the
+		// target refresh and the first engine read before /exit get it.
+		if !f.submitted && (f.mode == "version-named-no-argv" ||
+			f.mode == "version-named-no-argv-once" && f.badReads < 4) {
+			f.badReads++
+			return f.processResult([]any{json.RawMessage(`{"pid":3300341,"name":"2.1.330","argv":[]}`)}), ""
 		}
 		// One startup poll reads the pane's processes three times (two target
 		// refreshes, then the engine read): the first whole poll sees it dying.
@@ -324,9 +343,11 @@ func (f *reloadHerdrFixture) respond(method string, p map[string]json.RawMessage
 			}
 		}
 		argv := append([]string{pfmengine.MustLookup(f.request.Engine).Binary}, run.Args...)
-		return f.processResult(
-			[]any{map[string]any{"pid": pid, "name": "versioned-binary", "argv0": argv[0], "argv": argv}},
-		), ""
+		rows := []any{map[string]any{"pid": pid, "name": "versioned-binary", "argv0": argv[0], "argv": argv}}
+		if f.mode == "bundled-rg-first" {
+			rows = append([]any{json.RawMessage(bundledRgRow)}, rows...)
+		}
+		return f.processResult(rows), ""
 	case "pane.read":
 		if f.onRead != nil {
 			fn := f.onRead
@@ -488,9 +509,27 @@ func TestRunHerdrLifecycle(t *testing.T) {
 		{name: "process-error", mode: "process-error", want: "process unavailable"},
 		{name: "malformed-process", mode: "malformed-process", want: "shell identity"},
 		{name: "wrong-pane", mode: "wrong-pane", want: "shell identity"},
-		{name: "empty-process", mode: "empty-process", want: "engine"},
+		{
+			name: "empty-process", mode: "empty-process",
+			want: "native reload: target engine is not running: pane w6:p3 lists no foreground process",
+		},
+		// A child Claude native runs under argv0 rg is never taken for the engine.
+		{
+			name: "bundled-rg-is-not-the-engine", mode: "bundled-rg-alone",
+			want: `native reload: target engine is not running: pane w6:p3 lists pid 303 name "2.1.330" ` +
+				`argv0 "rg" argv ["rg" "--files"]`,
+		},
+		{name: "bundled-rg-listed-before-the-engine", mode: "bundled-rg-first"},
 		{name: "omitted-process", mode: "omitted-process", want: "engine"},
 		{name: "null-argv", mode: "null-argv", want: "argv"},
+		// Herdr lists a live Claude by its version name with an empty argv now
+		// and then: the reload reads again, never calls the chat not running.
+		{name: "version-named-row-without-argv-read-again", mode: "version-named-no-argv-once"},
+		{
+			name: "version-named-row-never-carries-argv", mode: "version-named-no-argv",
+			want: "native reload: target engine could not be proven: 3 reads of pane w6:p3 listed it without a valid " +
+				`pid/argv; the last listed pid 3300341 name "2.1.330" argv0 "" argv []`,
+		},
 		// After /exit the old engine dies: a dying process has no argv for a
 		// moment, so the wait reads again; one that never clears is the refusal.
 		{name: "dying-old-engine-read-again", mode: "argv-gone-once"},
@@ -544,7 +583,7 @@ func TestRunHerdrLifecycle(t *testing.T) {
 				f.request.Then = "resume the port"
 			}
 			var exitClock *clock.Fake
-			if tc.mode == "old-process" {
+			if tc.mode == "old-process" || tc.mode == "version-named-no-argv" {
 				// The idle check sleeps one 1 s poll between its two stable reads; the
 				// startup give-up then sleeps its poll at each of its 5+3 tries.
 				exitClock = clock.NewFake(time.Unix(0, 0))
@@ -566,6 +605,20 @@ func TestRunHerdrLifecycle(t *testing.T) {
 							got,
 						)
 					}
+				case "version-named-no-argv":
+					// Three reads, the clock's 1 s poll between each, nothing typed.
+					got := exitClock.Now().Sub(time.Unix(0, 0))
+					if err.Error() != tc.want || got != 2*time.Second || len(f.typed) != 0 || f.badReads != 8 {
+						t.Fatalf("unprovable engine: error=%q clock=%v typed=%q bad reads=%d, "+
+							"want %q, 2s, nothing typed, 8 reads", err, got, f.typed, f.badReads, tc.want)
+					}
+					f.assertLaunchRecorded(false)
+				case "empty-process", "bundled-rg-alone":
+					// The refusal names the pane and every row the read listed; nothing is typed.
+					if err.Error() != tc.want || len(f.typed) != 0 {
+						t.Fatalf("engine not running: error=%q typed=%q, want %q, nothing typed", err, f.typed, tc.want)
+					}
+					f.assertLaunchRecorded(false)
 				case "failed-start":
 					f.assertLaunchRecorded(true)
 				case "blocked":
@@ -629,6 +682,9 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			}
 			if tc.mode == "argv-gone-once" && f.processes < 4 {
 				t.Fatalf("returned after %d process reads, want the dying engine read again", f.processes)
+			}
+			if tc.mode == "version-named-no-argv-once" && f.badReads != 4 {
+				t.Fatalf("served %d version-named rows without argv, want 4", f.badReads)
 			}
 			if tc.mode == "pending-race" && f.processes < 3 {
 				t.Fatalf("returned on old process after %d probes", f.processes)

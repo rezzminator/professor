@@ -147,7 +147,7 @@ func RunHerdr(
 	}
 	oldPID := 0
 	if retry {
-		pid, _, err := n.process(ctx)
+		pid, _, err := n.engine(ctx)
 		if err != nil {
 			return Result{}, err
 		}
@@ -162,12 +162,14 @@ func RunHerdr(
 			return Result{}, errors.New("failed native seat is not showing the seat-host retry prompt")
 		}
 	} else {
-		oldPID, _, err = n.process(ctx)
+		var listed []herdr.Process
+		oldPID, listed, err = n.engine(ctx)
 		if err != nil {
 			return Result{}, err
 		}
 		if oldPID == 0 {
-			return Result{}, errors.New("native reload: target engine is not running")
+			return Result{}, fmt.Errorf("native reload: target engine is not running: pane %s lists %s",
+				n.target.Pane, foregroundRows(listed))
 		}
 		if options.Delay > 0 {
 			if err := options.Clock.Sleep(ctx, options.Delay); err != nil {
@@ -428,37 +430,75 @@ func nativeReloadRun(request Request, name string) (fleetdb.SeatRun, error) {
 
 var errEngineUnprovable = errors.New("native reload engine process lacks a valid pid/argv; startup cannot be proved")
 
-func (n *nativeReload) process(ctx context.Context) (int, []string, error) {
+// process is the target engine's pid and argv (0: Herdr listed none) in the
+// pane's foreground, as one read lists it, with every row that read listed.
+func (n *nativeReload) process(ctx context.Context) (int, []string, []herdr.Process, error) {
 	if err := n.refreshTarget(ctx); err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	processes, err := herdr.ReadPaneProcesses(ctx, n.target.SocketPath, n.target.Pane)
 	if err != nil {
-		return 0, nil, fmt.Errorf("native reload process_info: %w", err)
+		return 0, nil, nil, fmt.Errorf("native reload process_info: %w", err)
 	}
 	if processes.ForegroundErr != nil {
-		return 0, nil, fmt.Errorf("decode native reload process_info: %w", processes.ForegroundErr)
+		return 0, nil, nil, fmt.Errorf("decode native reload process_info: %w", processes.ForegroundErr)
 	}
 	if processes.Pane != n.target.Pane {
-		return 0, nil, errors.New("native reload malformed process_info or mismatched pane")
+		return 0, nil, nil, errors.New("native reload malformed process_info or mismatched pane")
 	}
-	binary := pfmengine.MustLookup(n.request.Engine).Binary
-	for _, process := range processes.Foreground {
-		name := process.Name
-		if process.Argv0 != "" {
-			name = filepath.Base(process.Argv0)
-		} else if len(process.Argv) > 0 {
-			name = filepath.Base(process.Argv[0])
-		}
-		if name != binary {
+	listed := processes.Foreground
+	for _, process := range listed {
+		if !process.RunsEngine(n.request.Engine) {
 			continue
 		}
 		if process.PID <= 0 || len(process.Argv) == 0 {
-			return 0, nil, errEngineUnprovable
+			return 0, nil, listed, errEngineUnprovable
 		}
-		return process.PID, process.Argv, nil
+		return process.PID, process.Argv, listed, nil
 	}
-	return 0, nil, nil
+	return 0, nil, listed, nil
+}
+
+// foregroundRows names every row a read of the pane's foreground listed.
+func foregroundRows(listed []herdr.Process) string {
+	if len(listed) == 0 {
+		return "no foreground process"
+	}
+	rows := make([]string, len(listed))
+	for index, process := range listed {
+		rows[index] = process.String()
+	}
+	return strings.Join(rows, "; ")
+}
+
+// nativeEngineReads bounds the reads of a target engine Herdr lists without a
+// valid pid/argv: Herdr 0.9.5 now and then answers a live engine's row with an
+// empty argv for one read.
+const nativeEngineReads = 3
+
+// engine is the target engine's pid (0: Herdr listed none) with the rows the
+// read listed, read again through the clock while its row carries no valid
+// pid/argv; a row that never does is an engine that could not be proven,
+// never one that is not running.
+func (n *nativeReload) engine(ctx context.Context) (int, []herdr.Process, error) {
+	for read := 1; ; read++ {
+		pid, _, listed, err := n.process(ctx)
+		if !errors.Is(err, errEngineUnprovable) {
+			return pid, listed, err
+		}
+		if read == nativeEngineReads {
+			return 0, listed, fmt.Errorf(
+				"native reload: target engine could not be proven: %d reads of pane %s listed it without a valid "+
+					"pid/argv; the last listed %s",
+				read,
+				n.target.Pane,
+				foregroundRows(listed),
+			)
+		}
+		if err := n.options.Clock.Sleep(ctx, n.options.Poll); err != nil {
+			return 0, nil, err
+		}
+	}
 }
 
 func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run fleetdb.SeatRun) error {
@@ -483,7 +523,7 @@ func (n *nativeReload) wait(ctx context.Context, id string, oldPID int, run flee
 			(oldPID != 0 || attempt+1 == n.options.ExitTries+n.options.ExitGraceTries) {
 			return fmt.Errorf("native reload new engine failed: %s", seat.LostNote)
 		}
-		pid, argv, err := n.process(ctx)
+		pid, argv, _, err := n.process(ctx)
 		// The old engine dying after /exit has no argv for a moment: read again.
 		if unprovable = nil; errors.Is(err, errEngineUnprovable) {
 			unprovable, err = err, nil
@@ -537,7 +577,7 @@ func (n *nativeReload) rollback(
 		return errors.New("native reload binding changed before rollback; pending left to seat-host")
 	}
 	if !retry {
-		pid, _, err := n.process(ctx)
+		pid, _, err := n.engine(ctx)
 		if err != nil {
 			return fmt.Errorf("native reload cannot safely roll back pending: %w", err)
 		}

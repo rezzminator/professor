@@ -63,18 +63,17 @@ func bridgeForeground(
 	}
 }
 
-// bridgeTmux runs one tmux read within gather.ProbeTimeout, as gather.TmuxRead
-// does: a stopped or wedged pfm server is this proof's named failure, never a
-// painter stalled on it.
+var bridgeTmuxWaitDelay = time.Second // past it, Wait closes a killed client's pipes its stopped server holds
+
+// bridgeTmux runs one tmux read within gather.ProbeTimeout, bound by gather.ProbeContext as gather.TmuxRead
+// is: a stopped or wedged pfm server is this proof's named failure, never a painter stalled on it.
 func bridgeTmux(ctx context.Context, socketPath string, args ...string) (string, error) {
-	readCtx, cancel := context.WithTimeout(ctx, gather.ProbeTimeout)
+	readCtx, cancel := gather.ProbeContext(ctx)
 	defer cancel()
 	var stderr strings.Builder
 	command := pfmtmux.Exec(readCtx, "", socketPath, args...)
 	command.Stderr = &stderr
-	// A client killed for a stopped server leaves that server holding its
-	// pipe: past the delay Wait closes it and returns.
-	command.WaitDelay = time.Second
+	command.WaitDelay = bridgeTmuxWaitDelay
 	output, err := command.Output()
 	if err != nil && ctx.Err() == nil && errors.Is(readCtx.Err(), context.DeadlineExceeded) {
 		return "", fmt.Errorf("tmux %s on %s: %w within %s",

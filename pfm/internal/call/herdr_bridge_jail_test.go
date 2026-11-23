@@ -5,12 +5,15 @@ package call
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -126,11 +129,28 @@ func TestHerdrBridgeTmuxGivesUpOnAFrozenServer(t *testing.T) {
 			held <- conn // held open, never answered
 		}
 	}()
+	// The probe bound fires on a fake clock the test moves, and the killed
+	// client's pipes, held by the frozen server, close at once: the test waits
+	// out neither in real time.
+	fake := clock.NewFake(time.Unix(0, 0))
+	keptDelay := bridgeTmuxWaitDelay
+	bridgeTmuxWaitDelay = time.Nanosecond
+	t.Cleanup(func() { bridgeTmuxWaitDelay = keptDelay })
 	done := make(chan error, 1)
 	go func() {
-		_, err := bridgeTmux(context.Background(), socketPath, "list-clients", "-F", "#{client_pid}")
+		_, err := bridgeTmux(gather.WithProbeClock(context.Background(), fake), socketPath,
+			"list-clients", "-F", "#{client_pid}")
 		done <- err
 	}()
+	testwait.Until(t, "the read to arm its probe bound and reach the frozen server", func() (bool, string) {
+		return fake.Pending() == 1 && len(held) > 0,
+			fmt.Sprintf("pending=%d accepted=%d clock=%s", fake.Pending(), len(held), fake)
+	})
+	fake.Advance(gather.ProbeTimeout - time.Nanosecond)
+	if fake.Pending() != 1 {
+		t.Fatalf("the probe bound fired %s before %s: %s", time.Nanosecond, gather.ProbeTimeout, fake)
+	}
+	fake.Advance(time.Nanosecond)
 	err, _ = testwait.Receive(t, "the read of a frozen server to end", done)
 	if !errors.Is(err, gather.ErrServerUnresponsive) {
 		t.Fatalf(

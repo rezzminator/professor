@@ -211,6 +211,14 @@ func (jail *callTmuxJail) startBusyPane(
 		session,
 		"-n",
 		"steer-window",
+		// A chat's terminal is wide enough to keep a long queued body and its
+		// composer row on screen, as a TUI keeps its composer: at tmux's 80x24
+		// default the body scrolls the row away and render-settle reads it to
+		// its last try.
+		"-x",
+		"200",
+		"-y",
+		"50",
 		"python3",
 		script,
 		glyph,
@@ -309,6 +317,13 @@ func (jail *callTmuxJail) startCompactTranscriptPane(
 		"-d",
 		"-s",
 		session,
+		// Wide and tall enough to keep the whole focus and its composer row on
+		// screen, as a TUI keeps its composer: at tmux's 80x24 default the
+		// focus scrolls the row away and render-settle reads it to its last try.
+		"-x",
+		"200",
+		"-y",
+		"50",
 		"python3",
 		script,
 		transcript,

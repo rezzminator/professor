@@ -421,6 +421,16 @@ func TestSharedOpenKeepsTheIssuesTableWhenItsBackupFails(t *testing.T) {
 	if count := countIssueObjects(t, db); count != 2 {
 		t.Fatalf("issues objects=%d after a failed backup, want the table and index kept", count)
 	}
+	if err := os.Remove(path + ".bak-before-issues-drop"); err != nil {
+		t.Fatal(err)
+	}
+	retried := OpenSharedState(ctx, paths.Values{StateDB: path})
+	if err := errors.Join(retried.Degraded(), retried.Close()); err != nil {
+		t.Fatalf("open of %s once the backup can be written: %v", path, err)
+	}
+	if count := countIssueObjects(t, db); count != 0 {
+		t.Fatalf("issues objects=%d in %s after the next open, want the table and index dropped", count, path)
+	}
 }
 
 // A read-only open never drops the ledger.

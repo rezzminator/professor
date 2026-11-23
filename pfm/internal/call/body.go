@@ -158,10 +158,9 @@ func (engine *Engine) prepareMessage(
 	}, nil
 }
 
-// inlineThreshold is the measured composer edge (TESTPLAN.md § Composer
-// transport boundaries): on the live path it is the inline-vs-paste
-// boundary, on the resume path the inline-vs-file boundary — see
-// prepareMessage's own comment for which caller means which.
+// inlineThreshold is the measured composer edge (README.md): on the live path
+// it is the inline-vs-paste boundary, on the resume path the inline-vs-file
+// boundary — see prepareMessage's own comment for which caller means which.
 func (engine *Engine) inlineThreshold(engineName string) int {
 	// OpenCode inherits Codex's conservative bound: its composer paste edge is
 	// unverified, so it gets the smaller of the two measured thresholds rather

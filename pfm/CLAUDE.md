@@ -4,7 +4,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 # Vocabulary
 
-- test plan: the tier tokens, what the fake engine plays and does not play, known divergences, seams and host fixtures · `TESTPLAN.md`
+- fake engine: what it plays and the real-engine flows no suite plays · `internal/mockengine/README.md`
 - CLI adapters: stdlib `flag` dispatch plus the end-to-end jail tests; a file name starts with its unit (`chat_` is the one multi-file unit), so `ls cmd/pfm/{unit}_*` lists a unit; `pfm help` lists the subcommands · `cmd/pfm/`
 - package map: each package's front door, `{package}.go` (`main.go` for `package main`), opens with its `// Package` menu per the `coding` rule, C31 ratcheting it; `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` prints the map · `internal/doctor/`, `internal/hookentry/`, `internal/picker/`, `internal/update/`, `internal/professor/`
 - tagged e2e: the `-tags e2e` tier, run serially · `e2e/`
@@ -51,7 +51,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 - **Tests NEVER touch a live `cc-*` / `cx-*` socket or the real `/tmp/cc-sid`:** every test sets `TMUX_TMPDIR = t.TempDir()`.
 - **Destructive commands default to a dry run, and the dry run IS the apply's preview:** `reap`, `archive` and `heal` classify identically with and without `--apply`; every unknown — an unanswerable busy query, a silent socket, a chat writing its transcript right now — resolves toward keeping what exists.
-- **No suite runs a real engine or a real credential:** a flow the fake engine cannot play is named `UNPLAYED` in `TESTPLAN.md` § Flows the fake engine does not yet play, never run against a real engine and never left quietly uncovered.
+- **No suite runs a real engine or a real credential:** a flow the fake engine cannot play is named `UNPLAYED` in `internal/mockengine/README.md` § Flows the fake engine does not yet play, never run against a real engine and never left quietly uncovered.
 
 ## Code Standards
 
@@ -85,6 +85,6 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 ## Testing Rules
 
-- Package tests sit beside every package; the end-to-end jail tests under `cmd/pfm/`; tiers per `TESTPLAN.md` § Legend — the SAFETY tokens.
+- Package tests sit beside every package; the end-to-end jail tests under `cmd/pfm/`; tiers per `.claude/commands/pfm-testing-manual.md` § Tiers.
 - Keep scratch socket paths short: a long `TMUX_TMPDIR` hits "File name too long", and the failure looks like a tmux bug.
 - Every K3 rule gets table-driven tests; every emitted shell line a golden file.

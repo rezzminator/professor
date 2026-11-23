@@ -459,6 +459,9 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 
 // claudeTokens is every token the response billed: the executor's and each
 // advisor consultation's, which the executor's top level never carries.
+// The sum is transcript traffic, not cost: every assistant record counts its
+// cache-read tokens again, so a long chat's TOKENS column repeatedly counts
+// its cached prefix.
 func claudeTokens(usage pricing.UsageBlock) int64 {
 	billed, _ := usage.Billed()
 	total := billed.Context() + billed.Output

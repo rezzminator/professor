@@ -69,6 +69,12 @@ func TestBezierAtPinsTheStraightRailPixelColumns(t *testing.T) {
 // value that turns the golden's ⢸ (U+28B8) into ⠘ (U+2818), byte 1348,
 // 0xb8 → 0x98: sample 9 and its two halo dots leave the cell together. On an FMA host with the conversions removed the two agree and
 // this fails; here it proves the trap is real and unentered.
+//
+// lerpRGB and luma are the package's only other expressions an FMA host still
+// contracts, and no test pins them. Measured: with every fusable expression in
+// cosmos.go and cosmoscanvas.go contracted, only the Bezier's byte moved,
+// because quantRGB's 8-step quantisation absorbs a 1-ULP colour difference. A
+// golden red on an FMA host at a colour escape, not a glyph, re-opens this.
 func TestBezierAtRefusesTheFusedMultiplyAdd(t *testing.T) {
 	at := float64(railFusedSample) / float64(railSteps)
 	mt := 1 - at

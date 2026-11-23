@@ -725,7 +725,7 @@ func TestCallPasteBoundaryAndKillerBody(t *testing.T) {
 	}
 }
 
-// Byte-exact calls are proven; real terminal negotiation remains UNPLAYED (TESTPLAN.md).
+// Byte-exact calls are proven; real terminal negotiation remains UNPLAYED (README.md).
 func TestMultiLineLongMessageSurvivesPasteByteExactWithoutMidBodyEnter(t *testing.T) {
 	assertMultilinePaste(t, "line one\nline two\nline three\n"+strings.Repeat("padding line\n", 60))
 }

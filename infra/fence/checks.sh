@@ -823,8 +823,6 @@ checks_pfm_verify() {
   # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
   # is rc 2 (an enumerator or grep that could not run), never a PASS.
   run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh"
-  # The test plan: every test and file TESTPLAN.md cites must exist.
-  run "pfm: test-plan citations" -- bash "$d/scripts/testplan-check.sh"
   # The gate scripts' own fixture suites: a ratchet nobody tests is trusted
   # on faith. Each prints "N passed, M failed" and is non-zero on any FAIL.
   run "pfm: gate-script self-tests" -- bash -c 'for t in "$1"/scripts/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$d"
@@ -1275,7 +1273,6 @@ gate_run() { # pfm, templates, or all
     steps_add_heavy pfm.vet run 'pfm: go vet' -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
     steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
       bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
-    steps_add pfm.testplan run 'pfm: test-plan citations' -- bash "$d/scripts/testplan-check.sh" || return 1
     steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh" || return 1
   fi
   if [[ "$target" == templates || "$target" == all ]]; then

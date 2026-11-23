@@ -186,7 +186,7 @@ graph_order() {
   ' "$T/registered"
 }
 static_names() { { grep -Ev '^(pfm\.(unit-proof|e2e|unit|race)|pfm\.self\..*|templates\.fence\..*|fixture\..*)$' "$T/registered" || true; } | sort | paste -sd, -; }
-pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
+pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch'
 templates_static='templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.theme-glyphs,templates.shtest-clock,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.install-ping-tests,templates.skill-tests'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.unit-proof,pfm.vet,pfm.vet-darwin'
 if gate_run all >"$T/all.out" &&
@@ -195,7 +195,7 @@ if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^pfm\.unit$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^pfm\.e2e$' "$T/registered")" -eq 1 ] &&
   [ "$(grep -c '^templates\.fence\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/fence/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
-  [ "$(sed -n '1,11p' "$T/registered" | paste -sd, -)" = 'pfm.unit-proof,pfm.e2e,pfm.unit,pfm.race,pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.testplan,pfm.arch,templates.mirrors' ] &&
+  [ "$(sed -n '1,10p' "$T/registered" | paste -sd, -)" = 'pfm.unit-proof,pfm.e2e,pfm.unit,pfm.race,pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,templates.mirrors' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   [ -z "$(sort "$T/registered" | uniq -d)" ] && graph_order all; then
@@ -203,7 +203,7 @@ if gate_run all >"$T/all.out" &&
 else bad 'all registration' "$(cat "$T/all.out")" "$(cat "$T/registered")"; fi
 
 if PFM_TEST_TIMING_DIR="$T/real-pfm" gate_run pfm >"$T/pfm.out" &&
-  [ "$(sed -n '1,10p' "$T/registered" | paste -sd, -)" = 'pfm.unit-proof,pfm.e2e,pfm.unit,pfm.race,pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.testplan,pfm.arch' ] &&
+  [ "$(sed -n '1,9p' "$T/registered" | paste -sd, -)" = 'pfm.unit-proof,pfm.e2e,pfm.unit,pfm.race,pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch' ] &&
   [ "$(static_names)" = "$(printf '%s' "$pfm_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   graph_order pfm; then

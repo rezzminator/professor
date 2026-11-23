@@ -47,6 +47,7 @@
 //   - control_reader.go: the FIFO's one-reader lock, opened at the mock's first timed act.
 //   - control_clock.go: the mock's clock itself and clockBound, a bound the real engine enforces, on that clock.
 //   - jail.go: the mock's presence on a jailed host — its /proc entry and sid crumb.
+//   - README.md: the real-engine behaviour each fake step exists for, and the real flows no suite plays.
 package mockengine
 
 import (

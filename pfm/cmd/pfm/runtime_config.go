@@ -25,7 +25,7 @@ func firstRuntime(runtimes []commandRuntime) *commandRuntime {
 }
 
 // firstEnv is the same optional-trailing-argument shape as firstRuntime, for
-// the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env): a caller's
+// the host-environment seam (paths.Env): a caller's
 // pinned environment, or the real process environment when none was given.
 func firstEnv(envs []paths.Env) paths.Env {
 	if len(envs) == 0 {

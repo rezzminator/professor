@@ -24,6 +24,7 @@
 //     and the wait for a reserved pane's address.
 //   - herdr_bridge.go proves a pfm tmux chat client in a Herdr pane's foreground.
 //   - env.go reads the CHAT_CALL_* and CHAT_THEN_* knobs; obs.go records a coordinator's state trail.
+//   - README.md records the measured composer edges ClaudeInlineMax and CodexInlineMax rest on.
 package call
 
 import "context"

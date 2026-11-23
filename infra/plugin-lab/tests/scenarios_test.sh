@@ -47,7 +47,7 @@ expect_has 'gap reason' "$gaps" 'R7b GAP config-dir switch of a live parent is f
 # S8's wall bounds its run and its token need (lib/auth.sh lab_auth_check): ceil(600/60) + 10 = 20 min
 lab_lib auth
 s8wall=$( (lab_options() { :; }; source "$LAB_DIR/scenarios/forward-compaction/unseen-compaction.sh"; printf '%s' "$LAB_WALL_S") )
-LAB_AUTH_JSON=$(printf '{"claudeAiOauth":{"expiresAt":%s}}' "$(( ($(date +%s) + 19 * 60) * 1000 ))")
+LAB_AUTH_JSON=$(printf '{"claudeAiOauth":{"expiresAt":%s}}' "$(( (LAB_NOW_S + 19 * 60) * 1000 ))")
 expect_has 'S8 needs 20 minutes of token' "$(lab_auth_check "$s8wall" 2>&1)" 'auth-expiring 19 min left, need 20'
 # Execute the shipped scenario against the producer's error row, without a live chat or pane.
 logger_checks=$( (

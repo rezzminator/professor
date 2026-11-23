@@ -43,7 +43,7 @@ func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 	command := exec.Command(
 		"tmux", "-f", "/dev/null", "-L", socket,
 		"new-session", "-d", "-s", socket, "-n", "codex",
-		"printf '"+statusLine+"'; sleep 120",
+		"printf '"+statusLine+"'; tail -f /dev/null",
 	)
 	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -74,7 +74,7 @@ func waitForPaneToPaint(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 	// only escape it uses, so the painted text is the literal before it.
 	want := strings.TrimSpace(strings.TrimSuffix(statusLine, `\n`))
 	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
-	waitForTmuxPaneText(t, socket, environment, want, 5*time.Second)
+	waitForTmuxPaneText(t, socket, environment, want)
 }
 
 func codexJailRollout(

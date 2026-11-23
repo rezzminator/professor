@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -41,7 +40,7 @@ func peerNew(c *harness.Ctx, s *State) {
 func callAcross(c *harness.Ctx, s State) State {
 	term, owner, peerTerm := c.Terminal(s.Term), c.Terminal(meshOwner), c.Terminal(meshPeer)
 	var attach string
-	peerTerm.WaitScreen("pfm chat new's lines for "+s.Mesh.PeerName, 30*time.Second, func(screen string) bool {
+	peerTerm.WaitScreen("pfm chat new's lines for "+s.Mesh.PeerName, func(screen string) bool {
 		lines := strings.Split(screen, "\n")
 		for i, line := range lines {
 			if f := strings.Fields(line); len(f) == 5 && f[0] == "cc" && f[1] == s.Mesh.PeerName && i+1 < len(lines) {
@@ -56,8 +55,8 @@ func callAcross(c *harness.Ctx, s State) State {
 		c.Failf("pfm chat new %s printed %q under its row, want %q", s.Mesh.PeerName, attach, want)
 	}
 	peerTerm.Type(strings.TrimPrefix(attach, "attach: ") + "\r")
-	peerTerm.WaitFor("❯", 30*time.Second)
-	c.Poll("one live Claude chat named "+s.Mesh.PeerName+" on "+s.Mesh.PeerSock, stepBound, func() (bool, string) {
+	peerTerm.WaitFor("❯")
+	c.Poll("one live Claude chat named "+s.Mesh.PeerName+" on "+s.Mesh.PeerSock, func() (bool, string) {
 		rows := namedChats(c, s.Mesh.PeerSock)
 		for session, row := range rows {
 			s.Mesh.Peer = Chat{Session: session, Name: s.Mesh.PeerName}
@@ -72,7 +71,7 @@ func callAcross(c *harness.Ctx, s State) State {
 	parentPane := liveSeats(c, herdrSocket(s))[s.Chat.Session][1]
 
 	hold := s.Home + "/" + c.Unique("hold")
-	if code := shellRun(owner, "hold-peer", "touch "+hold, stepBound); code != 0 {
+	if code := shellRun(owner, "hold-peer", "touch "+hold); code != 0 {
 		c.Failf("touch %s exited %d:\n%s", hold, code, owner.Screen())
 	}
 	c.Cleanup(func() {
@@ -89,16 +88,16 @@ func callAcross(c *harness.Ctx, s State) State {
 		turnStep(called),
 	)
 	term.Press(harness.Ctrl('b'), harness.Key("n"))
-	term.WaitScreen("the session's first tab", 20*time.Second, func(screen string) bool {
+	term.WaitScreen("the session's first tab", func(screen string) bool {
 		return composerLine(screen) == "" && strings.Contains(screen, "pfm chat new --engine cc --name "+s.Name)
 	})
 	term.Press(harness.Ctrl('b'), harness.Key("n"))
-	term.WaitScreen("the chat's tab", 20*time.Second, func(screen string) bool {
+	term.WaitScreen("the chat's tab", func(screen string) bool {
 		return strings.Contains(screen, "⏺ "+s.Mesh.Mark)
 	})
 	parentBefore := entries(c, s.Name)
 	term.Type(callAsk + "\r")
-	term.WaitFor("⏺ "+called, 30*time.Second)
+	term.WaitFor("⏺ " + called)
 	receipt := mcpReceipt(c, s.Name, s.Chat.Session)
 	if want := fmt.Sprintf(
 		"called LIVE into %q — typed inline and submitted (Enter confirmed, input cleared)",
@@ -109,7 +108,7 @@ func callAcross(c *harness.Ctx, s State) State {
 			s.Name, s.Mesh.PeerName, receipt, want)
 	}
 	signedByParent := peerAsk + "  — sid " + s.Chat.Session[:8] + " · to reply: call " + s.Name + " <message>"
-	c.Poll(s.Mesh.PeerName+"'s transcript holding the one signed call", stepBound, func() (bool, string) {
+	c.Poll(s.Mesh.PeerName+"'s transcript holding the one signed call", func() (bool, string) {
 		got := entries(c, s.Mesh.PeerName)
 		return slices.Equal(got, []entry{{"user", signedByParent}}), fmt.Sprintf("%+v", got)
 	})
@@ -117,16 +116,17 @@ func callAcross(c *harness.Ctx, s State) State {
 	// The peer's call back must meet an idle agent: Herdr marks the caller's turn over once its hook
 	// lands, later than the paint on a loaded machine, and a call meeting a working agent takes Herdr's
 	// raw path, whose receipt is worded differently.
-	c.Poll("Herdr status idle for "+parentPane, 20*time.Second, func() (bool, string) {
+	c.Poll("Herdr status idle for "+parentPane, func() (bool, string) {
 		got := herdrStatus(c, s, parentPane)
 		return got == "idle", "status " + got
 	})
 	if r := c.Read("rm", hold); r.Code != 0 {
 		c.Failf("rm %s exited %d: %s", hold, r.Code, r.Stderr)
 	}
-	term.WaitFor("⏺ "+back, 30*time.Second)
+	nudgeEngine(c, sessionEngine(c, s.Mesh.Peer.Session))
+	term.WaitFor("⏺ " + back)
 	s.Mesh.Mark = back
-	peerTerm.WaitFor("⏺ "+across, 30*time.Second)
+	peerTerm.WaitFor("⏺ " + across)
 	peerWant := []entry{{"user", signedByParent}, {"tool", ""}, {"assistant", across}}
 	parentWant := append(
 		slices.Clone(parentBefore),
@@ -139,7 +139,7 @@ func callAcross(c *harness.Ctx, s State) State {
 		},
 		entry{"assistant", back},
 	)
-	c.Poll("both transcripts settled", stepBound, func() (bool, string) {
+	c.Poll("both transcripts settled", func() (bool, string) {
 		peer, parent := entries(c, s.Mesh.PeerName), entries(c, s.Name)
 		return slices.Equal(peer, peerWant) && slices.Equal(parent, parentWant),
 			fmt.Sprintf(
@@ -195,13 +195,13 @@ func peerRows(c *harness.Ctx, s *State) {
 	}
 	inline := "called LIVE into %q — typed inline and submitted (Enter confirmed, input cleared)"
 	settled := func(what string, want []entry) {
-		c.Poll(peer+"'s transcript "+what, stepBound, func() (bool, string) {
+		c.Poll(peer+"'s transcript "+what, func() (bool, string) {
 			got := entries(c, peer)
 			return slices.Equal(got, want), fmt.Sprintf("%+v\nwant %+v", got, want)
 		})
 	}
 	composer := func(want string) {
-		c.Poll(peer+"'s composer "+strconv.Quote(want), stepBound, func() (bool, string) {
+		c.Poll(peer+"'s composer "+strconv.Quote(want), func() (bool, string) {
 			screen := read(c, "tmux", "-L", s.Mesh.PeerSock, "capture-pane", "-p", "-t", pane)
 			return composerLine(screen) == want, screen
 		})
@@ -213,7 +213,7 @@ func peerRows(c *harness.Ctx, s *State) {
 	// transcript holds the answer before the Stop hook ends and the spinner clears, and a call reads
 	// the screen, so the spinner must be gone too.
 	idle := func() {
-		c.Poll(peer+" idle", stepBound, func() (bool, string) {
+		c.Poll(peer+" idle", func() (bool, string) {
 			screen := read(c, "tmux", "-L", s.Mesh.PeerSock, "capture-pane", "-p", "-t", pane)
 			if strings.Contains(screen, "esc to interrupt") {
 				return false, screen
@@ -271,6 +271,7 @@ func peerRows(c *harness.Ctx, s *State) {
 	if r := c.Read("rm", hold); r.Code != 0 {
 		c.Failf("rm %s exited %d: %s", hold, r.Code, r.Stderr)
 	}
+	nudgeEngine(c, sessionEngine(c, s.Mesh.Peer.Session))
 	settled("answering the held call, then the one queued behind it",
 		append(want, first, entry{"assistant", held}, second, entry{"assistant", behind}))
 }
@@ -299,14 +300,14 @@ func panelCall(
 		map[string]any{"type": "background_agent", "name": agent, "until_gone": gate}, turnStep(started)),
 		entry{"assistant", started})
 	settled("holding the call that started an agent", want)
-	c.Poll(peer+" waiting on its agent", stepBound, func() (bool, string) {
+	c.Poll(peer+" waiting on its agent", func() (bool, string) {
 		screen := capture()
 		return strings.Contains(screen, "✻ Waiting for 1 background agent to finish"), screen
 	})
 	if r := c.Read("tmux", "-L", s.Mesh.PeerSock, "send-keys", "-t", pane, "Left"); r.Code != 0 {
 		c.Failf("tmux send-keys Left exited %d: %s", r.Code, r.Stderr)
 	}
-	c.Poll(peer+"'s agents panel focused", stepBound, func() (bool, string) {
+	c.Poll(peer+"'s agents panel focused", func() (bool, string) {
 		screen := capture()
 		return strings.Contains(screen, "↑/↓ to select · Enter to view") && strings.Contains(screen, "❯ ⏺ main"), screen
 	})
@@ -318,6 +319,7 @@ func panelCall(
 	if r := c.Read("rm", gate); r.Code != 0 {
 		c.Failf("rm %s exited %d: %s", gate, r.Code, r.Stderr)
 	}
+	nudgeEngine(c, sessionEngine(c, s.Mesh.Peer.Session))
 	want = append(want, entry{"assistant", `Agent "` + agent + `" finished`})
 	settled("holding the agent's result", want)
 	return want

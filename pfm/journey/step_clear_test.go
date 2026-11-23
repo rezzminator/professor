@@ -5,7 +5,6 @@ package journey
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -17,10 +16,10 @@ func clearChat(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	old := s.Chat
 	term.Type("/clear\r")
-	term.WaitGone("⏺ ", 20*time.Second)
+	term.WaitGone("⏺ ")
 	term.WaitFor("❯")
 	sock := herdrSocket(s)
-	c.Poll("one live chat on "+s.Pane+" under a conversation after "+old.Session, 20*time.Second,
+	c.Poll("one live chat on "+s.Pane+" under a conversation after "+old.Session,
 		func() (bool, string) {
 			rows, listed := liveChats(c, sock)
 			seats := liveSeats(c, sock)

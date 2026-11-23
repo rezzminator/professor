@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 var (
@@ -34,9 +34,9 @@ type protocolClient struct {
 	serverSession *mcp.ServerSession
 }
 
-func connectInMemory(t *testing.T, server *mcp.Server) protocolClient {
+func connectInMemory(t testing.TB, server *mcp.Server) protocolClient {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
@@ -62,28 +62,18 @@ func connectInMemory(t *testing.T, server *mcp.Server) protocolClient {
 	}
 }
 
-func callTool[T any](t *testing.T, session *mcp.ClientSession, name string, arguments any) T {
+func callTool[T any](t testing.TB, session *mcp.ClientSession, name string, arguments any) T {
 	t.Helper()
-	// One bound covers every call here, and the heaviest is not close to the
-	// others: the oversize-paste case drives a full megabyte through bracketed
-	// paste into a real jailed tmux pane and back. 15s fit that on an idle box
-	// and not under `go test ./...`, where this package competes with every
-	// other for exec and scheduler time, so a healthy megabyte round trip
-	// reported itself as a deadline. Size the bound for the heaviest legitimate
-	// operation; it is only ever paid in full when a call genuinely hangs.
-	const callBound = 60 * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), callBound)
+	// The one hung-only bound covers every call here, the oversize paste
+	// included: it never judges how long a healthy call takes.
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
-	started := time.Now()
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      name,
 		Arguments: arguments,
 	})
 	if err != nil {
-		// Name how long it actually waited: a call that died at the bound is a
-		// different problem from one that failed immediately, and "context
-		// deadline exceeded" alone does not say which happened.
-		t.Fatalf("%s: after %s of a %s bound: %v", name, time.Since(started).Round(time.Millisecond), callBound, err)
+		t.Fatalf("%s: %v", name, err)
 	}
 	if result.IsError {
 		t.Fatalf("%s returned tool error: %#v", name, result.Content)
@@ -164,7 +154,7 @@ func TestChatResolveEveryKindUsesTheCallResolutionGate(t *testing.T) {
 // setupBackendPaths lays the temp-dir paths a backend test reads (home, roots,
 // session ids, tmux, proc, the cache database the SQLite door serves from
 // memory) and points the environment at them.
-func setupBackendPaths(t *testing.T) string {
+func setupBackendPaths(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -217,7 +207,7 @@ func setupBackendPaths(t *testing.T) string {
 	return root
 }
 
-func writeJSONL(t *testing.T, path string, records []any) {
+func writeJSONL(t testing.TB, path string, records []any) {
 	t.Helper()
 	var content bytes.Buffer
 	encoder := json.NewEncoder(&content)

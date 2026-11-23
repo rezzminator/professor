@@ -20,10 +20,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -376,8 +376,7 @@ func (h *e2eHarness) pfm(home string, args ...string) commandResult {
 
 func (h *e2eHarness) pfmWithBinary(binary, home string, args ...string) commandResult {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
-	defer cancel()
+	ctx := testwait.Context(h.t)
 	command := exec.CommandContext(ctx, binary, args...)
 	command.Dir = h.repo
 	command.Env = h.environment(home)
@@ -528,8 +527,7 @@ func dirEntryNames(entries []os.DirEntry) []string {
 
 func (h *e2eHarness) tool(home, name string, args ...string) commandResult {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
+	ctx := testwait.Context(h.t)
 	command := exec.CommandContext(ctx, name, args...)
 	command.Dir = h.repo
 	command.Env = h.environment(home)

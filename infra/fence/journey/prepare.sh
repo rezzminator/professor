@@ -120,15 +120,18 @@ printf '{"hasCompletedOnboarding":true}\n' >"$HOME/.cc/2/.claude.json"
 # 8. Codex and OpenCode logged in, as after the owner's `codex login` and `opencode auth login`, so pfm
 # offers both engines; and the fake engine's scenario naming the pane texts Codex and OpenCode draw
 # (internal/mockengine PaneShapes: a TUI without them is refused) and the rate limits Codex's app-server
-# answers (pfm install's hook trust asks it), exported in every login.
+# answers (pfm install's hook trust asks it), exported in every login. Every fake engine reads its own
+# control FIFO, {pid} its process id: a step moves that engine's clock through it (pfm/journey control.go).
 install -d -m 0700 "$HOME/.codex" "$HOME/.local/share/opencode" || fail "engines: cannot create the Codex and OpenCode homes"
 printf '{"tokens":{"access_token":"journey-codex-access","account_id":"journey-codex-account"}}\n' >"$HOME/.codex/auth.json"
 printf '{"openai":{"type":"oauth","access":"journey-opencode","refresh":"journey-opencode","expires":4102444800000,"accountId":"journey-opencode"}}\n' \
   >"$HOME/.local/share/opencode/auth.json"
 # The model catalogue Codex fetches on its first run, which pfm checks a --model against.
 printf '{"fetched_at":"2026-11-12T00:00:00Z","models":[{"slug":"gpt-journey"}]}\n' >"$HOME/.codex/models_cache.json"
-cat >"$j/scenario.json" <<'JSON'
-{"pane":{"busy":"Working (1s · esc to interrupt) · esc interrupt","compacted":"Context compacted","composer":"FIXTURE-OPENCODE-PROMPT"},
+install -d -m 0700 "$j/control" || fail "engines: cannot create the fake engines' control folder $j/control"
+cat >"$j/scenario.json" <<JSON
+{"control":"$j/control/{pid}",
+ "pane":{"busy":"Working (1s · esc to interrupt) · esc interrupt","compacted":"Context compacted","composer":"FIXTURE-OPENCODE-PROMPT"},
  "rate_limits":{"primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":4102444800},"secondary":{"usedPercent":34,"windowDurationMins":10080,"resetsAt":4102444800},"planType":"plus"}}
 JSON
 printf 'export MOCK_ENGINE_SCENARIO="%s"\n' "$j/scenario.json" >>"$HOME/.zshenv"

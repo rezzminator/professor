@@ -7,6 +7,8 @@ import (
 	"os"
 	"syscall"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // The blinker's cadence. Re-reading the tab observations (the fleet scan
@@ -214,5 +216,5 @@ func (painter *indicatorPainter) restoreContext(ctx context.Context) (context.Co
 	if budget <= 0 {
 		budget = restoreBudget
 	}
-	return context.WithTimeout(context.WithoutCancel(ctx), budget)
+	return clock.WithTimeout(context.WithoutCancel(ctx), painter.clock, budget)
 }

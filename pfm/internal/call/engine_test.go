@@ -302,6 +302,7 @@ func newTestEngineWith(
 		Tmux:    tmux,
 		Spawner: spawner,
 		Options: Options{
+			Clock:             newSteppingClock(),
 			Poll:              time.Nanosecond,
 			EnterSettle:       time.Nanosecond,
 			ProofSettle:       time.Nanosecond,
@@ -538,7 +539,7 @@ func TestCallRecordsOnlyDeliveredDirectMessages(t *testing.T) {
 		warnings := &bytes.Buffer{}
 		engine.recorder = recorder
 		engine.warningWriter = warnings
-		engine.options.Clock = fixedClock{Clock: clock.Real, now: time.Unix(0, 123)}
+		engine.options.Clock = fixedClock{Clock: clock.NewFake(time.Unix(0, 123)), now: time.Unix(0, 123)}
 		return engine, warnings
 	}
 
@@ -1497,7 +1498,7 @@ func TestCallRefusesATypingHumanUnlessForced(t *testing.T) {
 			engine := newTestEngine(t, "cc-typist-guard", fake)
 			now := time.Unix(1_700_000_000, 0)
 			fake.clientActivity = now.Add(-test.activityAgo)
-			engine.options.Clock = fixedClock{Clock: clock.Real, now: now}
+			engine.options.Clock = fixedClock{Clock: clock.NewFake(now), now: now}
 			result, err := engine.Call(context.Background(), Request{
 				Target:   "chat",
 				Message:  "ordinary message, not a command",

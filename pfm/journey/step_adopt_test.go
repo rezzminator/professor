@@ -26,7 +26,7 @@ const (
 func adopt(c *harness.Ctx, s State) State {
 	term := c.Terminal("adopter")
 	const review = "REVIEW REQUIRED — 3 items; nothing was written."
-	if code := shellRun(term, "settle", "pfm doctor --project-updates", stepBound); code != 1 ||
+	if code := shellRun(term, "settle", "pfm doctor --project-updates"); code != 1 ||
 		!strings.Contains(term.Screen(), review) {
 		c.Failf("pfm doctor --project-updates exited %d, want 1 and %q on the screen:\n%s", code, review, term.Screen())
 	}
@@ -49,7 +49,7 @@ func adopt(c *harness.Ctx, s State) State {
 			" && pfm update pin --template " + manualTemplate + " " + manualLocal, "pinned 1 file(s) at " + head},
 		{"ignore", "pfm update ignore " + globalTemplate, "ignored 1 template(s)"},
 	} {
-		if code := shellRun(term, typed.label, typed.command, stepBound); code != 0 ||
+		if code := shellRun(term, typed.label, typed.command); code != 0 ||
 			!strings.Contains(term.Screen(), typed.says) {
 			c.Failf("%s exited %d, want 0 and %q on the screen:\n%s", typed.command, code, typed.says, term.Screen())
 		}

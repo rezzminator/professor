@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/creack/pty"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestSeatHostRejectsMissingSeat(t *testing.T) {
@@ -56,12 +56,14 @@ func seatReloadFailure(t *testing.T, root, socket string) (reload.Request, reloa
 		},
 	}
 	options := reload.Options{
-		Home:           root,
-		SIDDir:         filepath.Join(root, "sid"),
-		Delay:          -1,
-		Poll:           10 * time.Millisecond,
-		IdleTries:      10,
-		ExitTries:      50,
+		Home:   root,
+		SIDDir: filepath.Join(root, "sid"),
+		Delay:  -1,
+		// Every wait here is for the real supervisor in the pty: each succeeds
+		// at the supervisor's pace, so only a hung run reaches its end.
+		Poll:           testwait.ProcessPace,
+		IdleTries:      testwait.ProcessTries,
+		ExitTries:      testwait.ProcessTries,
 		ExitGraceTries: 5,
 	}
 	return request, options

@@ -21,7 +21,7 @@ func codexNamed(c *harness.Ctx, s State) State {
 	title := c.Unique("title")
 	since := time.Now()
 	term.Type("/rename " + title + "\r")
-	term.WaitFor(title+" · ", 20*time.Second)
+	term.WaitFor(title + " · ")
 	nameSynced(c, since, title)
 	if name := lsName(c, s); name != s.Name {
 		c.Failf("pfm ls names chat %s %q after the thread title %q arrived, want the --name %q",
@@ -43,7 +43,7 @@ func chatNewInPane(c *harness.Ctx, s State, engine, kind string) State {
 	sock := herdrSocket(s)
 	term.Type("cd " + s.Project + " && pfm chat new --engine " + engine + " --name " + s.Name + "\r")
 	var pane string
-	term.WaitScreen("pfm chat new's line for "+s.Name, 20*time.Second, func(screen string) bool {
+	term.WaitScreen("pfm chat new's line for "+s.Name, func(screen string) bool {
 		for _, line := range strings.Split(screen, "\n") {
 			f := strings.Fields(paneText(line))
 			if len(f) == 6 && f[0] == engine && f[1] == s.Name && f[2] == "herdr" && f[3] == sock {
@@ -54,7 +54,7 @@ func chatNewInPane(c *harness.Ctx, s State, engine, kind string) State {
 		return false
 	})
 	awaitTopTab(term, "idle", s.Name)
-	c.Poll("one live "+kind+" chat named "+s.Name+" with a live seat on "+pane, 20*time.Second,
+	c.Poll("one live "+kind+" chat named "+s.Name+" with a live seat on "+pane,
 		func() (bool, string) {
 			rows := namedChats(c, sock)
 			seats := liveSeats(c, sock)
@@ -84,13 +84,13 @@ func chatNewInPane(c *harness.Ctx, s State, engine, kind string) State {
 		s.Chat.Engine = engineOf(c, s)
 	}
 	term.Press(harness.Ctrl('b'), harness.Key("n"))
-	c.Poll("Herdr's focus on "+s.Name+"'s pane "+pane, stepBound, func() (bool, string) {
+	c.Poll("Herdr's focus on "+s.Name+"'s pane "+pane, func() (bool, string) {
 		got := focusedPane(c, s)
 		return got == pane, "focused pane " + got
 	})
 	// Herdr's state moves focus before its client draws the tab, and keys typed in between are lost: the
 	// owner types once his screen shows the engine's tab, where the shell line he typed is gone.
-	term.WaitScreen(s.Name+"'s tab drawn in place of the shell", stepBound, func(screen string) bool {
+	term.WaitScreen(s.Name+"'s tab drawn in place of the shell", func(screen string) bool {
 		return !strings.Contains(screen, "--name "+s.Name)
 	})
 	return s
@@ -100,7 +100,7 @@ func chatNewInPane(c *harness.Ctx, s State, engine, kind string) State {
 // session nowhere a process shows, so the branch's only OpenCode is its chat's.
 func freshOpenCode(c *harness.Ctx, s State) int {
 	pid := 0
-	c.Poll("one OpenCode engine under the Herdr server of "+herdrSocket(s), stepBound, func() (bool, string) {
+	c.Poll("one OpenCode engine under the Herdr server of "+herdrSocket(s), func() (bool, string) {
 		table := processes(c)
 		server := herdrServer(table, s)
 		var found []int
@@ -121,7 +121,7 @@ func freshOpenCode(c *harness.Ctx, s State) int {
 // /rename writes (Codex's session_index row) fires pfm's name sync (pfm-name-sync.path, launchd's
 // WatchPaths), so the name is judged once such a run is over.
 func nameSynced(c *harness.Ctx, since time.Time, title string) {
-	c.Poll("a pfm name-sync run finished after the thread title "+title, 20*time.Second, func() (bool, string) {
+	c.Poll("a pfm name-sync run finished after the thread title "+title, func() (bool, string) {
 		for _, record := range activity(c, since, time.Time{}) {
 			if strings.Contains(record, `"msg":"cmd.exit","cmd":"name-sync"`) {
 				return true, record

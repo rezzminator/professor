@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // shippedClaudeTheme is the Claude theme file the blueprint's theme name
@@ -171,13 +173,15 @@ func TestResolveValueErrorsNameTheFile(t *testing.T) {
 		_, err := resolveValue("custom:pipe", dir)
 		done <- err
 	}()
-	select {
-	case err := <-done:
-		if err == nil || !containsAll(err.Error(), "custom theme pipe", fifo, "not a regular file") {
-			t.Fatalf("a FIFO theme file = %v, want an error naming it", err)
+	t.Cleanup(func() {
+		// Release a blocked FIFO reader when the wait below fails the test.
+		if writer, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = writer.Close()
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("reading a FIFO theme file blocked: the follower would hang under the theme lock")
+	})
+	err, _ = testwait.Receive(t, "reading a FIFO theme file to return rather than block the follower", done)
+	if err == nil || !containsAll(err.Error(), "custom theme pipe", fifo, "not a regular file") {
+		t.Fatalf("a FIFO theme file = %v, want an error naming it", err)
 	}
 }
 

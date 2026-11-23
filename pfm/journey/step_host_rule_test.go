@@ -59,8 +59,8 @@ func hostRule(c *harness.Ctx, s *State) {
 		c.Failf("pfm chat open %s from Herdr pane %s = %+v, want %+v", s.Mesh.PeerName, pane, answers[2], want)
 	}
 	owner := c.Terminal(meshOwner)
-	out, errs, code := typedRunWithin(c, owner, "outside-new",
-		"cd $HOME/work/demo && HERDR_SESSION="+s.Session+" pfm chat new --engine cc --name "+outside, stepBound)
+	out, errs, code := typedRun(c, owner, "outside-new",
+		"cd $HOME/work/demo && HERDR_SESSION="+s.Session+" pfm chat new --engine cc --name "+outside)
 	born := regexp.MustCompile(`^cc\t` + regexp.QuoteMeta(outside) + `\therdr\t` + regexp.QuoteMeta(sock) +
 		`\tw[0-9A-Za-z]+:p[0-9A-Za-z]+\tstarting\n$`)
 	if code != 0 || !born.MatchString(out) || errs != "" {
@@ -84,7 +84,7 @@ func hostRule(c *harness.Ctx, s *State) {
 		c.Failf("pfm chat end %s exited %d: %s%s", again, r.Code, r.Stderr, r.Stdout)
 	}
 	vanished(c, again)
-	c.Poll("the ended fork "+again+"'s lineage under seat "+seat+" gone", stepBound, func() (bool, string) {
+	c.Poll("the ended fork "+again+"'s lineage under seat "+seat+" gone", func() (bool, string) {
 		lineage := forkLineage(c, seat)
 		return lineage == "", fmt.Sprintf("lineage %q", lineage)
 	})
@@ -121,7 +121,7 @@ func branched(c *harness.Ctx, s *State, got answer, fork, pane string) string {
 	if lineage := forkLineage(c, forkSeat); lineage != s.Chat.Session {
 		c.Failf("the fork %s's lineage under seat %s = %q, want its parent %s", fork, forkSeat, lineage, s.Chat.Session)
 	}
-	c.Poll(fork+" listed live and its tab idle", stepBound, func() (bool, string) {
+	c.Poll(fork+" listed live and its tab idle", func() (bool, string) {
 		rows, _ := liveChats(c, sock)
 		label := paneTabs(c, *s)[forkPane]
 		return rows[forkSession] == [2]string{"live-claude", sock} && label == markedLabel("idle", fork),

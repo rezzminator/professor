@@ -60,6 +60,7 @@ func newSignatureEngineWith(
 		Spawner:    spawner,
 		Identifier: identifier,
 		Options: Options{
+			Clock:       newSteppingClock(),
 			Poll:        time.Nanosecond,
 			EnterSettle: time.Nanosecond,
 			ProofSettle: time.Nanosecond,

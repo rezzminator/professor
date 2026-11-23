@@ -140,7 +140,7 @@ func TestRunYieldsToTheOwnersExit(t *testing.T) {
 			sidDir := t.TempDir()
 			tmux := testCase.tmux
 			tmux.markPath = ExitMarkPath(sidDir, "probe-reload", "%7")
-			result, err := Run(
+			result, err := runOnFake(t,
 				context.Background(),
 				Request{
 					Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-reload", Pane: "%7",

@@ -17,8 +17,10 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -29,7 +31,7 @@ import (
 )
 
 func TestRunHerdrRejectsMissingTarget(t *testing.T) {
-	_, err := RunHerdr(context.Background(), Request{}, Options{}, io.Discard)
+	_, err := runHerdrOnFake(t, context.Background(), Request{}, Options{}, io.Discard)
 	if err == nil || err.Error() != "native Herdr reload: socket and pane are required" {
 		t.Fatalf("RunHerdr empty target error = %v, want explicit target validation", err)
 	}
@@ -541,8 +543,15 @@ func TestRunHerdrLifecycle(t *testing.T) {
 			if tc.then {
 				f.request.Then = "resume the port"
 			}
+			var exitClock *clock.Fake
+			if tc.mode == "old-process" {
+				// The idle check sleeps one 1 s poll between its two stable reads; the
+				// startup give-up then sleeps its poll at each of its 5+3 tries.
+				exitClock = clock.NewFake(time.Unix(0, 0))
+				f.options.Clock, f.options.Poll = exitClock, time.Second
+			}
 			var stderr strings.Builder
-			result, err := RunHerdr(context.Background(), f.request, f.options, &stderr)
+			result, err := runHerdrOnFake(t, context.Background(), f.request, f.options, &stderr)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("RunHerdr error=%v, want %q", err, tc.want)
@@ -550,6 +559,13 @@ func TestRunHerdrLifecycle(t *testing.T) {
 				// Once /exit is submitted the seat host starts the new recipe, so
 				// its account is recorded; a reload refused before it records none.
 				switch tc.mode {
+				case "old-process":
+					if got := exitClock.Now().Sub(time.Unix(0, 0)); got != 9*time.Second {
+						t.Fatalf(
+							"startup give-up: fake clock %v past its start, want 9s (1s idle check, 5+3 tries x 1s)",
+							got,
+						)
+					}
 				case "failed-start":
 					f.assertLaunchRecorded(true)
 				case "blocked":
@@ -628,6 +644,7 @@ func TestRunHerdrPublicationAndCancellation(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			want := ""
+			var lockClock *clock.Fake
 			switch kind {
 			case "missing-recipe":
 				if err := f.db.DeleteSeatRun(f.seat.SeatID); err != nil {
@@ -709,11 +726,19 @@ func TestRunHerdrPublicationAndCancellation(t *testing.T) {
 					t.Fatal(err)
 				}
 				want = "another reload"
+				// The give-up sleeps its poll between tries: five tries of 1 s.
+				lockClock = clock.NewFake(time.Unix(0, 0))
+				f.options.Clock, f.options.Poll = lockClock, time.Second
 			}
-			_, err := RunHerdr(ctx, f.request, f.options, io.Discard)
+			_, err := runHerdrOnFake(t, ctx, f.request, f.options, io.Discard)
 			if want != "" {
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("error=%v want=%q", err, want)
+				}
+				if kind == "concurrent" {
+					if got := lockClock.Now().Sub(time.Unix(0, 0)); got != 5*time.Second {
+						t.Fatalf("lock give-up: fake clock %v past its start, want 5s (5 tries x 1s poll)", got)
+					}
 				}
 				if strings.HasPrefix(kind, "cancel") && !errors.Is(err, context.Canceled) {
 					t.Fatalf("cancellation identity lost: %v", err)
@@ -772,7 +797,7 @@ func TestRunHerdrUnsafePublication(t *testing.T) {
 				}
 				want = "binding changed"
 			}
-			_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("error=%v want=%q", err, want)
 			}
@@ -845,7 +870,7 @@ func TestRunHerdrCodex(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stderr strings.Builder
-			result, err := RunHerdr(context.Background(), f.request, f.options, &stderr)
+			result, err := runHerdrOnFake(t, context.Background(), f.request, f.options, &stderr)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("RunHerdr error=%v, want %q", err, tc.want)
@@ -895,7 +920,7 @@ func TestRunHerdrNamesDraftInRefusal(t *testing.T) {
 				f.request.Then = "wake up"
 				f.onExit = func() { f.text = "❯ " + draft }
 			}
-			_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), strings.Repeat("界", 80)) ||
 				strings.Contains(err.Error(), "TAIL_NOT_LOGGED") {
 				t.Fatalf("RunHerdr error = %v; want bounded draft evidence", err)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // doorSeat is one signed-in account whose shared cache holds a matching record
@@ -41,12 +43,13 @@ func doorSeat(t *testing.T, account int, now time.Time) (root, configDir, cacheD
 	return root, configDir, cacheDir, &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}}
 }
 
-// countingUsageServer answers every request with a 10%/5% payload after
-// delay, counting requests and keeping the last User-Agent it saw.
+// countingUsageServer answers every request with a 10%/5% payload once gate
+// is closed (at once when gate is nil), counting requests and keeping the last
+// User-Agent it saw.
 func countingUsageServer(
 	t *testing.T,
 	now time.Time,
-	delay time.Duration,
+	gate <-chan struct{},
 ) (*httptest.Server, *atomic.Int64, func() string) {
 	t.Helper()
 	var hits atomic.Int64
@@ -57,7 +60,9 @@ func countingUsageServer(
 		mu.Lock()
 		agent = request.Header.Get("User-Agent")
 		mu.Unlock()
-		time.Sleep(delay)
+		if gate != nil {
+			<-gate
+		}
 		_, _ = io.WriteString(writer, `{"five_hour":{"utilization":10,"resets_at":"`+
 			now.Add(2*time.Hour).UTC().Format(time.RFC3339)+`"},"seven_day":{"utilization":5,"resets_at":"`+
 			now.Add(48*time.Hour).UTC().Format(time.RFC3339)+`"}}`)
@@ -122,10 +127,15 @@ func TestEvaluateRecordsA429AsTheSharedBackoff(t *testing.T) {
 func TestConcurrentCallersSpendOneRequest(t *testing.T) {
 	now := time.Now()
 	root, configDir, cacheDir, env := doorSeat(t, 6, now)
-	server, hits, _ := countingUsageServer(t, now, 300*time.Millisecond)
+	gate := make(chan struct{})
+	var openGate sync.Once
+	release := func() { openGate.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	server, hits, _ := countingUsageServer(t, now, gate)
 	var group sync.WaitGroup
 	errs := make([]error, 2)
-	for index := range errs {
+	returned := make(chan int, 2)
+	caller := func(index int) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
@@ -134,8 +144,24 @@ func TestConcurrentCallersSpendOneRequest(t *testing.T) {
 				AccountDirs: map[string]int{configDir: 6}, CacheDir: cacheDir, TTL: 3 * time.Minute,
 				Client: server.Client(), Endpoint: server.URL, Log: io.Discard,
 			})
+			returned <- index
 		}()
 	}
+	// The first caller holds the refresh lock while its request sits at the server; the second
+	// arrives in that window and must answer without a request of its own.
+	caller(0)
+	testwait.Until(t, "the first caller's request to reach the server", func() (bool, string) {
+		return hits.Load() == 1, fmt.Sprintf("%d requests", hits.Load())
+	})
+	caller(1)
+	if got, _ := testwait.Receive(
+		t,
+		"the second caller to return while the first request is held",
+		returned,
+	); got != 1 {
+		t.Fatalf("caller %d returned while the first request was held, want caller 1", got)
+	}
+	release()
 	group.Wait()
 	for index, err := range errs {
 		if err != nil {
@@ -171,7 +197,7 @@ func TestFreshStatuslineSnapshotAnswersWithoutARequest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(snapshotDir, "acct-7.session-b.json"), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	server, hits, _ := countingUsageServer(t, now, 0)
+	server, hits, _ := countingUsageServer(t, now, nil)
 	var log bytes.Buffer
 	message, err := Evaluate(context.Background(), Options{
 		Now: func() time.Time { return now }, Env: env, Home: root, ConfigDir: configDir,
@@ -220,7 +246,7 @@ func TestRefreshLockBlocksAPeerButNotAStaleLock(t *testing.T) {
 			if err := os.Chtimes(lockPath, stamp, stamp); err != nil {
 				t.Fatal(err)
 			}
-			server, hits, _ := countingUsageServer(t, now, 0)
+			server, hits, _ := countingUsageServer(t, now, nil)
 			if _, err := Evaluate(context.Background(), Options{
 				Env: env, Home: root, ConfigDir: configDir,
 				AccountDirs: map[string]int{configDir: 8}, CacheDir: cacheDir, TTL: 3 * time.Minute,
@@ -249,7 +275,7 @@ func TestUsageRequestCarriesThePfmUserAgent(t *testing.T) {
 		t.Run(testcase.want, func(t *testing.T) {
 			now := time.Now()
 			root, configDir, cacheDir, env := doorSeat(t, 9, now)
-			server, hits, agent := countingUsageServer(t, now, 0)
+			server, hits, agent := countingUsageServer(t, now, nil)
 			if _, err := Evaluate(context.Background(), Options{
 				Env: env, Home: root, ConfigDir: configDir,
 				AccountDirs: map[string]int{configDir: 9}, CacheDir: cacheDir, TTL: 3 * time.Minute,
@@ -285,7 +311,7 @@ func TestUsageOfflineSwitchSendsNoRequest(t *testing.T) {
 			now := time.Now()
 			root, configDir, cacheDir, _ := doorSeat(t, 5, now)
 			env := &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}}
-			server, hits, _ := countingUsageServer(t, now, 0)
+			server, hits, _ := countingUsageServer(t, now, nil)
 			usage, _, err := Fetch(context.Background(), Options{
 				Env: env, Home: root, ConfigDir: configDir,
 				AccountDirs: map[string]int{configDir: 5}, CacheDir: cacheDir, TTL: 3 * time.Minute,

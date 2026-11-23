@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // canaryRegistry is a .claude.json as Claude writes it (two-space indent),
@@ -43,6 +46,9 @@ const canaryCleared = `{
 
 func fullscreenEngine(t *testing.T, apply bool, accounts ...pfmconfig.Account) (*engine, *bytes.Buffer) {
 	t.Helper()
+	// The registry lock's refresh ticker reads the process clock: a fake it
+	// never fires on keeps these tests off the real clock.
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	var output bytes.Buffer
 	return &engine{
 		// A null tui in claude.settings leaves the renderer to each account's settings.json.

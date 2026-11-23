@@ -103,7 +103,7 @@ func printOpenProjectsDoctor(
 // openProjectDeadline; a root still building then gets a timed-out row and
 // its context is cancelled. A blocked filesystem read is not waited for.
 func buildOpenProjectRows(roots []string, home string) []string {
-	ctx, cancel := context.WithTimeout(context.Background(), openProjectDeadline)
+	ctx, cancel := openProjectContext()
 	defer cancel()
 	type built struct {
 		index int

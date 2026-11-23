@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -15,7 +16,7 @@ import (
 // MCP route without initializing a persistent session or provoking HTTP 400.
 // Use the daemon probe bound, preserving any earlier caller deadline.
 func probeFamilyRoute(ctx context.Context, address, family string) error {
-	ctx, cancel := context.WithTimeout(ctx, daemonProbeTimeout)
+	ctx, cancel := clock.WithTimeout(ctx, clock.Real, daemonProbeTimeout)
 	defer cancel()
 	endpoint := "http://" + address + pfmconfig.MCPFamilyPath(family)
 	const ping = `{"jsonrpc":"2.0","id":1,"method":"ping"}`

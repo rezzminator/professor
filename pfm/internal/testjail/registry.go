@@ -17,7 +17,7 @@ import (
 // engine-sync's gate proves the rendered manuals and settings. Shared files
 // below a subdirectory are never agents: the inventory never lists them. It
 // also links the installed clone's global rules, the other registry a healthy home holds.
-func StageGlobalAgents(t *testing.T, home string) {
+func StageGlobalAgents(t testing.TB, home string) {
 	t.Helper()
 	stageGlobalRules(t, home)
 	rows, err := globalAgentFixtures()
@@ -54,7 +54,7 @@ func StageGlobalAgents(t *testing.T, home string) {
 // stageGlobalRules links every *.md of the installed clone's
 // templates/global/rules into {home}/.claude/rules, the links pfm install makes, so a healthy jail
 // home passes doctor's rules row; StageGlobalAgents calls it.
-func stageGlobalRules(t *testing.T, home string) {
+func stageGlobalRules(t testing.TB, home string) {
 	t.Helper()
 	source := filepath.Join(installedCloneDir(t), "templates", "global", "rules")
 	entries, err := os.ReadDir(source)

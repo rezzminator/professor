@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os/exec"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // fakeTmux is a deps.FakeRunner playing tmux: found on the runner's PATH, it
@@ -34,6 +36,15 @@ func hangingTmux() *deps.FakeRunner {
 		return deps.RunResult{ExitCode: -1}, ctx.Err()
 	})
 	return fake
+}
+
+// reached waits until the fake runner has recorded a call: the client is at the runner.
+func reached(t *testing.T, fake *deps.FakeRunner) {
+	t.Helper()
+	testwait.Until(t, "the tmux client to reach the runner", func() (bool, string) {
+		calls := len(fake.Calls())
+		return calls > 0, fmt.Sprintf("%d runner calls", calls)
+	})
 }
 
 func oneRecord(t *testing.T, recorder *obs.Recorder) obs.Record {
@@ -98,7 +109,8 @@ func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 		runner    func() *deps.FakeRunner
 		elapsed   time.Duration
 		cancelled bool
-		// deadline bounds the call: 0 none, negative already past at Start.
+		// deadline bounds the call: 0 none, negative already past at Start, positive the length the
+		// call's clock moves once the client waits at the runner.
 		deadline time.Duration
 		want     string
 	}{
@@ -112,7 +124,7 @@ func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 		// A stopped server: the deadline passed before the client could start (exec reports
 		// "context deadline exceeded"), or cut off a client left waiting ("signal: killed").
 		{"deadline passed before start", func() *deps.FakeRunner { return fakeTmux(0) }, time.Millisecond, false, -time.Second, "WARN"},
-		{"deadline cut off a waiting client", hangingTmux, time.Millisecond, false, 50 * time.Millisecond, "WARN"},
+		{"deadline cut off a waiting client", hangingTmux, time.Millisecond, false, time.Millisecond, "WARN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := clock.NewFake(time.Unix(1700000000, 0))
@@ -123,12 +135,18 @@ func TestExecRecordsAtTheLevelOfItsOutcome(t *testing.T) {
 				cancel()
 			}
 			if tc.deadline != 0 {
+				// The caller's deadline sits on the test's clock: past at once when negative, else
+				// fired by the Advance that moves the call's clock by its length.
 				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, tc.deadline)
+				ctx, cancel = clock.WithTimeout(ctx, fake, tc.deadline)
 				defer cancel()
 			}
-			command := Exec(WithClientRunner(ctx, tc.runner()), Binary, "/sockets/cc-1", "list-panes", "-a")
+			runner := tc.runner()
+			command := Exec(WithClientRunner(ctx, runner), Binary, "/sockets/cc-1", "list-panes", "-a")
 			if err := command.Start(); err == nil {
+				if tc.deadline > 0 {
+					reached(t, runner)
+				}
 				fake.Advance(tc.elapsed)
 				_ = command.Wait() // a non-zero exit is the case under test, recorded by Wait
 			}

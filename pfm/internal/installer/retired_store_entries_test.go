@@ -8,10 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/retired"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // fixtureStoreEntries are the retired store entries install's migration is
@@ -224,8 +227,17 @@ func TestRetiredStoreEntriesRespectBusyAccountGuard(t *testing.T) {
 			retired:        &fixtureStoreEntries,
 		},
 	}
-	if err := e.retireStoreEntries(); err != nil {
-		t.Fatal(err)
+	fake := clock.NewFake(time.Now())
+	testwait.ProcessClock(t, fake)
+	var retireErr error
+	testwait.Drive(
+		t,
+		"the retirement to give up on the busy account lock",
+		fake,
+		func() { retireErr = e.retireStoreEntries() },
+	)
+	if retireErr != nil {
+		t.Fatal(retireErr)
 	}
 	assertContent(t, filepath.Join(account, name), "shared bytes")
 	assertContent(t, filepath.Join(store, name), "shared bytes")

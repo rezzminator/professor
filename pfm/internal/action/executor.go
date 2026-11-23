@@ -69,6 +69,7 @@ func New(dependencies Dependencies) (*Executor, error) {
 		sidDir:     resolved.SIDDir,
 		heal:       dependencies.Heal,
 		engineSync: dependencies.EngineSyncRunner,
+		clock:      dependencies.Clock,
 	}, nil
 }
 

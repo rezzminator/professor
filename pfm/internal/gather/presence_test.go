@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // listenChatSocket binds a real unix socket named like a chat's tmux socket.
@@ -180,13 +181,8 @@ func TestReadPaneCrumbRefusesACrumbItCannotTrust(t *testing.T) {
 				_, err := readPaneCrumb(filepath.Join(sidDir, "cc-1800000000-1-1.%3"))
 				done <- err
 			}()
-			select {
-			case err := <-done:
-				if err == nil {
-					t.Fatalf("a %s crumb was read as a transcript path", name)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatalf("reading a %s crumb blocked", name)
+			if err, _ := testwait.Receive(t, "reading a "+name+" crumb to return", done); err == nil {
+				t.Fatalf("a %s crumb was read as a transcript path", name)
 			}
 		})
 	}

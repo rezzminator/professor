@@ -277,7 +277,11 @@ jobs:
           export SHELL=/bin/zsh
           /bin/bash infra/fence/journey/prepare.sh "$GITHUB_WORKSPACE"
           export PATH="$HOME/.local/bin:$PATH"
-          go -C pfm test -tags journey -count=1 -v -timeout 20m ./journey/
+          rc=0
+          go -C pfm test -tags journey -count=1 -v -timeout 20m ./journey/ || rc=$?
+          # The tree's time and every pfm process's CPU share, judged as run.sh judges them on Linux.
+          bash infra/fence/journey/budget.sh "$JOURNEY_ARTIFACTS" || rc=$((rc > 0 ? rc : $?))
+          exit "$rc"
 
       # Every run's profile (steps.tsv, waits.tsv, summary.md), the Linux run's coverage of pfm's source
       # (coverage.html, coverage-packages.tsv, coverage-funcs.txt, the raw counters in covdata/) and a

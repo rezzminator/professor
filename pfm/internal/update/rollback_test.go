@@ -11,16 +11,20 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T) {
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	for _, phase := range []string{"install", "doctor"} {
 		t.Run(phase, func(t *testing.T) {
 			runtime, repo := updateRollbackTestRuntime(t)
@@ -389,6 +393,7 @@ func updateTestStateDatabase(t *testing.T, path string, statements ...string) {
 // A state database restore that fails keeps its pre-update copy as the repair
 // source: the error names the copy and restoreFailed keeps the stage holding it.
 func TestUpdateRollbackStateDatabaseRestoreFailureKeepsTheCopy(t *testing.T) {
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	dir := t.TempDir()
 	testjail.DatabaseFiles(t, dir)
 	path := filepath.Join(dir, "pfm.db")

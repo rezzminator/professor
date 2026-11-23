@@ -181,7 +181,7 @@ func TestReloadWorkbenchInvalidBeforePaneLock(t *testing.T) {
 				}
 			}
 			tmux := &refusedWorkbenchTmux{}
-			_, err := Run(
+			_, err := runOnFake(t,
 				context.Background(),
 				request,
 				Options{SIDDir: sid, Delay: -1, Poll: -1},

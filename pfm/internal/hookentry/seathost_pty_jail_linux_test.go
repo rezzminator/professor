@@ -17,7 +17,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -30,6 +29,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // seatFixtureLedger reports whether mode's engine starts go through the faked ledger seam, and
@@ -138,6 +138,8 @@ func TestSeatHostPTY(t *testing.T) {
 			}
 			server := newSeatHostHerdr(t, root, mode)
 			server.addPane("w6:p3", "native")
+			holdSeatRelease(t, root, "engine-report-release")
+			holdSeatRelease(t, root, "engine-report-next-release")
 			if mode == "move-start" {
 				if err := os.WriteFile(filepath.Join(root, "move-on-proof"), []byte("move"), 0o600); err != nil {
 					t.Fatal(err)
@@ -213,7 +215,7 @@ func TestSeatHostPTY(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = slave.Close() }()
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithCancel(testwait.Context(t))
 			defer cancel()
 			hostBinary := filepath.Join(root, "pfm")
 			if mode == "reload-replaced" || mode == "end-replaced" || mode == "reload-retry" || mode == "reload-close" {
@@ -251,11 +253,7 @@ func TestSeatHostPTY(t *testing.T) {
 					current, found, err := db.Seat(context.Background(), "native-seat")
 					return err == nil && found && current.State == "live" && current.HerdrPane == "w9:p2"
 				})
-				if err := os.WriteFile(
-					filepath.Join(root, "engine-report-release"),
-					[]byte("ready"),
-					0o600,
-				); err != nil {
+				if err := releaseSeatFixture(filepath.Join(root, "engine-report-release")); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -353,11 +351,7 @@ func TestSeatHostPTY(t *testing.T) {
 				if err := db.UpdateSeat(context.Background(), before, seat); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(
-					filepath.Join(root, "engine-report-release"),
-					[]byte("ready"),
-					0o600,
-				); err != nil {
+				if err := releaseSeatFixture(filepath.Join(root, "engine-report-release")); err != nil {
 					t.Fatal(err)
 				}
 				if mode != "reload-success" && mode != "reload-replaced" {
@@ -452,11 +446,7 @@ func TestSeatHostPTY(t *testing.T) {
 								command.Process.Pid, running, runErr, hostBinary, installed, installErr)
 						}
 					}
-					if err := os.WriteFile(
-						filepath.Join(root, "engine-report-next-release"),
-						[]byte("ready"),
-						0o600,
-					); err != nil {
+					if err := releaseSeatFixture(filepath.Join(root, "engine-report-next-release")); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -472,34 +462,21 @@ func TestSeatHostPTY(t *testing.T) {
 				if err := os.Rename(hostBinary+".new", hostBinary); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(
-					filepath.Join(root, "engine-report-release"),
-					[]byte("ready"),
-					0o600,
-				); err != nil {
+				if err := releaseSeatFixture(filepath.Join(root, "engine-report-release")); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if mode == "hup" || mode == "int" {
 				sent := map[string]syscall.Signal{"hup": syscall.SIGHUP, "int": syscall.SIGINT}[mode]
-				deadline := time.NewTimer(8 * time.Second)
-				defer deadline.Stop()
-				tick := time.NewTicker(time.Millisecond)
-				defer tick.Stop()
-			ready:
-				for {
+				testwait.Until(t, "the engine's readiness report", func() (bool, string) {
 					select {
 					case err := <-done:
 						t.Fatalf("supervisor exited before engine readiness: %v %s", err, &output)
-					case <-deadline.C:
-						_ = command.Process.Signal(syscall.SIGHUP)
-						t.Fatal("engine readiness timeout")
-					case <-tick.C:
-						if _, err := os.Stat(filepath.Join(root, "engine-report")); err == nil {
-							break ready
-						}
+					default:
 					}
-				}
+					_, err := os.Stat(filepath.Join(root, "engine-report"))
+					return err == nil, "no engine-report yet"
+				})
 				if err := command.Process.Signal(sent); err != nil {
 					t.Fatal(err)
 				}
@@ -662,13 +639,13 @@ func TestSeatHostPTY(t *testing.T) {
 					t.Fatalf("lingering-pid %q: %v", raw, err)
 				}
 				t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-				deadline := time.Now().Add(5 * time.Second)
-				for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
-					if time.Now().After(deadline) {
-						t.Fatalf("job %d the engine left in its group outlived the host's final stop", pid)
-					}
-					time.Sleep(20 * time.Millisecond)
-				}
+				testwait.Until(
+					t,
+					fmt.Sprintf("job %d the engine left in its group to end at the host's final stop", pid),
+					func() (bool, string) {
+						return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH), "the job outlived the host's final stop"
+					},
+				)
 			}
 		})
 	}
@@ -703,7 +680,11 @@ func init() {
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP, syscall.SIGINT)
 	if os.Args[0] == "seat-descendant" {
-		if err := os.WriteFile(filepath.Join(root, "descendant-ready"), []byte("ready"), 0o600); err != nil {
+		ready := os.NewFile(3, "descendant-ready")
+		if _, err := ready.WriteString("ready"); err != nil {
+			panic(err)
+		}
+		if err := ready.Close(); err != nil {
 			panic(err)
 		}
 		sig := <-hup
@@ -717,24 +698,26 @@ func init() {
 		child = exec.Command(os.Getenv("PFM_S3_BINARY"))
 		child.Args = []string{"seat-descendant"}
 		child.Env = os.Environ()
+		readyRead, readyWrite, err := os.Pipe()
+		if err != nil {
+			panic(err)
+		}
+		child.ExtraFiles = []*os.File{readyWrite}
 		if err := child.Start(); err != nil {
 			panic(err)
 		}
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			if _, err := os.Stat(filepath.Join(root, "descendant-ready")); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				panic("descendant not ready")
-			}
-			time.Sleep(time.Millisecond)
+		// The descendant writes its readiness on fd 3 and closes it; a read that
+		// ends without it means the descendant died first.
+		_ = readyWrite.Close()
+		if told, err := io.ReadAll(readyRead); err != nil || string(told) != "ready" {
+			panic(fmt.Sprintf("descendant not ready: %q %v", told, err))
 		}
+		_ = readyRead.Close()
 	}
 	if os.Getenv("PFM_S3_MODE") == "int" {
 		// A job the engine leaves behind in its group, deaf to the forwarded
 		// SIGINT: only the host's final stop of the group ends it.
-		lingering := exec.Command("sh", "-c", `trap "" INT; exec sleep 60`)
+		lingering := exec.Command("sh", "-c", `trap "" INT; exec tail -f /dev/null`)
 		if err := lingering.Start(); err != nil {
 			panic(err)
 		}
@@ -817,16 +800,15 @@ func init() {
 	}
 	if strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "reload-") || os.Getenv("PFM_S3_MODE") == "move-start" ||
 		os.Getenv("PFM_S3_MODE") == "end-replaced" {
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			if _, err := os.Stat(filepath.Join(root, reportFile+"-release")); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				panic("reload release timeout")
-			}
-			time.Sleep(time.Millisecond)
+		// The test holds the FIFO open and writes one byte when it lets the engine go on.
+		release, err := os.OpenFile(filepath.Join(root, reportFile+"-release"), os.O_RDWR, 0)
+		if err != nil {
+			panic(err)
 		}
+		if _, err := release.Read(make([]byte, 1)); err != nil {
+			panic(err)
+		}
+		_ = release.Close()
 	}
 	if os.Getenv("PFM_S3_MODE") == "hangup-exit-one" {
 		<-hup
@@ -842,6 +824,22 @@ func init() {
 		}
 	}
 	os.Exit(7)
+}
+
+// holdSeatRelease makes the FIFO a fixture engine blocks on until the test lets
+// it go, and keeps it open read-write until the test ends so a byte written
+// before the engine reads it is not lost.
+func holdSeatRelease(t *testing.T, root, name string) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	held, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
 }
 
 // copySeatHostBuild copies this test binary, the seat-host build, to path.

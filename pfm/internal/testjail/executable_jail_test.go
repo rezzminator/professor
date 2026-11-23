@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 )
 
 // startForkLoad starts 4 goroutines forking and execing true until the returned
@@ -46,8 +45,7 @@ func startForkLoad(t *testing.T) (stop func()) {
 func TestWriteExecutableRunsWhileOtherGoroutinesFork(t *testing.T) {
 	dir := t.TempDir()
 	defer startForkLoad(t)()
-	deadline := time.Now().Add(2 * time.Second)
-	for index := 0; index < 1000 && time.Now().Before(deadline); index++ {
+	for index := range 1000 {
 		target := filepath.Join(dir, fmt.Sprintf("script-%d", index))
 		if err := WriteExecutable(target, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatalf("write %d: %v", index, err)

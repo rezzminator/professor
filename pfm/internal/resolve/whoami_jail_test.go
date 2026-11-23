@@ -3,7 +3,6 @@
 package resolve
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestJailedWhoamiEnvironmentAndAncestryPaths walks every rung of chat.sh's
@@ -40,8 +39,7 @@ func TestJailedWhoamiEnvironmentAndAncestryPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	socketPath := filepath.Join(jail.tmuxDir, socket)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 
 	// 1) $TMUX plus the exported Claude session id: the ordinary Claude chat.
 	identifier, err := NewWhoami(WhoamiDependencies{
@@ -178,8 +176,7 @@ func (jail *resolveJail) startPlain(
 		session,
 		"-n",
 		"whoami-window",
-		"sleep",
-		"120",
+		"cat", // reads the pane's terminal, so it runs until the server ends
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start %s: %v: %s", socket, err, output)

@@ -73,7 +73,7 @@ func startJailServer(t *testing.T, tmuxDir, socket string) {
 	command := exec.Command(
 		"tmux", "-f", "/dev/null",
 		"-S", filepath.Join(tmuxDir, socket),
-		"new-session", "-d", "-s", "chat", "sleep 120",
+		"new-session", "-d", "-s", "chat", "exec tail -f /dev/null",
 	)
 	command.Env = append(os.Environ(), "TMUX=")
 	if output, err := command.CombinedOutput(); err != nil {
@@ -196,7 +196,14 @@ func TestEndingALiveChatEndsOnlyItsOwnServer(t *testing.T) {
 			wantPanes := "%0\n"
 			if test.shared {
 				split := exec.Command(
-					"tmux", "-S", filepath.Join(tmuxDir, test.socket), "split-window", "-d", "-t", "%0", "sleep 120",
+					"tmux",
+					"-S",
+					filepath.Join(tmuxDir, test.socket),
+					"split-window",
+					"-d",
+					"-t",
+					"%0",
+					"exec tail -f /dev/null",
 				)
 				split.Env = append(os.Environ(), "TMUX=")
 				if output, err := split.CombinedOutput(); err != nil {

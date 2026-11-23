@@ -249,7 +249,7 @@ func serveClaude(proc *process) int {
 	if proc.script.LaunchCrash != "" && !call.headless {
 		// A Claude Code that dies at launch prints its last words and exits before
 		// any hook, record or prompt.
-		sleepOrCancel(proc.ctx, launchCrashBoot)
+		proc.wait(proc.ctx, launchCrashBoot)
 		fmt.Fprintln(proc.stderr, proc.script.LaunchCrash)
 		return launchCrashed
 	}
@@ -471,7 +471,7 @@ func (session *claudeSession) callMCP(step Step, input json.RawMessage) (*mcp.Ca
 	if !present || server.Command == "" || (server.Type != "" && server.Type != "stdio") {
 		return nil, fmt.Errorf("%s %q has no stdio mcpServers.%s command", flagMCPConfig, config, name)
 	}
-	bounded, cancel := mcpBoundedContext(session.proc.ctx)
+	bounded, cancel := mcpBoundedContext(session.proc.ctx, session.proc.clock())
 	defer cancel()
 	command := exec.CommandContext(bounded, server.Command, server.Args...)
 	command.Dir = session.proc.cwd
@@ -546,7 +546,8 @@ func (session *claudeSession) statusLine(usage Tokens) (string, error) {
 	input.ContextWindow.CurrentUsage.CacheCreationInputTokens = usage.CacheCreation
 	input.Cost.TotalCostUSD = usageCost(usage)
 	input.Effort.Level = session.call.effort
-	line, landed, err := invokeStatusLine(session.proc.ctx, session.status.command, input, session.proc.cwd,
+	proc := session.proc
+	line, landed, err := invokeStatusLine(proc.ctx, proc.clock(), session.status.command, input, proc.cwd,
 		session.environ, statusRunBound(session.status.refresh))
 	if err != nil || !landed {
 		// An aborted run keeps the line the last landed run painted; a fresh process has none.
@@ -632,7 +633,7 @@ func (session *claudeSession) headless() int {
 	if refusal != "" {
 		return session.headlessAPIError(prompt, Step{Type: StepAPIError, Reply: refusal})
 	}
-	started := time.Now()
+	started := proc.clock().Now()
 	running := proc.script.forPrompt(prompt)
 	step := running.next()
 	for !step.terminal() {
@@ -649,7 +650,7 @@ func (session *claudeSession) headless() int {
 		return session.headlessAPIError(prompt, step)
 	}
 	reply, busyMS, usage := running.turnReply(step)
-	if !sleepOrCancel(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
+	if !proc.wait(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
 		return ExitUsage
 	}
 	if !session.call.noSessionPersistence {
@@ -674,7 +675,7 @@ func (session *claudeSession) headless() int {
 	envelope := headlessEnvelope{
 		Type:         "result",
 		Subtype:      "success",
-		DurationMS:   time.Since(started).Milliseconds(),
+		DurationMS:   proc.clock().Now().Sub(started).Milliseconds(),
 		NumTurns:     1,
 		Result:       reply,
 		SessionID:    session.sessionID,

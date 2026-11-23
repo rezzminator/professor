@@ -25,11 +25,11 @@ lab_auth_read() { # <config dir>: sets LAB_AUTH_JSON, the credentials document
     || { printf 'ERROR auth-unreadable no claudeAiOauth.accessToken in service=%s\n' "$svc" >&2; return 2; }
 }
 
-lab_auth_check() { # <wall cap s>: needs expiresAt - now >= wall cap + 10 min
+lab_auth_check() { # <wall cap s>: needs expiresAt - now >= wall cap + 10 min; LAB_NOW_S, when set, is now (the self-tests' fixed clock)
   local exp now left need
   exp=$(printf '%s' "$LAB_AUTH_JSON" | jq -r '.claudeAiOauth.expiresAt // empty')
   [[ $exp =~ ^[0-9]+$ ]] || { printf 'ERROR auth-unreadable expiresAt=%s\n' "$exp" >&2; return 2; }
-  now=$(( $(date +%s) * 1000 ))
+  now=$(( ${LAB_NOW_S:-$(date +%s)} * 1000 ))
   left=$(( (exp - now + 30000) / 60000 ))
   need=$(( ($1 + 59) / 60 + 10 ))
   if (( left < need )); then

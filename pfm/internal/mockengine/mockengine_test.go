@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/mockengine/control/controltest"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // helperEnv makes THIS test binary the engine: a symlink named claude, codex
@@ -44,6 +47,8 @@ type fixture struct {
 	recordDir string
 	scenario  string
 	work      string
+	// control is the FIFO write names as every scenario's Scenario.Control: the mock's clock is the test's.
+	control string
 	// statusRefresh is the statusLine.refreshInterval installHooks writes, in
 	// seconds: pfm's own 2 unless a test waits on the interval itself.
 	statusRefresh float64
@@ -64,6 +69,7 @@ func newFixture(t *testing.T) *fixture {
 		recordDir: filepath.Join(root, "record"),
 		scenario:  filepath.Join(root, "scenario.json"),
 		work:      filepath.Join(root, "work", "repo"),
+		control:   filepath.Join(root, "control"),
 
 		statusRefresh: 2,
 	}
@@ -120,12 +126,42 @@ func (fix *fixture) write(scenario Scenario) {
 	if scenario.BusyMS == nil {
 		scenario.BusyMS = intPtr(0)
 	}
+	if scenario.Control == "" {
+		scenario.Control = fix.control
+	}
 	if err := scenario.Write(fix.scenario); err != nil {
 		fix.t.Fatal(err)
 	}
 	if err := os.Remove(fix.scenario + cursorSuffix); err != nil && !os.IsNotExist(err) {
 		fix.t.Fatal(err)
 	}
+}
+
+// next steps the mock's clock to the wait it is parked on and fails unless that wait was want long.
+func (fix *fixture) next(want time.Duration) {
+	fix.t.Helper()
+	if got := controltest.Next(fix.t, fix.control); got != want {
+		fix.t.Fatalf("the mock's clock stepped %s to its armed wait, want %s", got, want)
+	}
+}
+
+// tickUntil polls check, stepping the mock's clock to its next armed wait (a refresh tick) after each
+// look that finds it unmet: the mock moves only as the test looks.
+func (fix *fixture) tickUntil(condition string, check func() (bool, string)) {
+	fix.t.Helper()
+	testwait.Until(fix.t, condition, func() (bool, string) {
+		met, state := check()
+		if !met {
+			controltest.Next(fix.t, fix.control)
+		}
+		return met, state
+	})
+}
+
+// nudge hands the mock's looking wait (a busy footer, a gate file) one look.
+func (fix *fixture) nudge() {
+	fix.t.Helper()
+	controltest.Nudge(fix.t, fix.control)
 }
 
 func TestFixtureWriteSetsBusyOnlyWhenUnset(t *testing.T) {
@@ -233,11 +269,7 @@ func (fix *fixture) startTUI(engine string, args []string, extraEnv map[string]s
 		if session.exited {
 			return
 		}
-		select {
-		case <-session.done:
-		case <-time.After(5 * time.Second):
-			fix.t.Errorf("mock %s did not exit after cancel; stderr=%q", engine, session.stderr.String())
-		}
+		testwait.Receive(fix.t, "mock "+engine+" to exit after cancel", session.done)
 	})
 	return session
 }
@@ -260,48 +292,34 @@ func (session *tui) typeRaw(text string) {
 // frame and stderr when it never does.
 func (session *tui) waitFrame(what string, want func(string) bool) string {
 	session.t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
 	frame := ""
-	for time.Now().Before(deadline) {
+	testwait.Until(session.t, "the pane to show "+what, func() (bool, string) {
 		frame = session.out.frame()
-		if want(frame) {
-			return frame
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	session.t.Fatalf("pane never showed %s; last frame:\n%s\nstderr=%q", what, frame, session.stderr.String())
+		return want(frame), fmt.Sprintf("frame:\n%s\nstderr=%q", frame, session.stderr.String())
+	})
 	return frame
 }
 
 // waitExit waits for Run to return and gives back its exit code.
 func (session *tui) waitExit() int {
 	session.t.Helper()
-	select {
-	case code := <-session.done:
-		session.exited = true
-		return code
-	case <-time.After(8 * time.Second):
-		session.t.Fatalf("mock did not exit; frame:\n%s\nstderr=%q", session.out.frame(), session.stderr.String())
-		return -1
-	}
+	code, _ := testwait.Receive(session.t, "the mock to exit", session.done)
+	session.exited = true
+	return code
 }
 
 // waitFile polls until path exists and want(content) holds.
 func waitFile(t *testing.T, path string, want func(string) bool) string {
 	t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
 	last := ""
-	for time.Now().Before(deadline) {
+	testwait.Until(t, path+" to hold what was wanted", func() (bool, string) {
 		content, err := os.ReadFile(path)
-		if err == nil {
-			last = string(content)
-			if want(last) {
-				return last
-			}
+		if err != nil {
+			return false, err.Error()
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("%s never held what was wanted; last content:\n%s", path, last)
+		last = string(content)
+		return want(last), "content:\n" + last
+	})
 	return last
 }
 

@@ -321,7 +321,7 @@ func TestRunKeepsTheHandoffWhenAQueuedReloadFailsBeforeRespawn(t *testing.T) {
 	}
 	for attempt := 1; attempt <= 2; attempt++ {
 		tmux := &fakeReloadTmux{}
-		_, err := Run(context.Background(), request, Options{SIDDir: dir, Delay: -1, Poll: -1}, tmux, nil, nil)
+		_, err := runOnFake(t, context.Background(), request, Options{SIDDir: dir, Delay: -1, Poll: -1}, tmux, nil, nil)
 		if err == nil ||
 			err.Error() != "the reload before this one started a new Codex conversation whose id is not known yet — nothing changed; reload again once that chat has answered" ||
 			tmux.literal != "" {

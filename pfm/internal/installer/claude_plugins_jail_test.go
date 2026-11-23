@@ -7,6 +7,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // recordedPIDs reads every pid a fixture script appended to path.
@@ -42,14 +45,14 @@ func TestClaudePluginCommandTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// The fake claude records its own pid and a backgrounded sleep's pid under
+	// The fake claude records its own pid and a backgrounded tail's pid under
 	// the account dir (the one path the command's environment carries), then
 	// hangs, the way a stuck plugin command does.
 	binary := writeScript(t, t.TempDir(), "claude-hang", "#!/bin/sh\n"+
-		"sleep 300 &\n"+
+		"tail -f /dev/null &\n"+
 		"echo $! >> \"$CLAUDE_CONFIG_DIR/child.pids\"\n"+
 		"echo $$ >> \"$CLAUDE_CONFIG_DIR/main.pids\"\n"+
-		"exec sleep 300\n")
+		"exec tail -f /dev/null\n")
 	t.Cleanup(func() {
 		for _, name := range []string{"child.pids", "main.pids"} {
 			for _, pid := range recordedPIDs(t, filepath.Join(account, name)) {
@@ -57,25 +60,43 @@ func TestClaudePluginCommandTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 			}
 		}
 	})
-	previous := claudePluginTimeout
-	claudePluginTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { claudePluginTimeout = previous })
-
+	// The command's deadline is timed on a fake, moved to it once the hung
+	// command and its backgrounded child are both up.
+	fake := clock.NewFake(time.Unix(0, 0))
 	var out bytes.Buffer
 	installer := &engine{options: Options{
 		Home: home, ConfigDir: account, ClaudeBinary: binary, Stdout: &out,
 		ClaudePlugins: pfmconfig.DefaultClaudePlugins(),
-	}, apply: true}
+	}, apply: true, claudePluginTimer: fake}
 	finished := make(chan error, 1)
 	go func() { finished <- installer.ensureClaudePlugins(context.Background()) }()
-	var err error
-	select {
-	case err = <-finished:
-	case <-time.After(15 * time.Second):
-		t.Fatal("ensureClaudePlugins did not return within 15s: the hung command was not stopped")
+	testwait.Until(t, "the hung plugin command and its child to record their pids", func() (bool, string) {
+		child := recordedPIDs(t, filepath.Join(account, "child.pids"))
+		leader := recordedPIDs(t, filepath.Join(account, "main.pids"))
+		return len(child) == 1 && len(leader) == 1, fmt.Sprintf("child %v leader %v", child, leader)
+	})
+	if pending := fake.Pending(); pending != 1 {
+		t.Fatalf("armed deadlines = %d (%s), want the hung command's one", pending, fake)
 	}
+	fake.Advance(claudePluginCommandTimeout - time.Nanosecond)
+	if pending := fake.Pending(); pending != 1 {
+		t.Fatalf("the deadline fired %s before %s: %s", time.Nanosecond, claudePluginCommandTimeout, fake)
+	}
+	fake.Advance(time.Nanosecond)
+	// Every later plugin command runs the same hung fake: each is ended at its
+	// own deadline as it arms it, until the install returns.
+	testwait.Until(t, "ensureClaudePlugins returned: every hung command was stopped", func() (bool, string) {
+		if len(finished) == 1 {
+			return true, ""
+		}
+		if fake.Pending() == 1 {
+			fake.Advance(claudePluginCommandTimeout)
+		}
+		return false, fake.String()
+	})
+	err := <-finished
 	want := "claude plugin cache-live-control@professor in " + account +
-		": plugin marketplace add rezzminator/professor: timed out after 300ms: context deadline exceeded"
+		": plugin marketplace add rezzminator/professor: timed out after 2m0s: context deadline exceeded"
 	if err == nil || strings.Split(err.Error(), "\n")[0] != want {
 		t.Fatalf("error=%v, want its first line %q", err, want)
 	}
@@ -85,12 +106,8 @@ func TestClaudePluginCommandTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 		t.Fatalf("fixture recorded pids %v, want a shell and a backgrounded child", pids)
 	}
 	for _, pid := range pids {
-		deadline := time.Now().Add(5 * time.Second)
-		for syscall.Kill(pid, 0) == nil {
-			if time.Now().After(deadline) {
-				t.Fatalf("process %d survived the plugin command timeout", pid)
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
+		testwait.Until(t, fmt.Sprintf("process %d died with the plugin command timeout", pid), func() (bool, string) {
+			return syscall.Kill(pid, 0) != nil, "process survived the plugin command timeout"
+		})
 	}
 }

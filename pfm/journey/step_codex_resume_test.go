@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -20,8 +19,8 @@ func codexResume(c *harness.Ctx, s State) State {
 	term.Press(harness.Esc)
 	term.WaitFor(prompt)
 	term.Type("pfm chat open " + s.Chat.Session + "\r")
-	term.WaitFor("Ask Codex to do anything", 20*time.Second)
-	c.Poll("thread "+s.Chat.Session+" the one live Codex chat on "+herdrSocket(s), 20*time.Second,
+	term.WaitFor("Ask Codex to do anything")
+	c.Poll("thread "+s.Chat.Session+" the one live Codex chat on "+herdrSocket(s),
 		func() (bool, string) {
 			rows, _ := liveChats(c, herdrSocket(s))
 			seats := liveSeats(c, herdrSocket(s))
@@ -31,7 +30,7 @@ func codexResume(c *harness.Ctx, s State) State {
 		})
 	s.Chat.Seat, s.Pane = liveSeats(c, herdrSocket(s))[s.Chat.Session][0], liveSeats(c, herdrSocket(s))[s.Chat.Session][1]
 	s.Chat.Engine = engineOf(c, s)
-	c.Poll("thread "+s.Chat.Session+" idle in pfm's status", stepBound, func() (bool, string) {
+	c.Poll("thread "+s.Chat.Session+" idle in pfm's status", func() (bool, string) {
 		r := c.Read("pfm", "chat", "status", s.Chat.Session, "--json")
 		var status struct {
 			State string `json:"state"`

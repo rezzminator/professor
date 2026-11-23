@@ -27,7 +27,7 @@ func TestRunIgnoresUnusableHandoffAndReloads(t *testing.T) {
 			}
 			tmux := &fakeReloadTmux{}
 			var stderr strings.Builder
-			result, err := Run(context.Background(), Request{
+			result, err := runOnFake(t, context.Background(), Request{
 				Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
 				SessionID: "11111111-1111-4111-8111-111111111111", Account: 1, AccountIDs: []int{1},
 				CWD: "/jail/project", Machine: reloadTestMachine("", dir),

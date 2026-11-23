@@ -11,6 +11,10 @@ import (
 )
 
 // bashHooks opens every terminal as a bare interactive bash prompting "READY$ ".
+// spentDeadline is a runner deadline already past: a wait under it gives up at its first look, so a
+// test reaches a wait's miss without waiting (testwait.Expired's idea for a step).
+func spentDeadline() (time.Time, bool) { return time.Unix(0, 0), true }
+
 func bashHooks(t *testing.T) Hooks {
 	return Hooks{
 		Shell: []string{"bash", "--norc", "--noprofile", "-i"},
@@ -52,7 +56,6 @@ func TestTerminalShowsWhatTheOwnerSees(t *testing.T) {
 				row.drive(term)
 				term.WaitScreen(
 					"the screen "+row.name,
-					5*time.Second,
 					func(screen string) bool { return screen == row.want },
 				)
 				return in
@@ -81,7 +84,8 @@ func TestAFailedWaitPrintsTheWholeScreen(t *testing.T) {
 		Run(t, Do("root", func(c *Ctx, in int) int {
 			term := c.Terminal("sh")
 			term.WaitFor("READY$")
-			term.WaitFor("never", 100*time.Millisecond)
+			c.deadline = spentDeadline
+			term.WaitFor("never")
 			return in
 		}), 0, bashHooks(t))
 	})
@@ -92,7 +96,7 @@ func TestAFailedWaitPrintsTheWholeScreen(t *testing.T) {
 	if got, want := testDuration.ReplaceAllString(
 		miss,
 		"{d}",
-	), " waited 100ms for \"never\" on the screen; the screen:\n        ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n        READY$\n        ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nTIMELINE\nFAIL       {d}    {d}  root\nPASS 0 · FAIL 1 · BLOCKED 0\n--- FAIL: TestAFailedWaitPrintsTheWholeScreen ({d})\n    --- FAIL: TestAFailedWaitPrintsTheWholeScreen/root ({d})\nFAIL\n"; !failed ||
+	), " waited for \"never\" on the screen, past the hung-only limit; the screen:\n        ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n        READY$\n        ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nTIMELINE\nFAIL       {d}    {d}  root\nPASS 0 · FAIL 1 · BLOCKED 0\n--- FAIL: TestAFailedWaitPrintsTheWholeScreen ({d})\n    --- FAIL: TestAFailedWaitPrintsTheWholeScreen/root ({d})\nFAIL\n"; !failed ||
 		got != want {
 		t.Fatalf("miss = %q, want %q (failed %v)", got, want, failed)
 	}
@@ -140,7 +144,7 @@ func TestALaterTerminalInheritsNoDescriptorOfAnEarlierOne(t *testing.T) {
 		term := c.Terminal(name)
 		// Sorted as numbers: a runner that leaves descriptors past 9 open would sort them before 2 as text.
 		term.Type(`echo "HELD:$(ls /dev/fd | sort -n | tr '\n' ' ')"` + "\r")
-		term.WaitScreen("the descriptors a child of "+name+" holds", 5*time.Second, func(screen string) bool {
+		term.WaitScreen("the descriptors a child of "+name+" holds", func(screen string) bool {
 			for _, line := range strings.Split(screen, "\n") {
 				if rest, found := strings.CutPrefix(line, "HELD:"); found {
 					held[name] = strings.TrimSpace(rest)

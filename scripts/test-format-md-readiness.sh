@@ -11,16 +11,15 @@ cat > "$T/hook.sh" <<'HOOK'
 #!/usr/bin/env bash
 input=$(cat)
 if [[ $(jq -r '.session_id' <<< "$input") == overlap ]]; then
-  if [[ $EARLY_HOOK_MODE == stall ]]; then exec sleep 30; fi
+  # a stalled hook announces it will never reach the formatter, then blocks until killed
+  if [[ $EARLY_HOOK_MODE == stall ]]; then : > "$STUB_FMT_GATE/stalled"; exec tail -f /dev/null; fi
   exit "$EARLY_HOOK_MODE"
 fi
-sleep "${EARLY_HOOK_SETUP_DELAY:-0}"
 printf '%s' "$input" | bash "$REAL_HOOK"
 HOOK
 for mode in 0 7 stall; do
-  delay=0; [[ $mode != 0 ]] || delay=0.6
-  out=$(EARLY_HOOK_MODE="$mode" EARLY_HOOK_SETUP_DELAY="$delay" timeout 20 bash "$ROOT/scripts/test-format-md.sh" --readiness-only "$T/hook.sh" 2>&1); rc=$?
-  if [[ $mode == stall ]]; then reason='timed out waiting for formatter';
+  out=$(EARLY_HOOK_MODE="$mode" bash "$ROOT/scripts/test-format-md.sh" --readiness-only "$T/hook.sh" 2>&1); rc=$?
+  if [[ $mode == stall ]]; then reason='hook stalled before formatter readiness';
   else reason="hook exited before formatter readiness (exit $mode)"; fi
   if [[ $rc == 1 && $out == *"formatter readiness FAILED — $reason"* ]]; then
     ok "readiness failure is bounded and named: $mode"

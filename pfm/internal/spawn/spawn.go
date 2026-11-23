@@ -252,7 +252,7 @@ func waitForBoot(
 	target pfmcall.Target,
 	timings Timings,
 ) (string, error) {
-	deadline := clock.Real.Now().Add(timings.Boot)
+	deadline := timings.clock().Now().Add(timings.Boot)
 	previous := ""
 	settled := false
 	for {
@@ -277,7 +277,7 @@ func waitForBoot(
 			settled = false
 		}
 		previous = trimmed
-		if clock.Real.Now().After(deadline) {
+		if timings.clock().Now().After(deadline) {
 			if trimmed == "" {
 				return "", fmt.Errorf(
 					"the chat drew nothing within %s on socket %s",
@@ -287,7 +287,7 @@ func waitForBoot(
 			}
 			return capture, nil
 		}
-		if err := sleep(ctx, timings.Poll); err != nil {
+		if err := timings.sleep(ctx, timings.Poll); err != nil {
 			return "", err
 		}
 	}
@@ -345,7 +345,7 @@ func waitForComposer(
 	trace tracer,
 	ready func(string) bool,
 ) bool {
-	deadline := clock.Real.Now().Add(timings.Boot)
+	deadline := timings.clock().Now().Add(timings.Boot)
 	previous := ""
 	dismissals := 0
 	held := 0
@@ -384,10 +384,10 @@ func waitForComposer(
 		default:
 			held = 0
 		}
-		if clock.Real.Now().After(deadline) {
+		if timings.clock().Now().After(deadline) {
 			return false
 		}
-		if err := sleep(ctx, timings.Poll); err != nil {
+		if err := timings.sleep(ctx, timings.Poll); err != nil {
 			return false
 		}
 	}
@@ -527,7 +527,7 @@ func renameCodexThread(
 	}
 	confirmed := false
 	for press := 0; press < confirmPresses && !confirmed; press++ {
-		if err := sleep(ctx, timings.Typed); err != nil {
+		if err := timings.sleep(ctx, timings.Typed); err != nil {
 			break
 		}
 		if err := door.SendKey(ctx, target, "Enter"); err != nil {
@@ -537,7 +537,7 @@ func renameCodexThread(
 			ctx,
 			door,
 			target,
-			Timings{Poll: timings.Poll, Step: confirmWait(timings)},
+			Timings{Poll: timings.Poll, Step: confirmWait(timings), Clock: timings.Clock},
 			witnessed,
 		)
 		if !confirmed {
@@ -643,7 +643,7 @@ func submitPrompt(
 		return err
 	}
 	needle := composerNeedle(text)
-	step := Timings{Poll: timings.Poll, Step: confirmWait(timings)}
+	step := Timings{Poll: timings.Poll, Step: confirmWait(timings), Clock: timings.Clock}
 	if !pollCapture(ctx, door, target, step, func(capture string) bool {
 		return composerHolds(capture, needle)
 	}) {
@@ -654,7 +654,7 @@ func submitPrompt(
 		trace.step("the composer never showed the prompt")
 	}
 	for press := 0; press < promptSubmitTries; press++ {
-		if err := sleep(ctx, timings.Typed); err != nil {
+		if err := timings.sleep(ctx, timings.Typed); err != nil {
 			return err
 		}
 		if err := door.SendKey(ctx, target, "Enter"); err != nil {
@@ -759,23 +759,19 @@ func pollCapture(
 	timings Timings,
 	satisfied func(string) bool,
 ) bool {
-	deadline := clock.Real.Now().Add(timings.Step)
+	deadline := timings.clock().Now().Add(timings.Step)
 	for {
 		capture, err := door.CaptureScreen(ctx, target)
 		if err == nil && satisfied(capture) {
 			return true
 		}
-		if clock.Real.Now().After(deadline) {
+		if timings.clock().Now().After(deadline) {
 			return false
 		}
-		if err := sleep(ctx, timings.Poll); err != nil {
+		if err := timings.sleep(ctx, timings.Poll); err != nil {
 			return false
 		}
 	}
-}
-
-func sleep(ctx context.Context, duration time.Duration) error {
-	return clock.Real.Sleep(ctx, duration)
 }
 
 // WindowName reduces a chat name to something tmux can carry as a window name:

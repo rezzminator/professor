@@ -50,13 +50,13 @@ var unitNetDirs = []string{
 // unitNetKeep is every name of the starting environment an armed unit binary keeps, each with the
 // unit-tier reader it is kept for; armUnitProcess removes every other name before Run sets its own.
 var unitNetKeep = map[string]string{
-	paths.EnvTestArtifactDir:     "the step profiler writes the binary's timing artifacts there (profile.go)",
-	paths.EnvTestProfile:         "turns the step profiler on or off for this binary (profile.go)",
-	paths.EnvTestDeadlineEpoch:   "the profiler's deadline, the gate's step budget (profile.go)",
-	"PFM_STRESS":                 "runs the stress batteries (compose, store, transcript stress_test.go)",
-	"PFM_STRESS_STRICT":          "holds a stress battery to its time bound (mcpserv, picker, ui, store)",
-	"PFM_PROFILE_FIXTURE":        "picks the profiler fixture's deliberate behaviour, set by its jail driver (testdata/profilefixture)",
-	"PFM_PROFILE_FIXTURE_SLOW_S": "the profiler fixture's sleep, set by its jail driver (testdata/profilefixture)",
+	paths.EnvTestArtifactDir:      "the step profiler writes the binary's timing artifacts there (profile.go)",
+	paths.EnvTestProfile:          "turns the step profiler on or off for this binary (profile.go)",
+	paths.EnvTestDeadlineEpoch:    "the profiler's deadline, the gate's step budget (profile.go)",
+	realWaitEnv:                   "the directory the real-wait tripwire reports to (realwait.go)",
+	"PFM_STRESS":                  "runs the stress batteries (compose, store, transcript stress_test.go)",
+	"PFM_PROFILE_FIXTURE":         "picks the profiler fixture's deliberate behaviour, set by its jail driver (testdata/profilefixture)",
+	"PFM_PROFILE_FIXTURE_RELEASE": "the FIFO whose close releases the profiler fixture's slow mode (testdata/profilefixture)",
 }
 
 // unitNetZone is the time zone of every armed unit binary, the fence's: a test formatting a local

@@ -5,6 +5,7 @@ package action
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,10 +13,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type actionTmuxJail struct {
@@ -131,15 +132,15 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 	keepSocket := "cc-600-1-1"
 	duplicateSocket := "cc-700-1-1"
 	sharedSocket := "cc-800-1-1"
-	jail.start(t, keepSocket, "keep", "sleep 120")
-	jail.start(t, duplicateSocket, "duplicate", "sleep 120")
-	targetPane := jail.start(t, sharedSocket, "shared", "sleep 120")
+	jail.start(t, keepSocket, "keep", "tail -f /dev/null")
+	jail.start(t, duplicateSocket, "duplicate", "tail -f /dev/null")
+	targetPane := jail.start(t, sharedSocket, "shared", "tail -f /dev/null")
 	if output, err := jail.command(
 		"-L",
 		sharedSocket,
 		"split-window",
 		"-d",
-		"sleep 120",
+		"tail -f /dev/null",
 	).CombinedOutput(); err != nil {
 		t.Fatalf("split shared server: %v: %s", err, output)
 	}
@@ -248,9 +249,7 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 
 func waitForPaneCommand(t *testing.T, jail *actionTmuxJail, socket, target, want string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	last := ""
-	for time.Now().Before(deadline) {
+	testwait.Until(t, fmt.Sprintf("pane %s to report current command %q", target, want), func() (bool, string) {
 		output, err := jail.command(
 			"-L", socket,
 			"list-panes",
@@ -258,25 +257,30 @@ func waitForPaneCommand(t *testing.T, jail *actionTmuxJail, socket, target, want
 			"-F", "#{pane_current_command}\t#{pane_dead}\t#{pane_dead_status}",
 		).CombinedOutput()
 		if err != nil {
-			t.Fatalf("read pane command for %s: %v: %s", target, err, output)
+			t.Errorf("read pane command for %s: %v: %s", target, err, output)
+			return true, err.Error()
 		}
-		last = strings.TrimSuffix(string(output), "\n")
+		last := strings.TrimSuffix(string(output), "\n")
 		fields := strings.Split(last, "\t")
 		if len(fields) != 3 {
-			t.Fatalf("pane command row=%q, want command/dead/status", last)
+			t.Errorf("pane command row=%q, want command/dead/status", last)
+			return true, last
 		}
 		if fields[0] == want {
-			return
+			return true, last
 		}
 		if fields[1] == "1" {
-			t.Fatalf("pane %s died before reporting %q: command=%q status=%q", target, want, fields[0], fields[2])
+			t.Errorf("pane %s died before reporting %q: command=%q status=%q", target, want, fields[0], fields[2])
+			return true, last
 		}
-		time.Sleep(25 * time.Millisecond)
+		return false, last
+	})
+	if t.Failed() {
+		t.FailNow()
 	}
-	t.Fatalf("pane %s never reported current command %q within 5s; last=%q", target, want, last)
 }
 
-// fakeEngine builds a program that sleeps two minutes at target, so tmux
+// fakeEngine builds a program that blocks until it is killed at target, so tmux
 // reports target's own name as the pane's current command on every platform.
 // Neither a symlink nor a copy of the system sleep can stand in: macOS names a
 // process after the executable behind a symlink, and kills a copied system
@@ -290,7 +294,7 @@ func fakeEngine(t *testing.T, target string) {
 	source := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":  "module fakeengine\n\ngo 1.21\n",
-		"main.go": "package main\n\nimport \"time\"\n\nfunc main() { time.Sleep(2 * time.Minute) }\n",
+		"main.go": "package main\n\nimport (\n\t\"os\"\n\t\"os/signal\"\n)\n\nfunc main() { <-func() chan os.Signal { c := make(chan os.Signal, 1); signal.Notify(c, os.Interrupt); return c }() }\n",
 	} {
 		if err := os.WriteFile(filepath.Join(source, name), []byte(content), 0o600); err != nil {
 			t.Fatal(err)

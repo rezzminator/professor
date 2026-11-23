@@ -16,6 +16,7 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -24,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -197,6 +199,7 @@ func TestCodexTurnWritesARolloutPfmIndexesAndRenamesThroughSessionIndex(t *testi
 		"the supplied busy shape",
 		func(frame string) bool { return strings.Contains(frame, codexShapes.Busy) },
 	)
+	fix.next(600 * time.Millisecond)
 	session.waitFrame("the reply", func(frame string) bool {
 		return strings.Contains(frame, "incident read") && !strings.Contains(frame, codexShapes.Busy)
 	})
@@ -343,6 +346,7 @@ func TestCodexCompactWritesReceiptAndRollout(t *testing.T) {
 	if got, want := recordTypes(t, readFile(t, fix.rolloutPath())), "session_meta turn_context"; got != want {
 		t.Fatalf("records while compaction is busy = %q, want %q", got, want)
 	}
+	fix.next(180 * time.Millisecond)
 	session.waitFrame(
 		"compaction receipt",
 		func(frame string) bool {
@@ -383,16 +387,18 @@ func TestCodexCompactEscapeClearsFooterWithoutReceipt(t *testing.T) {
 }
 
 func TestCodexCompactBusyDuration(t *testing.T) {
-	session := &codexSession{}
 	for _, tc := range []struct {
-		step Step
-		want time.Duration
+		control string
+		step    Step
+		want    time.Duration
 	}{
-		{Step{Type: StepCompact, BusyMS: 125}, 125 * time.Millisecond},
-		{Step{Type: StepCompact}, 5 * time.Second},
+		{"/tmp/control", Step{Type: StepCompact, BusyMS: 125}, 125 * time.Millisecond},
+		{"/tmp/control", Step{Type: StepCompact}, 5 * time.Second},
+		{"", Step{Type: StepCompact}, 0},
 	} {
+		session := &codexSession{proc: &process{script: &script{Scenario: Scenario{Control: tc.control}}}}
 		if got := session.compactBusyDuration(tc.step); got != tc.want {
-			t.Fatalf("compactBusyDuration(%+v) = %s, want %s", tc.step, got, tc.want)
+			t.Fatalf("compactBusyDuration(%+v) with control %q = %s, want %s", tc.step, tc.control, got, tc.want)
 		}
 	}
 }
@@ -418,25 +424,27 @@ func TestCodexMCPStepNamesATableWithoutCommand(t *testing.T) {
 	}
 }
 
-// TestMCPBoundedContextAppliesTheConfiguredTimeout covers F4: session.mcp's
-// context.WithTimeout must actually bound the handshake with the spawned stdio
-// server — verified at the context itself rather than over a real hung child.
-// Without mcpBoundedContext, the mock would hand Connect/ListTools the
-// caller's own context — which carries no deadline of its own — leaving a
-// server that never answers free to hang the mock forever exactly as F4 named.
+// TestMCPBoundedContextAppliesTheConfiguredTimeout covers F4: session.mcp's bound must actually end the
+// handshake with the spawned stdio server — verified at the context itself rather than over a real hung
+// child. Without mcpBoundedContext, the mock would hand Connect/ListTools the caller's own context, which
+// carries no bound of its own, leaving a server that never answers free to hang the mock forever.
 func TestMCPBoundedContextAppliesTheConfiguredTimeout(t *testing.T) {
-	previous := mcpTimeout
-	mcpTimeout = 250 * time.Millisecond
-	t.Cleanup(func() { mcpTimeout = previous })
-	bounded, cancel := mcpBoundedContext(context.Background())
+	clk := clock.NewFake(time.Unix(0, 0))
+	bounded, cancel := mcpBoundedContext(context.Background(), clk)
 	defer cancel()
-	deadline, ok := bounded.Deadline()
-	if !ok {
-		t.Fatal("mcpBoundedContext returned a context with no deadline — a stdio server that never answers " +
-			"would then have nothing bounding it")
+	if got := clk.Pending(); got != 1 {
+		t.Fatalf("pending waits on the mock's clock = %d, want 1: the bound is not armed on it", got)
 	}
-	if remaining := time.Until(deadline); remaining <= 0 || remaining > mcpTimeout {
-		t.Fatalf("deadline is %s from now, want within (0, %s]", remaining, mcpTimeout)
+	clk.Advance(mcpTimeout - time.Nanosecond)
+	if err := bounded.Err(); err != nil {
+		t.Fatalf("context ended %v before mcpTimeout %s passed, want it alive", err, mcpTimeout)
+	}
+	clk.Advance(time.Nanosecond)
+	testwait.Until(t, "the bounded context to end once mcpTimeout passed", func() (bool, string) {
+		return bounded.Err() != nil, fmt.Sprintf("err %v", bounded.Err())
+	})
+	if !boundPassed(bounded) {
+		t.Fatalf("context cause %v, want errBoundPassed", context.Cause(bounded))
 	}
 }
 
@@ -584,6 +592,12 @@ func TestCodexRolloutClosesOnEveryPaneExit(t *testing.T) {
 			case "crash", "step":
 				session.typeLine("leave")
 				wantCode = 7
+				if exit == "crash" {
+					session.waitFrame("the crashing turn's busy footer", func(frame string) bool {
+						return strings.Contains(frame, codexShapes.Busy)
+					})
+					fix.next(150 * time.Millisecond)
+				}
 			case "start failure":
 				wantCode = ExitUsage
 			}

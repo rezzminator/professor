@@ -28,7 +28,7 @@ L="$T/free.lock"
 if mkdir_lock_try "$L" 4242 && [ "$(cat "$L/pid")" = 4242 ]; then ok 'a free lock is taken, its pid file naming the owner'
 else bad 'free lock' "$(ls -la "$L" 2>&1)"; fi
 
-sleep 30 &
+shtest_hold mkdir-lock &
 live=$!
 L="$T/live.lock"
 mkdir "$L"; printf '%s\n' "$live" >"$L/pid"
@@ -82,7 +82,7 @@ else bad 'stale breaker' "$(ls -la "$T" 2>&1)"; fi
 # same dead pid before the break, re-reads it under the breaker, finds the first's live lock and keeps off.
 L="$T/race.lock"
 mkdir "$L"; gone="$(dead_pid)"; printf '%s\n' "$gone" >"$L/pid"
-sleep 30 &
+shtest_hold mkdir-lock &
 first=$!
 mkdir_lock_try "$L" "$first"; rc1=$?
 _mkdir_lock_create "$L.break" second
@@ -91,22 +91,22 @@ if [ "$now" = "$gone" ] && _mkdir_lock_stale "$L" "$now"; then rm -rf "$L"; fi #
 rm -f "$L.break"
 if [ "$rc1" -eq 0 ] && [ "$(cat "$L/pid")" = "$first" ]; then ok "a second breaker's re-check under the breaker leaves the first's fresh lock"
 else bad 'break re-check' "rc1=$rc1 pid=$(cat "$L/pid" 2>&1)"; fi
-# Six waiters race one dead holder; a winner holds until released, so a loser can only take the lock
-# through a wrong break. Counted once the losers have spent their tries.
+# Six waiters race one dead holder; a winner holds until released (a line on its FIFO), so a loser can only
+# take the lock through a wrong break. Counted once every waiter either holds or has spent its tries.
+race_settled() { [ $(( $(wc -l <"$1") + $(wc -l <"$2") )) -ge 6 ]; } # race_settled <won> <spent>
 bad_rounds=""
 for round in 1 2 3 4 5 6 7 8; do
-  L="$T/race$round.lock" W="$T/race$round.won" REL="$T/race$round.release"
+  L="$T/race$round.lock" W="$T/race$round.won" REL="$T/race$round.release" SPENT="$T/race$round.spent"
   mkdir "$L"; dead_pid >"$L/pid"
-  : >"$W"
+  : >"$W"; : >"$SPENT"; mkfifo "$REL"
   pids=()
   for i in 1 2 3 4 5 6; do
-    bash -c '. "$1"; for ((n = 0; n < 50; n++)); do if mkdir_lock_try "$2" "$BASHPID"; then echo "$BASHPID" >>"$3"; for ((m = 0; m < 100; m++)); do [ -e "$4" ] && break; sleep 0.05; done; exit 0; fi; sleep 0.01; done; exit 0' _ "$SUT" "$L" "$W" "$REL" &
+    bash -c '. "$1"; for ((n = 0; n < 50; n++)); do if mkdir_lock_try "$2" "$BASHPID"; then echo "$BASHPID" >>"$3"; read -r _ <"$4"; exit 0; fi; done; echo "$BASHPID" >>"$5"; exit 0' _ "$SUT" "$L" "$W" "$REL" "$SPENT" &
     pids+=($!)
   done
-  for ((n = 0; n < 100; n++)); do [ -s "$W" ] && break; sleep 0.05; done
-  sleep 1
+  shtest_wait_until "round $round: every waiter holds the lock or has spent its tries" race_settled "$W" "$SPENT"
   holders="$(wc -l <"$W" | tr -d ' ')"
-  : >"$REL"
+  exec {rel}<>"$REL"; exec {rel}>&- # opens and closes the FIFO's write end: every winner's read returns
   for pid in "${pids[@]}"; do wait "$pid"; done
   [ "$holders" = 1 ] || bad_rounds="$bad_rounds round $round: $holders holder(s);"
 done
@@ -114,6 +114,6 @@ if [ -z "$bad_rounds" ]; then ok 'six waiters racing one dead holder: exactly on
 else bad 'racing waiters' "$bad_rounds"; fi
 
 for p in "$live" "$first"; do
-  ps -o args= -p "$p" 2>/dev/null | grep -qF 'sleep 30' && kill "$p" 2>/dev/null
+  ps -o args= -p "$p" 2>/dev/null | grep -qF 'shtest-hold mkdir-lock' && kill "$p" 2>/dev/null
 done
 shtest_end

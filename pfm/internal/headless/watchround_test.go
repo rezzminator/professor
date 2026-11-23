@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestFleetWatchGlobAdoptsSeatsBornLater(t *testing.T) {
@@ -134,7 +136,7 @@ func TestFleetWatchRefusesAMalformedPatternBeforeTheFirstPoll(t *testing.T) {
 	polled := false
 	var out bytes.Buffer
 	// A regression that accepts the pattern would watch forever: bound it.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	_, err := FleetWatcher{
 		Targets: []string{"fine", "["},

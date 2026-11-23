@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestProbeServiceManagerSystemdNoSystemctlOnPath watches the "no service
@@ -134,10 +134,7 @@ func TestProbeServiceManagerSystemdTimeoutCouldNotAsk(t *testing.T) {
 	fake := &deps.FakeRunner{}
 	fake.ScriptLookPath("systemctl", "/usr/bin/systemctl", nil)
 	fake.Script(systemdShowArgv, deps.RunResult{ExitCode: -1}, nil)
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancel()
-
-	report := systemdServiceManager.service(ctx, fake)
+	report := systemdServiceManager.service(testwait.Expired(), fake)
 	if report.Unit.Err == nil {
 		t.Fatalf("an expired probe must be could-not-ask, got %+v", report.Unit)
 	}

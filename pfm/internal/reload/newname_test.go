@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // renameTmux is delayedThenTmux plus a record of EVERY literal typed, in
@@ -108,7 +109,7 @@ func runNew(t *testing.T, tmux *renameTmux, home, transcript, name, then string,
 	fakeClock := clock.NewFake(time.Unix(0, 0))
 	var result Result
 	var err error
-	driveFakeClock(t, fakeClock, func() {
+	testwait.Drive(t, "reload to run through its waits", fakeClock, func() {
 		result, err = runNewOnClock(tmux, home, transcript, name, then, stderr, t.TempDir(), fakeClock)
 	})
 	if err != nil {

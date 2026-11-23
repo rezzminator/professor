@@ -62,11 +62,13 @@ const fire = () => {
     listener({ affectsConfiguration: (key) => key === 'workbench' || key === 'workbench.colorTheme' });
   }
 };
+const flightWaiters = [];
 const execFile = childProcess.execFile;
 childProcess.execFile = (file, args, options, callback) => {
   inFlight++;
   return execFile(file, args, options, (...result) => {
     inFlight--;
+    if (!inFlight) flightWaiters.splice(0).forEach((resume) => resume());
     callback(...result);
   });
 };
@@ -168,13 +170,19 @@ const switchWindow = (name) => {
     api = require(extensionPath).activate(context);
   }
 };
-const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+const hop = () => new Promise((resolve) => setImmediate(resolve));
 // A fired change reaches the extension's own listener, which queues its pick; the pick is idle
-// once no pfm run is in flight for a few ticks in a row.
+// once no pfm run is in flight for a few event-loop turns in a row. A run in flight is waited
+// for by its completion, never by a timer.
 const idle = async () => {
-  for (let quiet = 0, waited = 0; quiet < 4 && waited < 30000; waited += 5) {
-    await tick();
-    quiet = inFlight ? 0 : quiet + 1;
+  for (let quiet = 0; quiet < 4;) {
+    if (inFlight) {
+      quiet = 0;
+      await new Promise((resume) => flightWaiters.push(resume));
+    } else {
+      await hop();
+      quiet++;
+    }
   }
 };
 const readJSON = (file) => {

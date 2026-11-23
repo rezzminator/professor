@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
@@ -37,7 +37,7 @@ func statusRunBound(refresh time.Duration) time.Duration {
 // line it printed — the line the pane shows under the composer — and whether it
 // landed: a run still going at bound is aborted, as Claude Code aborts it.
 func invokeStatusLine(
-	ctx context.Context, command string, input any, cwd string, environ []string, bound time.Duration,
+	ctx context.Context, clk clock.Clock, command string, input any, cwd string, environ []string, bound time.Duration,
 ) (string, bool, error) {
 	if command == "" {
 		return "", true, nil
@@ -50,7 +50,7 @@ func invokeStatusLine(
 	if err != nil {
 		return "", false, fmt.Errorf("statusline: sh not found: %w", err)
 	}
-	bounded, cancel := context.WithTimeout(ctx, bound)
+	bounded, cancel := clockBound(ctx, clk, bound)
 	defer cancel()
 	cmd := exec.CommandContext(bounded, shell, "-c", command)
 	cmd.Dir = cwd
@@ -60,7 +60,7 @@ func invokeStatusLine(
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == nil && errors.Is(bounded.Err(), context.DeadlineExceeded) {
+		if ctx.Err() == nil && boundPassed(bounded) {
 			return "", false, nil
 		}
 		return "", false, fmt.Errorf("statusline %q: %w: %s", command, err, strings.TrimSpace(stderr.String()))

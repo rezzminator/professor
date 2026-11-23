@@ -13,7 +13,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
@@ -640,7 +639,7 @@ func callOneWithin(ctx context.Context, socket string, line []byte, limit time.D
 	defer stopCancel()
 	// The exchange ends at the I/O timeout or the caller's deadline, whichever
 	// comes first, and a response is read up to maxResponse bytes.
-	deadline := clock.Real.Now().Add(limit)
+	deadline := exchangeWall().Add(limit)
 	if bound, ok := ctx.Deadline(); ok && bound.Before(deadline) {
 		deadline = bound
 	}

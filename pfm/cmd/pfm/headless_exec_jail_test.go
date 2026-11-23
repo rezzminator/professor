@@ -270,7 +270,7 @@ func TestHeadlessExecOutCarriesOnlyAPaidAnswer(t *testing.T) {
 		}
 	})
 	t.Run("timeout", func(t *testing.T) {
-		binary := writeHeadlessCLIStub(t, "sleep 2\nprintf '%s\\n' '{\"result\":\"late\"}'")
+		binary := writeHeadlessCLIStub(t, "exec tail -f /dev/null")
 		commandEnv := headlessCLIRuntime(t, binary)
 		out := filepath.Join(t.TempDir(), "out.json")
 		receipt := filepath.Join(t.TempDir(), "receipt.jsonl")

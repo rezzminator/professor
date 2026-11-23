@@ -5,14 +5,13 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
 // childNew: in the chat's own tab the owner asks it to spawn a child through pfm's MCP `new` tool,
 // not waiting for the child's answer, with a first prompt the child works on until a file the owner
-// holds is gone. The chat's reply paints within 10 s while the child still works (escape chat-mesh/
+// holds is gone. The chat's reply paints while the child still works (escape chat-mesh/
 // mcp-new-returns-before-child-ready); the receipt names the child on the chat's own Herdr socket;
 // Herdr opens the child's tab; the child is one live Claude chat with its own seat and pane in the
 // chat's workspace, its engine under the session's Herdr server, carrying its own pane variable, the
@@ -26,7 +25,7 @@ func childNew(c *harness.Ctx, s State) State {
 	peerNew(c, &s)
 	s.Mesh.ChildName = c.Unique("child")
 	hold := s.Home + "/" + c.Unique("hold")
-	if code := shellRun(owner, "hold", "touch "+hold, stepBound); code != 0 {
+	if code := shellRun(owner, "hold", "touch "+hold); code != 0 {
 		c.Failf("touch %s exited %d:\n%s", hold, code, owner.Screen())
 	}
 	c.Cleanup(func() {
@@ -35,22 +34,20 @@ func childNew(c *harness.Ctx, s State) State {
 		}
 	})
 	term.Press(harness.Ctrl('b'), harness.Key("n"))
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	reply := c.Unique("spawned")
 	childPrompt := `mock-engine: {\"type\":\"hold\",\"until_gone\":\"` + hold + `\"}`
 	term.Type(`spawn a child mock-engine: [{"type":"mcp","tool":"new","input":{"name":"` + s.Mesh.ChildName +
 		`","prompt":"` + childPrompt + `"}},{"type":"turn","reply":"` + reply + `"}]` + "\r")
-	start := time.Now()
-	term.WaitFor("⏺ "+reply, 10*time.Second)
+	term.WaitFor("⏺ " + reply)
 	s.Mesh.Mark = reply
-	c.Logf("the chat's reply painted %s after the ask", time.Since(start).Round(time.Millisecond))
 	if r := c.Read("test", "-e", hold); r.Code != 0 {
 		c.Failf("the hold file %s is gone before the step released it", hold)
 	}
 	receipt := mcpReceipt(c, s.Name, s.Chat.Session)
 	awaitTopTab(term, "working", s.Mesh.ChildName)
 	child := s
-	c.Poll("one live Claude chat named "+s.Mesh.ChildName+" with its own live seat on "+sock, 20*time.Second,
+	c.Poll("one live Claude chat named "+s.Mesh.ChildName+" with its own live seat on "+sock,
 		func() (bool, string) {
 			rows, seats := namedChats(c, sock), liveSeats(c, sock)
 			seen := fmt.Sprintf("chats %v, seats %v", rows, seats)
@@ -123,10 +120,11 @@ func childNew(c *harness.Ctx, s State) State {
 	if r := c.Read("rm", hold); r.Code != 0 {
 		c.Failf("rm %s exited %d: %s", hold, r.Code, r.Stderr)
 	}
+	nudgeEngine(c, s.Mesh.Child.Engine)
 	var state struct {
 		State string `json:"state"`
 	}
-	c.Poll(s.Mesh.ChildName+" idle once its first turn and the call queued behind it answered", stepBound,
+	c.Poll(s.Mesh.ChildName+" idle once its first turn and the call queued behind it answered",
 		func() (bool, string) {
 			out := read(c, "pfm", "chat", "status", s.Mesh.ChildName, "--json")
 			if json.Unmarshal([]byte(out), &state) != nil {

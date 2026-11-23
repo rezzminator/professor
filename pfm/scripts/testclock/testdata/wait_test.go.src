@@ -1,0 +1,67 @@
+package loud
+
+import (
+	"context"
+	"net"
+	"os/exec"
+	"runtime"
+	tm "time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+)
+
+// A comment naming tm.Sleep( is never judged.
+func wait(c context.Context, conn net.Conn, cmd *exec.Cmd) {
+	tm.Sleep(1)
+	<-tm.After(1)
+	tm.AfterFunc(1, func() {})
+	_, _ = context.WithDeadline(c, tm.Now())
+	_ = tm.Now().After(tm.Now())
+	_ = tm.Until(tm.Now())
+	_ = clock.Real
+	_ = conn.SetReadDeadline(tm.Now())
+	cmd.WaitDelay = 1
+	runtime.Gosched()
+	_ = `echo ready; timeout 5 true`
+	_ = "near timeout 1"
+	_ = tm.Now().Add(1)
+	_ = tm.Now().Sub(tm.Now())
+	_ = tm.Time{}.Before(tm.Now())
+}
+
+// forwarding is a fake's net.Conn: its deadline methods forward and read no clock, so pass.
+type forwarding struct{ net.Conn }
+
+func (f forwarding) SetDeadline(at tm.Time) error { return f.Conn.SetDeadline(at) }
+
+// stamping arms a deadline from the real clock inside its forwarding method: door 8.
+type stamping struct{ net.Conn }
+
+func (s stamping) SetWriteDeadline(tm.Time) error { return s.Conn.SetWriteDeadline(tm.Now()) }
+
+// compare reads a production option and writes none: no door 9.
+func compare(cmd *exec.Cmd) bool { return cmd.WaitDelay == 1 }
+
+// fixtures holds door 11's script spellings in strings, and the near misses that pass.
+func fixtures() {
+	_ = "time.sleep(0.05)"
+	_ = `ready, _, _ = select.select([0], [], [], 0.05)`
+	_ = "ready, _, _ = select.select([0, fd], [], [])"
+	_ = "if time.time() - start >= delay:"
+	_ = "setTimeout(resolve, 5); setInterval(tick, 1)"
+	_ = exec.Command("sleep", "30")
+	_ = []string{"timeout", "5s", "true"}
+	_ = exec.Command("echo", "sleep", "now")
+	_ = "await asyncio.sleep(1)"
+	_ = "x.sleeper(1); mysleep(2); deadline = monotonic"
+}
+
+// identity compares a clock to the real one and reads no clock: no door 7 (ruling 72).
+func identity(c clock.Clock) (bool, bool) { return c == clock.Real, (clock.Real) != c }
+
+// realUses hold the real clock beside a comparison, or compare what it read: door 7 each.
+func realUses(at tm.Time) bool {
+	c := clock.Real
+	_ = c
+	return clock.Real.Now() == at
+}

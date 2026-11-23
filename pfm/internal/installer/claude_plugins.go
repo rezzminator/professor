@@ -46,10 +46,6 @@ const claudePluginCommandTimeout = 2 * time.Minute
 // is killed, so a grandchild still holding them cannot stall Run.
 const claudePluginWaitDelay = 5 * time.Second
 
-// claudePluginTimeout is the per-command deadline in force. It is a variable
-// only as a test seam: a test shortens it and restores it in t.Cleanup.
-var claudePluginTimeout = claudePluginCommandTimeout
-
 // ClaudePluginRepair is the repair every plugin gap pfm install closes names.
 const ClaudePluginRepair = "run pfm install --yes"
 
@@ -483,7 +479,7 @@ func (installer *engine) refreshClaudePluginMarketplace(
 		claudeConfigDirEnv, run.dir, shellCommandLine(update...), marketplace)
 	err := installer.change(message, func() error {
 		options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir)}
-		return runClaudePluginCommand(ctx, installer.processRunner(), update, options)
+		return installer.runClaudePluginCommand(ctx, update, options)
 	})
 	run.refreshed[marketplace] = err
 	if err != nil {
@@ -558,7 +554,7 @@ func (installer *engine) repointClaudePluginMarketplace(
 	message := fmt.Sprintf("run %s=%s %s: %s", claudeConfigDirEnv, run.dir, shellCommandLine(add...), gaps[0].Problem)
 	return installer.change(message, func() error {
 		options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir)}
-		if err := runClaudePluginCommand(ctx, installer.processRunner(), add, options); err != nil {
+		if err := installer.runClaudePluginCommand(ctx, add, options); err != nil {
 			return err
 		}
 		after, err := ClaudePluginMarketplaceGaps(run.dir, one)
@@ -658,9 +654,9 @@ func (installer *engine) installClaudePlugin(
 		if add != nil {
 			// An already-added marketplace exits non-zero; the install that
 			// follows is the judge, so its failure carries this answer too.
-			addErr = runClaudePluginCommand(ctx, installer.processRunner(), add, options)
+			addErr = installer.runClaudePluginCommand(ctx, add, options)
 		}
-		if err := runClaudePluginCommand(ctx, installer.processRunner(), install, options); err != nil {
+		if err := installer.runClaudePluginCommand(ctx, install, options); err != nil {
 			if addErr != nil {
 				return errors.Join(addErr, err)
 			}
@@ -668,60 +664,6 @@ func (installer *engine) installClaudePlugin(
 		}
 		return nil
 	})
-}
-
-// pluginCommandEnvironment is the inherited environment with CLAUDE_CONFIG_DIR
-// set to dir and the login default's sentinel dropped: the child runs on the
-// dir pfm chose, so nothing may read it as the inherited default.
-func pluginCommandEnvironment(dir string) []string {
-	inherited := deps.EnvironmentWith(claudeConfigDirEnv, dir)
-	environment := make([]string, 0, len(inherited))
-	for _, entry := range inherited {
-		if !strings.HasPrefix(entry, claudelaunch.ConfigDirDefaultEnv+"=") {
-			environment = append(environment, entry)
-		}
-	}
-	return environment
-}
-
-func runClaudePluginCommand(ctx context.Context, runner deps.Runner, argv []string, options deps.RunOptions) error {
-	return runPluginCommandWithin(ctx, runner, argv, options, claudePluginTimeout)
-}
-
-// runPluginCommandWithin runs argv in its own process group under timeout,
-// any failure an error naming the command, its exit code and its stderr.
-func runPluginCommandWithin(
-	ctx context.Context,
-	runner deps.Runner,
-	argv []string,
-	options deps.RunOptions,
-	timeout time.Duration,
-) error {
-	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	options.ProcessGroup = true
-	options.WaitDelay = claudePluginWaitDelay
-	result, err := runner.Run(cmdCtx, argv, options)
-	if cmdCtx.Err() != nil && (err != nil || result.ExitCode != 0) {
-		if ctx.Err() != nil {
-			return fmt.Errorf("%s: cancelled: %w", strings.Join(argv[1:], " "), ctx.Err())
-		}
-		return fmt.Errorf(
-			"%s: timed out after %s: %w", strings.Join(argv[1:], " "), timeout, cmdCtx.Err(),
-		)
-	}
-	if err != nil {
-		return fmt.Errorf("%s: %w", strings.Join(argv[1:], " "), err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf(
-			"%s: exit %d stderr=%q",
-			strings.Join(argv[1:], " "),
-			result.ExitCode,
-			strings.TrimSpace(string(result.Stderr)),
-		)
-	}
-	return nil
 }
 
 func (installer *engine) pluginFailure(dir, plugin string, err error) error {

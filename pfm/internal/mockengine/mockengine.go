@@ -10,9 +10,12 @@
 // Entry point: Main. The other files:
 //
 //   - argv_engine.go: the engine a run plays — argv[0], the override, or a Claude native build's version name.
-//   - scenario.go: the scenario, the inline `mock-engine: ` directive and the step cursor.
+//   - scenario.go: the scenario, its load and its refusal of a timed act no control FIFO could end.
+//   - scenario_inline.go: the inline `mock-engine: ` directive a prompt carries, in place of the script's steps.
+//   - scenario_script.go: the running script — defaults resolved, the step cursor and the file it persists in.
 //   - scenario_step.go: one scripted step — its kinds, fields and validation.
 //   - pane.go: the TUI every engine shares — the idle loop, a turn and its steps, /exit.
+//   - pane_busy.go: a busy turn — its footer, its end on the mock's clock or its gate file, keys meanwhile.
 //   - pane_screen.go: the screen the TUI repaints — history, footer or menu, composer, statusline.
 //   - agents.go: the background agents behind an idle composer — their rows, Claude's wait row, a
 //     gated agent's end and the turn that reports it.
@@ -28,7 +31,8 @@
 //   - claude_resume.go: a resumed Claude transcript's title and a fork's seeded copy, written at its first prompt.
 //   - claude_tooluse.go: Claude's PostToolUse beat and the tool response it carries.
 //   - claude_shell_snapshot.go: the tool shell — Claude's zsh snapshot of the owner's shell, sh otherwise.
-//   - hooks.go: the settings hook documents, running a hook command and reading its answer.
+//   - hooks.go: the settings hook documents and the answers a hook gives.
+//   - hooks_run.go: running one hook command under its timeout, its output in files an orphan cannot hold.
 //   - statusline.go: a settings layer's statusLine and one run of its command, aborted as Claude aborts it.
 //   - session_end.go: SessionEnd hooks that outlive a hangup on every engine, and Claude's session end.
 //   - codex.go: Codex — its pane, rollout, app-server and MCP handshake.
@@ -38,6 +42,10 @@
 //   - opencode_serve.go: OpenCode's `serve` HTTP API.
 //   - opencode_plugin.go: pfm's Herdr reporter plugin as OpenCode loads it — start, working, title, idle and end.
 //   - cli.go: the engines' non-chat verbs (plugin marketplace and install records).
+//   - control.go: the Scenario.Control FIFO's reader and the commands it applies to the mock's clock (only
+//     its test moves it), its timed waits and its looks.
+//   - control_reader.go: the FIFO's one-reader lock, opened at the mock's first timed act.
+//   - control_clock.go: the mock's clock itself and clockBound, a bound the real engine enforces, on that clock.
 //   - jail.go: the mock's presence on a jailed host — its /proc entry and sid crumb.
 package mockengine
 
@@ -48,6 +56,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -92,6 +101,16 @@ type process struct {
 	cwd      string
 	pid      int
 	recorder recorder
+	// control is the Scenario.Control FIFO's reader, opened at the first timed act (control.go).
+	control     *controlChannel
+	controlOnce sync.Once
+	listenOnce  sync.Once
+	// refused is the error that ended this mock: it could not read its control FIFO (control_reader.go listen).
+	refused error
+	// abort ends ctx, with its cause.
+	abort context.CancelCauseFunc
+	// hostLinks hold the write ends of the links a bg-spare reads its host's life from.
+	hostLinks []*os.File
 }
 
 // Main is the whole mock: argv0 selects the engine, args are its command line,
@@ -119,11 +138,14 @@ func Main(
 		fmt.Fprintf(stderr, "mock-engine: resolve cwd: %v\n", err)
 		return ExitUsage
 	}
+	ctx, abort := context.WithCancelCause(ctx)
+	defer abort(nil)
 	proc := &process{
-		ctx: ctx, engine: engine, args: args, stdin: stdin, stdout: stdout, stderr: stderr, env: env,
+		ctx: ctx, abort: abort, engine: engine, args: args, stdin: stdin, stdout: stdout, stderr: stderr, env: env,
 		script: newScript(scenario, engine), cwd: cwd, pid: os.Getpid(),
 		recorder: recorder{dir: scenario.RecordDir},
 	}
+	defer proc.closeControl()
 	if err := proc.script.resume(env(EnvScenario)); err != nil {
 		fmt.Fprintf(stderr, "mock-engine: %v\n", err)
 		return ExitUsage
@@ -141,7 +163,16 @@ func Main(
 	if code, answered := answerCLI(proc); answered {
 		return code
 	}
-	switch engine {
+	code := serveEngine(proc)
+	if proc.controlRefused() != nil {
+		return ExitUsage
+	}
+	return code
+}
+
+// serveEngine plays the engine the run is: Claude Code, Codex or OpenCode.
+func serveEngine(proc *process) int {
+	switch proc.engine {
 	case engineClaude:
 		return serveClaude(proc)
 	case engineCodex:
@@ -218,19 +249,4 @@ func touchFile(path string) error {
 // stamp is the RFC3339 millisecond timestamp Claude and Codex write.
 func stamp(now time.Time) string {
 	return now.UTC().Format("2006-01-02T15:04:05.000Z")
-}
-
-// sleepOrCancel waits for the duration unless ctx ends first.
-func sleepOrCancel(ctx context.Context, duration time.Duration) bool {
-	if duration <= 0 {
-		return ctx.Err() == nil
-	}
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return true
-	case <-ctx.Done():
-		return false
-	}
 }

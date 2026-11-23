@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // noopCodexRenamer is the pane door for a rebind that never clears a prior
@@ -383,7 +385,7 @@ func startNoopCodexPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 	command := exec.Command(
 		"tmux", "-f", "/dev/null", "-L", socket,
 		"new-session", "-d", "-s", socket, "-n", "codex",
-		"printf '"+statusLine+"'; sleep 120",
+		"printf '"+statusLine+"'; exec tail -f /dev/null",
 	)
 	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -395,20 +397,14 @@ func startNoopCodexPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 		_ = killCommand.Run()
 	})
 	want := strings.TrimSpace(strings.TrimSuffix(statusLine, `\n`))
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-p", "-t", socket)
-		capture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
-		output, err := capture.Output()
-		if err == nil && strings.Contains(string(output), want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("jailed codex pane %q never painted %q (fixture failure): last capture=%q err=%v",
-				socket, want, output, err)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	testwait.Until(t, fmt.Sprintf("jailed codex pane %q to paint %q (fixture failure)", socket, want),
+		func() (bool, string) {
+			capture := exec.Command("tmux", "-L", socket, "capture-pane", "-p", "-t", socket)
+			capture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
+			output, err := capture.Output()
+			seen := fmt.Sprintf("last capture=%q err=%v", output, err)
+			return err == nil && strings.Contains(string(output), want), seen
+		})
 }
 
 // TestReconcileCodexPanesCarriesSchedulesAcrossAReset: a Codex reset rotates

@@ -12,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
@@ -19,7 +22,7 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	writeProbeStub(t, directory, "tmux-ok", "printf 'tmux 3.4\\n'")
 	writeProbeStub(t, directory, "tmux-old", "printf 'tmux 1.7\\n'")
 	writeProbeStub(t, directory, "garbage", "printf 'not-a-version\\n'")
-	writeProbeStub(t, directory, "timeout", "exec /bin/sleep 30")
+	writeProbeStub(t, directory, "timeout", `: > "$PROBE_PHASE_MARKER"; exec /bin/sleep 30`)
 	writeProbeStub(t, directory, "failed", "printf 'permission denied by fixture\\n'; exit 7")
 	t.Setenv("PATH", directory)
 
@@ -63,15 +66,17 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	if results[0].Version != "3.4" || results[1].Version != "1.7" {
 		t.Fatalf("parsed versions ok=%q old=%q", results[0].Version, results[1].Version)
 	}
-	hung := Probe(context.Background(), []Entry{{Name: "timeout", Command: "timeout", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}}, ProbeOptions{GOOS: "linux", Timeout: hungProbeTimeout})[0]
+	hung := probeAtBound(t, ProbeTimeout, Entry{
+		Name: "timeout", Command: "timeout", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion,
+	}, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})
 	if hung.State != StateTimeout {
 		t.Fatalf("hung state=%s error=%q, want StateTimeout", hung.State, hung.Error)
 	}
-	if !strings.HasPrefix(hung.Error, "timeout (") || !strings.Contains(hung.Error, hungProbeTimeout.String()) {
+	if hung.Error != "timeout (5s)" {
 		t.Fatalf(
 			"timeout error=%q, want it to name the enforced bound %q rather than a bare sentinel",
 			hung.Error,
-			hungProbeTimeout,
+			"timeout (5s)",
 		)
 	}
 }
@@ -84,11 +89,13 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 // distinguishes the two rather than relabelling every failure as a timeout.
 func TestVersionProbeTimeoutIsNotConflatedWithBroken(t *testing.T) {
 	directory := t.TempDir()
-	writeProbeStub(t, directory, "hung", "exec /bin/sleep 30")
+	writeProbeStub(t, directory, "hung", `: > "$PROBE_PHASE_MARKER"; exec /bin/sleep 30`)
 	writeProbeStub(t, directory, "broken", "printf 'permission denied by fixture\\n'; exit 7")
 	t.Setenv("PATH", directory)
 
-	hung := Probe(context.Background(), []Entry{{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}}, ProbeOptions{GOOS: "linux", Timeout: hungProbeTimeout})[0]
+	hung := probeAtBound(t, ProbeTimeout, Entry{
+		Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion,
+	}, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})
 	broken := Probe(context.Background(), []Entry{{Name: "broken", Command: "broken", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}}, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})[0]
 
 	if hung.State != StateTimeout {
@@ -98,8 +105,8 @@ func TestVersionProbeTimeoutIsNotConflatedWithBroken(t *testing.T) {
 			hung.Error,
 		)
 	}
-	if !strings.HasPrefix(hung.Error, "timeout (") || !strings.Contains(hung.Error, hungProbeTimeout.String()) {
-		t.Fatalf("hung error=%q, want the enforced bound named", hung.Error)
+	if hung.Error != "timeout (5s)" {
+		t.Fatalf("hung error=%q, want the enforced bound named: %q", hung.Error, "timeout (5s)")
 	}
 	if broken.State != StateBroken {
 		t.Fatalf(
@@ -112,7 +119,7 @@ func TestVersionProbeTimeoutIsNotConflatedWithBroken(t *testing.T) {
 
 func TestVersionProbePreservesParentCancellationAndDeadline(t *testing.T) {
 	directory := t.TempDir()
-	writeProbeStub(t, directory, "hung", "exec /bin/sleep 30")
+	writeProbeStub(t, directory, "hung", `: > "$PROBE_PHASE_MARKER"; exec /bin/sleep 30`)
 	t.Setenv("PATH", directory)
 	entry := Entry{
 		Name:        "hung",
@@ -123,12 +130,14 @@ func TestVersionProbePreservesParentCancellationAndDeadline(t *testing.T) {
 	}
 
 	t.Run("cancelled", func(t *testing.T) {
+		marker := filepath.Join(t.TempDir(), "hung-started")
+		t.Setenv("PROBE_PHASE_MARKER", marker)
 		ctx, cancel := context.WithCancel(context.Background())
 		resultCh := make(chan Result, 1)
 		go func() {
-			resultCh <- Probe(ctx, []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: 2 * time.Second})[0]
+			resultCh <- Probe(ctx, []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: probeStageBound})[0]
 		}()
-		time.Sleep(50 * time.Millisecond)
+		waitForProbePhaseMarker(t, marker)
 		cancel()
 		result := <-resultCh
 		if result.State != StateCancelled {
@@ -140,9 +149,16 @@ func TestVersionProbePreservesParentCancellationAndDeadline(t *testing.T) {
 	})
 
 	t.Run("parent deadline", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		defer cancel()
-		result := Probe(ctx, []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: 2 * time.Second})[0]
+		marker := filepath.Join(t.TempDir(), "hung-started")
+		t.Setenv("PROBE_PHASE_MARKER", marker)
+		ctx := newDeferredDeadlineContext()
+		resultCh := make(chan Result, 1)
+		go func() {
+			resultCh <- Probe(ctx, []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: probeStageBound})[0]
+		}()
+		waitForProbePhaseMarker(t, marker)
+		ctx.expire()
+		result := <-resultCh
 		if result.State != StateCancelled {
 			t.Fatalf("state=%s error=%q, want StateCancelled", result.State, result.Error)
 		}
@@ -203,7 +219,7 @@ exit 2`)
 			}
 			defer cancel()
 
-			probeTimeout := selfDoctorProbeTimeout(t)
+			probeTimeout := probeStageBound
 			resultCh := make(chan Result, 1)
 			go func() {
 				resultCh <- Probe(parent, []Entry{entry}, ProbeOptions{
@@ -272,62 +288,51 @@ func (ctx *deferredDeadlineContext) expire() {
 	close(ctx.done)
 }
 
-// selfDoctorProbeTimeout is the per-call bound this test hands to Probe()
-// for its version probe and each self-doctor stage (--help, then --summary).
-// It used to be a flat 2s literal, and that is exactly what broke: --help
-// gates --summary in probeSelfDoctor, so a --help probe that outran only its
-// own 2s bound on a loaded box (the trivial fixture never even scheduled in
-// time) made probeSelfDoctor return "broken" WITHOUT ever attempting
-// --summary — so the summary phase marker this test waits for was never
-// written, no matter how long the wait after it was made. The bound is
-// derived from the test's own deadline rather than another guessed literal,
-// capped to a quarter of what remains so the deliberately-hung phase this
-// test drives still leaves room to be cancelled and observed afterward.
-func selfDoctorProbeTimeout(t *testing.T) time.Duration {
-	t.Helper()
-	budget := DefaultSelfDoctorTimeout
-	if deadline, ok := t.Deadline(); ok {
-		if remaining := time.Until(deadline) / 4; remaining < budget {
-			budget = remaining
-		}
-	}
-	return budget
-}
+// probeStageBound is the per-call bound these tests hand to Probe() for its
+// version probe and each self-doctor stage. It is production patience these
+// tests never judge: a stage that outran a short guess on a loaded box made
+// probeSelfDoctor return "broken" before the phase marker the test waits for
+// was written. The bound only has to be longer than any healthy run, and a
+// stage that hangs is failed by waitForProbePhaseMarker, never by this bound.
+const probeStageBound = testwait.HungLimit
 
-// probePhaseMarkerFallbackBudget is the wait used only when the test binary
-// carries no deadline at all (e.g. `-timeout 0`), where there is no ceiling
-// to respect and the wait needs a floor rather than a guess.
-const probePhaseMarkerFallbackBudget = 5 * time.Minute
+// probeAtBound probes entry with its bounds timed on a fake clock and ends the
+// one call that hangs at its bound: the stub writes $PROBE_PHASE_MARKER as it
+// starts to hang, a moment before bound the call still waits, at it Probe
+// returns the result this test judges.
+func probeAtBound(t *testing.T, bound time.Duration, entry Entry, options ProbeOptions) Result {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "hung-started")
+	t.Setenv("PROBE_PHASE_MARKER", marker)
+	fake := clock.NewFake(time.Unix(0, 0))
+	options.Clock = fake
+	resultCh := make(chan Result, 1)
+	go func() { resultCh <- Probe(context.Background(), []Entry{entry}, options)[0] }()
+	waitForProbePhaseMarker(t, marker)
+	if pending := fake.Pending(); pending != 1 {
+		t.Fatalf("armed probe bounds = %d (%s), want the hung call's one", pending, fake)
+	}
+	fake.Advance(bound - time.Nanosecond)
+	if pending := fake.Pending(); pending != 1 {
+		t.Fatalf("the probe bound fired %s before %s: %s", time.Nanosecond, bound, fake)
+	}
+	fake.Advance(time.Nanosecond)
+	result, _ := testwait.Receive(t, "Probe to return once its bound fired", resultCh)
+	return result
+}
 
 func waitForProbePhaseMarker(t *testing.T, marker string) {
 	t.Helper()
-	// The budget is derived from the test binary's own deadline, not from a
-	// fixed constant: a hardcoded ceiling (60s, tried here before) is exactly
-	// the "generous-looking" number that machine load blows through — the
-	// marker is written by a /bin/sh stub that must first be forked and
-	// scheduled, and under a loaded box running the whole suite in parallel
-	// that scheduling alone was observed to exceed 60s. Spending everything
-	// up to the deadline costs nothing: a genuine hang never writes the
-	// marker AT ALL, so no budget lets this pass by accident — it only
-	// decides how long the failure takes to name itself, and failing here
-	// beats being killed by a whole-binary timeout panic that names nothing
-	// about which wait never finished.
-	budget := probePhaseMarkerFallbackBudget
-	if testDeadline, ok := t.Deadline(); ok {
-		if remaining := time.Until(testDeadline) - time.Second; remaining < budget {
-			budget = remaining
+	testwait.Until(t, "the probe stub to write its phase marker "+marker, func() (bool, string) {
+		_, err := os.Stat(marker)
+		if err == nil {
+			return true, ""
 		}
-	}
-	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(marker); err == nil {
-			return
-		} else if !os.IsNotExist(err) {
+		if !os.IsNotExist(err) {
 			t.Fatalf("stat probe phase marker %q: %v", marker, err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("probe phase marker %q was not created within %s", marker, budget)
+		return false, "marker not created"
+	})
 }
 
 func TestDarwinLsofParsesApplesMultilineBanner(t *testing.T) {
@@ -421,6 +426,7 @@ if [ "$1" = "--version" ]; then printf '1.0\n'; exit 0; fi
 exit 2`)
 	writeProbeStub(t, directory, "hung", `
 if [ "$1" = "--version" ]; then printf '1.0\n'; exit 0; fi
+: > "$PROBE_PHASE_MARKER"
 exec /bin/sleep 30`)
 	t.Setenv("PATH", directory)
 	entries := []Entry{
@@ -446,11 +452,11 @@ exec /bin/sleep 30`)
 		Timeout:           ProbeTimeout,
 		SelfDoctorTimeout: ProbeTimeout,
 	})[0]
-	hung := Probe(context.Background(), entries[1:], ProbeOptions{
+	hung := probeAtBound(t, DefaultSelfDoctorTimeout, entries[1], ProbeOptions{
 		GOOS:              "linux",
 		Timeout:           ProbeTimeout,
-		SelfDoctorTimeout: hungProbeTimeout,
-	})[0]
+		SelfDoctorTimeout: DefaultSelfDoctorTimeout,
+	})
 	if unsupported.State != StateOK || unsupported.SelfDoctor != "unavailable" {
 		t.Fatalf("unsupported self-doctor=%#v", unsupported)
 	}
@@ -516,7 +522,7 @@ func TestProbeSelfDoctorTimeoutIsNotConflatedWithBroken(t *testing.T) {
 		writeProbeStub(t, directory, "codex", `
 if [ "$1" = "--version" ]; then printf 'codex-cli 0.148.0\n'; exit 0; fi
 if [ "$1" = "doctor" ] && [ "$2" = "--help" ]; then printf 'usage: codex doctor\n'; exit 0; fi
-if [ "$1" = "doctor" ] && [ "$2" = "--summary" ]; then exec /bin/sleep 30; fi
+if [ "$1" = "doctor" ] && [ "$2" = "--summary" ]; then : > "$PROBE_PHASE_MARKER"; exec /bin/sleep 30; fi
 exit 2`)
 		t.Setenv("PATH", directory)
 		entry := Entry{
@@ -527,7 +533,9 @@ exit 2`)
 			Parse:          firstVersion,
 			SelfDoctorArgs: []string{"doctor", "--summary", "--ascii", "--no-color"},
 		}
-		result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout, SelfDoctorTimeout: slowSelfDoctorTimeout})[0]
+		result := probeAtBound(t, DefaultSelfDoctorTimeout, entry, ProbeOptions{
+			GOOS: "linux", Timeout: ProbeTimeout, SelfDoctorTimeout: DefaultSelfDoctorTimeout,
+		})
 		if result.State != StateOK {
 			t.Fatalf(
 				"state=%s error=%q, want ok — a self-doctor that outran the probe timeout must not read as a broken engine",

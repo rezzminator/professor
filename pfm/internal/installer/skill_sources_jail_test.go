@@ -7,6 +7,8 @@ package installer
 // own discovery and config reading are the subject, which no fake git reproduces.
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,35 +16,46 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestRunSkillGitReturnsWithinItsBound pins F4: a git call whose grandchild
 // keeps stderr open still returns shortly after its timeout, carrying git's
-// stderr tail.
+// stderr tail. The timeout is timed on a fake, fired once the fake git has
+// printed its line; the grace after the kill is os/exec's own WaitDelay.
 func TestRunSkillGitReturnsWithinItsBound(t *testing.T) {
 	t.Parallel()
-	script := filepath.Join(t.TempDir(), "git")
+	dir := t.TempDir()
+	printed := filepath.Join(dir, "printed")
+	script := filepath.Join(dir, "git")
 	if err := testjail.WriteExecutable(
 		script,
-		[]byte("#!/bin/sh\necho 'fatal: slow remote' >&2\nsleep 12 &\nsleep 12\n"),
+		[]byte("#!/bin/sh\necho 'fatal: slow remote' >&2\n: > '"+printed+"'\n"+
+			"tail -f /dev/null &\nexec tail -f /dev/null\n"),
 		0o755,
 	); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
-	_, err := runSkillGitWith(
-		deps.RealRunner{},
-		200*time.Millisecond,
-		100*time.Millisecond,
-		script,
-		t.TempDir(),
-		"clone",
-	)
-	if elapsed := time.Since(start); elapsed > 8*time.Second {
-		t.Fatalf("git returned after %s, past its bound (err=%v)", elapsed, err)
-	}
+	const timeout = 200 * time.Millisecond
+	fake := clock.NewFake(time.Unix(0, 0))
+	ctx, cancel := clock.WithTimeout(context.Background(), fake, timeout)
+	defer cancel()
+	returned := make(chan error, 1)
+	go func() {
+		_, err := runSkillGitContext(
+			ctx, deps.RealRunner{}, timeout, 100*time.Millisecond, script, t.TempDir(), "clone",
+		)
+		returned <- err
+	}()
+	testwait.Until(t, "the fake git to print its stderr line ("+printed+")", func() (bool, string) {
+		_, err := os.Stat(printed)
+		return err == nil, fmt.Sprintf("stat %s: %v", printed, err)
+	})
+	fake.Advance(timeout)
+	err, _ := testwait.Receive(t, "the timed-out git call to return", returned)
 	if err == nil || err.Error() != "git clone timed out after 200ms: fatal: slow remote" {
 		t.Fatalf("timeout error does not carry git's stderr tail: %v", err)
 	}

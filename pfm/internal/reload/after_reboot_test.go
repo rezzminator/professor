@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -46,7 +47,7 @@ func TestNativeReloadLabelsOnlyANamedClaudeConversationItLeftBehind(t *testing.T
 			}
 			native := &nativeReload{
 				request: Request{fresh: testCase.fresh, Engine: testCase.engine},
-				options: Options{Home: home, ClaudeRoots: []string{claudeRoot}, Clock: clock.Real},
+				options: Options{Home: home, ClaudeRoots: []string{claudeRoot}, Clock: clock.NewFake(time.Unix(0, 0))},
 			}
 			var stderr bytes.Buffer
 			native.labelLeftBehind(testCase.session, &stderr)

@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -75,7 +77,7 @@ func SeatRequest(ctx context.Context, socket, method string, params any) (json.R
 		if !ok {
 			return nil, fmt.Errorf("herdr agent.wait: caller deadline is required")
 		}
-		limit = time.Until(deadline)
+		limit = deadline.Sub(exchangeWall())
 	}
 	result, err := callOneWithin(ctx, socket, line, limit)
 	if err != nil {
@@ -184,3 +186,12 @@ func FocusPane(ctx context.Context, socket, pane string) error {
 	}
 	return nil
 }
+
+// wallOffset shifts the wall clock an exchange's socket deadline is built
+// from; zero (every production run) is clock.Wall as it reads. A test shifts it
+// to put a default deadline already past, or far off, for the kernel, so the
+// side that ends an exchange shows in its outcome, never in elapsed time.
+var wallOffset atomic.Int64
+
+// exchangeWall is the wall clock an exchange's socket deadline is built from.
+func exchangeWall() time.Time { return clock.Wall().Add(time.Duration(wallOffset.Load())) }

@@ -85,6 +85,7 @@ func runPostExitFinisher(
 	t.Helper()
 	unkillTmux := &fakeTmux{existsFor: 1}
 	finisher, err := NewFinisher(database, Dependencies{
+		Clock: newFinisherStepClock(),
 		Paths: jail.resolved(),
 		Tmux:  unkillTmux, Screen: unkillTmux, Refresher: refresher,
 		Delay: time.Millisecond, PollEvery: time.Millisecond, PollAttempts: 3,

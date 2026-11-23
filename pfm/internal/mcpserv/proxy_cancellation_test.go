@@ -16,16 +16,20 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type proxyCancellationClock struct {
 	clock.Clock
+	window       time.Duration // the retry window's own timer, which signals nothing
 	timerCreated chan struct{}
 }
 
 func (testClock *proxyCancellationClock) NewTimer(delay time.Duration) clock.Timer {
 	timer := testClock.Clock.NewTimer(delay)
-	testClock.timerCreated <- struct{}{}
+	if delay != testClock.window {
+		testClock.timerCreated <- struct{}{}
+	}
 	return timer
 }
 
@@ -37,8 +41,8 @@ func TestStdioProxyCancellationStopsUndeliveredRetry(t *testing.T) {
 	var mutations atomic.Int32
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
-	proxy.retryDelay = 200 * time.Millisecond
-	proxy.retryWindow = time.Second
+	// The retry delay never passes on its own: the cancellation must end it.
+	proxy.clock = admittingClock{clock.NewFake(time.Unix(0, 0))}
 	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
 		var frame proxyFrame
 		if err := json.NewDecoder(request.Body).Decode(&frame); err != nil {
@@ -75,7 +79,7 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 	firstAttempt := make(chan struct{})
 	cancellationForwarded := make(chan struct{})
 	fakeClock := clock.NewFake(time.Unix(0, 0))
-	testClock := &proxyCancellationClock{Clock: fakeClock, timerCreated: make(chan struct{}, 1)}
+	testClock := &proxyCancellationClock{Clock: fakeClock, window: time.Minute, timerCreated: make(chan struct{}, 1)}
 	var attempts atomic.Int32
 	var mutations atomic.Int32
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
@@ -132,21 +136,12 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 	// the request must already be cancelled when the replay boundary opens. The
 	// retry loop reads the request's context, which is cancelled just after the
 	// cancelled flag is set, so the test waits on the context.
-	deadline := time.After(2 * time.Second)
-	for {
+	testwait.Until(t, "request 2 to be marked cancelled", func() (bool, string) {
 		proxy.requestMutex.Lock()
+		defer proxy.requestMutex.Unlock()
 		request := proxy.requests["number:2"]
-		cancelled := request != nil && request.ctx.Err() != nil
-		proxy.requestMutex.Unlock()
-		if cancelled {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("request 2 was never marked cancelled")
-		case <-time.After(time.Millisecond):
-		}
-	}
+		return request != nil && request.ctx.Err() != nil, "request 2 is not cancelled"
+	})
 	proxy.reinitMutex.Unlock()
 	reinitLocked = false
 	<-cancellationForwarded
@@ -167,6 +162,7 @@ func TestStdioProxyReusesCancelledStartedRequestID(t *testing.T) {
 	t.Cleanup(release)
 	var calls atomic.Int32
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
+	proxyTestStepping(proxy)
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.sessionID = "session-current"
 	proxy.protocol = "2025-06-18"
@@ -207,17 +203,29 @@ func TestStdioProxyReusesCancelledStartedRequestID(t *testing.T) {
 
 	harness.write(t, proxyTestToolCall(3, "new", `{"name":"reused"}`))
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`)
-	select {
-	case <-reusedStarted:
+	// Presence beside the absence: the reused request is blocked behind the old
+	// cancellation notification, the one point it would forward from.
+	reached := false
+	testwait.Until(
+		t,
+		"the reused request blocked behind the old cancellation, or at the daemon",
+		func() (bool, string) {
+			if len(reusedStarted) != 0 {
+				reached = true
+				return true, "at the daemon"
+			}
+			return testwait.Blocked("mcpserv.waitForProxyRequest", "mcpserv.(*stdioProxy).forwardRequest")
+		},
+	)
+	if reached {
 		t.Fatal("reused request reached daemon before the old cancellation notification completed")
-	case <-time.After(50 * time.Millisecond):
 	}
 	release()
-	select {
-	case <-reusedStarted:
-	case <-time.After(time.Second):
-		t.Fatal("reused request did not reach daemon after the old cancellation notification completed")
-	}
+	testwait.Receive(
+		t,
+		"the reused request to reach the daemon after the old cancellation notification completed",
+		reusedStarted,
+	)
 	if response := harness.read(t); response["id"] != float64(3) || response["result"] == nil {
 		t.Fatalf("reused started request response = %+v, want success", response)
 	}
@@ -246,14 +254,13 @@ func TestStdioProxyCancellationInterruptsAnUnresponsiveReplayProbe(t *testing.T)
 			accepted <- conn
 		}
 	}()
-	previous := DaemonProbeTimeoutOverride
-	DaemonProbeTimeoutOverride = 30 * time.Second
-	t.Cleanup(func() { DaemonProbeTimeoutOverride = previous })
 	proxy := newStdioProxy(context.Background(), listener.Addr().String(), io.Discard)
+	// The replay probe's deadline sits on a fake that never reaches it: only
+	// the cancellation ends the probe.
+	fake := clock.NewFake(time.Unix(0, 0))
+	proxy.clock = fake
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
-	proxy.retryDelay = time.Millisecond
-	proxy.retryWindow = time.Minute
 	proxy.sessionID = "session-before-refusal"
 	proxy.protocol = "2025-06-18"
 	proxy.handshake.store(proxyInitializeMethod, []byte(proxyTestInitialize))
@@ -267,25 +274,27 @@ func TestStdioProxyCancellationInterruptsAnUnresponsiveReplayProbe(t *testing.T)
 		_, sendErr := proxy.sendWithRetry(ctx, []byte(proxyTestToolCall(2, "ls", `{}`)), false)
 		done <- sendErr
 	}()
-	var conn net.Conn
-	select {
-	case conn = <-accepted:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the replay never probed the daemon's runtime")
-	}
+	testwait.Until(t, "the refused send to wait out its retry delay", func() (bool, string) {
+		step, due := fake.NextDue()
+		return due && step == proxyRetryDelay, fake.String()
+	})
+	fake.Advance(proxyRetryDelay)
+	conn, _ := testwait.Receive(t, "the replay to probe the daemon's runtime", accepted)
 	defer func() {
 		if err := conn.Close(); err != nil {
 			t.Errorf("close probe connection: %v", err)
 		}
 	}()
 	cancel()
-	select {
-	case sendErr := <-done:
-		if !errors.Is(sendErr, context.Canceled) {
-			t.Fatalf("sendWithRetry() error = %v, want context.Canceled", sendErr)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("a cancelled request stayed blocked on the unresponsive daemon's runtime probe")
+	if sendErr, _ := testwait.Receive(
+		t,
+		"the cancelled request to leave the unresponsive daemon's runtime probe",
+		done,
+	); !errors.Is(
+		sendErr,
+		context.Canceled,
+	) {
+		t.Fatalf("sendWithRetry() error = %v, want context.Canceled", sendErr)
 	}
 }
 
@@ -305,9 +314,9 @@ func TestRunStdioCancelledDaemonProbe(t *testing.T) {
 			accepted <- conn
 		}
 	}()
-	previous := DaemonProbeTimeoutOverride
-	DaemonProbeTimeoutOverride = 30 * time.Second
-	t.Cleanup(func() { DaemonProbeTimeoutOverride = previous })
+	// The start's probe deadline sits on a fake that never reaches it: only
+	// the cancellation ends the probe.
+	probeClock(t)
 	var warnings proxyTestBuffer
 	service := stdioTestService("cancelled-start", &warnings)
 	professor := stdioTestProfessor(t, service)
@@ -335,30 +344,18 @@ func TestRunStdioCancelledDaemonProbe(t *testing.T) {
 			}
 		}
 		if !finished {
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				t.Error("stdio start stayed blocked after closing the probe")
-			}
+			_, _ = testwait.Receive(t, "the stdio start to end after closing the probe", done)
 		}
 	}()
-	select {
-	case conn = <-accepted:
-	case <-time.After(10 * time.Second):
-		t.Fatal("stdio start never probed the daemon")
-	}
+	conn, _ = testwait.Receive(t, "the stdio start to probe the daemon", accepted)
 	cancel()
-	select {
-	case err := <-done:
-		finished = true
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("stdio start error = %v, want context.Canceled", err)
-		}
-		if strings.Contains(warnings.String(), "using in-process MCP") {
-			t.Errorf("cancelled stdio start fell back: %s", warnings.String())
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("cancelled stdio start stayed blocked on the daemon probe")
+	err, _ = testwait.Receive(t, "the cancelled stdio start to leave the daemon probe", done)
+	finished = true
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("stdio start error = %v, want context.Canceled", err)
+	}
+	if strings.Contains(warnings.String(), "using in-process MCP") {
+		t.Errorf("cancelled stdio start fell back: %s", warnings.String())
 	}
 }
 

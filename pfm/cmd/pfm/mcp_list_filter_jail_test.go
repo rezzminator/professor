@@ -12,13 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestMCPListProjectFilterIsASubstringNotAQuery is the F4 regression:
@@ -95,7 +95,7 @@ func TestMCPListAdmitsBootingRow(t *testing.T) {
 	socket := "cc-1700000000-" + strconv.Itoa(os.Getpid()) + "-9"
 	session := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "sleep", "120",
+		"new-session", "-d", "-s", socket, "tail", "-f", "/dev/null",
 	)
 	if output, err := session.CombinedOutput(); err != nil {
 		t.Fatalf("start booting pane: %v: %s", err, output)
@@ -197,7 +197,7 @@ func callChatTool[T any](t *testing.T, name string, arguments any) T {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = service.Close() })
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := service.Server().Connect(ctx, serverTransport, nil)

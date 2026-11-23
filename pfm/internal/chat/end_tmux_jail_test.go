@@ -37,7 +37,7 @@ func TestKillServerRecordsAChatStateTransition(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", "bg", "sleep", "120",
+		"new-session", "-d", "-s", "bg", "tail", "-f", "/dev/null",
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)
@@ -117,12 +117,12 @@ func TestKillServerEndsOnlyASoleChatServer(t *testing.T) {
 				output, err := command.CombinedOutput()
 				return string(output), err
 			}
-			if output, err := tmux("new-session", "-d", "-s", "chat", "sleep 120"); err != nil {
+			if output, err := tmux("new-session", "-d", "-s", "chat", "tail -f /dev/null"); err != nil {
 				t.Fatalf("start server %s: %v: %s", socketPath, err, output)
 			}
 			t.Cleanup(func() { _, _ = tmux("kill-server") })
 			if test.split {
-				if output, err := tmux("split-window", "-d", "-t", "%0", "sleep 120"); err != nil {
+				if output, err := tmux("split-window", "-d", "-t", "%0", "tail -f /dev/null"); err != nil {
 					t.Fatalf("split a second pane onto %s: %v: %s", socketPath, err, output)
 				}
 			}

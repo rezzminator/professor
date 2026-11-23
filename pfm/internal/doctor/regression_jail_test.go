@@ -19,7 +19,7 @@ func TestTmuxTitlesDoctorReportsStringDriftAsDivergent(t *testing.T) {
 	}
 	root, socket := t.TempDir(), "titles-doctor"
 	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "fixture", "sleep", "120")
+	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "fixture", "cat")
 	start.Env = environment
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start tmux fixture: %v: %s", err, output)

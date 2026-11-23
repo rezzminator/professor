@@ -143,6 +143,10 @@ type indicatorPainter struct {
 	// serverStart reads the Herdr server's start identity (its socket file's
 	// mtime), the key of the unproved-pane memo; nil reads the socket file.
 	serverStart func() (int64, error)
+	// socketAtStart says the socket file was there when the painter started
+	// (ownerIdentity read): a dial that later finds it gone is its server ended
+	// under the painter (failed), never a socket that was never there.
+	socketAtStart bool
 	// server is the start identity the memo was last read under; persisted
 	// says whether it was read, so the memo is kept in lockDir. A socket file
 	// that cannot be read keeps the memo in this process alone: a pane is
@@ -211,6 +215,8 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 		painter.logf("%v", err)
 		return err
 	}
+	_, err := painter.ownerIdentity()
+	painter.socketAtStart = err == nil
 	if err := painter.record(ctx); errors.Is(err, errThemeOff) {
 		// Not a failure: pfm's Herdr theme is off, and its stop marker stands.
 		_, _ = fmt.Fprintf(painter.stderr, "%v: socket %s left as theme off found it\n", err, painter.socket)

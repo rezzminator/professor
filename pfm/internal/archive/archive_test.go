@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // fakeKills is the killed set with an audit trail of what was retired.
@@ -62,6 +63,9 @@ func (emptyProc) Stat(int) (gather.ProcStat, error)      { return gather.ProcSta
 
 func archiveJail(t *testing.T) paths.Values {
 	t.Helper()
+	// The history lease's heartbeat ticks on the process clock: a fake one it
+	// never fires on keeps every test on the lease off the real clock.
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	root := t.TempDir()
 	values := paths.Values{
 		Home: filepath.Join(root, "home"),
@@ -760,9 +764,7 @@ func TestArchivePreservesAnExternalSidecarAppendAtCommit(t *testing.T) {
 			var slow *clock.Fake
 			if name == "history slow prune" {
 				slow = clock.NewFake(time.Now())
-				originalClock := leaseClock
-				leaseClock = slow
-				t.Cleanup(func() { leaseClock = originalClock })
+				testwait.ProcessClock(t, slow)
 			}
 			original := beforePruneCommit
 			t.Cleanup(func() { beforePruneCommit = original })
@@ -779,8 +781,8 @@ func TestArchivePreservesAnExternalSidecarAppendAtCommit(t *testing.T) {
 					// given its chance to refresh the lease before time moves on.
 					for step := 1; step <= 11; step++ {
 						slow.Advance(time.Second)
-						if step%2 == 0 && !awaitLeaseRefresh(realPath+".lock", slow.Now()) {
-							return fmt.Errorf("the lease was not refreshed by the heartbeat due at %s", slow.Now())
+						if step%2 == 0 {
+							awaitLeaseRefresh(t, realPath+".lock", slow.Now())
 						}
 					}
 					info, err := os.Stat(realPath + ".lock")
@@ -874,20 +876,22 @@ func TestArchivePreservesAnExternalSidecarAppendAtCommit(t *testing.T) {
 	}
 }
 
-// awaitLeaseRefresh waits, a bounded real while, for the heartbeat to stamp the
-// lease at tick; a heartbeat that never does leaves the stale lease to the
-// producer's takeover, which the caller's assertion then reports.
-// awaitLeaseRefresh reports whether the heartbeat refreshed the lease for the
-// tick due at tick; a heartbeat that never answers is false, never a pass.
-func awaitLeaseRefresh(lock string, tick time.Time) bool {
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if info, err := os.Stat(lock); err == nil && !info.ModTime().Before(tick.Truncate(time.Microsecond)) {
-			return true
-		}
-		time.Sleep(time.Millisecond)
-	}
-	return false
+// awaitLeaseRefresh waits until the heartbeat has stamped the lease for the
+// tick due at tick; a heartbeat that never does fails the test with the lease's
+// last stamp, never passes.
+func awaitLeaseRefresh(t *testing.T, lock string, tick time.Time) {
+	t.Helper()
+	testwait.Until(
+		t,
+		"the heartbeat to refresh the lease "+lock+" for the tick due at "+tick.String(),
+		func() (bool, string) {
+			info, err := os.Stat(lock)
+			if err != nil {
+				return false, err.Error()
+			}
+			return !info.ModTime().Before(tick.Truncate(time.Microsecond)), "lease stamped " + info.ModTime().String()
+		},
+	)
 }
 
 func TestMoveFileRefusesAnOccupiedPublicationTarget(t *testing.T) {

@@ -64,7 +64,7 @@ var installedClone struct {
 
 // StageSourceRepoMarker records, in home, the clone a healthy install came
 // from: installedCloneDir.
-func StageSourceRepoMarker(t *testing.T, home string) {
+func StageSourceRepoMarker(t testing.TB, home string) {
 	t.Helper()
 	clone := installedCloneDir(t)
 	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
@@ -76,7 +76,7 @@ func StageSourceRepoMarker(t *testing.T, home string) {
 // checkout's installedCloneFiles, made once per test binary beside
 // runSourceRepo, holding none of the files a host leaves beside the tracked
 // ones (copyTrackedPaths), the same clone on every machine.
-func installedCloneDir(t *testing.T) string {
+func installedCloneDir(t testing.TB) string {
 	t.Helper()
 	installedClone.once.Do(func() {
 		if runSourceRepo == "" {

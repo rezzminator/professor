@@ -5,11 +5,44 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
+
+// steppingClock stands still until a Sleep moves it: Sleep adds its duration
+// and returns at once, so a lock's settle and poll waits cost no time and its
+// timeout fires after a count of polls. Only Now and Sleep are meant to be
+// called; the embedded fake is never advanced.
+type steppingClock struct {
+	clock.Clock
+	mutex sync.Mutex
+	at    time.Time
+}
+
+// newSteppingClock starts at the wall time, as on-disk lock stamps compare to it.
+func newSteppingClock() *steppingClock {
+	start := time.Now()
+	return &steppingClock{Clock: clock.NewFake(start), at: start}
+}
+
+func (c *steppingClock) Now() time.Time {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.at
+}
+
+func (c *steppingClock) Sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.at = c.at.Add(d)
+	return nil
+}
 
 // TestLockBeatReportsALostLock (L1-F9): beat must not silently succeed when
 // the lock directory's owner file now names another pid — a delivery that
@@ -18,7 +51,7 @@ import (
 func TestLockBeatReportsALostLock(t *testing.T) {
 	root := t.TempDir()
 	lock, err := acquireTargetLock(
-		context.Background(), clock.Real, root, "sock:%1",
+		context.Background(), newSteppingClock(), root, "sock:%1",
 		time.Second, time.Millisecond, time.Minute,
 	)
 	if err != nil {
@@ -42,7 +75,7 @@ func TestLockBeatReportsALostLock(t *testing.T) {
 func TestLockBeatSucceedsWhileStillOwner(t *testing.T) {
 	root := t.TempDir()
 	lock, err := acquireTargetLock(
-		context.Background(), clock.Real, root, "sock:%1",
+		context.Background(), newSteppingClock(), root, "sock:%1",
 		time.Second, time.Millisecond, time.Minute,
 	)
 	if err != nil {
@@ -57,11 +90,12 @@ func TestCancelledSettleReleasesTargetLock(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := acquireTargetLock(ctx, clock.Real, root, "sock:%1", time.Second, time.Millisecond, time.Minute)
+	clk := newSteppingClock()
+	_, err := acquireTargetLock(ctx, clk, root, "sock:%1", time.Second, time.Millisecond, time.Minute)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("settle error = %v, want context.Canceled", err)
 	}
-	lock, err := acquireTargetLock(context.Background(), clock.Real, root, "sock:%1", 0, 0, time.Minute)
+	lock, err := acquireTargetLock(context.Background(), clk, root, "sock:%1", 0, 0, time.Minute)
 	if err != nil {
 		t.Fatalf("cancelled settle leaked the owned lock: reacquire = %v", err)
 	}
@@ -93,12 +127,13 @@ func TestUnparsableLockOwnerIsStaleOnlyPastMaxHold(t *testing.T) {
 			if err := os.WriteFile(owner, []byte("torn"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			written := time.Now().Add(-test.age)
+			clk := newSteppingClock()
+			written := clk.Now().Add(-test.age)
 			if err := os.Chtimes(owner, written, written); err != nil {
 				t.Fatal(err)
 			}
 			lock, err := acquireTargetLock(
-				context.Background(), clock.Real, root, "sock:%1", 0, time.Millisecond, time.Minute,
+				context.Background(), clk, root, "sock:%1", 0, time.Millisecond, time.Minute,
 			)
 			if !test.acquired {
 				want := "call target lock timeout: owner file " + owner + " names no owner"

@@ -125,7 +125,7 @@ func convergeCodexProbeWindow(
 		}
 		return strings.TrimSpace(string(output))
 	}
-	probeTmux("-f", "/dev/null", "new-session", "-d", "-s", socket, "-n", "before", "sleep 120")
+	probeTmux("-f", "/dev/null", "new-session", "-d", "-s", socket, "-n", "before", "exec tail -f /dev/null")
 	t.Cleanup(func() {
 		kill := exec.Command("tmux", "-L", socket, "kill-server")
 		kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)

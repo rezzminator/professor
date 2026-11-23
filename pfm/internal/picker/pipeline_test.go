@@ -13,12 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
@@ -84,7 +86,6 @@ func (runner *immediateIndexRunner) Run(
 // A pass in which one engine failed and the rest indexed warns and goes on
 // listing: the stream neither stops nor reports a refresh failure.
 func TestPickerRefreshStreamWarnsOnAPartialIndexAndKeepsRefreshing(t *testing.T) {
-	shortenRefreshIntervals(t)
 	jailTest(t)
 	database, err := store.Open()
 	if err != nil {
@@ -95,12 +96,13 @@ func TestPickerRefreshStreamWarnsOnAPartialIndexAndKeepsRefreshing(t *testing.T)
 			t.Errorf("close database: %v", err)
 		}
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	updates := make(chan ui.Snapshot, 1)
 	var stderr bytes.Buffer
 	var warned []string
 	var warnedMutex sync.Mutex
+	fake := clock.NewFake(time.Unix(1_800_000_000, 0))
 	runner := &immediateIndexRunner{err: &fleetindex.PartialError{
 		Failures: []error{errors.New("index engine oc: store unreadable")},
 	}}
@@ -115,15 +117,20 @@ func TestPickerRefreshStreamWarnsOnAPartialIndexAndKeepsRefreshing(t *testing.T)
 		},
 		&stderr,
 		updates,
-		refreshDependencies{newIndexer: func(*store.Store) (indexRunner, error) { return runner, nil }},
+		refreshDependencies{
+			newIndexer: func(*store.Store) (indexRunner, error) { return runner, nil },
+			clock:      fake,
+		},
 	)
-	published := 0
-	for snapshot := range updates {
+	// The stream's every wait on fake is its pause between passes: three passes publish
+	// once each pause has passed.
+	for published := 0; published < 3; {
+		snapshot, ok := nextRefreshSnapshot(t, "a pass to publish", updates, fake)
+		if !ok {
+			t.Fatalf("refresh stream closed before its third pass: %s", stderr.String())
+		}
 		if !snapshot.Refreshing {
 			published++
-		}
-		if published == 3 {
-			break
 		}
 	}
 	cancel()
@@ -141,7 +148,6 @@ func TestPickerRefreshStreamWarnsOnAPartialIndexAndKeepsRefreshing(t *testing.T)
 }
 
 func TestPickerRefreshStreamRepeatsAtTheBaseInterval(t *testing.T) {
-	shortenRefreshIntervals(t)
 	jailTest(t)
 	database, err := store.Open()
 	if err != nil {
@@ -152,11 +158,12 @@ func TestPickerRefreshStreamRepeatsAtTheBaseInterval(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	updates := make(chan ui.Snapshot, 1)
 	var stderr bytes.Buffer
 	runner := &immediateIndexRunner{}
+	fake := clock.NewFake(time.Unix(1_800_000_000, 0))
 	go streamFleetRefreshesWith(
 		ctx,
 		database,
@@ -164,37 +171,30 @@ func TestPickerRefreshStreamRepeatsAtTheBaseInterval(t *testing.T) {
 		fleet.PrintWarn(&stderr),
 		&stderr,
 		updates,
-		refreshDependencies{newIndexer: func(*store.Store) (indexRunner, error) {
-			return runner, nil
-		}},
+		refreshDependencies{
+			newIndexer: func(*store.Store) (indexRunner, error) {
+				return runner, nil
+			},
+			clock: fake,
+		},
 	)
-	for {
-		snapshot, ok := <-updates
+	// The opening pass publishes first; a nil activity clock never backs off, so
+	// a second pass is due one fleetRefreshInterval after it.
+	for settled := false; !settled; {
+		snapshot, ok := nextRefreshSnapshot(t, "the opening pass to publish", updates, fake)
 		if !ok {
 			t.Fatalf("refresh stream closed after initial scan: %s", stderr.String())
 		}
-		if !snapshot.Refreshing {
-			break
-		}
+		settled = !snapshot.Refreshing
 	}
-	// The base interval plus headroom: a nil activity clock never backs off,
-	// so a second pass is due one fleetRefreshInterval after the first.
-	deadline := time.After(fleetRefreshInterval + 4*time.Second)
-	for {
-		select {
-		case snapshot, ok := <-updates:
-			if !ok {
-				t.Fatalf("refresh stream closed before recurring scan: %s", stderr.String())
-			}
-			if !snapshot.Refreshing {
-				goto refreshed
-			}
-		case <-deadline:
-			t.Fatalf("picker did not refresh again within %s", fleetRefreshInterval+4*time.Second)
+	for settled := false; !settled; {
+		snapshot, ok := nextRefreshSnapshot(t, "the recurring pass to publish", updates, fake)
+		if !ok {
+			t.Fatalf("refresh stream closed before recurring scan: %s", stderr.String())
 		}
+		settled = !snapshot.Refreshing
 	}
 
-refreshed:
 	cancel()
 	for range updates {
 	}
@@ -211,22 +211,29 @@ refreshed:
 	}
 }
 
-func shortenRefreshIntervals(t *testing.T) {
+// nextRefreshSnapshot receives the stream's next snapshot (open false once it
+// closed). A stream that waits only on its own timers has each one it arms
+// pass at once on fake: every wait on fake is the stream's pause between
+// passes, and what the test waits for is made by the stream itself.
+func nextRefreshSnapshot(
+	t *testing.T,
+	what string,
+	updates <-chan ui.Snapshot,
+	fake *clock.Fake,
+) (snapshot ui.Snapshot, open bool) {
 	t.Helper()
-	previousInterval := fleetRefreshInterval
-	previousParkThreshold := fleetRefreshParkThreshold
-	previousParkPoll := fleetRefreshParkPollInterval
-	previousCodexPoll := fleetRefreshCodexPollInterval
-	fleetRefreshInterval = 10 * time.Millisecond
-	fleetRefreshParkThreshold = 20 * time.Millisecond
-	fleetRefreshParkPollInterval = 5 * time.Millisecond
-	fleetRefreshCodexPollInterval = 10 * time.Millisecond
-	t.Cleanup(func() {
-		fleetRefreshInterval = previousInterval
-		fleetRefreshParkThreshold = previousParkThreshold
-		fleetRefreshParkPollInterval = previousParkPoll
-		fleetRefreshCodexPollInterval = previousCodexPoll
+	testwait.Until(t, "a snapshot while "+what, func() (bool, string) {
+		select {
+		case snapshot, open = <-updates:
+			return true, ""
+		default:
+		}
+		if step, due := fake.NextDue(); due {
+			fake.Advance(step)
+		}
+		return false, fake.String()
 	})
+	return snapshot, open
 }
 
 func (runner *slowIndexRunner) Run(
@@ -251,6 +258,64 @@ func (runner *slowIndexRunner) Run(
 	return fleetindex.Counters{}, nil
 }
 
+// seedTranscriptRows indexes rows transcripts named prefix-NNNNNNNN, each with a first prompt and
+// the working directory the test runs in.
+func seedTranscriptRows(tb testing.TB, database *store.Store, prefix string, rows int) {
+	tb.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		tb.Fatal(err)
+	}
+	if err := database.Batch(
+		context.Background(),
+		rows,
+		func(tx *store.ImmediateTx, start, end int) error {
+			for index := start; index < end; index++ {
+				if err := tx.UpsertTranscript(context.Background(), store.Transcript{
+					UUID:        fmt.Sprintf("%s-%08d", prefix, index),
+					Path:        fmt.Sprintf("/jail/%s-%08d.jsonl", prefix, index),
+					Size:        1024,
+					MTimeNS:     int64(index + 1),
+					CWD:         cwd,
+					FirstPrompt: fmt.Sprintf("%s row %08d", prefix, index),
+					PromptCount: 1,
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+// The first frame a 5,000-row cache paints before any index pass has run: its number is the
+// cost the picker's open pays, measured here and never judged by a test.
+func BenchmarkCachedFirstPaint(b *testing.B) {
+	jailTest(b)
+	database, err := store.Open()
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			b.Errorf("close database: %v", err)
+		}
+	}()
+	seedTranscriptRows(b, database, "cached", 5_000)
+	b.ResetTimer()
+	for range b.N {
+		cached, err := scanFleetCached(context.Background(), database, scanRequest{})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if view := ui.NewModel(cached.Snapshot).View(); view.Content == "" {
+			b.Fatal("cached first frame is empty")
+		}
+	}
+}
+
 func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 	jailTest(t)
 	database, err := store.Open()
@@ -267,36 +332,9 @@ func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	const rows = 5_000
-	if err := database.Batch(
-		context.Background(),
-		rows,
-		func(tx *store.ImmediateTx, start, end int) error {
-			for index := start; index < end; index++ {
-				if err := tx.UpsertTranscript(context.Background(), store.Transcript{
-					UUID:        fmt.Sprintf("cached-%08d", index),
-					Path:        fmt.Sprintf("/jail/cached-%08d.jsonl", index),
-					Size:        1024,
-					MTimeNS:     int64(index + 1),
-					CWD:         cwd,
-					FirstPrompt: fmt.Sprintf("cached row %08d", index),
-					PromptCount: 1,
-				}); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
+	seedTranscriptRows(t, database, "cached", rows)
 
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
-	limit := 2 * time.Second
-	if strict {
-		limit = 100 * time.Millisecond
-	}
 	request := scanRequest{}
-	started := time.Now()
 	cached, err := scanFleetCached(context.Background(), database, request)
 	if err != nil {
 		t.Fatal(err)
@@ -312,26 +350,9 @@ func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 			rows-30,
 		)
 	}
-	scanReady := time.Since(started)
-	modelStarted := time.Now()
 	model := ui.NewModel(cached.Snapshot)
-	modelReady := time.Since(modelStarted)
-	viewStarted := time.Now()
 	if view := model.View(); view.Content == "" {
 		t.Fatal("cached first frame is empty")
-	}
-	viewReady := time.Since(viewStarted)
-	firstPaint := time.Since(started)
-	if firstPaint >= limit {
-		t.Fatalf(
-			"cached 5k first paint=%s (scan=%s model=%s view=%s), want <%s (strict=%t)",
-			firstPaint,
-			scanReady,
-			modelReady,
-			viewReady,
-			limit,
-			strict,
-		)
 	}
 
 	runner := &slowIndexRunner{
@@ -353,17 +374,15 @@ func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 			newIndexer: func(*store.Store) (indexRunner, error) {
 				return runner, nil
 			},
+			// The test reads the opening passes only: the cadence timer parks on a fake that never moves.
+			clock: clock.NewFake(time.Unix(1_800_000_000, 0)),
 		},
 	)
 	gathered, ok := <-updates
 	if !ok {
 		t.Fatalf("refresh ended before gather: %s", stderr.String())
 	}
-	select {
-	case <-runner.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("slow project index did not start asynchronously")
-	}
+	testwait.Receive(t, "the slow project index to start asynchronously", runner.started)
 	follow := model.SelectedKey()
 	updated, command := model.Update(ui.RefreshMsg{Snapshot: gathered})
 	if command != nil {
@@ -405,15 +424,10 @@ func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 		t.Fatalf("async refresh leaked goroutines: before=%d after=%d", before, after)
 	}
 	t.Logf(
-		"STRESS cached_rows=%d first_paint=%s scan=%s model=%s view=%s slow_index_async=true refreshes=3 priority_only=true cursor_follow=true goroutines=%d/%d strict=%t",
+		"STRESS cached_rows=%d slow_index_async=true refreshes=3 priority_only=true cursor_follow=true goroutines=%d/%d",
 		rows,
-		firstPaint,
-		scanReady,
-		modelReady,
-		viewReady,
 		before,
 		after,
-		strict,
 	)
 }
 
@@ -428,33 +442,8 @@ func TestAsyncCallerRefreshStormPreservesCursorAndGoroutines(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
 	const rows = 256
-	if err := database.Batch(
-		context.Background(),
-		rows,
-		func(tx *store.ImmediateTx, start, end int) error {
-			for index := start; index < end; index++ {
-				if err := tx.UpsertTranscript(context.Background(), store.Transcript{
-					UUID:        fmt.Sprintf("storm-%08d", index),
-					Path:        fmt.Sprintf("/jail/storm-%08d.jsonl", index),
-					Size:        1024,
-					MTimeNS:     int64(index + 1),
-					CWD:         cwd,
-					FirstPrompt: fmt.Sprintf("storm row %08d", index),
-					PromptCount: 1,
-				}); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
+	seedTranscriptRows(t, database, "storm", rows)
 	request := scanRequest{}
 	cached, err := scanFleetCached(context.Background(), database, request)
 	if err != nil {
@@ -480,6 +469,7 @@ func TestAsyncCallerRefreshStormPreservesCursorAndGoroutines(t *testing.T) {
 				newIndexer: func(*store.Store) (indexRunner, error) {
 					return &immediateIndexRunner{}, nil
 				},
+				clock: clock.NewFake(time.Unix(1_800_000_000, 0)),
 			},
 		)
 		for {
@@ -711,12 +701,14 @@ func TestPickerWorkbenchRefreshDiscoversAndCaches(t *testing.T) {
 				updates,
 				refreshDependencies{
 					newIndexer: func(*store.Store) (indexRunner, error) { return &immediateIndexRunner{}, nil },
+					// The test reads the opening pass only: the cadence timer parks on a fake that never moves.
+					clock: clock.NewFake(time.Unix(1_800_000_000, 0)),
 				},
 			)
 			var first ui.Snapshot
 			select {
 			case first = <-updates:
-			case <-time.After(10 * time.Second):
+			case <-testwait.Context(t).Done():
 				cancel()
 				for range updates {
 				}
@@ -766,12 +758,15 @@ func TestPickerWorkbenchRefreshWalkErrors(t *testing.T) {
 				benches, _ := workbench.Discover(roots)
 				return benches, []workbench.WalkError{fault}
 			},
+			// The loop the first pass starts arms its cadence on this clock,
+			// which nothing moves: the test reads only the first snapshot.
+			clock: clock.NewFake(time.Unix(1_800_000_000, 0)),
 		},
 	)
 	var first ui.Snapshot
 	select {
 	case first = <-updates:
-	case <-time.After(10 * time.Second):
+	case <-testwait.Context(t).Done():
 		cancel()
 		for range updates {
 		}

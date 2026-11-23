@@ -1,0 +1,26 @@
+# The banned spellings of scripts/shtest-clock-check.sh, closed world: one row each, `{spelling}<TAB>{extended regex}`.
+# A line of a scanned file holding the regex is a site named by the spelling. <B> stands for the left edge of a
+# command word (line start, a character no name part can be, or a printf `\n`/`\t` escape), <E> for its right edge. The spellings are this
+# file's subject, so they live here, in no shell file, and the check never scans this table.
+sleep	<B>sleep[[:space:]]+(-|[0-9.$"'{(]|inf)
+timeout	<B>g?timeout[[:space:]]+(-|[0-9.$"'{(])
+usleep	<B>usleep<E>
+read -t	<B>read[[:space:]]+([^;|&]*[[:space:]])?-[A-Za-z]*t
+wait -t	<B>wait[[:space:]]+([^;|&]*[[:space:]])?-[A-Za-z]*t
+TMOUT	<B>TMOUT<E>
+SECONDS	(^|[^A-Za-z0-9_])SECONDS([^A-Za-z0-9_]|$)
+EPOCHSECONDS	EPOCHSECONDS
+EPOCHREALTIME	EPOCHREALTIME
+date +%s	<B>g?date([[:space:]]+(-u|--utc))?[[:space:]]+["']?[+]%s
+date -d now	<B>g?date[[:space:]]+(-d|--date)[[:space:]=]+["']?now
+sleep()	(^|[^A-Za-z0-9_])sleep[[:space:]]*[(][^)]
+Time::HiRes	Time::HiRes
+select(undef	select[[:space:]]*[(][[:space:]]*undef
+alarm	(^|[^A-Za-z0-9_])alarm[[:space:]]*[(0-9$]
+time.time()	time[.](time|monotonic|perf_counter)[[:space:]]*[(]
+timeout=	(^|[^-.A-Za-z0-9_])timeout[[:space:]]*=
+settimeout(	settimeout[[:space:]]*[(]
+setTimeout(	set(Timeout|Interval)[[:space:]]*[(]
+flock -w	<B>flock[[:space:]]+([^;|&]*[[:space:]])?-(w|-timeout)
+inotifywait -t	<B>inotifywait[[:space:]]+([^;|&]*[[:space:]])?-(t|-timeout)
+--max-time	--(max-time|connect-timeout)

@@ -29,7 +29,7 @@ func TestClaudeWindowNameConvergesOnARealServer(t *testing.T) {
 	command := jail.command(
 		"-f", "/dev/null", "-L", socket,
 		"new-session", "-d", "-s", socket, "-n", "zsh",
-		"printf '🥇 acct  🔖 FLEET_LABEL │ 42%%\\n'; sleep 120",
+		"printf '🥇 acct  🔖 FLEET_LABEL │ 42%%\\n'; exec tail -f /dev/null",
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed server: %v: %s", err, output)

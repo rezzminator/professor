@@ -117,7 +117,7 @@ func (s *session) followerPath() string {
 // launchd is the calling user's GUI domain over the session's runner, its
 // retries pausing on wallClock.
 func (s *session) launchd() servicemanager.Launchd {
-	return servicemanager.NewLaunchd(s.env.Runner, wallClock.Sleep)
+	return servicemanager.NewLaunchd(s.env.Runner, clockOr(wallClock).Sleep)
 }
 
 func (s *session) followerTarget() string {

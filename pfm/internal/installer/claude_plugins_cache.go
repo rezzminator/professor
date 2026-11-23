@@ -188,7 +188,7 @@ func (installer *engine) updateClaudePluginEntries(
 		}
 		err := installer.change("run "+line+": "+why(entry), func() error {
 			options := deps.RunOptions{Env: pluginCommandEnvironment(run.dir), Dir: dir}
-			return runClaudePluginCommand(ctx, installer.processRunner(), update, options)
+			return installer.runClaudePluginCommand(ctx, update, options)
 		})
 		moved[key] = err == nil
 		if err != nil {

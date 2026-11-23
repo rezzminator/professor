@@ -175,33 +175,6 @@ func sortProjectRows(rows []Row) ([]Row, []string) {
 	return sortedRows, order
 }
 
-func projectDirs(input Input) map[string]string {
-	names := projectNames{resolved: make(map[string]projectRef), benches: input.Workbenches}
-	directories := make(map[string]projectDir)
-	if input.Options.CurrentDir != "" {
-		project := names.of(input.Options.CurrentDir)
-		directories[project] = projectDir{
-			path:   cleanPath(input.Options.CurrentDir),
-			seeded: true,
-		}
-	}
-	for index := range input.Transcripts {
-		transcript := input.Transcripts[index]
-		rememberProjectDir(names, directories, transcript.CWD, transcript.EffectiveActivityNS())
-	}
-	for index := range input.Rollouts {
-		rollout := input.Rollouts[index]
-		if rollout.UserThread {
-			rememberProjectDir(names, directories, rollout.CWD, rollout.MTimeNS)
-		}
-	}
-	result := make(map[string]string, len(directories))
-	for project, directory := range directories {
-		result[project] = directory.path
-	}
-	return result
-}
-
 func rememberProjectDir(
 	names projectNames,
 	directories map[string]projectDir,

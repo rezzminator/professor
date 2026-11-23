@@ -69,7 +69,7 @@ func (child *handoverChild) replay(initialize []byte) error {
 	if err := child.write(initialize); err != nil {
 		return fmt.Errorf("replay initialize: %w", err)
 	}
-	timer := handoverClock.NewTimer(handoverReplayBound)
+	timer := clock.Real.NewTimer(handoverReplayBound)
 	defer timer.Stop()
 	for {
 		select {
@@ -218,5 +218,3 @@ func handoverLines(reader io.Reader, lines chan<- []byte) {
 }
 
 var errHandoverChildEnded = errors.New("the installed pfm ended before it answered")
-
-var handoverClock clock.Clock = clock.Real

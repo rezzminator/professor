@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/mockengine/control/controltest"
 )
 
 // A real engine runs its SessionEnd hooks before it exits however the pane ends: /exit, its stdin
@@ -25,9 +27,10 @@ func TestSessionEndRunsOnEveryPaneExit(t *testing.T) {
 			fix := newFixture(t)
 			t.Chdir(fix.work)
 			record := filepath.Join(fix.recordDir, "session-end.jsonl")
-			// The sleep outlasts the hangup: a hook cut off by the cancelled
-			// process context never reaches its write.
-			command := `sleep 0.3; cat >> "` + record + `"; printf '\n' >> "` + record + `"`
+			// The hook blocks on its FIFO until the pane has ended: a hook cut off by the cancelled process
+			// context never reaches its write.
+			hold := controltest.FIFO(t, filepath.Join(fix.root, "session-end-hold"))
+			command := `read -r _ < "` + hold + `"; cat >> "` + record + `"; printf '\n' >> "` + record + `"`
 			var args []string
 			composer, session := "❯", fixtureSession
 			if row.engine == "codex" {
@@ -53,6 +56,7 @@ func TestSessionEndRunsOnEveryPaneExit(t *testing.T) {
 			case "hangup":
 				pane.cancel()
 			}
+			controltest.Release(t, hold)
 			if code := pane.waitExit(); code != 0 {
 				t.Fatalf("exit code = %d, want 0; stderr=%q", code, pane.stderr.String())
 			}

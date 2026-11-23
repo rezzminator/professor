@@ -29,7 +29,7 @@ func TestApplyChatNameReadsAClaudeRenameBack(t *testing.T) {
 	session := "probe-nameread"
 	start := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", session, "-n", "before", "sleep", "120",
+		"new-session", "-d", "-s", session, "-n", "before", "tail", "-f", "/dev/null",
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)

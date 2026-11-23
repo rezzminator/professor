@@ -3,9 +3,9 @@ package transcript
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 )
 
@@ -32,13 +32,11 @@ func stressLargeString(t *testing.T) {
 	}
 	input[len(input)-1] = '"'
 
-	started := time.Now()
 	output := FlattenPromptText(json.RawMessage(input))
-	elapsed := time.Since(started)
 	if len(output) != size || output[0] != 'x' || output[len(output)-1] != 'x' {
 		t.Fatalf("10 MiB string output has length %d or corrupt edges", len(output))
 	}
-	t.Logf("10 MiB JSON string flattened in %s", elapsed.Round(time.Millisecond))
+	t.Logf("10 MiB JSON string flattened")
 }
 
 func stressLargeArray(t *testing.T) {
@@ -56,13 +54,11 @@ func stressLargeArray(t *testing.T) {
 	}
 	input.WriteByte(']')
 
-	started := time.Now()
 	output := FlattenPromptText(json.RawMessage(input.String()))
-	elapsed := time.Since(started)
 	if got, want := len(output), elements*2-1; got != want {
 		t.Fatalf("100k text block output length = %d, want %d", got, want)
 	}
-	t.Logf("100k-element content array flattened in %s", elapsed.Round(time.Millisecond))
+	t.Logf("100k-element content array flattened")
 }
 
 func stressDeepNesting(t *testing.T) {
@@ -76,13 +72,11 @@ func stressDeepNesting(t *testing.T) {
 	}
 	input[depth] = '0'
 
-	started := time.Now()
 	output := FlattenPromptText(json.RawMessage(input))
-	elapsed := time.Since(started)
 	if output != "" {
 		t.Fatalf("deep non-text nesting output = %q, want empty", output)
 	}
-	t.Logf("%d-level nesting rejected safely in %s", depth, elapsed.Round(time.Millisecond))
+	t.Logf("%d-level nesting rejected safely", depth)
 }
 
 func stressInvalidUTF8(t *testing.T) {
@@ -102,28 +96,26 @@ func stressInvalidUTF8(t *testing.T) {
 func stressLinearScaling(t *testing.T) {
 	t.Helper()
 
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
-	oneMiB := quotedASCII(1 << 20)
-	fourMiB := quotedASCII(4 << 20)
-	small := bestFlattenDuration(oneMiB, 3)
-	large := bestFlattenDuration(fourMiB, 3)
-	if strict && large > small*8+250*time.Millisecond {
-		t.Fatalf(
-			"flatten scaling is not roughly linear: 1 MiB=%s 4 MiB=%s",
-			small,
-			large,
-		)
+	for _, size := range []int{1 << 20, 4 << 20} {
+		output := FlattenPromptText(json.RawMessage(quotedASCII(size)))
+		if len(output) != size {
+			t.Fatalf("%d-byte string flattened to %d bytes", size, len(output))
+		}
 	}
-	if !strict && large > 30*time.Second {
-		t.Fatalf("4 MiB flatten sanity duration = %s, want <30s", large)
+	t.Logf("1 MiB and 4 MiB strings flattened whole")
+}
+
+// BenchmarkFlattenPromptTextScaling is the cost of one flatten at 1 MiB and
+// 4 MiB: the pair a linear-scaling reading compares.
+func BenchmarkFlattenPromptTextScaling(b *testing.B) {
+	for _, size := range []int{1 << 20, 4 << 20} {
+		input := json.RawMessage(quotedASCII(size))
+		b.Run(strconv.Itoa(size>>20)+"MiB", func(b *testing.B) {
+			for b.Loop() {
+				_ = FlattenPromptText(input)
+			}
+		})
 	}
-	t.Logf(
-		"linear scaling probe (best of 3): 1 MiB=%s, 4 MiB=%s, ratio=%.2fx, strict=%t",
-		small.Round(time.Microsecond),
-		large.Round(time.Microsecond),
-		float64(large)/float64(small),
-		strict,
-	)
 }
 
 func quotedASCII(size int) []byte {
@@ -134,14 +126,4 @@ func quotedASCII(size int) []byte {
 	}
 	input[len(input)-1] = '"'
 	return input
-}
-
-func bestFlattenDuration(input []byte, attempts int) time.Duration {
-	best := time.Duration(1<<63 - 1)
-	for range attempts {
-		started := time.Now()
-		_ = FlattenPromptText(json.RawMessage(input))
-		best = min(best, time.Since(started))
-	}
-	return best
 }

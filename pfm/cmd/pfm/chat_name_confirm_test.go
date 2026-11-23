@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -47,7 +49,14 @@ func TestUnconfirmedClaudeName(t *testing.T) {
 		{"no transcript is known", "", "could not verify the Claude rename — the chat's transcript is not known; the chat may be named, check it with pfm ls"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			got := unconfirmedClaudeName(context.Background(), headless.Chat{Path: scenario.path}, "Fix login")
+			// The read-back pauses on the process clock; a fake one runs each
+			// pause at once, so the tries are counted, never waited out.
+			fake := clock.NewFake(time.Unix(1_800_000_000, 0))
+			testwait.ProcessClock(t, fake)
+			var got string
+			testwait.Drive(t, "the Claude rename read-back", fake, func() {
+				got = unconfirmedClaudeName(context.Background(), headless.Chat{Path: scenario.path}, "Fix login")
+			})
 			if scenario.path != "" {
 				got = strings.ReplaceAll(got, scenario.path, "{path}")
 			}

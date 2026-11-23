@@ -6,11 +6,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // blockingWaiter never returns until released — the shape of the real waiter
@@ -72,13 +72,9 @@ func TestThenLogsItsContractBeforeWaiting(t *testing.T) {
 		}, log)
 	}()
 
-	deadline := time.Now().Add(5 * time.Second)
-	for log.String() == "" {
-		if time.Now().After(deadline) {
-			t.Fatal("the waiter log stayed EMPTY while DeliverThen blocked — nothing was written before the wait")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	testwait.Until(t, "the waiter log to be written before DeliverThen blocks", func() (bool, string) {
+		return log.String() != "", "the waiter log is EMPTY"
+	})
 	select {
 	case code := <-done:
 		t.Fatalf("Then returned %d before the waiter was released — the fake did not block", code)

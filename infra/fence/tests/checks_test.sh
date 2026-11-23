@@ -137,19 +137,17 @@ steps_reset() { : > "$T/registered"; : > "$T/heavy"; : > "$T/bounds"; }
 steps_add() { printf '%s\n' "$1" >> "$T/registered"; printf '%s\n' "$*" >> "$T/registered.args"; }
 steps_add_heavy() { steps_add "$@"; printf '%s\n' "$1" >> "$T/heavy"; }
 steps_set_bound() { printf '%s %s\n' "$(tail -n 1 "$T/registered")" "$1" >> "$T/bounds"; }
-# Stub scripts log to $STUB_EVENTS; wait_event polls it in 0.1 s ticks, bounded at 5 s, for a line that
-# starts with one of its arguments (fixed strings, each naming one run's own directory).
+# Stub scripts log to $STUB_EVENTS; wait_event waits, through the wait door, for a line that starts
+# with one of its arguments (fixed strings, each naming one run's own directory).
 export STUB_EVENTS="$T/events"
-wait_event() {
-  local i p
-  for ((i = 0; i < 50; i++)); do
-    for p in "$@"; do
-      awk -v p="$p" 'index($0, p) == 1 {found = 1; exit} END {exit !found}' "$STUB_EVENTS" 2>/dev/null && return 0
-    done
-    sleep 0.1
+event_seen() { # event_seen <prefix>...: a line of $STUB_EVENTS starts with one of them
+  local p
+  for p in "$@"; do
+    awk -v p="$p" 'index($0, p) == 1 {found = 1; exit} END {exit !found}' "$STUB_EVENTS" 2>/dev/null && return 0
   done
   return 1
 }
+wait_event() { shtest_wait_until "an event line starting with: $*" event_seen "$@"; }
 event_words() { cut -d' ' -f1 "$STUB_EVENTS" | paste -sd' ' -; }
 steps_run() {
   if [ "$REPO_ROOT" = "$T/fx" ]; then # a fixture run's TERM to its sampler comes only after the sampler logged
@@ -189,7 +187,7 @@ graph_order() {
 }
 static_names() { { grep -Ev '^(pfm\.(unit-proof|e2e|unit|race)|pfm\.self\..*|templates\.fence\..*|fixture\..*)$' "$T/registered" || true; } | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch,pfm.testplan'
-templates_static='templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.theme-glyphs,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.install-ping-tests,templates.skill-tests'
+templates_static='templates.clone,templates.leak,templates.plugin-logs,templates.plugin-lab,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.generated-agents,templates.release-check,templates.refresh-scope,templates.plugin-workflows,templates.worktree-script,templates.dev-report,templates.format-md,templates.theme-glyphs,templates.shtest-clock,templates.test-tests,templates.unit-path-tests,templates.engine-sync-action-tests,templates.install-ping-tests,templates.skill-tests'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.race,pfm.unit,pfm.unit-proof,pfm.vet,pfm.vet-darwin'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&
@@ -397,7 +395,8 @@ fi
 trap 'printf "sampler-stop\n" >> "$STUB_EVENTS"; exit 0' TERM
 printf 'epoch_s\n' > "$3"
 printf 'sampler-start %s\n' "$*" >> "$STUB_EVENTS"
-while :; do sleep 0.1; done
+exec {hold}<> <(:) # a pipe that never delivers: the read blocks until the TERM trap ends the stub
+read -r -u "$hold" _
 SH
 cat > "$T/fx/pfm/scripts/test-contention.sh" <<'SH'
 printf 'judge %s\n' "$*" >> "$STUB_EVENTS"
@@ -428,7 +427,8 @@ if [ "${STUB_LOAD_FAIL:-0}" = 1 ]; then
 fi
 trap 'printf "load-stop\n" >> "$STUB_EVENTS"; exit 0' TERM
 printf 'load-start %s\n' "$*" >> "$STUB_EVENTS"
-while :; do sleep 0.1; done
+exec {hold}<> <(:) # a pipe that never delivers: the read blocks until the TERM trap ends the stub
+read -r -u "$hold" _
 SH
 fx_budget() { printf 'tolerance: 1.25\nfail_factor: 2\ngate:\n  all: 198\n  pfm: unpinned\n  templates: abc\n' > "$T/fx/infra/fence/gate-budget.yml"; }
 fx_case() { # fx_case <name> <target>: gate_run in $T/case-<name>; sets GATE_RC, GATE_OUT and RUN
@@ -686,28 +686,28 @@ else bad 'pfm.unit-proof, pass' "$(cat "$T/up.out")"; fi
 # checks_gate_fixture, Go kinds: the fixture package run through a stubbed go, then the shared report
 # and the failure pointers on the stream it wrote.
 go() {
-  printf 'go %s | PFM_PROFILE_FIXTURE=%s SLOW_S=%s ARTIFACT=%s\n' "$*" "${PFM_PROFILE_FIXTURE-unset}" "${PFM_PROFILE_FIXTURE_SLOW_S-unset}" "${PFM_TEST_ARTIFACT_DIR-unset}" >> "$T/go.calls"
+  printf 'go %s | PFM_PROFILE_FIXTURE=%s ARTIFACT=%s\n' "$*" "${PFM_PROFILE_FIXTURE-unset}" "${PFM_TEST_ARTIFACT_DIR-unset}" >> "$T/go.calls"
   printf '{"Action":"fail","Package":"stub"}\n'
   return "${STUB_GO_RC:-1}"
 }
-fixture_go_case() { # fixture_go_case <step kind> <PFM_PROFILE_FIXTURE> <-timeout> <expected PFM_PROFILE_FIXTURE_SLOW_S>
+fixture_go_case() { # fixture_go_case <step kind> <PFM_PROFILE_FIXTURE> <-timeout>
   local rd="$T/fixture-run-$1" json="$T/fixture-run-$1/fixture-$1.json" root="$T/fixture-run-$1/profile/fixture-$1"
   mkdir -p "$rd"; : > "$STUB_EVENTS"; : > "$T/go.calls"; FAILURES=0
   export STUB_FAILURES_OUT="  PROFILE github.com/rezzminator/professor/pfm/internal/testjail/testdata/profilefixture: $root/internal_testjail_testdata_profilefixture.9/exit/DIAGNOSIS.txt"
   checks_gate_fixture "$1" "$rd" >"$T/fixture-$1.out" 2>&1
   unset STUB_FAILURES_OUT
-  if [ "$(cat "$T/go.calls")" = "go -C $T/fx/pfm test -count=1 -json -timeout $3 ./internal/testjail/testdata/profilefixture/ | PFM_PROFILE_FIXTURE=$2 SLOW_S=$4 ARTIFACT=$root" ] &&
+  if [ "$(cat "$T/go.calls")" = "go -C $T/fx/pfm test -count=1 -json -timeout $3 ./internal/testjail/testdata/profilefixture/ | PFM_PROFILE_FIXTURE=$2 ARTIFACT=$root" ] &&
     [ "$(cat "$json")" = '{"Action":"fail","Package":"stub"}' ] && [ "$FAILURES" -eq 1 ] &&
     [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$json" "$json" "$root")" ] &&
     [ "$(grep -v '^  PROFILE ' "$T/fixture-$1.out")" = "FAILSTEP fixture: go $2 red (expected)" ] &&
     grep -Fxq "  PROFILE github.com/rezzminator/professor/pfm/internal/testjail/testdata/profilefixture: $root/internal_testjail_testdata_profilefixture.9/exit/DIAGNOSIS.txt" "$T/fixture-$1.out" &&
-    [ -z "${PFM_PROFILE_FIXTURE+x}${PFM_PROFILE_FIXTURE_SLOW_S+x}${PFM_TEST_ARTIFACT_DIR+x}" ]; then
+    [ -z "${PFM_PROFILE_FIXTURE+x}${PFM_TEST_ARTIFACT_DIR+x}" ]; then
     ok "fixture.$1: go test -timeout $3 on the profile fixture in mode $2 profiling into profile/fixture-$1, its stream kept in the run dir, red, then the report and the failure pointers over that root"
   else bad "fixture.$1" "$(cat "$T/go.calls")" "$(cat "$STUB_EVENTS")" "$(cat "$T/fixture-$1.out")"; fi
 }
-fixture_go_case go-fail fail 2m unset
-fixture_go_case go-hang hang 20s unset
-fixture_go_case go-slow slow 5m 120
+fixture_go_case go-fail fail 2m
+fixture_go_case go-hang hang 20s
+fixture_go_case go-slow slow 5m
 checks_gate_fixture no-such-kind "$T/fixture-run" >"$T/fixture-unknown.out" 2>&1
 if grep -Fxq "FAILSTEP fixture: unknown kind 'no-such-kind'" "$T/fixture-unknown.out"; then
   ok 'an unknown fixture kind is a named red step, never a silent pass'
@@ -1264,30 +1264,36 @@ else bad 'F7: marker row failure' "$out"; fi
 
 # A sampler still bootstrapping may not yet honor TERM. Its emitted header
 # is the existing readiness door: real sampler.sh emits it after arming traps.
+# The stub stays in its bootstrap (TERM ignored) until the gate is seen polling for the header (a sleep
+# of its readiness wait under the driver); a stop sent during the bootstrap is lost and hangs the driver.
 mkdir -p "$T/boot"
 cat > "$T/boot/sampler.sh" <<'SH'
 trap '' TERM
 printf started > "$1/started"
-exec {boot_fd}<> <(:)
-read -r -t "${BOOT_GRACE_S:-0.2}" -u "$boot_fd" || true
+. "$3"
+gate_polls() { pgrep -P "$PPID" -x sleep > /dev/null; }
+shtest_wait_until "the gate polls the bootstrapping sampler's readiness" gate_polls
 trap 'printf stopped > "$1/stopped"; exit 0' TERM
 printf 'epoch_s\n' > "$1/resources.tsv"
-while :; do read -r -t 0.1 -u "$boot_fd" || true; done
+exec {boot_fd}<> <(:)
+read -r -u "$boot_fd" _
 SH
 cat > "$T/boot/driver.sh" <<'SH'
 source "$1"
-bash "$2/sampler.sh" "$2" &
+. "$3"
+bash "$2/sampler.sh" "$2" "$3" &
 pid=$!
 trap 'kill -KILL "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
-for ((i=0;i<100;i++)); do [[ -f "$2/started" ]] && break; sleep 0.01; done
-[[ -f "$2/started" ]] || exit 2
+shtest_wait_until "the stub sampler starts" test -f "$2/started" || exit 2
 gate_resources_stop "$pid" "$2"
 [[ -f "$2/stopped" && -s "$2/resources.tsv" ]]
 SH
-if timeout --kill-after=1s 2s bash "$T/boot/driver.sh" "$SUT" "$T/boot" > "$T/boot/out" 2>&1; then
+bash "$T/boot/driver.sh" "$SUT" "$T/boot" "$(dirname -- "${BASH_SOURCE[0]}")/../../../scripts/shtest-wait.sh" > "$T/boot/out" 2>&1 &
+boot_driver=$!
+if shtest_wait_gone "the boot driver ends" "$boot_driver"; then wait "$boot_driver"; boot_rc=$?; else boot_rc=hung; kill -TERM "$boot_driver" 2>/dev/null; fi
+if [ "$boot_rc" = 0 ]; then
   ok 'sampler stop waits for armed-trap header and finishes after bootstrap'
 else
-  boot_rc=$?
   bad 'sampler stop waits for armed-trap header and finishes after bootstrap' "rc=$boot_rc" "$(cat "$T/boot/out")"
 fi
 # A tracked templates/generated/agents file no fresh render produces (an

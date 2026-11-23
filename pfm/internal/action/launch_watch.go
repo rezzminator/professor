@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -65,8 +64,8 @@ func (executor *Executor) watchLaunch(
 		)
 	}
 	engines := enginePaneCommands(engineCommands...)
-	deadline := clock.Real.Now().Add(launchDeadline)
-	previous, stillSince := "", clock.Real.Now()
+	deadline := executor.launchClock().Now().Add(launchDeadline)
+	previous, stillSince := "", executor.launchClock().Now()
 	var running, painters []int // the engines at the last poll; those also there before the screen last changed
 	for {
 		pane, err := executor.tmux.LaunchPane(ctx, socket)
@@ -112,7 +111,7 @@ func (executor *Executor) watchLaunch(
 			refusal := spawn.Result{Socket: socket, Session: socket}.TrustRefusal(name, server.CWD)
 			return executor.keepLaunch(ctx, socket, []string{refusal}), nil
 		}
-		now, onPane := clock.Real.Now(), executor.paneEngines(ctx, pane, engines)
+		now, onPane := executor.launchClock().Now(), executor.paneEngines(ctx, pane, engines)
 		if screen != previous {
 			previous, stillSince = screen, now
 			painters = slices.DeleteFunc(slices.Clone(onPane),
@@ -125,7 +124,7 @@ func (executor *Executor) watchLaunch(
 		if !now.Before(deadline) {
 			return executor.keepLaunch(ctx, socket, nil), nil
 		}
-		if err := clock.Real.Sleep(ctx, launchPoll); err != nil {
+		if err := executor.launchClock().Sleep(ctx, launchPoll); err != nil {
 			return executor.keepLaunch(ctx, socket, []string{unwatched(name, socket, err)}), nil
 		}
 	}

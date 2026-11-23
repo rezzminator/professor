@@ -24,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
@@ -116,7 +117,7 @@ func TestLaunchWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 				released := make(chan struct{})
 				finished := make(chan struct{})
 				finishRead = func() { close(released); <-finished }
-				input = interruptingReader{released: released, finished: finished}
+				input = interruptingReader{released: released, finished: finished, ended: testwait.Context(t).Done()}
 			}
 			t.Cleanup(launchnotice.Replace(input, test.terminal))
 			if finishRead != nil {

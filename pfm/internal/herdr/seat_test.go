@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestSeatRequest(t *testing.T) {
@@ -52,20 +55,19 @@ func TestSeatRequest(t *testing.T) {
 }
 
 func TestSeatWaitUsesCallerDeadline(t *testing.T) {
-	t.Parallel()
+	// The reporter's I/O timeout, built an hour back, is already past for the
+	// kernel: only the caller's deadline lets the wait through.
+	shiftWall(t, -time.Hour)
 	socket := serve(t, func(string) string {
-		<-time.After(1100 * time.Millisecond)
 		return `{"result":{"type":"agent_waited","agent_status":"idle"}}`
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
 	got, err := SeatRequest(
-		ctx,
+		testwait.Context(t),
 		socket,
 		"agent.wait",
 		map[string]any{"target": "w6:p3", "timeout_ms": 2000, "until": []string{"idle", "done", "blocked"}},
 	)
-	if err != nil || len(got) == 0 {
+	if err != nil || string(got) != `{"type":"agent_waited","agent_status":"idle"}` {
 		t.Fatalf("wait beyond reporter timeout = %s,%v", got, err)
 	}
 	t.Run("cancellation after acceptance", func(t *testing.T) {
@@ -76,62 +78,72 @@ func TestSeatWaitUsesCallerDeadline(t *testing.T) {
 			<-release
 			return `{"result":{"type":"agent_waited","agent_status":"idle"}}`
 		})
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithCancel(testwait.Context(t))
 		defer cancel()
 		done := make(chan error, 1)
 		go func() {
 			_, err := SeatRequest(ctx, socket, "agent.wait", map[string]any{"target": "w6:p3"})
 			done <- err
 		}()
-		select {
-		case <-accepted:
-			cancel()
-		case <-time.After(5 * time.Second):
-			t.Fatal("wait request never reached server")
-		}
-		select {
-		case err := <-done:
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("cancelled wait = %v, want context.Canceled", err)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("accepted wait ignored cancellation until its long deadline")
+		testwait.Receive(t, "the wait request reached the server", accepted)
+		cancel()
+		err, _ := testwait.Receive(t, "the accepted wait ended at its cancellation", done)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled wait = %v, want context.Canceled", err)
 		}
 	})
 }
 
 func TestSeatRecentReadDeadline(t *testing.T) {
-	t.Parallel()
+	// The wall clock the default bounds are built from sits a second past the
+	// reporter's I/O timeout: that timeout is already past for the kernel, the
+	// 21 s history bound still ahead, so the bound a read got shows in whether
+	// a server that answers at once is heard.
 	for _, tc := range []struct {
 		name, source string
-		bound        time.Duration
 		ok           bool
 	}{
-		{"history", "recent", 3 * time.Second, true}, {"caller-bound", "recent", 30 * time.Millisecond, false}, {"visible-stays-short", "visible", 3 * time.Second, false},
+		{"history", "recent", true}, {"visible-stays-short", "visible", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			release := make(chan struct{})
-			defer close(release)
-			socket := serve(t, func(string) string {
-				select {
-				case <-time.After(1100 * time.Millisecond):
-				case <-release:
-				}
-				return `{"result":{"type":"pane_read"}}`
-			})
-			ctx, cancel := context.WithTimeout(context.Background(), tc.bound)
-			defer cancel()
-			started := time.Now()
-			got, err := SeatRequest(ctx, socket, "pane.read", map[string]any{"pane_id": "w1:p1", "source": tc.source})
-			if (err == nil) != tc.ok || (tc.ok && len(got) == 0) {
+			shiftWall(t, -(ioTimeout + time.Second))
+			socket := serve(t, func(string) string { return `{"result":{"type":"pane_read"}}` })
+			got, err := SeatRequest(
+				testwait.Context(t),
+				socket,
+				"pane.read",
+				map[string]any{"pane_id": "w1:p1", "source": tc.source},
+			)
+			if tc.ok && (err != nil || string(got) != `{"type":"pane_read"}`) ||
+				!tc.ok && !errors.Is(err, os.ErrDeadlineExceeded) {
 				t.Fatalf("read beyond 1s got=%s err=%v want ok=%t", got, err, tc.ok)
-			}
-			if tc.name == "caller-bound" && time.Since(started) > 500*time.Millisecond {
-				t.Fatalf("history read ignored shorter caller deadline: %v", time.Since(started))
 			}
 		})
 	}
+	t.Run("caller-bound", func(t *testing.T) {
+		// The history bound is an hour off: only the caller's deadline can end
+		// a read the server holds.
+		shiftWall(t, time.Hour)
+		accepted, release := make(chan struct{}), make(chan struct{})
+		defer close(release)
+		socket := serve(t, func(string) string {
+			close(accepted)
+			<-release
+			return `{"result":{"type":"pane_read"}}`
+		})
+		ctx, expire := testwait.Deadline(t)
+		done := make(chan error, 1)
+		go func() {
+			_, err := SeatRequest(ctx, socket, "pane.read", map[string]any{"pane_id": "w1:p1", "source": "recent"})
+			done <- err
+		}()
+		testwait.Receive(t, "the history read reached the server", accepted)
+		expire()
+		err, _ := testwait.Receive(t, "the held history read ended at its caller's deadline", done)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("history read ignored shorter caller deadline: %v", err)
+		}
+	})
 }
 
 func TestSeatEncodedRequestLimit(t *testing.T) {

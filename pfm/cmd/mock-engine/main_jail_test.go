@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -13,10 +14,10 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/mockengine"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestBuiltBinaryAnswersByTheNameItIsInstalledUnder builds the real binary and
@@ -153,33 +154,22 @@ func TestHangupReleasesTheJailSeat(t *testing.T) {
 				<-exited
 			})
 			entry := filepath.Join(procRoot, strconv.Itoa(command.Process.Pid))
-			deadline := time.NewTimer(10 * time.Second)
-			defer deadline.Stop()
-			tick := time.NewTicker(10 * time.Millisecond)
-			defer tick.Stop()
-			for {
-				if _, err := os.Stat(entry); err == nil {
-					break
-				} else if !os.IsNotExist(err) {
-					t.Fatalf("read jail seat: %v", err)
-				}
+			testwait.Until(t, "the mock to bind its jail seat "+entry, func() (bool, string) {
 				select {
 				case <-exited:
 					t.Fatalf("mock exited before binding its seat: %v: %s", waitErr, stderr.String())
-				case <-deadline.C:
-					t.Fatalf("mock did not bind jail seat %s within 10 s", entry)
-				case <-tick.C:
+				default:
 				}
-			}
+				_, err := os.Stat(entry)
+				if err != nil && !os.IsNotExist(err) {
+					t.Fatalf("read jail seat: %v", err)
+				}
+				return err == nil, fmt.Sprintf("stat %s: %v", entry, err)
+			})
 			if err := command.Process.Signal(signal); err != nil {
 				t.Fatal(err)
 			}
-			deadline.Reset(10 * time.Second)
-			select {
-			case <-exited:
-			case <-deadline.C:
-				t.Fatal("mock did not exit within 10 s of the signal")
-			}
+			testwait.Receive(t, "the mock to exit on "+signal.String(), exited)
 			if _, err := os.Stat(entry); !os.IsNotExist(err) {
 				t.Fatalf("jail seat remains after %s: stat=%v exit=%v stderr=%q", signal, err, waitErr, stderr.String())
 			}

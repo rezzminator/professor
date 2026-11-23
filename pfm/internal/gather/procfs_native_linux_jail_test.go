@@ -12,9 +12,9 @@ import (
 // after its spawn, within the one 10 ms tick the kernel counts it in.
 func TestLinuxProcFSStartedPlacesTheSpawnOnTheWallClock(t *testing.T) {
 	before := time.Now()
-	command := exec.Command("sleep", "5")
+	command := exec.Command("tail", "-f", "/dev/null")
 	if err := command.Start(); err != nil {
-		t.Fatalf("start sleep: %v", err)
+		t.Fatalf("start tail: %v", err)
 	}
 	after := time.Now()
 	t.Cleanup(func() {

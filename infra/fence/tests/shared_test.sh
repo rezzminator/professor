@@ -84,16 +84,16 @@ stub_docker() { # STUB_INSPECT: the inspect answer (empty = no container); STUB_
 }
 docker() { stub_docker "$@"; }
 sleep() { :; }
-# A start's detached housekeeping is recorded, not run (STUB_AFTER_SLEEP: it takes that long);
-# real_after_start is the real one, driven directly below.
+# A start's detached housekeeping is recorded, not run (STUB_AFTER_HOLD: a FIFO it blocks on until a line or
+# its write end closes, then records `after_start done`); real_after_start is the real one, driven directly below.
 eval "real_after_start() $(declare -f _fence_sh_after_start | tail -n +2)"
-_fence_sh_after_start() { echo after_start >>"$REC"; [ -z "${STUB_AFTER_SLEEP:-}" ] || command sleep "$STUB_AFTER_SLEEP"; }
+_fence_sh_after_start() { echo after_start >>"$REC"; [ -z "${STUB_AFTER_HOLD:-}" ] || { read -r _ <"$STUB_AFTER_HOLD"; echo 'after_start done' >>"$REC"; }; }
 PFM_DEV_GIT_COMMON="$MAIN/.git"
 init() { # init [tree]: a fresh fence_shared_init from MAIN (or the given tree)
   local PFM_FENCE_CPUS="${PFM_FENCE_CPUS-6}" PFM_FENCE_MEM="${PFM_FENCE_MEM-5g}"
   REPO_ROOT="${1:-$MAIN}"; fence_shared_init
 }
-reset() { : >"$REC"; unset STUB_INSPECT STUB_RUN_RC STUB_UPDATE_RC STUB_UPDATE_NOOP STUB_PS STUB_KTAG_LABEL STUB_IMG STUB_IMG_AFTER_BUILD STUB_BUILD_RC STUB_KTAGS STUB_INUSE_INSPECT STUB_AFTER_SLEEP; FENCE_IMAGE_BUILD=(); rm -f "$T/exec.rcs" "$T/run.inuse" "$T/gone" "$T/inspect.after"; }
+reset() { : >"$REC"; unset STUB_INSPECT STUB_RUN_RC STUB_UPDATE_RC STUB_UPDATE_NOOP STUB_PS STUB_KTAG_LABEL STUB_IMG STUB_IMG_AFTER_BUILD STUB_BUILD_RC STUB_KTAGS STUB_INUSE_INSPECT STUB_AFTER_HOLD; FENCE_IMAGE_BUILD=(); rm -f "$T/exec.rcs" "$T/run.inuse" "$T/gone" "$T/inspect.after"; }
 has() { if grep -qF -- "$2" "$REC"; then ok "$1"; else bad "$1" "no docker call with: $2" "$(cat "$REC")"; fi; }
 lacks() { if grep -qF -- "$2" "$REC"; then bad "$1" "a docker call with: $2" "$(cat "$REC")"; else ok "$1"; fi; }
 PFM_DEV_INPUTS_KEY=abcdef0123456789abcdef; FENCE_IMAGE_BUILD=(); FENCE_SH_COMPOSE="$T/docker-compose.yml"
@@ -152,10 +152,17 @@ has "the container gets the capabilities a run's namespaces need" '--cap-add SYS
 has "the container removes itself when its daemon exits" 'docker run -d --rm --init'
 has "the cache volumes are ensured first" volumes
 if [ "$rc" = 0 ] && [ ! -e "$FENCE_SH_LOCK" ]; then ok "a start releases the lock"; else bad "start lock" "rc=$rc lock=$(ls -d "$FENCE_SH_LOCK" 2>&1)"; fi
-reset; STUB_AFTER_SLEEP=3; t0=$SECONDS
-out="$(fence_shared_ensure 2>&1)"; rc=$?; took=$((SECONDS - t0))
-if [ "$rc" = 0 ] && [ "$took" -lt 2 ]; then ok "a start's housekeeping is detached: the caller's output closes without waiting for it"
-else bad "detached housekeeping" "rc=$rc took=${took}s (housekeeping 3 s)" "$out"; fi
+reset; STUB_AFTER_HOLD="$T/after.hold"; rm -f "$STUB_AFTER_HOLD" "$T/ensure.rc"; mkfifo "$STUB_AFTER_HOLD"
+( out="$(fence_shared_ensure 2>&1)"; rc=$?; printf '%s\n' "$out" >"$T/ensure.out"; echo "$rc" >"$T/ensure.rc" ) &
+ensure=$!
+shtest_wait_until "a start whose housekeeping is held returns" test -s "$T/ensure.rc"; returned=$?
+held="$(grep -c '^after_start' "$REC")"
+exec {hold}<>"$STUB_AFTER_HOLD"; exec {hold}>&- # releases the held housekeeping
+wait "$ensure"
+if [ "$returned" = 0 ] && [ "$(cat "$T/ensure.rc" 2>&1)" = 0 ] && [ "$held" = 1 ]; then ok "a start's housekeeping is detached: the caller's output closes without waiting for it"
+else bad "detached housekeeping" "returned while held: $([ "$returned" = 0 ] && echo yes || echo no) rc=$(cat "$T/ensure.rc" 2>&1) housekeeping records when the caller returned: $held (want 1: started, not done)" "$(cat "$T/ensure.out" 2>&1)"; fi
+shtest_wait_until "the released housekeeping ends" grep -qx 'after_start done' "$REC"
+
 reset; STUB_RUN_RC=125
 out="$(fence_shared_ensure 2>&1)"; rc=$?
 if [ "$rc" = 1 ] && grep -qF "iso: the shared fence container $FENCE_SH_NAME did not start: boom: no such image" <<<"$out" && [ ! -e "$FENCE_SH_LOCK" ]; then
@@ -212,7 +219,7 @@ fence_shared_ensure >/dev/null 2>&1
 lacks "a start supersedes no other container: another worktree's key keeps its warm container" 'docker exec'
 # the detached start housekeeping: a dead caller's run directory goes, a live one's stays, the log rotates
 reset; FENCE_SH_IMAGE="$KTAG"
-command sleep 60 & live=$!
+shtest_hold shared-live & live=$!
 dead="$FENCE_SH_HOST/.runs/20261018T000000Z-999999-123"; alive="$FENCE_SH_HOST/.runs/20261018T000000Z-$live-456"
 mkdir -p "$dead" "$alive"; echo secret >"$dead/leak-terms.txt"
 HKLOG="/tmp/$PROJ/fence/housekeeping.log"

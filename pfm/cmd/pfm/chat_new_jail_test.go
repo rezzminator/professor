@@ -27,6 +27,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type runJail struct {
@@ -207,15 +208,11 @@ func (jail *runJail) onlyWindowName(t *testing.T) string {
 // races the pane and would flake.
 func (jail *runJail) await(t *testing.T, name, want string) string {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
 	got := ""
-	for time.Now().Before(deadline) {
+	testwait.Until(t, "engine-side state of "+name+" to contain "+want, func() (bool, string) {
 		got = jail.read(t, name)
-		if strings.Contains(got, want) {
-			return got
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return strings.Contains(got, want), got
+	})
 	return got
 }
 
@@ -701,7 +698,7 @@ func callJailedChatNewResult(
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = service.Close() })
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := service.Server().Connect(ctx, serverTransport, nil)
@@ -871,32 +868,26 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 		defer cancel()
 		// The spawn comms row is written after the spawn returned and before the await
 		// starts, so a cancel sent once it exists lands in the await however loaded the
-		// machine is; the await's timeout is far past the poll's bound.
-		cancelled := make(chan bool, 1)
-		go func() {
-			defer cancel()
-			state := fleetdb.OpenSharedState(context.Background(), paths.Values{
-				StateDB: filepath.Join(jail.root, "home", ".local", "state", "pfm", "pfm.db"),
-			})
-			defer func() { _ = state.Close() }()
-			for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-				events, readErr := state.CommsSince(context.Background(), 0, 10)
-				if readErr == nil && len(events) == 1 && events[0].Kind == fleetdb.KindSpawn {
-					cancelled <- true
-					return
-				}
-			}
-			cancelled <- false
-		}()
+		// machine is. The state opens first, so its schema is whole before chat new reads it.
+		state := fleetdb.OpenSharedState(context.Background(), paths.Values{
+			StateDB: filepath.Join(jail.root, "home", ".local", "state", "pfm", "pfm.db"),
+		})
 		var stdout, stderr bytes.Buffer
-		code := runChatWithRuntime([]string{
-			"new", "--engine", "claude", "--name", "await child",
-			"--cwd", filepath.Join(jail.root, "work"), "--await", "--timeout", "120", "cancel await",
-		}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
-		if !<-cancelled {
-			t.Fatalf("no spawn comms row within 30s, so the await was never cancelled: exit=%d stdout=%q stderr=%q",
-				code, stdout.String(), stderr.String())
-		}
+		finished := make(chan int, 1)
+		go func() {
+			finished <- runChatWithRuntime([]string{
+				"new", "--engine", "claude", "--name", "await child",
+				"--cwd", filepath.Join(jail.root, "work"), "--await", "--timeout", "120", "cancel await",
+			}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
+		}()
+		testwait.Until(t, "the spawn comms row, so the await can be cancelled", func() (bool, string) {
+			events, readErr := state.CommsSince(context.Background(), 0, 10)
+			return readErr == nil && len(events) == 1 && events[0].Kind == fleetdb.KindSpawn,
+				fmt.Sprintf("events=%v err=%v", events, readErr)
+		})
+		_ = state.Close()
+		cancel()
+		code, _ := testwait.Receive(t, "the cancelled await to return", finished)
 		sockets, err := os.ReadDir(jail.tmuxDir)
 		if err != nil || len(sockets) != 1 {
 			t.Fatalf("cancelled await sockets in %s = %v, err=%v, want the one live chat", jail.tmuxDir, sockets, err)

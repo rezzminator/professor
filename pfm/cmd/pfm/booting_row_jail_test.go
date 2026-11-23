@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestBootingRowJailedTSV is the red-first, gather-through-render proof for
@@ -178,7 +179,7 @@ func startNamedBootingPane(t *testing.T, socket, window string) int {
 	t.Helper()
 	session := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", window, "sleep", "120",
+		"new-session", "-d", "-s", socket, "-n", window, "tail", "-f", "/dev/null",
 	)
 	if output, err := session.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed pane %q: %v: %s", socket, err, output)
@@ -281,17 +282,17 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 		// row — the only other row this minimal jail composes. Wait for "◐",
 		// the marker rowMarker() (internal/ui/render.go) paints ONLY for
 		// compose.Booting — the row itself never paints the word "booting".
-		waitForTmuxPaneText(t, driverSocket, jail.env, "◐", 5*time.Second)
+		waitForTmuxPaneText(t, driverSocket, jail.env, "◐")
 		for _, key := range []string{"Down", "C-x", "Escape"} {
 			send := jail.tmux(driverSocket, "send-keys", "-t", "driver:0.0", key)
 			if output, err := send.CombinedOutput(); err != nil {
 				t.Fatalf("send-keys %s: %v: %s", key, err, output)
 			}
-			time.Sleep(300 * time.Millisecond)
+			if key == "Down" {
+				waitForBootingRowCursor(t, jail, driverSocket)
+			}
 		}
-		if !waitForAttachFile(marker, 10*time.Second) {
-			t.Fatal("kill-probe picker did not exit after Escape")
-		}
+		waitForAttachFile(t, marker, "kill-probe picker to exit after Escape")
 		if content, err := os.ReadFile(marker); err != nil ||
 			strings.TrimSpace(string(content)) != "RC=0" {
 			t.Fatalf("kill-probe picker exit marker = %q, err=%v", content, err)
@@ -333,29 +334,28 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 
 		// Same wait as above: "◐" is the row's own painted marker, not the
 		// word "booting".
-		waitForTmuxPaneText(t, driverSocket, jail.env, "◐", 5*time.Second)
+		waitForTmuxPaneText(t, driverSocket, jail.env, "◐")
 		for _, key := range []string{"Down", "Enter"} {
 			send := jail.tmux(driverSocket, "send-keys", "-t", "driver:0.0", key)
 			if output, err := send.CombinedOutput(); err != nil {
 				t.Fatalf("send-keys %s: %v: %s", key, err, output)
 			}
-			time.Sleep(300 * time.Millisecond)
+			if key == "Down" {
+				waitForBootingRowCursor(t, jail, driverSocket)
+			}
 		}
 
-		deadline := time.Now().Add(20 * time.Second)
 		var clientSession string
-		for time.Now().Before(deadline) {
+		testwait.Until(t, "a client of the target server", func() (bool, string) {
 			output, listErr := jail.tmux(
 				targetSocket, "list-clients", "-F", "#{client_session}",
 			).Output()
-			if listErr == nil {
-				clientSession = strings.TrimSpace(string(output))
-				if clientSession != "" {
-					break
-				}
+			if listErr != nil {
+				return false, listErr.Error()
 			}
-			time.Sleep(25 * time.Millisecond)
-		}
+			clientSession = strings.TrimSpace(string(output))
+			return clientSession != "", "no client yet"
+		})
 		if clientSession != targetSocket {
 			t.Fatalf(
 				"Enter on the booting row did not attach: client_session=%q, want %q",
@@ -366,6 +366,24 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 		if output, err := jail.tmux(targetSocket, "detach-client", "-a").CombinedOutput(); err != nil {
 			t.Fatalf("detach attach proof client: %v: %s", err, output)
 		}
+	})
+}
+
+// waitForBootingRowCursor waits until the picker's cursor (›) sits on the
+// booting row (◐): a key sent before that would land on the row above it.
+func waitForBootingRowCursor(t *testing.T, jail *bootingPickerJail, driverSocket string) {
+	t.Helper()
+	testwait.Until(t, "the picker's cursor on the booting row", func() (bool, string) {
+		captured, err := jail.tmux(driverSocket, "capture-pane", "-p", "-t", "driver:0.0").Output()
+		if err != nil {
+			return false, err.Error()
+		}
+		for _, line := range strings.Split(string(captured), "\n") {
+			if strings.Contains(line, "›") && strings.Contains(line, "◐") {
+				return true, ""
+			}
+		}
+		return false, "last frame: " + string(captured)
 	})
 }
 
@@ -446,7 +464,7 @@ func (jail *bootingPickerJail) tmux(socket string, arguments ...string) *exec.Cm
 func (jail *bootingPickerJail) startTarget(t *testing.T, socket string) {
 	t.Helper()
 	if output, err := jail.tmux(
-		socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "sleep", "120",
+		socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "tail", "-f", "/dev/null",
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start booting target %q: %v: %s", socket, err, output)
 	}

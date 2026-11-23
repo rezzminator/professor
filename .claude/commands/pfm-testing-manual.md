@@ -32,7 +32,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - Shared-core files with one editor per flight: `pfm/journey/tree_test.go`, `pfm/journey/harness/`, `pfm/journey/doors_test.go`, `pfm/journey/doors_cells_test.go`, `pfm/scripts/known-skips.tsv`.
 - The most coverage with the fewest steps: a new check is an assertion in the step that already walks the path.
 - A step needing only its parent's state hangs beside its siblings, never at a chain's end.
-- The whole tree stays at 90 s or under on its profile's `wall` line, herdr-mesh at 40 s or under; the runner fails a run only past `budget` (`pfm/journey/journey_test.go`).
+- The tree's time (500 s) and each pfm process's CPU share (20 % of the tree's time) are judged outside the test, by `infra/fence/journey/budget.sh` over the run's `steps.tsv` and `cpu.tsv`: `run.sh` calls it on Linux, `ci.yml` on macOS; the suite fails no step for its speed.
 - A step reads machine-wide state (schedules, the picker's rows, the chats list) only through an id it created: every branch of the day shares one machine.
 - A picker step moves to its row and reads it as the owner does (`newChatSelected`, `rowIs`), never assuming the cursor: a chat whose schedule fired unseen is pinned above "New chat" with the cursor on it.
 - Every chat function is played through both doors, `pfm chat {verb}` and the chat MCP tool, from inside a live Claude chat by the cells in `pfm/journey/doors_cells_test.go`; a new chat verb or MCP tool lands with its cells.
@@ -98,7 +98,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - A probe that launches an engine closes stdin (`</dev/null`) or it hangs.
 - The e2e harness refuses to run without `PFM_DEV_FENCE=1`: that red on a host is the fence law, not a defect; suites and provisioning scripts gate on `scripts/platform.sh` `platform_in_fence` (the variable AND `/.dockerenv`), never the variable alone.
 - `internal/hookentry` (socket path length) is red on a macOS host and green in the fence.
-- A shell poll counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten.
+- How a test waits, in Go, shell, a fixture, the mock engine or the journey, and the three checks holding it: `.claude/rules/pfm-test-waits.md`.
 - A closed listener keeps accepting while a parallel test's fork holds its fd until exec: a test expecting a refused dial on a closed port stays serial.
 - A closed `gather.AcquireAccountGuard` keeps its flock while a parallel test's fork holds the open file description until exec: `AcquireAccountGuard(dir, false)` retries a busy lock for `accountBusyGrace` before it refuses, and a test that expects the busy refusal calls `acquireAccountGuardWithin(dir, false, 0)` (in `gather`) or holds the guard for longer than the grace.
 - A file a test writes then runs goes through `testjail.WriteExecutable` (`C26-exec-write` fails a bare exec-mode `os.WriteFile`: a parallel test's fork mid-write makes it ETXTBSY), and in `internal/deps` and `internal/config`, which testjail imports, through their local `writeExecutableUnderForkLock`; a file the code under test only resolves, stats or hashes, and nothing runs, through `testjail.WriteExecutableNeverRun`, never a plain write plus an exec-bit `os.Chmod` or a link to the test executable; a scripted engine child plays its output through `deps.FakeRunner.ScriptStartOutput` (`deps.StartOutput`: stdout, stderr, exit code, an `AtStart` hook).
@@ -112,4 +112,4 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 - A model's words: a step asserts from pfm's own report or the pane.
 - A value one run printed about its data (a count, an id).
-- That an event did not happen (a network call, a DNS query, a sleep, a fork): the egress verdict and the fenced measurements prove those, never a test.
+- That an event did not happen (a network call, a DNS query, a sleep, a fork): the egress verdict, the real-wait tripwire and the fenced measurements prove those, never a test.

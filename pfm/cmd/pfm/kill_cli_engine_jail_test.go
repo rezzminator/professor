@@ -50,7 +50,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 		t.Helper()
 		start := exec.Command(
 			"tmux", "-L", socket, "-f", "/dev/null",
-			"new-session", "-d", "-s", session, "sleep", "120",
+			"new-session", "-d", "-s", session, "tail", "-f", "/dev/null",
 		)
 		if output, err := start.CombinedOutput(); err != nil {
 			t.Fatalf("start background pane %s: %v: %s", session, err, output)
@@ -291,7 +291,9 @@ func TestKillSelfResolveAndInternalCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	socket := filepath.Join(t.TempDir(), "cc-1-1-1")
-	command := exec.Command("tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "cc-1-1-1", "sleep 120")
+	command := exec.Command(
+		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "cc-1-1-1", "tail -f /dev/null",
+	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start caller fixture: %v: %s", err, output)
 	}

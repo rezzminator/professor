@@ -33,7 +33,7 @@ func (tmux *trustDialogTmux) SendKey(_ context.Context, _ pfmcall.Target, key st
 
 func TestDeliverThenRefusesTheClaudeFolderTrustDialogWithoutAKey(t *testing.T) {
 	tmux := &trustDialogTmux{}
-	err := deliverThen(
+	err := deliverThenOnFake(t,
 		context.Background(),
 		Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-trust", Pane: "%7",

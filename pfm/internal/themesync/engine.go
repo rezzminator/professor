@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 const (
@@ -22,10 +21,6 @@ const (
 	surfaceVscode   = "vscode"
 	surfaceFollower = "follower"
 )
-
-// flipClock is the time seam of the latency measurement: read once after each
-// surface's apply.
-var flipClock clock.Clock = clock.Real
 
 // flipOrigin is where a flip is measured from: the file whose mtime the user's
 // change left, and when.
@@ -196,7 +191,7 @@ func (s *session) replaceFile(path string, content []byte) error {
 
 // backupBeside copies a user file next to itself before the sync first edits it.
 func (s *session) backupBeside(path string, content []byte) (string, error) {
-	backup := path + ".pfm-theme-" + wallClock.Now().Format(backupStampLayout)
+	backup := path + ".pfm-theme-" + clockOr(wallClock).Now().Format(backupStampLayout)
 	if err := atomicfile.Write(backup, content, 0o600); err != nil {
 		return "", fmt.Errorf("themesync: back up %s: %w", path, err)
 	}
@@ -270,7 +265,7 @@ func (s *session) stamp(surface string) {
 	if s.offsets == nil {
 		s.offsets = map[string]float64{}
 	}
-	s.offsets[surface] = math.Round(flipClock.Now().Sub(s.origin.at).Seconds()*100) / 100
+	s.offsets[surface] = math.Round(clockOr(flipClock).Now().Sub(s.origin.at).Seconds()*100) / 100
 }
 
 // recordFlip keeps the offsets this run measured as the last flip.

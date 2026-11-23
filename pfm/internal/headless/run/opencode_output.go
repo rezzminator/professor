@@ -13,13 +13,6 @@ import (
 	"time"
 )
 
-type openCodeAssistantMarker struct {
-	SessionID     string          `json:"sessionID"`
-	UserMessageID string          `json:"userMessageID"`
-	AssistantIDs  []string        `json:"assistantIDs"`
-	Error         json.RawMessage `json:"error"`
-}
-
 type openCodeMessageSnapshot struct {
 	Info  json.RawMessage   `json:"info"`
 	Parts []json.RawMessage `json:"parts"`
@@ -40,7 +33,7 @@ func collectOpenCodeRunOutput(
 	defer ticker.Stop()
 	var markerDecodeErr error
 	for {
-		markerBody, markerErr := os.ReadFile(assistantPath)
+		markerBody, markerErr := readOpenCodeMarker(assistantPath)
 		if markerErr == nil {
 			var marker openCodeAssistantMarker
 			if err := json.Unmarshal(markerBody, &marker); err != nil {

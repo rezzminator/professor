@@ -8,7 +8,7 @@
 // enginesync.go, enginesync_runner.go: the engine-sync fakes, run and in process.
 // fence.go: runsHere, the guard Run asks first; ChildOutput, a re-exec's output; tier_unit.go and
 // tier_machine.go, the build-tag pair telling a unit binary from a jail (or e2e, journey) one.
-// unitnet.go: the unit net an armed unit binary runs inside, and its one switch.
+// unitnet.go: the unit net an armed unit binary runs inside, and its one switch; realwait.go: its real-wait tripwire.
 // source_repo.go: the run's empty source repository and StageSourceRepoMarker, the installed clone.
 // jail_dir.go: RunInJail, Run starting a package's tests in the jail directory.
 // seed_config.go: seedConfig, every jail home's pfm.config.json, and its variants.
@@ -192,7 +192,8 @@ func Run(m *testing.M) int {
 	if !enterJailDir() {
 		return 1
 	}
-	return runProfiled(m)
+	tripwire := armRealWait() // realwait.go: always armed in a unit binary; the variable only names the report dir
+	return tripwire.verdict(runProfiled(m))
 }
 
 // activeProfiler is the profiler of this process while runProfiled runs its
@@ -303,7 +304,7 @@ func jailHome(base string) (func(), error) {
 // test rather than a path that ran out of room. Callers that only need a
 // scratch directory should keep using t.TempDir(); this is for the ones whose
 // children include a socket.
-func ShortRoot(t *testing.T) string {
+func ShortRoot(t testing.TB) string {
 	t.Helper()
 	directory, err := CreateShortRoot()
 	if err != nil {
@@ -340,7 +341,7 @@ func CreateShortRoot() (string, error) {
 // variable — the test itself, a subprocess, a library — writing into the
 // operator's real account, which is how fixture transcripts reached a live
 // ~/.claude/projects. The two must never be allowed to disagree.
-func Fleet(t *testing.T) string {
+func Fleet(t testing.TB) string {
 	t.Helper()
 	return fleetSetenv(t, t.Setenv)
 }
@@ -357,7 +358,7 @@ func FleetEnv(t *testing.T) (string, []string) {
 	return root, environment
 }
 
-func fleetSetenv(t *testing.T, setenv func(string, string)) string {
+func fleetSetenv(t testing.TB, setenv func(string, string)) string {
 	t.Helper()
 	root := ShortRoot(t)
 	// The engine roots are named for their engines, spelled by the registry.
@@ -409,7 +410,7 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 
 // InstalledHome builds the host artifacts a healthy pfm install carries on
 // top of a scratch fleet and returns the fleet root.
-func InstalledHome(t *testing.T) string {
+func InstalledHome(t testing.TB) string {
 	t.Helper()
 
 	root := Fleet(t)
@@ -505,7 +506,7 @@ func StageAccountLinks(t *testing.T, home, accountDir string, dirs []string, fil
 	}
 }
 
-func stageCloneZshrc(t *testing.T, home string) {
+func stageCloneZshrc(t testing.TB, home string) {
 	t.Helper()
 	shim := filepath.Join(checkoutRoot(), "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
 	line := "[[ -r \"" + shim + "\" ]] && source \"" + shim + "\"\n"

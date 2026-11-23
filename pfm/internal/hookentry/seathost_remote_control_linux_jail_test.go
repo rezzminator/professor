@@ -14,13 +14,13 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // Exercise the supervisor itself: old saved recipes can restart without ever
@@ -102,8 +102,7 @@ func runRemoteControlSeatHost(t *testing.T, enabled, corrupt bool) {
 		t.Fatal(err)
 	}
 	defer func() { _ = slave.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	host := filepath.Join(root, "pfm")
 	if err := os.Symlink(os.Args[0], host); err != nil {
 		t.Fatal(err)

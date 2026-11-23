@@ -4,6 +4,11 @@
 LAB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 FAKES="$LAB_DIR/tests/fakes"
 T=$(mktemp -d /tmp/plab.XXXXXX)
+# shtest_wait_until, shtest_wait_gone, shtest_wait_line, shtest_hold: the one wait door of the shell tests
+# shellcheck source=../../../scripts/shtest-wait.sh
+source "$LAB_DIR/../../scripts/shtest-wait.sh" || { echo "testlib: the wait door scripts/shtest-wait.sh did not load" >&2; exit 2; }
+# the fixed now lib/auth.sh's expiry check reads, so a credentials stamp is exact on any host and at any speed
+export LAB_NOW_S=1767225600
 PASSES=0
 FAILS=0
 
@@ -27,7 +32,8 @@ expect_has() { # <name> <text> <fixed string>
 expect_lacks() { # <name> <text> <fixed string>
   if [[ "$2" != *"$3"* ]]; then ok "$1"; else bad "$1" "${2:0:600} (must not contain: $3)"; fi
 }
-finish() {
+finish() { # a hung wait of this shell is a failure, whether or not the test read its status
+  (( SHTEST_WAITS_HUNG == 0 )) || { printf 'FAIL - %d waits hung (each WAIT HUNG line above)\n' "$SHTEST_WAITS_HUNG"; FAILS=$((FAILS + SHTEST_WAITS_HUNG)); }
   printf '%s: %d passed, %d failed\n' "$(basename "$0")" "$PASSES" "$FAILS"
   [[ "$FAILS" == 0 ]]
 }

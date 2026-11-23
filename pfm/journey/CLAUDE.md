@@ -20,7 +20,8 @@ It runs as the owner on the machine's real paths, no jail, and every branch of t
 ## Machine
 
 - Every terminal and `Ctx.Read` gets only `ownerVars` (`journey_test.go`), with `~/.local/bin` and `~/.local/share/journey/bin` first on `PATH`: a value pfm must see reaches the owner's login through `prepare.sh`, as `GOCOVERDIR` does.
-- Bounds: a terminal wait 10 s unless given, `stepBound` 10 s, a `Ctx.Read` 2 min, a poll every 25 ms, the tree `budget`.
+- Waits: `Ctx.Poll`, `Ctx.Control`, a `Ctx.Read` and a `Terminal`'s `WaitFor`, `WaitGone` and `WaitScreen` run on the wait door, take no duration and end only at the hung-only limit (`.claude/rules/pfm-test-waits.md`); pfm's own patience is real time here (the launch watch's 5 s `launchQuiet`, `pfm/internal/action/launch_watch.go`), production's limit, not the step's.
+- The tree's time and each pfm process's CPU share are judged outside the test by `infra/fence/journey/budget.sh` (`.claude/commands/pfm-testing-manual.md` § Suite duties).
 - Under a together node the log gate judges every branch once, over the node's whole window, against every branch's `Expect` patterns.
 - `Ctx.Cleanup` runs once the node's whole subtree ends, failed or not, after its evidence and before its terminals close; a teardown failure is logged, never a verdict, and the joins judge what it left.
 - Narrowest: `bash infra/fence/journey/run.sh -run 'Journey/{node path}$'`; done: the whole tree, then the macOS run `.claude/rules/pfm-os-doors.md` requires; flags, output and artifacts: `.claude/commands/pfm-testing-manual.md` § Run commands.
@@ -48,4 +49,5 @@ It runs as the owner on the machine's real paths, no jail, and every branch of t
 
 ## Reds
 
-- A wait that times out under load (sibling builders in the tree, a loaded host) is reproduced at rest before it is reported as a product fault; a bound or `budget` moves only once timings taken at rest explain the slowness.
+- A wait that reaches the hung-only limit is a hang: find what never happened from the condition and last state its failure prints, never raise a limit.
+- A `budget.sh` FAIL under load (sibling builders in the tree, a loaded host) is reproduced at rest before it is reported as a product fault; `BUDGET_SECS` or `CPU_SHARE` moves only once timings taken at rest explain it.

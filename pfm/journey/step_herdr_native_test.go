@@ -22,27 +22,36 @@ import (
 func claudeTyped(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Esc)
-	term.WaitFor(prompt, 20*time.Second)
+	term.WaitFor(prompt)
 	s.Project = filepath.Join(s.Home, "work", "demo")
 	term.Type("cd " + s.Project + " && claude\r")
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	s.Chat = oneLiveChat(c, s, "live-claude")
 	s.Chat.Engine = engineOf(c, s)
 	if got := workspaceLabel(c, s); got != "demo" {
 		c.Failf("Herdr workspace label of the typed chat = %q, want %q (the project, not home)", got, "demo")
 	}
 	// Herdr reads `unknown` for a fresh agent until its startup grace ends: a turn typed sooner is never seen.
-	c.Poll("Herdr status idle for "+s.Pane, 20*time.Second, func() (bool, string) {
+	c.Poll("Herdr status idle for "+s.Pane, func() (bool, string) {
 		got := herdrStatus(c, s, s.Pane)
 		return got == "idle", "status " + got
 	})
 	term.Type(`a turn mock-engine: {"type":"turn","reply":"native-reply","busy_ms":2000}` + "\r")
 	var trail []string
-	c.Poll("the reply and Herdr status idle again", 20*time.Second, func() (bool, string) {
+	look := func() string {
 		got := herdrStatus(c, s, s.Pane)
 		if len(trail) == 0 || trail[len(trail)-1] != got {
 			trail = append(trail, got)
 		}
+		return got
+	}
+	c.Poll("Herdr status working through the turn", func() (bool, string) {
+		return look() == "working", fmt.Sprintf("trail %v", trail)
+	})
+	// The turn's busy stretch ends by signal once Herdr has shown it working.
+	advanceEngine(c, s.Chat.Engine, 2*time.Second)
+	c.Poll("the reply and Herdr status idle again", func() (bool, string) {
+		got := look()
 		return strings.Contains(term.Screen(), "⏺ native-reply") && got == "idle", fmt.Sprintf("trail %v", trail)
 	})
 	if want := []string{"idle", "working", "idle"}; strings.Join(trail, " ") != strings.Join(want, " ") {
@@ -52,8 +61,8 @@ func claudeTyped(c *harness.Ctx, s State) State {
 	// and the native pane's tab shows the error mark, not idle.
 	launch := tabName(c, s)
 	term.Type(`a refused turn mock-engine: {"type":"api_error","reply":"API Error: 500 refused"}` + "\r")
-	term.WaitFor("⎿ API Error: 500 refused", 20*time.Second)
-	c.Poll("pfm reads the refused chat error, its tab marked "+strings.Join(tabMarks["error"], "/"), stepBound,
+	term.WaitFor("⎿ API Error: 500 refused")
+	c.Poll("pfm reads the refused chat error, its tab marked "+strings.Join(tabMarks["error"], "/"),
 		func() (bool, string) {
 			state, label := chatAttention(c, s), tabLabel(c, s)
 			return state == "error" &&
@@ -70,8 +79,8 @@ func claudeTyped(c *harness.Ctx, s State) State {
 		`a titled turn mock-engine: [{"type":"ai_title","name":"` + title + `"},{"type":"turn","reply":"titled"}]` +
 			"\r",
 	)
-	term.WaitFor("⏺ titled", 20*time.Second)
-	c.Poll("row and tab named by the AI title "+title, stepBound, func() (bool, string) {
+	term.WaitFor("⏺ titled")
+	c.Poll("row and tab named by the AI title "+title, func() (bool, string) {
 		got := [2]string{lsName(c, s), tabLabel(c, s)}
 		return got == [2]string{title, markedLabel("idle", title)}, fmt.Sprintf("row, tab = %q", got)
 	})
@@ -97,7 +106,7 @@ func rename(c *harness.Ctx, s State) State {
 	// before any turn; the turn's hooks after it keep the name.
 	namesAgree(c, s, "/rename")
 	term.Type(`after the rename mock-engine: {"type":"turn","reply":"renamed-reply"}` + "\r")
-	term.WaitFor("⏺ renamed-reply", 20*time.Second)
+	term.WaitFor("⏺ renamed-reply")
 	namesAgree(c, s, "/rename and a turn")
 	fleetConsistent(c, s)
 
@@ -105,7 +114,7 @@ func rename(c *harness.Ctx, s State) State {
 	// again once reload-cli has replaced it.
 	before := s.Chat
 	term.Type("/clear\r")
-	c.Poll("a new session on seat "+before.Seat, 20*time.Second, func() (bool, string) {
+	c.Poll("a new session on seat "+before.Seat, func() (bool, string) {
 		seats := liveSeats(c, herdrSocket(s))
 		for session, seat := range seats {
 			if session != before.Session && seat == [2]string{before.Seat, s.Pane} && len(seats) == 1 {
@@ -144,13 +153,20 @@ func nameFromCLI(c *harness.Ctx, cli *harness.Terminal, s State, target string) 
 // namesAgree waits for pfm's row name and the live seat's name to read s.Name, and the Herdr tab label
 // to read s.Name under the idle mark: every door to it leaves the chat at rest.
 func namesAgree(c *harness.Ctx, s State, after string) {
-	c.Poll("row, tab and seat named "+s.Name+" after "+after, stepBound, func() (bool, string) {
+	// Claude Code re-runs its statusline on its refresh tick, the fake engine's on a signal: each look
+	// that finds a name unshown fires the next tick. Codex repaints at once and ticks none.
+	ticks := processes(c)[s.Chat.Engine].Engine == "claude"
+	c.Poll("row, tab and seat named "+s.Name+" after "+after, func() (bool, string) {
 		seat := strings.TrimSpace(
 			stateSQL(c, "select coalesce(name, '') from seat where state = 'live'"+
 				" and session_id = '"+s.Chat.Session+"'"),
 		)
 		got := [3]string{lsName(c, s), tabLabel(c, s), seat}
-		return got == [3]string{s.Name, markedLabel("idle", s.Name), s.Name}, fmt.Sprintf("row, tab, seat = %q", got)
+		met := got == [3]string{s.Name, markedLabel("idle", s.Name), s.Name}
+		if !met && ticks {
+			tickEngine(c, engineControl(s.Chat.Engine))
+		}
+		return met, fmt.Sprintf("row, tab, seat = %q", got)
 	})
 }
 
@@ -197,7 +213,7 @@ func reloadCLI(c *harness.Ctx, s State) State {
 		}
 	})
 	read(c, "ln", engine, newer)
-	c.Poll("no Claude launch still on its way to exec "+recorded, 20*time.Second, func() (bool, string) {
+	c.Poll("no Claude launch still on its way to exec "+recorded, func() (bool, string) {
 		var launching []string
 		for pid, p := range processes(c) {
 			if strings.Contains(p.Args, "internal claude-launch") ||
@@ -214,10 +230,10 @@ func reloadCLI(c *harness.Ctx, s State) State {
 	reply := c.Unique("then-pong")
 	then := "the reborn chat answers this follow-up at once " + directive(turnStep(reply))
 	command := "pfm chat reload --sock " + herdrSocket(s) + " --pane " + s.Pane + " --then '" + then + "'"
-	if code := shellRun(cli, "reload", command, 30*time.Second); code != 0 {
+	if code := shellRun(cli, "reload", command); code != 0 {
 		c.Failf("%s exited %d, want 0", command, code)
 	}
-	c.Poll("a new engine for session "+s.Chat.Session, 20*time.Second, func() (bool, string) {
+	c.Poll("a new engine for session "+s.Chat.Session, func() (bool, string) {
 		for pid, session := range engines(processes(c)) {
 			if session == s.Chat.Session && pid != before {
 				return true, ""
@@ -226,7 +242,7 @@ func reloadCLI(c *harness.Ctx, s State) State {
 		return false, fmt.Sprintf("engines %v", engines(processes(c)))
 	})
 	reloadRunDone(c, s)
-	term.WaitFor("⏺ "+reply, 20*time.Second)
+	term.WaitFor("⏺ " + reply)
 	s.Chat.Engine = engineOf(c, s)
 	if got := engineBuild(c, s.Chat.Engine); got != newer {
 		c.Failf("engine %d of %s after the reload runs %q, want the newer build the updater installed %q",
@@ -266,13 +282,13 @@ func paneLost(c *harness.Ctx, s State) State {
 	term.Type("x")
 	term.WaitFor("↵ confirm")
 	term.Press(harness.Enter)
-	c.Poll("pane "+s.Pane+" gone and its engine with it", stepBound, func() (bool, string) {
+	c.Poll("pane "+s.Pane+" gone and its engine with it", func() (bool, string) {
 		_, pane := herdrPanes(c, s)[s.Pane]
 		_, engine := processes(c)[s.Chat.Engine]
 		return !pane && !engine, fmt.Sprintf("pane listed %t, engine %d alive %t", pane, s.Chat.Engine, engine)
 	})
 	sock := herdrSocket(s)
-	c.Poll("the chat listed lost", stepBound, func() (bool, string) {
+	c.Poll("the chat listed lost", func() (bool, string) {
 		r := c.Read("pfm", "chat", "ls", "--all")
 		if r.Code != 0 {
 			c.Failf("pfm chat ls --all exited %d with the pane gone: %s%s", r.Code, r.Stderr, r.Stdout)
@@ -306,7 +322,7 @@ func paneLost(c *harness.Ctx, s State) State {
 	} {
 		c.Failf("lost seats on %s = %v, want %s on %v", sock, seats, s.Chat.Session, [2]string{s.Chat.Seat, s.Pane})
 	}
-	term.WaitFor("↻ "+s.Name, 20*time.Second)
+	term.WaitFor("↻ " + s.Name)
 	chatTabGone(c, s)
 	return s
 }
@@ -344,17 +360,17 @@ func killFromPicker(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.WaitFor("↻ " + s.Name)
 	term.Type(s.Name)
-	term.WaitScreen("the picker narrowed to "+s.Name, stepBound, func(screen string) bool {
+	term.WaitScreen("the picker narrowed to "+s.Name, func(screen string) bool {
 		return strings.Contains(screen, "find › "+s.Name)
 	})
 	if !strings.HasPrefix(selectedRow(term.Screen()), "↻ "+s.Name) {
 		term.Press(harness.Down)
 	}
-	term.WaitScreen("the lost chat "+s.Name+" selected", stepBound, func(screen string) bool {
+	term.WaitScreen("the lost chat "+s.Name+" selected", func(screen string) bool {
 		return strings.HasPrefix(selectedRow(screen), "↻ "+s.Name)
 	})
 	term.Press(harness.Ctrl('x'))
-	term.WaitGone("↻ "+s.Name, stepBound)
+	term.WaitGone("↻ " + s.Name)
 	// The picker lists every branch's chats, and a tmux-hosted one's dossier names tmux: the broken state
 	// is the lost chat's own Herdr socket read as a tmux socket, so its path on the screen.
 	if screen := term.Screen(); strings.Contains(unwrapped(screen), herdrSocket(s)) {
@@ -407,7 +423,7 @@ func unkill(c *harness.Ctx, s State) State {
 			"pfm chat unkill: " + s.Chat.Session + " is not killed; nothing was unkilled\n", 1,
 		},
 	} {
-		out, errs, code := typedRunWithin(c, cli, run.label, run.command, 20*time.Second)
+		out, errs, code := typedRun(c, cli, run.label, run.command)
 		if code != run.code || out != run.stdout || errs != run.stderr {
 			c.Failf("%s: exit %d, stdout %q, stderr %q; want exit %d, stdout %q, stderr %q",
 				run.command, code, out, errs, run.code, run.stdout, run.stderr)
@@ -434,9 +450,9 @@ func unkill(c *harness.Ctx, s State) State {
 	// The open picker keeps its own Ctrl-X over every refresh (model.killChanges): the owner reopens it.
 	term := c.Terminal(s.Term)
 	term.Press(harness.Esc)
-	term.WaitFor(prompt, stepBound)
+	term.WaitFor(prompt)
 	term.Type("pfm\r")
-	term.WaitFor("↻ "+s.Name, 20*time.Second)
+	term.WaitFor("↻ " + s.Name)
 	return s
 }
 

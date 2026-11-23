@@ -431,7 +431,9 @@ const mod = await import(pathToFileURL(row.plugin).href)
 const hooks = await mod.PfmEngineGuard({directory: row.directory, client: {app: {log: async ({body}) => { logs.push(body.level + " " + body.message.split("\n")[0]) }}}})
 const outcomes = []
 let ticks = 0
-const ticker = setInterval(() => { ticks++ }, 1)
+let spinning = true
+const spin = () => { ticks++; if (spinning) setImmediate(spin) }
+setImmediate(spin)
 for (const call of row.calls) {
   try {
     await hooks["tool.execute.before"]({tool: call.tool, sessionID: "s", callID: "c"}, {args: call.args})
@@ -440,7 +442,7 @@ for (const call of row.calls) {
     outcomes.push("deny " + error.message)
   }
 }
-clearInterval(ticker)
+spinning = false
 process.stdout.write(JSON.stringify({outcomes, logs, loopRan: ticks > 0}))
 `
 

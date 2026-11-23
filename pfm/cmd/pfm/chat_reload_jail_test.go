@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -22,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
@@ -35,7 +35,7 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 	socket := probeReloadSocket(t, "selector")
 	server := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
-		"printf '❯ 1. choose\\n'; sleep 120",
+		"printf '❯ 1. choose\\n'; tail -f /dev/null",
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -112,7 +112,7 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 	socket := probeReloadSocket(t, "schedule")
 	server := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
-		"sleep 120",
+		"tail -f /dev/null",
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -178,7 +178,7 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 	socket := probeReloadSocket(t, "ambient")
 	server := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
-		"sleep 120",
+		"tail -f /dev/null",
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -253,7 +253,7 @@ func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 	socket := probeReloadSocket(t, "explicit-multi")
 	server := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
-		"sleep 120",
+		"tail -f /dev/null",
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -261,7 +261,7 @@ func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 	}
 	cleanupProbeReloadSocket(t, socket)
 	if output, err := exec.Command(
-		"tmux", "-S", socket, "new-window", "-d", "-n", "second", "sleep 120",
+		"tmux", "-S", socket, "new-window", "-d", "-n", "second", "tail -f /dev/null",
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start second probe pane: %v: %s", err, output)
 	}
@@ -448,23 +448,14 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	// microseconds-scale race — poll rather than assume the write already
 	// landed by the time the worker call above returned.
 	var content string
-	deadline := time.Now().Add(3 * time.Second)
-	for {
+	testwait.Until(t, "fixture claude to write "+captured, func() (bool, string) {
 		data, readErr := os.ReadFile(captured)
-		if readErr == nil && len(data) > 0 {
-			content = string(data)
-			break
+		if readErr != nil {
+			return false, readErr.Error() + " stdout=" + stdout.String() + " stderr=" + stderr.String()
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf(
-				"fixture claude never ran within the timeout: err=%v stdout=%q stderr=%q",
-				readErr,
-				stdout.String(),
-				stderr.String(),
-			)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		content = string(data)
+		return len(data) > 0, "empty file"
+	})
 	if strings.Contains(content, "--resume") {
 		t.Fatalf("fresh reload still resumed a session:\n%s", content)
 	}

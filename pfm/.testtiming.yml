@@ -68,6 +68,8 @@ suites:
       github.com/rezzminator/professor/pfm/internal/launchnotice: 2
       github.com/rezzminator/professor/pfm/internal/mcpserv: 44
       github.com/rezzminator/professor/pfm/internal/mockengine: 36
+      github.com/rezzminator/professor/pfm/internal/mockengine/control: 2
+      github.com/rezzminator/professor/pfm/internal/mockengine/control/controltest: 2
       github.com/rezzminator/professor/pfm/internal/modelglyph: 2
       github.com/rezzminator/professor/pfm/internal/naming: 2
       github.com/rezzminator/professor/pfm/internal/obs: 2
@@ -99,6 +101,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/testjail: 12
       github.com/rezzminator/professor/pfm/internal/testjail/fakegit: 2
       github.com/rezzminator/professor/pfm/internal/testjail/sourcesweep: 2
+      github.com/rezzminator/professor/pfm/internal/testwait: 2
       github.com/rezzminator/professor/pfm/internal/theme: 2
       github.com/rezzminator/professor/pfm/internal/themecmd: 2
       github.com/rezzminator/professor/pfm/internal/themesync: 6
@@ -115,6 +118,7 @@ suites:
       github.com/rezzminator/professor/pfm/journey: 2
       github.com/rezzminator/professor/pfm/journey/harness: 10
       github.com/rezzminator/professor/pfm/scripts/testassert: 2
+      github.com/rezzminator/professor/pfm/scripts/testclock: 2
   e2e:
     wall_s: 150
     packages:

@@ -5,7 +5,6 @@ package journey
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -16,13 +15,13 @@ import (
 func openElsewhere(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Esc)
-	term.WaitFor(prompt, stepBound)
+	term.WaitFor(prompt)
 	if label := workspaceLabel(c, s); label != "~" {
 		c.Failf("Herdr workspace before the open = %q, want ~ (opened in home)", label)
 	}
 	term.Type("pfm chat open " + s.Chat.Session + "\r")
 	sock := herdrSocket(s)
-	c.Poll("chat "+s.Chat.Session+" live again on "+sock, 20*time.Second, func() (bool, string) {
+	c.Poll("chat "+s.Chat.Session+" live again on "+sock, func() (bool, string) {
 		seats := liveSeats(c, sock)
 		seat, ok := seats[s.Chat.Session]
 		if !ok || len(seats) != 1 {
@@ -34,8 +33,8 @@ func openElsewhere(c *harness.Ctx, s State) State {
 	s.Chat.Engine = engineOf(c, s)
 	// The composer is painted once the resumed engine's SessionStart hooks have run: the owner kills a chat
 	// he sees, never one whose resume is still lifting its earlier kill.
-	term.WaitFor("❯", 20*time.Second)
-	c.Poll("the one Herdr workspace labelled demo", stepBound, func() (bool, string) {
+	term.WaitFor("❯")
+	c.Poll("the one Herdr workspace labelled demo", func() (bool, string) {
 		label := workspaceLabel(c, s)
 		return label == "demo", "workspace " + label
 	})
@@ -58,12 +57,12 @@ func killCLI(c *harness.Ctx, s State) State {
 		c.Failf("pfm chat kill %s: exit %d, stdout %q, stderr %q; want exit 0, stdout %q, no stderr",
 			s.Name, code, out, errs, want)
 	}
-	c.Poll("pane "+s.Pane+" and engine "+fmt.Sprint(s.Chat.Engine)+" gone", stepBound, func() (bool, string) {
+	c.Poll("pane "+s.Pane+" and engine "+fmt.Sprint(s.Chat.Engine)+" gone", func() (bool, string) {
 		_, pane := herdrPanes(c, s)[s.Pane]
 		_, engine := processes(c)[s.Chat.Engine]
 		return !pane && !engine, fmt.Sprintf("pane listed %t, engine alive %t", pane, engine)
 	})
-	c.Poll(s.Name+" killed in state and gone from pfm chat ls --all", stepBound, func() (bool, string) {
+	c.Poll(s.Name+" killed in state and gone from pfm chat ls --all", func() (bool, string) {
 		listed := read(c, "pfm", "chat", "ls", "--all")
 		hidden := strings.TrimSpace(
 			stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
@@ -74,10 +73,10 @@ func killCLI(c *harness.Ctx, s State) State {
 	// Herdr gave the emptied workspace a new pane on pfm's picker: the owner leaves it for the shell.
 	term := c.Terminal(s.Term)
 	term.Press(harness.Esc)
-	term.WaitFor(prompt, stepBound)
+	term.WaitFor(prompt)
 	term.Type("cd " + s.Project + " && claude --resume " + s.Chat.Session + "\r")
-	term.WaitFor("❯", 20*time.Second)
-	c.Poll("the resumed chat live and no longer killed", stepBound, func() (bool, string) {
+	term.WaitFor("❯")
+	c.Poll("the resumed chat live and no longer killed", func() (bool, string) {
 		hidden := strings.TrimSpace(
 			stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
 		)

@@ -26,6 +26,7 @@ import (
 func TestClearAndRenameCarryNativeHerdrName(t *testing.T) {
 	for _, event := range []string{"clear", "rename"} {
 		t.Run(event, func(t *testing.T) {
+			idleProcessClock(t)
 			server := newNativeReporterHerdr(t, "native-seat", "w6:p3", "native-terminal")
 			root := t.TempDir()
 			t.Setenv(paths.EnvHome, root)
@@ -91,7 +92,7 @@ func TestClearAndRenameCarryNativeHerdrName(t *testing.T) {
 				}
 				code = ClearName(nil, strings.NewReader(string(payload)), &out, &stderr, runtime)
 			} else {
-				code = reportToHerdr([]string{"start"}, strings.NewReader(string(payload)), &stderr, realHerdrDeps())
+				code = reportToHerdr([]string{"start"}, strings.NewReader(string(payload)), &stderr, testHerdrDeps())
 			}
 			if code != 0 || stderr.Len() != 0 || out.Len() != 0 {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, &out, &stderr)
@@ -272,7 +273,7 @@ func newNativeTitleRig(t *testing.T, title string, beforeSend ...func()) nativeT
 	})
 	prompt := func() herdrRun {
 		var stderr bytes.Buffer
-		deps := realHerdrDeps()
+		deps := testHerdrDeps()
 		deps.spawn = nil // the transcript watch is herdr_watch_test.go's
 		rc := reportToHerdr([]string{"working"}, bytes.NewReader(payload), &stderr, deps)
 		return herdrRun{rc: rc, stderr: stderr.String()}
@@ -417,7 +418,7 @@ func TestOpenCodeTitleNamesItsNativeSeat(t *testing.T) {
 			}
 			payload, _ := json.Marshal(map[string]string{"session_id": rig.seat.SessionID, "title": row.title})
 			var stderr bytes.Buffer
-			deps := realHerdrDeps()
+			deps := testHerdrDeps()
 			deps.spawn = nil
 			rc := reportToHerdr([]string{"--engine", "opencode", "title"}, bytes.NewReader(payload), &stderr, deps)
 			if rc != 0 || stderr.String() != row.wantStderr {

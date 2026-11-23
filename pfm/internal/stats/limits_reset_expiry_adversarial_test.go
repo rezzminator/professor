@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -214,9 +216,9 @@ func TestExpiredWindowsUnderBackoffNeverFetchOnTheLivePath(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	var hits int
+	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits++
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, usageJSONBody(5, 5, now))
 	}))
@@ -231,13 +233,16 @@ func TestExpiredWindowsUnderBackoffNeverFetchOnTheLivePath(t *testing.T) {
 	for offset := time.Duration(0); offset < 10*time.Second; offset += 2 * time.Second {
 		sampler.SampleLive(context.Background())
 	}
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
+	// SampleLive starts any refresh before it returns, so no flight left running
+	// means a refresh that would have hit the server has already done so.
+	testwait.Until(t, "every live refresh flight to end", func() (bool, string) {
+		sampler.mu.Lock()
+		defer sampler.mu.Unlock()
+		return len(sampler.flights) == 0, fmt.Sprintf("flights=%v", sampler.flights)
+	})
 	limits, _ := sampler.SampleLive(context.Background())
-	if hits != 0 {
-		t.Fatalf("live picker bypassed an active 429 backoff: hits=%d", hits)
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("live picker bypassed an active 429 backoff: hits=%d", got)
 	}
 	for _, window := range limits[0].Windows {
 		if window.UsedPct == 96 {

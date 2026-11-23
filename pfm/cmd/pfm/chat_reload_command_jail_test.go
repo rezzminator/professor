@@ -26,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestChatEndRemovesTheRoleSeatPrompt(t *testing.T) {
@@ -475,27 +476,23 @@ func TestChatEndRetryPendingIntentRunsRealDetachedCLIWorker(t *testing.T) {
 		t.Fatalf("real initiating CLI failed: err=%v out=%s stderr=%s", err, &stdout, &stderr)
 	}
 
-	deadline := time.Now().Add(8 * time.Second)
-	for {
+	testwait.Until(t, "real detached CLI worker to reconcile the seat "+seat.SeatID, func() (bool, string) {
 		_, found, err := db.Seat(context.Background(), seat.SeatID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !found {
-			if _, err := os.Stat(
-				filepath.Join(filepath.Dir(runtime.Paths.StateDB), "seats", seat.SeatID+".json"),
-			); !os.IsNotExist(
-				err,
-			) {
-				t.Fatalf("pending recipe remains: %v", err)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
+		if found {
 			body, _ := os.ReadFile(filepath.Join(runtime.Paths.SIDDir, "end-"+seat.SeatID+".log"))
-			t.Fatalf("real detached CLI worker did not reconcile: %s", body)
+			return false, string(body)
 		}
-		time.Sleep(10 * time.Millisecond)
+		return true, ""
+	})
+	if _, err := os.Stat(
+		filepath.Join(filepath.Dir(runtime.Paths.StateDB), "seats", seat.SeatID+".json"),
+	); !os.IsNotExist(
+		err,
+	) {
+		t.Fatalf("pending recipe remains: %v", err)
 	}
 }
 

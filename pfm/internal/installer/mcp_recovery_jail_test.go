@@ -13,7 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A hostile registry must not leave an installer renewing its native lock
@@ -58,7 +59,7 @@ func TestMCPReadsRejectFIFO(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithCancel(testwait.Context(t))
 			defer cancel()
 			command := exec.CommandContext(ctx, executable, "-test.run=^TestMCPReadsRejectFIFO$")
 			command.Env = append(os.Environ(), "PFM_TEST_FIFO_SOURCE="+path, "PFM_TEST_FIFO_READ="+reader)

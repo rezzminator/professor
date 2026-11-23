@@ -11,6 +11,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -186,13 +187,9 @@ func TestContextCatalogRejectsSpecialFileWithoutBlocking(t *testing.T) {
 		_, state := r.catalog().capacity("gpt-6.1-sol")
 		result <- state
 	}()
-	select {
-	case state := <-result:
-		if state != catalogError {
-			t.Fatalf("special file state = %q", state)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("catalog blocked opening a FIFO")
+	state, _ := testwait.Receive(t, "the catalog to return on a FIFO", result)
+	if state != catalogError {
+		t.Fatalf("special file state = %q", state)
 	}
 }
 

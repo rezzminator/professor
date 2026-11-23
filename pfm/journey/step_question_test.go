@@ -4,7 +4,6 @@ package journey
 
 import (
 	"regexp"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -19,18 +18,18 @@ func question(c *harness.Ctx, s State) State {
 	picker := c.Terminal("question-picker")
 	picker.WaitFor(prompt)
 	picker.Type("pfm ls\r")
-	picker.WaitFor("New chat", 20*time.Second)
+	picker.WaitFor("New chat")
 	ask(c, s)
-	picker.WaitScreen("the asking chat's row "+blockedRow.String(), stepBound, blockedRow.MatchString)
+	picker.WaitScreen("the asking chat's row "+blockedRow.String(), blockedRow.MatchString)
 	term.Press(harness.Enter)
-	term.WaitGone(questionHint, 20*time.Second)
+	term.WaitGone(questionHint)
 	term.WaitFor("❯")
-	awaitAttention(c, s, "idle", stepBound)
-	picker.WaitScreen("the answered chat's row without the blocked mark", stepBound, func(screen string) bool {
+	awaitAttention(c, s, "idle")
+	picker.WaitScreen("the answered chat's row without the blocked mark", func(screen string) bool {
 		return askingRow.MatchString(screen) && !blockedRow.MatchString(screen)
 	})
 	picker.Press(harness.Esc)
-	picker.WaitGone("New chat", 20*time.Second)
+	picker.WaitGone("New chat")
 	rejectTool(c, s)
 	return s
 }
@@ -41,11 +40,11 @@ func question(c *harness.Ctx, s State) State {
 func rejectTool(c *harness.Ctx, s State) {
 	term := c.Terminal(s.Term)
 	term.Type(`a tool mock-engine: {"type":"permission","tool":"Bash","input":{"command":"true"}}` + "\r")
-	term.WaitFor("❯ 1. Yes", 20*time.Second)
-	awaitAttention(c, s, "blocked", stepBound)
+	term.WaitFor("❯ 1. Yes")
+	awaitAttention(c, s, "blocked")
 	term.Press(harness.Esc)
-	term.WaitFor("Interrupted · What should Claude do instead?", 20*time.Second)
-	awaitAttention(c, s, "idle", stepBound)
+	term.WaitFor("Interrupted · What should Claude do instead?")
+	awaitAttention(c, s, "idle")
 	aborted := entry{Role: "assistant", Text: "[turn aborted: interrupted]"}
 	if got := entries(c, s.Chat.Session); len(got) == 0 || got[len(got)-1] != aborted {
 		c.Failf("pfm chat read %s after the rejected tool: last entry of %v, want %v", s.Chat.Session, got, aborted)
@@ -68,7 +67,7 @@ func ask(c *harness.Ctx, s State) {
 	term := c.Terminal(s.Term)
 	option := c.Unique("answer")
 	term.Type(`a question mock-engine: {"type":"menu","options":["` + option + `","no"],"selected":1}` + "\r")
-	term.WaitFor("❯ 1. "+option, 20*time.Second)
+	term.WaitFor("❯ 1. " + option)
 	term.WaitFor(questionHint)
-	awaitAttention(c, s, "blocked", stepBound)
+	awaitAttention(c, s, "blocked")
 }

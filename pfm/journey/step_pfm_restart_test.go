@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -45,7 +44,7 @@ func pfmRestart(c *harness.Ctx, s State) State {
 	if got := services(c); got != pausedServices {
 		c.Failf("pfm's services after the dry run:\n%s\nwant:\n%s", got, pausedServices)
 	}
-	if code := shellRun(term, "restart-run", "clear && pfm restart", 120*time.Second); code != 0 {
+	if code := shellRun(term, "restart-run", "clear && pfm restart"); code != 0 {
 		c.Failf("pfm restart exited %d:\n%s", code, term.Screen())
 	}
 	screen := unwrapped(term.Screen())
@@ -69,7 +68,7 @@ func pfmRestart(c *harness.Ctx, s State) State {
 		c.Failf("pfm's services after the owner starts %s again:\n%s\nwant:\n%s", pausedService, got, installedServices)
 	}
 	for _, chat := range s.Chats {
-		c.Poll(chat.Name+" ended and resumable, no engine of it left", stepBound, func() (bool, string) {
+		c.Poll(chat.Name+" ended and resumable, no engine of it left", func() (bool, string) {
 			rows := listRows(c, chat.Session)
 			for pid, session := range engines(processes(c)) {
 				if session == chat.Session {

@@ -12,26 +12,76 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // appServerFixtureEnv marks the re-exec of this test binary that plays the
 // Codex App Server (TestCodexAppServerFixture).
 const appServerFixtureEnv = "PFM_GPT_APP_SERVER_FIXTURE"
 
+// appServerReleaseEnv names the FIFO the App Server fixture answers on: the
+// test opens it once the parent is proven waiting on the answer.
+const appServerReleaseEnv = "PFM_APP_SERVER_FIXTURE_RELEASE"
+
+// readFromAppServerFixture runs readCodexRateLimitsCommand against the App
+// Server fixture, and releases the fixture to answer once the parent is
+// blocked reading the answer: a parent that closed the transport right after
+// its request has closed it by then, and the fixture sees its EOF.
+func readFromAppServerFixture(t *testing.T, ctx context.Context) ([]byte, error) {
+	t.Helper()
+	release := filepath.Join(t.TempDir(), "release")
+	if err := syscall.Mkfifo(release, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run=TestCodexAppServerFixture", "--", "app-server")
+	command.Env = append(os.Environ(), appServerFixtureEnv+"=1", appServerReleaseEnv+"="+release)
+	type read struct {
+		body []byte
+		err  error
+	}
+	done := make(chan read, 1)
+	go func() {
+		body, err := readCodexRateLimitsCommand(ctx, command)
+		done <- read{body, err}
+	}()
+	testwait.Until(t, "the parent to wait on the App Server's answer", func() (bool, string) {
+		select {
+		case got := <-done:
+			done <- got
+			return true, "the read returned"
+		default:
+		}
+		return testwait.Blocked("bufio.(*Scanner).Scan", "statusline.readCodexRateLimitsCommand")
+	})
+	opened := make(chan error, 1)
+	go func() {
+		fifo, err := os.OpenFile(release, os.O_WRONLY, 0)
+		if err == nil {
+			err = fifo.Close()
+		}
+		opened <- err
+	}()
+	got, _ := testwait.Receive(t, "the App Server read to return", done)
+	select {
+	case err := <-opened:
+		if err != nil {
+			t.Fatalf("release the App Server fixture: %v", err)
+		}
+	default:
+		// The fixture ended without taking its release; free the opener.
+		if fifo, err := os.OpenFile(release, os.O_RDONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = fifo.Close()
+		}
+	}
+	return got.body, got.err
+}
+
 func TestAppServerHandshakeCarriesJSONRPCAndReadsIDOne(t *testing.T) {
-	command := exec.CommandContext(
-		context.Background(),
-		os.Args[0],
-		"-test.run=TestCodexAppServerFixture",
-		"--",
-		"app-server",
-	)
-	command.Env = append(os.Environ(), appServerFixtureEnv+"=1")
-	body, err := readCodexRateLimitsCommand(context.Background(), command)
+	body, err := readFromAppServerFixture(t, testwait.Context(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,24 +220,40 @@ func TestCodexAppServerFixture(t *testing.T) {
 	// The real App Server cancels outstanding work when stdin reaches EOF.
 	// Refuse to answer a parent that closes the transport immediately after
 	// writing the request: that is the production failure this fixture pins.
-	eof := make(chan error, 1)
-	go func() {
-		_, err := reader.ReadByte()
-		eof <- err
-	}()
-	select {
-	case err := <-eof:
-		if err == io.EOF {
-			os.Exit(94)
-		}
-	case <-time.After(100 * time.Millisecond):
+	// The test releases this fixture once the parent waits on the answer, so
+	// such a parent's EOF is queued by then.
+	release, err := os.Open(os.Getenv(appServerReleaseEnv))
+	if err != nil {
+		os.Exit(95)
+	}
+	_, _ = io.Copy(io.Discard, release)
+	_ = release.Close()
+	if reader.Buffered() == 0 && appServerStdinClosed() {
+		os.Exit(94)
 	}
 	_, _ = os.Stdout.WriteString(`{"jsonrpc":"2.0","method":"configWarning","params":{}}` + "\n")
 	_, _ = os.Stdout.WriteString(
 		`{"jsonrpc":"2.0","id":1,"result":{"rateLimits":{"primary":{"usedPercent":10},"planType":"plus"}}}` + "\n",
 	)
-	time.Sleep(10 * time.Second)
+	// Stay up until the parent ends the session by closing stdin, or kills this.
+	for {
+		if _, err := reader.ReadByte(); err != nil {
+			break
+		}
+	}
 	os.Exit(0)
+}
+
+// appServerStdinClosed reads stdin once without blocking: true when it is at
+// EOF, false while the parent holds it open. Stdin blocks again after.
+func appServerStdinClosed() bool {
+	if err := syscall.SetNonblock(0, true); err != nil {
+		os.Exit(96)
+	}
+	defer func() { _ = syscall.SetNonblock(0, false) }()
+	var probe [1]byte
+	n, err := syscall.Read(0, probe[:])
+	return n == 0 && err == nil
 }
 
 // TestReadCodexRateLimitsNamesAMissingBinary: a Codex binary absent from

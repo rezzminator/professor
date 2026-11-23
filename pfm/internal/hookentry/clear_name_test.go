@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/naming"
@@ -17,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type clearNameFailWriter struct{}
@@ -29,6 +31,7 @@ func (clearNameFailWriter) Write([]byte) (int, error) { return 0, errors.New("na
 // directory. No PFM_HOME and no database file.
 func memoryClearName(t *testing.T) (config.Runtime, string) {
 	t.Helper()
+	idleProcessClock(t) // the prompt hook's deadline never passes; a test that wants it to installs its own
 	database, err := store.OpenMemory()
 	if err != nil {
 		t.Fatal(err)
@@ -45,6 +48,7 @@ func memoryClearName(t *testing.T) (config.Runtime, string) {
 }
 
 func TestClearNameFailureIsVisibleAndRetryable(t *testing.T) {
+	idleProcessClock(t)
 	root := testjail.Fleet(t)
 	runtime, err := config.LoadRuntime("")
 	if err != nil {
@@ -162,9 +166,6 @@ func TestClearNameIgnoresUnmanagedLifecycleEvents(t *testing.T) {
 }
 
 func TestClearNamePromptBoundsHeldConversationLock(t *testing.T) {
-	oldDeadline := promptHookDeadline
-	promptHookDeadline = 500 * time.Millisecond
-	t.Cleanup(func() { promptHookDeadline = oldDeadline })
 	for _, pending := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unmanaged", true: "pending"}[pending], func(t *testing.T) {
 			runtime, _ := memoryClearName(t)
@@ -183,23 +184,19 @@ func TestClearNamePromptBoundsHeldConversationLock(t *testing.T) {
 			}
 			defer func() { _ = unlock() }()
 			var out, stderr bytes.Buffer
-			done := make(chan int, 1)
-			go func() {
+			// The lock never frees: the hook polls it on the process clock until its deadline passes there.
+			fake := clock.NewFake(time.Now())
+			testwait.ProcessClock(t, fake)
+			var code int
+			expireHeldWait(t, fake, 10*time.Millisecond, promptHookDeadline, func() {
 				payload := `{"hook_event_name":"UserPromptSubmit","session_id":"` + id + `"}`
-				done <- ClearName(nil, strings.NewReader(payload), &out, &stderr, runtime)
-			}()
-			bound, cancel := context.WithTimeout(ctx, time.Second)
-			defer cancel()
-			select {
-			case code := <-done:
-				if code != 0 || out.Len() != 0 || (stderr.Len() != 0) != pending {
-					t.Fatalf("pending=%v code=%d out=%s stderr=%s", pending, code, &out, &stderr)
-				}
-				if pending && !strings.Contains(stderr.String(), "context deadline exceeded") {
-					t.Fatalf("lock deadline was not visible: %s", &stderr)
-				}
-			case <-bound.Done():
-				t.Fatal("prompt waited on the conversation lock beyond its own deadline")
+				code = ClearName(nil, strings.NewReader(payload), &out, &stderr, runtime)
+			})
+			if code != 0 || out.Len() != 0 || (stderr.Len() != 0) != pending {
+				t.Fatalf("pending=%v code=%d out=%s stderr=%s", pending, code, &out, &stderr)
+			}
+			if pending && !strings.Contains(stderr.String(), "context deadline exceeded") {
+				t.Fatalf("lock deadline was not visible: %s", &stderr)
 			}
 		})
 	}
@@ -224,6 +221,7 @@ func TestClearNameNamesTheSuccessorOfARelativeTranscriptPath(t *testing.T) {
 }
 
 func TestClearNameStateWriteFailureIsVisible(t *testing.T) {
+	idleProcessClock(t)
 	root := testjail.Fleet(t)
 	runtime, err := config.LoadRuntime("")
 	if err != nil {
@@ -249,6 +247,7 @@ func TestClearNameStateWriteFailureIsVisible(t *testing.T) {
 }
 
 func TestClearNameLookupFailureIsVisibleWithoutGuessing(t *testing.T) {
+	idleProcessClock(t)
 	testjail.Fleet(t)
 	runtime, err := config.LoadRuntime("")
 	if err != nil {

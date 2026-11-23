@@ -13,7 +13,6 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/headless"
@@ -29,10 +28,13 @@ import (
 const frontRoleEnv = "PFM_RESTART_TEST_FRONT_DIR"
 
 // runFrontRole is the front: it spawns a worker that outlives it, prints the
-// worker's pid, then follows the worker's log until it is killed.
+// worker's pid, then follows the worker's log until it is killed. Its clock never sleeps: the
+// front lives only until the test kills it.
 func runFrontRole(dir string) int {
-	launcher := Launcher{Runner: deps.RealRunner{}, Clock: clock.Real, Exited: childExited}
-	script := "sleep 1; echo survived > " + filepath.Join(dir, "marker") + "; echo '" + ExitMarker + "0'"
+	launcher := Launcher{Runner: deps.RealRunner{}, Clock: newTickClock(), Exited: childExited}
+	// The worker finishes only once the test writes the go pipe, after it has killed the front.
+	script := "read -r _ < " + filepath.Join(dir, "go") + "; echo survived > " + filepath.Join(dir, "marker") +
+		"; echo '" + ExitMarker + "0'"
 	var env []string
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, frontRoleEnv+"=") {

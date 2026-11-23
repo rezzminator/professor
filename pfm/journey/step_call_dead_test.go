@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -79,7 +78,7 @@ func deadChat(c *harness.Ctx, s *State) {
 		}
 	})
 	var session string
-	c.Poll("one live Claude chat named "+dead, stepBound, func() (bool, string) {
+	c.Poll("one live Claude chat named "+dead, func() (bool, string) {
 		rows := namedChats(c, f[2])
 		for id, row := range rows {
 			session = id
@@ -117,7 +116,7 @@ func deadChat(c *harness.Ctx, s *State) {
 
 // notLive waits until `pfm chat status` answers that name is dead, its exit 3.
 func notLive(c *harness.Ctx, name string) {
-	c.Poll(name+" dead", 20*time.Second, func() (bool, string) {
+	c.Poll(name+" dead", func() (bool, string) {
 		r := c.Read("pfm", "chat", "status", name, "--json")
 		var status struct {
 			State string `json:"state"`
@@ -130,7 +129,7 @@ func notLive(c *harness.Ctx, name string) {
 // vanished waits until `pfm chat status` names no chat called name, its exit 4: a fork that ended before
 // its first prompt, as Claude writes a fork's transcript only then, leaves nothing to resume.
 func vanished(c *harness.Ctx, name string) {
-	c.Poll(name+" gone", 20*time.Second, func() (bool, string) {
+	c.Poll(name+" gone", func() (bool, string) {
 		r := c.Read("pfm", "chat", "status", name, "--json")
 		var status struct {
 			State string `json:"state"`

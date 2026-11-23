@@ -42,7 +42,7 @@ func newTitlesProbeServer(t *testing.T, socket string, titles *pfmconfig.TmuxTit
 	tmux := TmuxSpawner{TmuxDir: tmuxDir, Titles: titles}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Claude", CWD: root,
-		Width: 180, Height: 45, Run: "sleep 120",
+		Width: 180, Height: 45, Run: "tail -f /dev/null",
 	}); err != nil {
 		t.Fatalf("create chat server: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
 	socket := "probe-cc-1800000014-1-1"
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
-		Socket: socket, Session: socket, Window: "Claude", CWD: root, Run: "sleep 120",
+		Socket: socket, Session: socket, Window: "Claude", CWD: root, Run: "tail -f /dev/null",
 	}); err != nil {
 		t.Fatalf("create an unsized chat server: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestNewSessionStoresTheExactChatNameInTheSameCommand(t *testing.T) {
 		// A pool name or a branch's default name is no user's: marked automatic.
 		"probe-cc-1800000017-1-1": {Window: "Pool name", ChatName: "Pool name;", ChatNameAutomatic: true},
 	} {
-		spec.Socket, spec.Session, spec.CWD, spec.Run = socket, socket, root, "sleep 120"
+		spec.Socket, spec.Session, spec.CWD, spec.Run = socket, socket, root, "tail -f /dev/null"
 		if err := tmux.NewSession(context.Background(), spec); err != nil {
 			t.Fatalf("create chat server %s: %v", socket, err)
 		}

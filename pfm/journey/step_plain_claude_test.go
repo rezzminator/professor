@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -22,7 +21,7 @@ func plainClaude(c *harness.Ctx, s State) State {
 	term.WaitFor(prompt)
 	c.Cleanup(func() { stopPlainChat(c, &s, term) })
 	term.Type("cd $HOME/work/demo && claude\r")
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	return plainClaudeLive(c, s, attached(c, term))
 }
 
@@ -33,7 +32,7 @@ func plainReloadTyped(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	before, socket := s.Chat, plainSocket(c, s)
 	term.Type("/pfm:reload\r")
-	c.Poll("a new engine for session "+s.Chat.Session, 20*time.Second, func() (bool, string) {
+	c.Poll("a new engine for session "+s.Chat.Session, func() (bool, string) {
 		for pid, session := range engines(processes(c)) {
 			if session == s.Chat.Session && pid != before.Engine {
 				return true, ""
@@ -41,11 +40,11 @@ func plainReloadTyped(c *harness.Ctx, s State) State {
 		}
 		return false, fmt.Sprintf("engines %v", engines(processes(c)))
 	})
-	c.Poll("pfm's reload run on "+socket+" done", 20*time.Second, func() (bool, string) {
+	c.Poll("pfm's reload run on "+socket+" done", func() (bool, string) {
 		run := reloadRun(c, socket)
 		return run == "", run
 	})
-	term.WaitGone("/pfm:reload", 20*time.Second)
+	term.WaitGone("/pfm:reload")
 	plainStatusRow(c, s)
 	s = plainClaudeLive(c, s, socket)
 	if s.Chat.Seat != before.Seat || s.Chat.Engine == before.Engine {
@@ -62,7 +61,7 @@ func plainEnd(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := plainSocket(c, s)
 	term.Type("/exit\r")
-	term.WaitGone("❯", 20*time.Second)
+	term.WaitGone("❯")
 	plainGone(c, s, term, socket)
 	return s
 }
@@ -79,7 +78,7 @@ func plainResumeFromCLI(c *harness.Ctx, s State) State {
 	term.WaitFor(prompt)
 	c.Cleanup(func() { stopPlainChat(c, &s, term) })
 	term.Type("pfm chat open " + s.Chat.Session + "\r")
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	s = plainClaudeLive(c, s, attached(c, term))
 	if s.Chat.Seat == old.Seat {
 		c.Failf("the resumed chat %s is on the ended chat's seat %s, want a seat of its own", s.Chat.Session, old.Seat)
@@ -87,7 +86,7 @@ func plainResumeFromCLI(c *harness.Ctx, s State) State {
 	if args := processes(c)[s.Chat.Engine].Args; !strings.Contains(args, "--resume "+s.Chat.Session) {
 		c.Failf("the resumed engine %d runs %q, want --resume %s", s.Chat.Engine, args, s.Chat.Session)
 	}
-	c.Poll("chat "+s.Chat.Session+" idle in pfm's status", stepBound, func() (bool, string) {
+	c.Poll("chat "+s.Chat.Session+" idle in pfm's status", func() (bool, string) {
 		state := chatAttention(c, s)
 		return state == "idle", state
 	})
@@ -114,11 +113,11 @@ func plainExitDuringReload(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := plainSocket(c, s)
 	term.Type("/pfm:reload\r")
-	c.Poll("pfm's reload run on "+socket+" started", 20*time.Second, func() (bool, string) {
+	c.Poll("pfm's reload run on "+socket+" started", func() (bool, string) {
 		return reloadRun(c, socket) != "", "no reload run"
 	})
 	term.Type("/exit\r")
-	term.WaitGone("❯", 20*time.Second)
+	term.WaitGone("❯")
 	plainGone(c, s, term, socket)
 	return s
 }
@@ -139,7 +138,7 @@ func reloadRun(c *harness.Ctx, socket string) string {
 func plainStatusRow(c *harness.Ctx, s State) {
 	want := regexp.MustCompile(`^🥇 ◇ Sonnet·effort unknown │ ` + regexp.QuoteMeta(filepath.Base(s.Project)) +
 		` │ 🌿 master │` + fleetCounts)
-	c.Terminal(s.Term).WaitScreen("the status line "+want.String()+" under the box", stepBound,
+	c.Terminal(s.Term).WaitScreen("the status line "+want.String()+" under the box",
 		func(screen string) bool {
 			row, found := statusRow(screen)
 			return found && want.MatchString(row)
@@ -154,7 +153,7 @@ var tmuxClient = regexp.MustCompile(`(?:^|/)tmux (?:-L (\S+)|-S (\S+))`)
 // machine-wide count, which other branches change.
 func attached(c *harness.Ctx, term *harness.Terminal) string {
 	socket := ""
-	c.Poll("the tmux client in terminal "+term.Name(), stepBound, func() (bool, string) {
+	c.Poll("the tmux client in terminal "+term.Name(), func() (bool, string) {
 		table := processes(c)
 		var clients []string
 		for pid, p := range table {
@@ -173,7 +172,7 @@ func attached(c *harness.Ctx, term *harness.Terminal) string {
 // plainClaudeLive waits for the branch's Claude chat to be the one live row on socket, on a live
 // tmux seat there, run by exactly one engine, and returns s with that chat.
 func plainClaudeLive(c *harness.Ctx, s State, socket string) State {
-	c.Poll("one live Claude chat on tmux socket "+socket+" with its live seat and one engine", stepBound,
+	c.Poll("one live Claude chat on tmux socket "+socket+" with its live seat and one engine",
 		func() (bool, string) {
 			rows, listed := liveChats(c, socket)
 			seats := seatsWhere(c, "state = 'live' and backend = 'tmux' and tmux_socket like '%/"+socket+"'")
@@ -226,7 +225,7 @@ func plainSocket(c *harness.Ctx, s State) string {
 // no engine and no tmux process on socket, while the terminal's shell, which a chat never closes,
 // stays and draws its prompt again.
 func plainGone(c *harness.Ctx, s State, term *harness.Terminal, socket string) {
-	c.Poll("chat "+s.Chat.Session+" and tmux socket "+socket+" gone, the terminal's shell kept", stepBound,
+	c.Poll("chat "+s.Chat.Session+" and tmux socket "+socket+" gone, the terminal's shell kept",
 		func() (bool, string) {
 			rows, _ := liveChats(c, "")
 			seats := seatsWhere(c, "state = 'live' and session_id = '"+s.Chat.Session+"'")
@@ -289,7 +288,7 @@ func stopPlainChat(c *harness.Ctx, s *State, term *harness.Terminal) {
 		run("pfm", "chat", "end", s.Chat.Session)
 	}
 	phase(c, func() {
-		c.Poll("no engine of chat "+s.Chat.Session+" left", 20*time.Second, func() (bool, string) {
+		c.Poll("no engine of chat "+s.Chat.Session+" left", func() (bool, string) {
 			var left []string
 			for pid, session := range engines(processes(c)) {
 				if session == s.Chat.Session {

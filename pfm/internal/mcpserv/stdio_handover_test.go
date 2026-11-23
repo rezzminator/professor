@@ -14,13 +14,12 @@ import (
 	"sync"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/binwatch"
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -173,16 +172,10 @@ func (output *handoverOutput) String() string {
 	return output.buffer.String()
 }
 
-// waitHandover polls a named condition until it holds or two seconds pass.
+// waitHandover polls a named condition until it holds.
 func waitHandover(t *testing.T, what string, holds func() bool) {
 	t.Helper()
-	deadline := clock.Real.Now().Add(2 * time.Second)
-	for !holds() {
-		if clock.Real.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		_ = clock.Real.Sleep(context.Background(), 5*time.Millisecond)
-	}
+	testwait.Until(t, what, func() (bool, string) { return holds(), "does not hold yet" })
 }
 
 // installHandoverBuild renames a new build over path, as make host-install does.
@@ -216,6 +209,7 @@ func newTestHandover(t *testing.T, runner *handoverRunner) (*stdioHandover, *han
 }
 
 func TestStdioHandoverMovesTheChatOntoTheInstalledPfm(t *testing.T) {
+	probeClock(t)
 	newChild := newHandoverChild("new", "result", handoverExit(3))
 	runner := &handoverRunner{children: []*handoverChildScript{newChild}}
 	handover, output, warnings, binary := newTestHandover(t, runner)
@@ -272,6 +266,7 @@ func TestStdioHandoverBeforeTheHandshakeCarriesTheClientsOwn(t *testing.T) {
 }
 
 func TestStdioHandoverMovesAnInstalledPfmAnInstallReplacedAgain(t *testing.T) {
+	probeClock(t)
 	first, second := newHandoverChild("first", "result", nil), newHandoverChild("second", "result", nil)
 	runner := &handoverRunner{children: []*handoverChildScript{first, second}}
 	handover, output, warnings, binary := newTestHandover(t, runner)
@@ -309,6 +304,7 @@ func TestStdioHandoverMovesAnInstalledPfmAnInstallReplacedAgain(t *testing.T) {
 }
 
 func TestRunStdioEndsWithTheInstalledPfmsExitStatus(t *testing.T) {
+	probeClock(t)
 	child := newHandoverChild("new", "result", handoverExit(4))
 	runner := &handoverRunner{children: []*handoverChildScript{child}}
 	handover, _, _, binary := newTestHandover(t, runner)

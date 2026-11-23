@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -51,15 +51,8 @@ func TestStoreStressKilledHelper(t *testing.T) {
 		t.Fatalf("write store stress ready marker: %v", err)
 	}
 
-	timeout := 3 * time.Minute
-	if os.Getenv("PFM_STRESS_STRICT") == "1" {
-		timeout = 40 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	if err := waitForPaths(ctx, gate); err != nil {
-		t.Fatalf("wait for store stress gate: %v", err)
-	}
+	ctx := testwait.Context(t)
+	waitForPaths(t, gate)
 
 	prefix := os.Getenv(storeStressPrefixEnv)
 	engine := pfmengine.Claude
@@ -78,6 +71,61 @@ func TestStoreStressKilledHelper(t *testing.T) {
 			BaselinePrompts: &baseline,
 		}); err != nil {
 			t.Fatalf("stress Kill(%s, %d): %v", prefix, index, err)
+		}
+	}
+}
+
+// stressTranscriptPass writes (or updates) the 50k stress transcripts in
+// BatchSize transactions.
+func stressTranscriptPass(tb testing.TB, store *Store, update bool) {
+	tb.Helper()
+
+	ctx := context.Background()
+	for base := 0; base < storeStressTranscripts; base += BatchSize {
+		count := min(BatchSize, storeStressTranscripts-base)
+		err := store.Batch(ctx, count, func(tx *ImmediateTx, start, end int) error {
+			for offset := start; offset < end; offset++ {
+				index := base + offset
+				promptCount := int64(1)
+				lastPrompt := "initial"
+				if update {
+					promptCount = 2
+					lastPrompt = "updated"
+				}
+				if err := tx.UpsertTranscript(ctx, Transcript{
+					UUID:         fmt.Sprintf("stress-%05d", index),
+					Path:         fmt.Sprintf("/stress/%05d.jsonl", index),
+					Size:         int64(index + 100),
+					MTimeNS:      int64(index + 200),
+					ParsedOffset: int64(index + 90),
+					CWD:          "/stress",
+					FirstPrompt:  "first",
+					LastPrompt:   lastPrompt,
+					PromptCount:  promptCount,
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			tb.Fatalf("stress transcript batch at %d: %v", base, err)
+		}
+	}
+}
+
+// BenchmarkStoreStressTranscriptPass is the 50k-transcript insert and update
+// pass TestStoreStress asserts the rows of, on an in-memory store.
+func BenchmarkStoreStressTranscriptPass(b *testing.B) {
+	for b.Loop() {
+		store, err := OpenMemory()
+		if err != nil {
+			b.Fatalf("OpenMemory() error = %v", err)
+		}
+		stressTranscriptPass(b, store, false)
+		stressTranscriptPass(b, store, true)
+		if err := store.Close(); err != nil {
+			b.Fatalf("close store: %v", err)
 		}
 	}
 }

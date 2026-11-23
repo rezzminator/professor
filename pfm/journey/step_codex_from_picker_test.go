@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -24,7 +23,7 @@ func codexFromPicker(c *harness.Ctx, s State) State {
 	term.WaitFor(prompt)
 	model := c.Unique("no-such-model")
 	command := "pfm chat new --engine cx --name " + c.Unique("refused") + " --model " + model
-	if code := paneRun(term, "refused", command, 20*time.Second); code == 0 {
+	if code := paneRun(term, "refused", command); code == 0 {
 		c.Failf("pfm chat new --model %s exited 0, want a refusal", model)
 	}
 	term.WaitFor(`codex model "` + model + `" is not offered by Codex`)
@@ -39,7 +38,7 @@ func codexFromPicker(c *harness.Ctx, s State) State {
 	term.Press(harness.Enter)
 	pickEngine(term, "Codex")
 	term.Press(harness.Enter)
-	term.WaitFor("Ask Codex to do anything", 20*time.Second)
+	term.WaitFor("Ask Codex to do anything")
 	s.Chat = oneLiveChat(c, s, "live-codex")
 	s.Chat.Engine = engineOf(c, s)
 	s.Name = c.Unique("codex-title")
@@ -58,7 +57,7 @@ var engineChip = regexp.MustCompile(`◖ (\S+) ◗`)
 // the screen before the press with the chip row still undrawn, and a press sent on that reading lands
 // after the chip was read as right and moves it on.
 func pickEngine(term *harness.Terminal, short string) {
-	term.WaitFor("choose the engine", 20*time.Second)
+	term.WaitFor("choose the engine")
 	boxed := func(screen string) string {
 		return strings.Join(engineChip.FindAllString(screen, -1), " ")
 	}
@@ -66,7 +65,7 @@ func pickEngine(term *harness.Terminal, short string) {
 	var on string
 	rest := func(what, was string) {
 		var last string
-		term.WaitScreen(what, stepBound, func(screen string) bool {
+		term.WaitScreen(what, func(screen string) bool {
 			last, on = on, boxed(screen)
 			return on != "" && on != was && on == last
 		})
@@ -87,7 +86,7 @@ func pickEngine(term *harness.Terminal, short string) {
 // branch's pane, and returns it.
 func oneLiveChat(c *harness.Ctx, s State, kind string) Chat {
 	var chat Chat
-	c.Poll("one "+kind+" chat with a live seat on "+s.Pane, 20*time.Second, func() (bool, string) {
+	c.Poll("one "+kind+" chat with a live seat on "+s.Pane, func() (bool, string) {
 		rows, _ := liveChats(c, herdrSocket(s))
 		seats := liveSeats(c, herdrSocket(s))
 		seen := fmt.Sprintf("chats %v, seats %v", rows, seats)
@@ -108,11 +107,11 @@ func oneLiveChat(c *harness.Ctx, s State, kind string) Chat {
 
 // paneRun is shellRun for a shell inside a Herdr pane, whose lines Herdr's frame indents: the exit
 // line is found anywhere on a row.
-func paneRun(term *harness.Terminal, label, command string, within time.Duration) int {
+func paneRun(term *harness.Terminal, label, command string) int {
 	term.Type(command + `; echo "` + label + ` exit=$?"` + "\r")
 	marker := regexp.MustCompile(regexp.QuoteMeta(label) + ` exit=(\d+)`)
 	var code int
-	term.WaitScreen(label+"'s exit line", within, func(screen string) bool {
+	term.WaitScreen(label+"'s exit line", func(screen string) bool {
 		m := marker.FindStringSubmatch(screen)
 		if m != nil {
 			code, _ = strconv.Atoi(m[1])

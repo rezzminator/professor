@@ -12,8 +12,11 @@
 // Clock takes when a later wave folds them in: one clock, never five.
 //
 // This file holds the Clock, Timer and Ticker interfaces; the other files:
-//   - real.go: Real, the wall clock every production caller gets by default.
+//   - real.go: Real, the wall clock every production caller gets by default,
+//     and Wall, the host's own time a kernel deadline is built from.
 //   - fake.go: Fake, the deterministic clock a test advances by hand.
+//   - timeout.go: WithTimeout, production's one way to bound work by a context on a Clock:
+//     context.WithTimeout on the real clock, ended by the given clock's timer on any other.
 package clock
 
 import (

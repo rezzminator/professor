@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestHerdrCallNative(t *testing.T) {
@@ -82,13 +83,22 @@ func TestHerdrCallNative(t *testing.T) {
 				target.Engine = test.engine
 			}
 			engine := nativeEngine(t, target)
-			// The bound only has to outlast the composer hold's reads.
-			engine.options.ComposerWait, engine.options.Poll = time.Second, time.Millisecond
-			result, err := engine.CallTarget(
-				context.Background(),
-				target,
-				Request{Target: "recipient", Message: "hello\nworld", ForceNow: test.force},
-			)
+			// The bound only has to outlast the composer hold's reads. Both run on
+			// a fake clock Drive advances, so the bound is a count of reads
+			// (ComposerWait/Poll, one more than the hold's), never the host's speed.
+			engine.options.ComposerWait = time.Second
+			engine.options.Poll = engine.options.ComposerWait / (ComposerHoldReads + 1)
+			fake := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+			engine.options.Clock = fake
+			var result Result
+			var err error
+			testwait.Drive(t, "native call to return its receipt", fake, func() {
+				result, err = engine.CallTarget(
+					testwait.Context(t),
+					target,
+					Request{Target: "recipient", Message: "hello\nworld", ForceNow: test.force},
+				)
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -527,9 +537,7 @@ func TestHerdrTurnPreservesIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			err = nativeEngine(t, target).waitHerdrTurn(ctx, target, turn)
+			err = nativeEngine(t, target).waitHerdrTurn(testwait.Context(t), target, turn)
 			if err == nil || err.Error() != "herdr turn identity changed for \"w1:p2\"" {
 				t.Fatalf("replacement accepted: %v", err)
 			}
@@ -623,6 +631,7 @@ func TestHerdrNativeDeliveryWaitsForTurnEvidence(t *testing.T) {
 		{"cancelled", statusDeliveredUnproven, "context canceled"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			clk := newBirthPublishClock()
 			prompted, reads := false, 0
 			socket := newNativeSocket(t, func(req nativeRequest) (any, string) {
 				if req.Method == "pane.read" {
@@ -663,7 +672,7 @@ func TestHerdrNativeDeliveryWaitsForTurnEvidence(t *testing.T) {
 						agent["agent_status"], agent["state_change_seq"] = "working", 9
 					case "slow-read": // a loaded machine: the read outlives the settle budget, then sees the turn
 						if req.Method == "agent.get" {
-							time.Sleep(2 * slowReadSettle)
+							clk.advance(2 * slowReadSettle)
 							agent["agent_status"], agent["state_change_seq"] = "working", 9
 						}
 					case "read-refused":
@@ -684,7 +693,6 @@ func TestHerdrNativeDeliveryWaitsForTurnEvidence(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			clk := &birthPublishClock{Clock: clock.Real, now: clock.Real.Now()}
 			if test.name == "cancelled" {
 				var cancelAfterPrompt func()
 				cancelAfterPrompt = func() {

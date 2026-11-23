@@ -52,12 +52,12 @@ func TestHerdrShellReportsToThePaneRunningTheShell(t *testing.T) {
 		"a multi-line command reports on one line": {
 			setup: func(server *fakeHerdr) { server.addShellPane("wT:p1", "t1", 4242) },
 			args: []string{
-				"done", "--pid", "4242", "--command", "for i in 1 2\ndo sleep 6\ndone", "--exit", "0", "--seconds", "12",
+				"done", "--pid", "4242", "--command", "for i in 1 2\ndo echo $i\ndone", "--exit", "0", "--seconds", "12",
 			},
 			want: []string{
 				sprintf(info, "wT:p1"), sprintf(working, "wT:p1"),
-				sprintf(idle, "wT:p1", "for i in 1 2 do sleep 6 done exit 0 · 12s"),
-				sprintf(title, "wT:p1", "for i in 1 2 do sleep 6 done exit 0 · 12s"),
+				sprintf(idle, "wT:p1", "for i in 1 2 do echo $i done exit 0 · 12s"),
+				sprintf(title, "wT:p1", "for i in 1 2 do echo $i done exit 0 · 12s"),
 			},
 		},
 		"a command too long for one message keeps its exit status and duration": {
@@ -339,7 +339,7 @@ func TestHerdrShellAnExitedNestedShellNeverClearsALaterDoneTitle(t *testing.T) {
 		}
 		return server.calls()[before:]
 	}
-	run("done", "--pid", "4242", "--at", "1760000010.5", "--command", "sleep 12", "--exit", "0", "--seconds", "12")
+	run("done", "--pid", "4242", "--at", "1760000010.5", "--command", "make build", "--exit", "0", "--seconds", "12")
 	const parentTitle = `pane.report_metadata {"pane_id":"wT:p1","source":"pfm-shell",` +
 		`"title":"zsh -i exit 0 · 19s"}`
 	parent := run("done", "--pid", "7", "--at", "1760000012.5", "--command", "zsh -i", "--exit", "0", "--seconds", "19")
@@ -433,7 +433,7 @@ func TestHerdrShellADoneWhoseSendErrorsStillHoldsThePaneTitle(t *testing.T) {
 		}
 		return server.calls()[before:]
 	}
-	run("done", "--pid", "4242", "--at", "1760000010.5", "--command", "sleep 12", "--exit", "0", "--seconds", "12")
+	run("done", "--pid", "4242", "--at", "1760000010.5", "--command", "make build", "--exit", "0", "--seconds", "12")
 	server.refuse["pane.report_metadata"] = "internal"
 	run("done", "--pid", "7", "--at", "1760000012.5", "--command", "zsh -i", "--exit", "0", "--seconds", "19")
 	if !strings.Contains(stderr.String(), "pane.report_metadata") {

@@ -12,13 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestReviewSplitRenameRetainsAmbiguityGuard(t *testing.T) {
@@ -127,20 +127,14 @@ while True:
 				t.Fatal(err)
 			}
 		}
-		deadline := time.Now().Add(2 * time.Second)
 		for _, pane := range fixture.panes {
-			for {
+			testwait.Until(t, "rename pane "+pane+" to become ready", func() (bool, string) {
 				capture, captureErr := exec.Command(
 					"tmux", "-S", socketPath, "capture-pane", "-p", "-t", pane,
 				).Output()
-				if captureErr == nil && strings.Contains(string(capture), "❯") {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("rename pane %s never became ready: %v: %q", pane, captureErr, capture)
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
+				ready := captureErr == nil && strings.Contains(string(capture), "❯")
+				return ready, fmt.Sprintf("%v: %q", captureErr, capture)
+			})
 		}
 		return fixture
 	}
@@ -245,9 +239,9 @@ func TestAmbientClaudeSplitSelfRetainsItsExactPane(t *testing.T) {
 			t.Fatalf("tmux %v: %v: %s", args, err, output)
 		}
 	}
-	runTmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-new-review-split", "sleep 120")
+	runTmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-new-review-split", "tail -f /dev/null")
 	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socket, "kill-server").Run() })
-	runTmux("split-window", "-d", "-t", "cc-new-review-split", "sleep 120")
+	runTmux("split-window", "-d", "-t", "cc-new-review-split", "tail -f /dev/null")
 	for pane, id := range map[string]string{"%0": first, "%1": second} {
 		transcript := filepath.Join(root, "claude", "project", id+".jsonl")
 		if err := os.WriteFile(
@@ -288,7 +282,7 @@ func TestAmbientSelfWithoutExportedIDEnrichesFromItsExactSocket(t *testing.T) {
 	socket := filepath.Join(tmuxDir, "cc-new-review")
 	command := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", "cc-new-review", "sleep 120",
+		"new-session", "-d", "-s", "cc-new-review", "tail -f /dev/null",
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start tmux: %v: %s", err, output)

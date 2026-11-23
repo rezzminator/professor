@@ -284,7 +284,7 @@ func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	socket := "cc-1800000041-1-1"
 	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "sleep", "120")
+	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "cat")
 	start.Env = environment
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start tmux fixture: %v: %s", err, output)
@@ -409,7 +409,7 @@ func TestGathererProbesThePFMTmuxDirSockets(t *testing.T) {
 	t.Setenv("PFM_TMUX_DIR", directory)
 	socketPath := filepath.Join(directory, socket)
 	if output, err := jail.command("-f", "/dev/null", "-S", socketPath,
-		"new-session", "-d", "-s", "work", "sleep", "120").CombinedOutput(); err != nil {
+		"new-session", "-d", "-s", "work", "cat").CombinedOutput(); err != nil {
 		t.Fatalf("start tmux on %s: %v: %s", socketPath, err, output)
 	}
 	t.Cleanup(func() { _ = jail.command("-S", socketPath, "kill-server").Run() })

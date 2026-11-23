@@ -320,12 +320,13 @@ func runStoreGit(t *testing.T, arguments ...string) string {
 
 type boundedStoreRunner struct {
 	deps.Runner
-	bounded bool
+	deadline time.Time
+	bounded  bool
 }
 
 func (runner *boundedStoreRunner) Run(ctx context.Context, _ []string, _ deps.RunOptions) (deps.RunResult, error) {
 	deadline, ok := ctx.Deadline()
-	runner.bounded = ok && time.Until(deadline) > 0 && time.Until(deadline) <= time.Minute
+	runner.deadline, runner.bounded = deadline, ok
 	return deps.RunResult{Stdout: []byte("scripted-sha\n")}, nil
 }
 
@@ -337,7 +338,14 @@ func TestStoreSHAWithRunnerBoundsItsGitProbe(t *testing.T) {
 	fake := &deps.FakeRunner{}
 	fake.ScriptLookPath("git", "scripted-git", nil)
 	runner := &boundedStoreRunner{Runner: fake}
+	before := time.Now()
 	sha, err := storeSHAWithRunner(root, runner)
+	after := time.Now()
+	// The deadline is the call's own instant plus its bound, so it sits after the instant before the
+	// call and no later than the instant after it plus a minute, whatever the host's load.
+	if runner.bounded && (!runner.deadline.After(before) || runner.deadline.After(after.Add(time.Minute))) {
+		runner.bounded = false
+	}
 	if err != nil || sha != "scripted-sha" || !runner.bounded {
 		t.Fatalf(
 			"store git probe sha=%q err=%v bounded=%v, want scripted-sha under a finite deadline",

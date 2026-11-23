@@ -86,13 +86,13 @@ fi
 # ---- make mcp-restart lists an unsupervised daemon, never kills it ----------
 newhome
 : > "$STATE/nounit"
-sleep 300 &
+shtest_hold mcp-daemon &
 daemon=$!
 echo "$daemon" > "$STATE/pids"
 out="$(mk mcp-restart)"; rc=$?
 want="mcp: no pfm-mcp.service unit or com.professor.pfm.mcp agent supervises 'pfm mcp serve'; make stops no process by name — each one below still runs the binary it started on:
-  pid $daemon: sleep 300
-    stop it: ps -o args= -p $daemon | grep -qxF 'sleep 300' && kill $daemon
+  pid $daemon: shtest-hold mcp-daemon -f /dev/null
+    stop it: ps -o args= -p $daemon | grep -qxF 'shtest-hold mcp-daemon -f /dev/null' && kill $daemon
 mcp: make sweep-stale stops each one that runs a replaced binary; the next client then starts a fresh daemon"
 if [ $rc -eq 0 ] && [ "$out" = "$want" ] && kill -0 "$daemon" 2>/dev/null; then
   ok "mcp-restart: an unsupervised daemon is listed with its identity-checked stop and keeps running"

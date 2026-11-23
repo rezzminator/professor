@@ -94,10 +94,8 @@ ensured_before() { # ensured_before <docker line regexp>
   [ -n "$e" ] && [ -n "$c" ] && [ "$e" -lt "$c" ]
 }
 exec_mode() { sed -n 's|^exec -i.*/shared-run\.sh run [^ ]* \([a-z]*\) .*|\1|p' "$STUB_DOCKER_LOG" | head -1; }
-wait_housekept() { # the detached housekeeping writes `image prune` once it ran: up to 10 s
-  local i
-  for ((i = 0; i < 100; i++)); do grep -q '^image prune' "$STUB_DOCKER_LOG" && return 0; sleep 0.1; done
-  return 1
+wait_housekept() { # the detached housekeeping writes `image prune` once it ran
+  shtest_wait_until 'the detached housekeeping logs image prune' grep -q '^image prune' "$STUB_DOCKER_LOG"
 }
 
 # --- a running container: entered, never started, no housekeeping ---------------------------------------

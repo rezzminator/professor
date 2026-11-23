@@ -5,7 +5,6 @@ package journey
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -18,11 +17,11 @@ func reloadTyped(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Type("/pfm:reload\r")
 	// pfm's hook blocks the typed prompt and says why: the reboot is scheduled, not refused.
-	term.WaitScreen("the hook's scheduled-reload row", 20*time.Second, func(screen string) bool {
+	term.WaitScreen("the hook's scheduled-reload row", func(screen string) bool {
 		return strings.Contains(unwrapped(screen), reloadScheduled)
 	})
 	before := s.Chat.Engine
-	c.Poll("a new engine for session "+s.Chat.Session, 20*time.Second, func() (bool, string) {
+	c.Poll("a new engine for session "+s.Chat.Session, func() (bool, string) {
 		for pid, session := range engines(processes(c)) {
 			if session == s.Chat.Session && pid != before {
 				return true, ""
@@ -30,7 +29,7 @@ func reloadTyped(c *harness.Ctx, s State) State {
 		}
 		return false, fmt.Sprintf("engines %v", engines(processes(c)))
 	})
-	c.Poll("pfm's reload run on "+herdrSocket(s)+" done", 20*time.Second, func() (bool, string) {
+	c.Poll("pfm's reload run on "+herdrSocket(s)+" done", func() (bool, string) {
 		for _, p := range processes(c) {
 			if strings.Contains(p.Args, " internal reload-run ") && strings.Contains(p.Args, herdrSocket(s)) {
 				return false, fmt.Sprintf("pid %d: %s", p.Pid, p.Args)
@@ -38,7 +37,7 @@ func reloadTyped(c *harness.Ctx, s State) State {
 		}
 		return true, ""
 	})
-	term.WaitGone("/pfm:reload", 20*time.Second)
+	term.WaitGone("/pfm:reload")
 	term.WaitFor("❯")
 	s.Chat.Engine = engineOf(c, s)
 	seats := liveSeats(c, herdrSocket(s))
@@ -62,7 +61,7 @@ func reloadStashed(c *harness.Ctx, s State) State {
 	term.Type(draft)
 	term.WaitFor("❯ " + draft)
 	term.Press(harness.Ctrl('s'))
-	term.WaitGone(draft, stepBound)
+	term.WaitGone(draft)
 	s = reloadTypedDrawn(c, s)
 	for _, text := range userTexts(c, transcriptOf(c, s)) {
 		if strings.Contains(text, draft) {

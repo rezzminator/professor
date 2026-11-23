@@ -31,7 +31,7 @@ func TestNewSessionAcceptsAResolvableBinary(t *testing.T) {
 		Session: "preflight-ok",
 		Window:  "w",
 		CWD:     root,
-		Run:     "sh -c 'sleep 30'",
+		Run:     "sh -c 'exec tail -f /dev/null'",
 		Binary:  "sh",
 		Width:   80,
 		Height:  24,

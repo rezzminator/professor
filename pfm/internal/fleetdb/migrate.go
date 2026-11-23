@@ -473,7 +473,7 @@ func backupBeside(ctx context.Context, db *sql.DB, path, base string) (written s
 // budget or hide cancellation, then restore it before returning the connection.
 func checkpointBeforeBackup(ctx context.Context, db *sql.DB) (returnErr error) {
 	const checkpointStep, checkpointWait = 10 * time.Millisecond, 5 * time.Second
-	waiting, cancel := context.WithTimeout(ctx, checkpointWait)
+	waiting, cancel := clock.WithTimeout(ctx, clock.Real, checkpointWait)
 	defer cancel()
 	conn, err := db.Conn(waiting)
 	if err != nil {

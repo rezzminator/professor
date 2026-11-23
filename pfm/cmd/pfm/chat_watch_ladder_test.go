@@ -23,11 +23,10 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/mockengine/control"
+	"github.com/rezzminator/professor/pfm/internal/mockengine/control/controltest"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
-
-// ladderRoundLimit bounds one poll round: a round that has not finished by
-// then is a hung watch, which is the failure a frozen tmux server causes.
-const ladderRoundLimit = 20 * time.Second
 
 // newLadderTime is a ladder's time: a fake clock every watch of the ladder
 // polls on and every transcript of it is pinned to, so a second a watch prints
@@ -37,27 +36,16 @@ const ladderRoundLimit = 20 * time.Second
 func newLadderTime() *clock.Fake { return clock.NewFake(time.Unix(time.Now().Unix()/60*60, 0)) }
 
 // ladderClock is one watch's poll clock: Now reads the ladder's time, and a
-// poll timer fires only when the test fires it (poll). Sleep, After and
-// tickers stay real: they time waits on other processes, never an instant.
+// poll timer fires only when the test fires it (poll). A watch reads only Now
+// and the poll timer from it; its Sleep, After and tickers are the fake's.
 type ladderClock struct {
+	clock.Clock
 	fake  *clock.Fake
 	armed chan ladderTimer
 }
 
 func newLadderClock(fake *clock.Fake) *ladderClock {
-	return &ladderClock{fake: fake, armed: make(chan ladderTimer, 1)}
-}
-
-func (ladder *ladderClock) Now() time.Time { return ladder.fake.Now() }
-
-func (*ladderClock) Sleep(ctx context.Context, duration time.Duration) error {
-	return clock.Real.Sleep(ctx, duration)
-}
-
-func (*ladderClock) After(duration time.Duration) <-chan time.Time { return clock.Real.After(duration) }
-
-func (*ladderClock) NewTicker(duration time.Duration) clock.Ticker {
-	return clock.Real.NewTicker(duration)
+	return &ladderClock{Clock: fake, fake: fake, armed: make(chan ladderTimer, 1)}
 }
 
 func (ladder *ladderClock) NewTimer(duration time.Duration) clock.Timer {
@@ -199,20 +187,21 @@ func (ladder *watchLadder) start(name string) *ladderSeat {
 // name on socket.
 func (ladder *watchLadder) waitRow(name, socket string, live bool) {
 	ladder.t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		rows, err := pfmchat.Rows(context.Background(), io.Discard, nil)
-		found := false
-		for index := range rows {
-			row := pfmchat.FromRow(rows[index])
-			if row.Live && row.Name == name && row.Socket == socket {
-				found = true
+	testwait.Until(
+		ladder.t,
+		fmt.Sprintf("the fleet to list %s on %s live=%v", name, socket, live),
+		func() (bool, string) {
+			rows, err := pfmchat.Rows(context.Background(), io.Discard, nil)
+			found := false
+			for index := range rows {
+				row := pfmchat.FromRow(rows[index])
+				if row.Live && row.Name == name && row.Socket == socket {
+					found = true
+				}
 			}
-		}
-		if err == nil && found == live {
-			return
-		}
-		if time.Now().After(deadline) {
+			if err == nil && found == live {
+				return true, ""
+			}
 			var seen []string
 			for index := range rows {
 				row := pfmchat.FromRow(rows[index])
@@ -238,11 +227,10 @@ func (ladder *watchLadder) waitRow(name, socket string, live bool) {
 			}
 			fmt.Fprintf(&warnings, "; list-panes -L %s: %q err %v; TMUX_TMPDIR=%s PFM_TMUX_DIR=%s",
 				socket, listed, probeErr, os.Getenv("TMUX_TMPDIR"), os.Getenv("PFM_TMUX_DIR"))
-			ladder.t.Fatalf("fleet never listed %s on %s live=%v (err %v); rows %q; crumbs %q; scan warnings %q",
-				name, socket, live, err, seen, crumbNames, warnings.String())
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+			return false, fmt.Sprintf("err %v; rows %q; crumbs %q; scan warnings %q",
+				err, seen, crumbNames, warnings.String())
+		},
+	)
 }
 
 func (seat *ladderSeat) socketPath() string {
@@ -256,17 +244,10 @@ func (seat *ladderSeat) tmux(arguments ...string) (string, error) {
 
 func (seat *ladderSeat) waitPane(want string) {
 	seat.ladder.t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
+	testwait.Until(seat.ladder.t, fmt.Sprintf("seat %s pane to show %q", seat.name, want), func() (bool, string) {
 		frame, _ := seat.tmux("capture-pane", "-p", "-t", "main")
-		if strings.Contains(frame, want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			seat.ladder.t.Fatalf("seat %s pane never showed %q: %q", seat.name, want, frame)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+		return strings.Contains(frame, want), frame
+	})
 }
 
 // pin sets every transcript in the seat's project directory to the ladder's
@@ -290,18 +271,11 @@ func (seat *ladderSeat) pin() {
 // waitTranscript waits until the seat's current transcript holds want.
 func (seat *ladderSeat) waitTranscript(want string) {
 	seat.ladder.t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
+	testwait.Until(seat.ladder.t, fmt.Sprintf("seat %s transcript to hold %q", seat.name, want), func() (bool, string) {
 		content, _ := os.ReadFile(seat.transcript)
-		if strings.Contains(string(content), want) {
-			seat.pin()
-			return
-		}
-		if time.Now().After(deadline) {
-			seat.ladder.t.Fatalf("seat %s transcript never held %q", seat.name, want)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+		return strings.Contains(string(content), want), string(content)
+	})
+	seat.pin()
 }
 
 // waitProject waits until a transcript in the seat's project directory other
@@ -310,21 +284,21 @@ func (seat *ladderSeat) waitTranscript(want string) {
 func (seat *ladderSeat) waitProject(want, skip string) {
 	seat.ladder.t.Helper()
 	project := filepath.Dir(seat.transcript)
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		matches, _ := filepath.Glob(filepath.Join(project, "*.jsonl"))
-		for _, path := range matches {
-			if content, err := os.ReadFile(path); err == nil && path != skip &&
-				strings.Contains(string(content), want) {
-				seat.pin()
-				return
+	testwait.Until(
+		seat.ladder.t,
+		fmt.Sprintf("a transcript in %s besides %q to hold %q", project, skip, want),
+		func() (bool, string) {
+			matches, _ := filepath.Glob(filepath.Join(project, "*.jsonl"))
+			for _, path := range matches {
+				if content, err := os.ReadFile(path); err == nil && path != skip &&
+					strings.Contains(string(content), want) {
+					return true, ""
+				}
 			}
-		}
-		if time.Now().After(deadline) {
-			seat.ladder.t.Fatalf("no transcript in %s besides %q ever held %q", project, skip, want)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+			return false, fmt.Sprintf("transcripts: %q", matches)
+		},
+	)
+	seat.pin()
 }
 
 func (seat *ladderSeat) typeLine(line string) {
@@ -346,8 +320,15 @@ func (seat *ladderSeat) turn() {
 	seat.waitTranscript(answered(reply))
 }
 
+// controlPath is the ladder scenario's control FIFO: each seat's mock engine
+// reads its own, named for its process id.
+func (ladder *watchLadder) controlPath() string {
+	return filepath.Join(ladder.jail.root, "control", control.PIDToken)
+}
+
 // hold starts a turn that stays open until release, and waits until the
-// prompt is on disk.
+// prompt is on disk. release removes the hold's file and hands the mock's
+// wait one look, which finds it gone.
 func (seat *ladderSeat) hold() func() {
 	seat.ladder.t.Helper()
 	seat.ladder.replies++
@@ -364,6 +345,7 @@ func (seat *ladderSeat) hold() func() {
 		if err := os.Remove(flag); err != nil {
 			seat.ladder.t.Fatal(err)
 		}
+		controltest.Nudge(seat.ladder.t, control.ForPID(seat.ladder.controlPath(), seat.enginePID))
 		seat.waitTranscript(answered(reply))
 	}
 }
@@ -377,13 +359,9 @@ func (seat *ladderSeat) exit() {
 
 func (seat *ladderSeat) waitGone() {
 	seat.ladder.t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for syscall.Kill(seat.pid, 0) == nil {
-		if time.Now().After(deadline) {
-			seat.ladder.t.Fatalf("seat %s server %d never ended", seat.name, seat.pid)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+	testwait.Until(seat.ladder.t, fmt.Sprintf("seat %s server %d to end", seat.name, seat.pid), func() (bool, string) {
+		return syscall.Kill(seat.pid, 0) != nil, "server still alive"
+	})
 }
 
 // processArgs is pid's full command line as the kernel's process table holds
@@ -461,14 +439,19 @@ func (ladder *watchLadder) watch(args ...string) *ladderWatch {
 // watch returned.
 func (watch *ladderWatch) settle() {
 	watch.t.Helper()
-	select {
-	case watch.timer = <-watch.clock.armed:
-	case watch.code = <-watch.done:
-		watch.ended = true
-	case <-time.After(ladderRoundLimit):
-		watch.t.Fatalf("a poll round did not finish within %s: stdout %q stderr %q\nwatch goroutines:\n%s",
-			ladderRoundLimit, watch.stdout.String(), watch.stderr.String(), pfmFrames())
-	}
+	testwait.Until(watch.t, "the poll round in flight to end: the next poll armed or the watch returned",
+		func() (bool, string) {
+			select {
+			case watch.timer = <-watch.clock.armed:
+				return true, ""
+			case watch.code = <-watch.done:
+				watch.ended = true
+				return true, ""
+			default:
+				return false, fmt.Sprintf("stdout %q stderr %q\nwatch goroutines:\n%s",
+					watch.stdout.String(), watch.stderr.String(), pfmFrames())
+			}
+		})
 }
 
 // pfmFrames is every goroutine stack that passes through pfm code: where a hung
@@ -504,12 +487,8 @@ func (watch *ladderWatch) stop() {
 		return
 	}
 	watch.cancel()
-	select {
-	case watch.code = <-watch.done:
-		watch.ended = true
-	case <-time.After(10 * time.Second):
-		watch.t.Errorf("watch did not return within 10s of its context ending")
-	}
+	watch.code, _ = testwait.Receive(watch.t, "the watch to return once its context ended", watch.done)
+	watch.ended = true
 }
 
 // expect checks the event lines written since the last check are exactly

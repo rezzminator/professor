@@ -11,10 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func opencodeValidEvents() string {
@@ -172,8 +174,8 @@ if (process.env.PFM_TEST_TWO_ASSISTANTS === "1") await hooks.event({event: {type
 if (process.env.CAPTURE_DIR) fs.writeFileSync(process.env.CAPTURE_DIR + "/native-complete", "done\n")
 NODE
     }
-	if [ "${PFM_TEST_DEFER_ASSISTANT:-0}" = "1" ]; then
-      (sleep 0.1; emit_assistant) > /dev/null 2>&1 &
+	if [ -n "${PFM_TEST_DEFER_ASSISTANT:-}" ]; then
+      (read -r _ < "$PFM_TEST_DEFER_ASSISTANT"; emit_assistant) > /dev/null 2>&1 &
     else
       emit_assistant
     fi
@@ -228,13 +230,43 @@ printf 'native OpenCode stream\n'`)
 func TestRunOpenCodeNativeWaitsForPersistedCompletion(t *testing.T) {
 	headlessJail(t)
 	capture := t.TempDir()
+	// The deferred assistant event is emitted once the test releases it, which
+	// it does once pfm's marker wait has looked and found no marker.
+	deferred := filepath.Join(capture, "defer-assistant")
+	if err := syscall.Mkfifo(deferred, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	binary := writeOpenCodeStub(t, `printf 'native OpenCode stream\n'`)
-	var stdout bytes.Buffer
-	result, err := Run(context.Background(), Request{
-		Config: opencodeMachine(binary, opencodeHome(t)), Engine: pfmengine.OpenCode,
-		TempDir: t.TempDir(), Prompt: "hello", Native: true, Timeout: 10 * time.Second, Stdout: &stdout,
-		Env: testEnv(capture, "CAPTURE_DIR="+capture, "PFM_TEST_DEFER_ASSISTANT=1"),
-	})
+	stdout := &observedWriter{first: make(chan struct{})}
+	done := make(chan struct{})
+	var result Result
+	var err error
+	looked := make(chan error, 1)
+	previous := openCodeMarkerLooked
+	openCodeMarkerLooked = func(markerErr error) {
+		select {
+		case looked <- markerErr:
+		default:
+		}
+	}
+	t.Cleanup(func() { openCodeMarkerLooked = previous })
+	go func() {
+		result, err = Run(context.Background(), Request{
+			Config: opencodeMachine(binary, opencodeHome(t)), Engine: pfmengine.OpenCode,
+			TempDir: t.TempDir(), Prompt: "hello", Native: true, Timeout: 10 * time.Second, Stdout: stdout,
+			Env: testEnv(capture, "CAPTURE_DIR="+capture, "PFM_TEST_DEFER_ASSISTANT="+deferred),
+		})
+		close(done)
+	}()
+	firstLook, _ := testwait.Receive(t, "pfm's first look for the assistant marker", looked)
+	if !errors.Is(firstLook, os.ErrNotExist) {
+		t.Fatalf("pfm's first look for the assistant marker = %v, want %v before the assistant is released",
+			firstLook, os.ErrNotExist)
+	}
+	if err := os.WriteFile(deferred, []byte("go\n"), 0o600); err != nil {
+		t.Fatalf("release the deferred assistant event: %v", err)
+	}
+	testwait.Receive(t, "native OpenCode Run() to return once the assistant completed", done)
 	if err != nil {
 		t.Fatalf("native OpenCode Run() error = %v", err)
 	}
@@ -250,9 +282,9 @@ func TestRunOpenCodeTimeoutKillsProcessGroup(t *testing.T) {
 	headlessJail(t)
 	capture := t.TempDir()
 	scratch := t.TempDir()
-	binary := writeOpenCodeStub(t, `(sleep 30) &
+	binary := writeOpenCodeStub(t, `(tail -f /dev/null >/dev/null) &
 echo "$!" > "$CAPTURE_DIR/child-pid"
-sleep 30`)
+tail -f /dev/null`)
 	ctx := newArmedDeadlineContext()
 	done := make(chan struct{})
 	var result Result
@@ -264,13 +296,9 @@ sleep 30`)
 		})
 		close(done)
 	}()
-	waitForFile(t, filepath.Join(capture, "child-pid"), 3*time.Second)
+	waitForFile(t, filepath.Join(capture, "child-pid"))
 	ctx.arm()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("OpenCode Run() did not return after the deadline was armed")
-	}
+	testwait.Receive(t, "OpenCode Run() to return after the deadline was armed", done)
 	if runErr == nil || !errors.Is(runErr, context.DeadlineExceeded) || !result.TimedOut {
 		t.Fatalf("timeout err/result = %v/%#v", runErr, result)
 	}

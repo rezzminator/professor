@@ -23,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
@@ -66,11 +67,7 @@ func (sampler *switchingStatsSampler) SampleResources(_ []compose.Row) (pfmstats
 
 func waitForSample(t *testing.T, started <-chan struct{}) {
 	t.Helper()
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("sample command did not enter its in-flight gate")
-	}
+	testwait.Receive(t, "the sample command to enter its in-flight gate", started)
 }
 
 func runStatsCommand(t *testing.T, command tea.Cmd) <-chan tea.Msg {
@@ -85,17 +82,12 @@ func runStatsCommand(t *testing.T, command tea.Cmd) <-chan tea.Msg {
 
 func statsMessage(t *testing.T, messages <-chan tea.Msg) statsSampleMsg {
 	t.Helper()
-	select {
-	case message := <-messages:
-		result, ok := message.(statsSampleMsg)
-		if !ok {
-			t.Fatalf("stats command returned %T", message)
-		}
-		return result
-	case <-time.After(2 * time.Second):
-		t.Fatal("stats command did not complete")
-		return statsSampleMsg{}
+	message, _ := testwait.Receive(t, "the stats command to complete", messages)
+	result, ok := message.(statsSampleMsg)
+	if !ok {
+		t.Fatalf("stats command returned %T", message)
 	}
+	return result
 }
 
 func TestRapidLimitsToStatsDropsInFlightLimitsResult(t *testing.T) {

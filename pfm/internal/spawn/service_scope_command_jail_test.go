@@ -79,7 +79,7 @@ exit 0
 			}
 			err := tmux.NewSession(context.Background(), SessionSpec{
 				Socket: "cx-scope", Session: "cx-scope", Window: "Codex", CWD: root,
-				Width: 180, Height: 45, Run: "sleep 120",
+				Width: 180, Height: 45, Run: "tail -f /dev/null",
 			})
 			if tc.wantErr != "" {
 				if err == nil || err.Error() != tc.wantErr {

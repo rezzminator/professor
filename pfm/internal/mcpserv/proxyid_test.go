@@ -192,6 +192,7 @@ func TestBirthProxyForwardsCurrentHerdrSeatAndErrors(t *testing.T) {
 	}))
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxyTestStepping(proxy)
 	proxy.sidDir = t.TempDir()
 	if err := os.WriteFile(
 		filepath.Join(proxy.sidDir, "herdr.sock.wC:p24"),

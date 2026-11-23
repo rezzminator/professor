@@ -20,7 +20,7 @@ func TestNativeReloadPublishesCurrentRemoteControlPolicy(t *testing.T) {
 	f.request.Machine.Claude.RemoteControl = true
 	// A pre-knob recipe is deliberately reused: the worker must render anew,
 	// not perpetuate the birth recipe's lack of the interactive flag.
-	_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+	_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

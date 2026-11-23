@@ -65,6 +65,7 @@ func TestSoloTrailCauseNamesWhatItKilled(t *testing.T) {
 				}
 			}
 			executor, err := New(Dependencies{
+				Clock:     newLaunchStepClock(),
 				Tmux:      tmux,
 				Processes: processes,
 				Gate:      fixedGate(false),
@@ -215,6 +216,7 @@ func TestSoloStrayKillGoesThroughTheDoor(t *testing.T) {
 				afterScan:    test.afterScan,
 			}
 			executor, err := New(Dependencies{
+				Clock:     newLaunchStepClock(),
 				Tmux:      &fakeActionTmux{alive: map[string]bool{}},
 				Processes: processes,
 				Gate:      fixedGate(false),
@@ -313,6 +315,7 @@ func TestSoloCrumbAfterPaneProbeError(t *testing.T) {
 			}
 			var stderr bytes.Buffer
 			executor, err := New(Dependencies{
+				Clock:     newLaunchStepClock(),
 				Tmux:      tmux,
 				Processes: &fakeProcesses{},
 				Gate:      fixedGate(false),

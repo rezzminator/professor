@@ -7,10 +7,10 @@ import (
 	"os"
 	"reflect"
 	"testing"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -258,11 +258,8 @@ func TestKilledWriteHelperProcess(t *testing.T) {
 		t.Fatalf("write ready marker: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if err := waitForPaths(ctx, gate); err != nil {
-		t.Fatalf("wait for gate: %v", err)
-	}
+	waitForPaths(t, gate)
+	ctx := testwait.Context(t)
 
 	prefix := os.Getenv(helperPrefixEnv)
 	engine := pfmengine.Claude
@@ -282,29 +279,14 @@ func TestKilledWriteHelperProcess(t *testing.T) {
 	}
 }
 
-func waitForPaths(ctx context.Context, filePaths ...string) error {
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		allPresent := true
+func waitForPaths(t *testing.T, filePaths ...string) {
+	t.Helper()
+	testwait.Until(t, "the marker files to appear", func() (bool, string) {
 		for _, filePath := range filePaths {
 			if _, err := os.Stat(filePath); err != nil {
-				if !os.IsNotExist(err) {
-					return err
-				}
-				allPresent = false
-				break
+				return false, err.Error()
 			}
 		}
-		if allPresent {
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
+		return true, ""
+	})
 }

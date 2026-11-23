@@ -17,10 +17,12 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // harnessChild plays the `claude` child of one capture run: it reads the argv
@@ -87,7 +89,6 @@ func neverRunClaude(t *testing.T) string {
 // CHECK FAILED — the doctor row that reports this never gets to guess whether
 // the OAuth-only routing spent real money.
 func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *testing.T) {
-	shortenHarnessCaptureSinkGrace(t)
 	binary, runner := writeFakeHarnessClaude(t, func(_ []string, opts deps.StartOptions) error {
 		_, err := io.WriteString(
 			opts.Stdout,
@@ -98,7 +99,7 @@ func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *te
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 
-	captured, err := captureHarnessPrompt(
+	captured, err := driveHarnessCapture(t,
 		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: runner},
 	)
 	if !errors.Is(err, errHarnessBypassedSink) {
@@ -118,7 +119,6 @@ func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *te
 // capture launches with a fresh, per-capture CLAUDE_CONFIG_DIR — never the
 // caller's real one — and removes it once the capture returns.
 func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
-	shortenHarnessCaptureSinkGrace(t)
 	record := filepath.Join(t.TempDir(), "config-dir-seen.txt")
 	binary, runner := writeFakeHarnessClaude(t, func(_ []string, opts deps.StartOptions) error {
 		configDir, _ := childEnvValue(opts.Env, "CLAUDE_CONFIG_DIR")
@@ -131,7 +131,7 @@ func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 	machine.Claude.Binary = binary
 
 	home := t.TempDir()
-	if _, err := captureHarnessPrompt(
+	if _, err := driveHarnessCapture(t,
 		t.Context(), home, machine, "sonnet", "", Dependencies{Runner: runner},
 	); err == nil {
 		t.Fatal("fake CLI never reaches the sink, want a capture error")
@@ -165,7 +165,6 @@ func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 // user settings set ANTHROPIC_BASE_URL, the dummy key went to that URL and the
 // capture failed with a 401. The fake CLI reports what a real one would load.
 func TestHarnessCaptureNeverLoadsTheCallersProjectSettings(t *testing.T) {
-	shortenHarnessCaptureSinkGrace(t)
 	caller := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(caller, ".claude"), 0o700); err != nil {
 		t.Fatal(err)
@@ -193,7 +192,7 @@ func TestHarnessCaptureNeverLoadsTheCallersProjectSettings(t *testing.T) {
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 
-	if _, err := captureHarnessPrompt(
+	if _, err := driveHarnessCapture(t,
 		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: runner},
 	); err == nil {
 		t.Fatal("fake CLI never reaches the sink, want a capture error")
@@ -210,7 +209,6 @@ func TestHarnessCaptureNeverLoadsTheCallersProjectSettings(t *testing.T) {
 }
 
 func TestHarnessCaptureUsesRegistryProbeEnvironment(t *testing.T) {
-	shortenHarnessCaptureSinkGrace(t)
 	path := filepath.Join(t.TempDir(), "environment")
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
 	binary, runner := writeFakeHarnessClaude(t, func(_ []string, opts deps.StartOptions) error {
@@ -230,7 +228,7 @@ func TestHarnessCaptureUsesRegistryProbeEnvironment(t *testing.T) {
 	})
 	machine := config.Config{}
 	machine.Claude.Binary = binary
-	_, _ = captureHarnessPrompt(
+	_, _ = driveHarnessCapture(t,
 		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: runner},
 	)
 	got, err := os.ReadFile(path)
@@ -249,7 +247,6 @@ func TestHarnessCaptureUsesRegistryProbeEnvironment(t *testing.T) {
 // model's evidence carries its alias and a later capture never overwrites an
 // earlier one's; a failed row points at its own model's file.
 func TestDoctorVerboseKeepsTheHarnessRunOutput(t *testing.T) {
-	shortenHarnessCaptureSinkGrace(t)
 	binary, runner := writeFakeHarnessClaude(t, func(argv []string, opts deps.StartOptions) error {
 		_, err := fmt.Fprintf(opts.Stderr, "diagnostic-stderr-line %s\n", strings.Join(argv[1:], " "))
 		if err != nil {
@@ -263,7 +260,7 @@ func TestDoctorVerboseKeepsTheHarnessRunOutput(t *testing.T) {
 	verboseDir := t.TempDir()
 	var got strings.Builder
 	for _, alias := range []string{"sonnet", "opus"} {
-		_, err := captureHarnessPrompt(
+		_, err := driveHarnessCapture(t,
 			t.Context(), t.TempDir(), machine, alias, verboseDir, Dependencies{Runner: runner},
 		)
 		raw, readErr := os.ReadFile(filepath.Join(verboseDir, "harness-prompt-"+alias+".stderr"))
@@ -325,7 +322,6 @@ func TestHarnessCaptureEnvStripsTheFleetHygieneList(t *testing.T) {
 // with its path and error on the doctor row and counts a warning, while the
 // capture's own verdict still prints.
 func TestHarnessCaptureNamesAScratchDirItCouldNotRemove(t *testing.T) {
-	shortenHarnessCaptureSinkGrace(t)
 	var left string
 	previous := harnessRemoveAll
 	harnessRemoveAll = func(path string) error {
@@ -341,7 +337,7 @@ func TestHarnessCaptureNamesAScratchDirItCouldNotRemove(t *testing.T) {
 	binary := neverRunClaude(t)
 	machine := config.Config{}
 	machine.Claude.Binary = binary
-	captured, err := captureHarnessPrompt(
+	captured, err := driveHarnessCapture(t,
 		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: harnessCaptureHTTPRunner{binary: binary}},
 	)
 	configDir := strings.HasPrefix(filepath.Base(left), paths.SIDHarnessConfigDirPrefix)
@@ -357,21 +353,34 @@ func TestHarnessCaptureNamesAScratchDirItCouldNotRemove(t *testing.T) {
 	}
 }
 
-func shortenHarnessCaptureSinkGrace(t *testing.T) {
+// driveHarnessCapture runs captureHarnessPrompt on a fake clock the test steps
+// through the capture's sink grace once the capture's own work is done.
+func driveHarnessCapture(
+	t *testing.T,
+	ctx context.Context,
+	home string,
+	machine config.Config,
+	model, verboseDir string,
+	dependencies Dependencies,
+) (HarnessCapture, error) {
 	t.Helper()
-	previous := harnessCaptureSinkGrace
-	harnessCaptureSinkGrace = 20 * time.Millisecond
-	t.Cleanup(func() { harnessCaptureSinkGrace = previous })
+	fake := clock.NewFake(time.Now())
+	dependencies.Clock = fake
+	var captured HarnessCapture
+	var err error
+	testwait.Drive(t, "the harness capture to return", fake, func() {
+		captured, err = captureHarnessPrompt(ctx, home, machine, model, verboseDir, dependencies)
+	})
+	return captured, err
 }
 
 func TestHarnessCaptureVersionUsesWaitDelay(t *testing.T) {
-	shortenHarnessCaptureSinkGrace(t)
 	binary := neverRunClaude(t)
 	fake := &deps.FakeRunner{}
 	fake.Script([]string{binary, "--version"}, deps.RunResult{Stdout: []byte("2.1.fixture\n")}, nil)
 	machine := config.Config{}
 	machine.Claude.Binary = binary
-	_, _ = captureHarnessPrompt(
+	_, _ = driveHarnessCapture(t,
 		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: fake},
 	)
 	calls := fake.Calls()
@@ -384,7 +393,6 @@ func TestHarnessCaptureVersionUsesWaitDelay(t *testing.T) {
 }
 
 func TestHarnessCaptureReturnsDecodedResultWithEvidenceWriteError(t *testing.T) {
-	shortenHarnessCaptureSinkGrace(t)
 	verboseDir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(verboseDir, "sink-hits-sonnet.txt"), 0o700); err != nil {
 		t.Fatalf("make sink evidence directory: %v", err)
@@ -393,7 +401,7 @@ func TestHarnessCaptureReturnsDecodedResultWithEvidenceWriteError(t *testing.T) 
 	runner := harnessCaptureHTTPRunner{binary: binary}
 	machine := config.Config{}
 	machine.Claude.Binary = binary
-	captured, err := captureHarnessPrompt(
+	captured, err := driveHarnessCapture(t,
 		t.Context(), t.TempDir(), machine, "sonnet", verboseDir, Dependencies{Runner: runner},
 	)
 	if err == nil || !strings.Contains(err.Error(), "sink hit evidence") {
@@ -476,7 +484,7 @@ func TestVerboseHarnessCapturePreservesReviewEvidence(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			captured, err := captureHarnessPrompt(
+			captured, err := driveHarnessCapture(t,
 				t.Context(),
 				t.TempDir(),
 				machine,

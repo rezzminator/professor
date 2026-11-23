@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -23,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/testjail/fakegit"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -41,17 +43,28 @@ type placeHerdr struct {
 	panes      map[string]string
 	cwds       map[string]string
 	calls      []placeCall
-	listDelay  time.Duration // how long each workspace.list takes to answer
-	refuse     string        // the one method answered with a refusal
-	bareCreate bool          // workspace.create answers without the tab it opened
-	focused    string        // the pane Herdr has focused; a focused move focuses the moved pane
-	focusless  bool          // pane.list answers without each pane's focused field
+	// listEntered, when set, is closed by the first workspace.list, which then
+	// answers only once listRelease is closed.
+	listEntered, listRelease chan struct{}
+	listHeld                 bool
+	refuse                   string // the one method answered with a refusal
+	bareCreate               bool   // workspace.create answers without the tab it opened
+	focused                  string // the pane Herdr has focused; a focused move focuses the moved pane
+	focusless                bool   // pane.list answers without each pane's focused field
 }
 
 func (fake *placeHerdr) answer(call placeCall) (any, string) {
 	fake.mu.Lock()
-	defer fake.mu.Unlock()
 	fake.calls = append(fake.calls, call)
+	hold := call.Method == "workspace.list" && fake.listEntered != nil && !fake.listHeld
+	fake.listHeld = fake.listHeld || hold
+	fake.mu.Unlock()
+	if hold {
+		close(fake.listEntered)
+		<-fake.listRelease
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
 	pane, _ := call.Params["pane_id"].(string)
 	if call.Method == fake.refuse {
 		return nil, "fixture_refused"
@@ -60,7 +73,6 @@ func (fake *placeHerdr) answer(call placeCall) (any, string) {
 	case "ping":
 		return map[string]any{"type": "pong", "version": "0.9.5", "protocol": 22}, ""
 	case "workspace.list":
-		time.Sleep(fake.listDelay)
 		listed := []any{}
 		for _, workspace := range fake.workspaces {
 			listed = append(listed, map[string]any{
@@ -185,8 +197,11 @@ func servePlaceHerdr(t *testing.T, fake *placeHerdr) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Each connection is answered on its own goroutine, as Herdr's server does,
+	// so an answer the fake holds never stops another being heard.
+	var served sync.WaitGroup
 	done := make(chan struct{})
-	t.Cleanup(func() { _ = listener.Close(); <-done })
+	t.Cleanup(func() { _ = listener.Close(); <-done; served.Wait() })
 	go func() {
 		defer close(done)
 		for {
@@ -194,16 +209,21 @@ func servePlaceHerdr(t *testing.T, fake *placeHerdr) string {
 			if err != nil {
 				return
 			}
-			var call placeCall
-			if err := json.NewDecoder(conn).Decode(&call); err == nil {
+			served.Add(1)
+			go func() {
+				defer served.Done()
+				defer func() { _ = conn.Close() }()
+				var call placeCall
+				if err := json.NewDecoder(conn).Decode(&call); err != nil {
+					return
+				}
 				result, code := fake.answer(call)
 				if code != "" {
 					_, _ = fmt.Fprintf(conn, `{"id":"x","ok":false,"error":{"code":%q,"message":"fixture"}}`+"\n", code)
 				} else {
 					_ = json.NewEncoder(conn).Encode(map[string]any{"id": "x", "ok": true, "result": result})
 				}
-			}
-			_ = conn.Close()
+			}()
 		}
 	}()
 	return socket
@@ -320,7 +340,12 @@ func TestPlaceHerdrBirthsRacingCreateOneWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := &placeHerdr{workspaces: [][3]any{{"wF", "orchard", 7}}, listDelay: 20 * time.Millisecond}
+	// The placement lock's poll runs on the process clock: a parked poll is a
+	// birth waiting on the lock.
+	polls := clock.NewFake(time.Now())
+	testwait.ProcessClock(t, polls)
+	entered, release := make(chan struct{}), make(chan struct{})
+	fake := &placeHerdr{workspaces: [][3]any{{"wF", "orchard", 7}}, listEntered: entered, listRelease: release}
 	fleet := fleetDesk()
 	request := HerdrRequest{
 		Paths: values,
@@ -329,6 +354,8 @@ func TestPlaceHerdrBirthsRacingCreateOneWorkspace(t *testing.T) {
 		},
 		Run: fleetdb.SeatRun{CWD: "/fixture/fleet-desk"},
 	}
+	releaseList := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseList) // a failed proof still lets the held list answer
 	workspaces, failures := make([]string, 4), make([]error, 4)
 	var births sync.WaitGroup
 	for birth := range workspaces {
@@ -338,7 +365,42 @@ func TestPlaceHerdrBirthsRacingCreateOneWorkspace(t *testing.T) {
 			workspaces[birth], _, _, failures[birth] = placeHerdrBirth(context.Background(), request, fleet)
 		}()
 	}
-	births.Wait()
+	ended := make(chan struct{})
+	go func() {
+		births.Wait()
+		close(ended)
+	}()
+	// The first birth lists under the placement lock and is held there until
+	// every other birth is parked on the lock, or one lists past it.
+	testwait.Receive(t, "the first birth to list the workspaces", entered)
+	lists := func() int { return strings.Count(strings.Join(fake.methods(), " "), "workspace.list") }
+	testwait.Until(t, "the other births to wait on the placement lock", func() (bool, string) {
+		if lists() > 1 {
+			return true, "a second birth listed"
+		}
+		return polls.Pending() == len(workspaces)-1, polls.String()
+	})
+	if lists() > 1 {
+		t.Fatalf("a second birth listed the workspaces while the first held the placement lock: %q", fake.methods())
+	}
+	releaseList()
+	// Each turn of the lock is one poll: a parked birth retries when the clock moves.
+	for {
+		over := false
+		testwait.Until(t, "the racing births to end or park on the placement lock", func() (bool, string) {
+			select {
+			case <-ended:
+				over = true
+				return true, ""
+			default:
+			}
+			return polls.Pending() > 0, polls.String()
+		})
+		if over {
+			break
+		}
+		polls.Advance(time.Minute)
+	}
 	creates := 0
 	for _, method := range fake.methods() {
 		if method == "workspace.create" {

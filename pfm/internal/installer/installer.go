@@ -2,6 +2,7 @@
 // wiring. Its assets are embedded so one pfm binary is a complete installer.
 //
 // herdr_claude.go: Herdr's own Claude integration, once per Claude settings store.
+// claude_plugins_command.go: one `claude plugin` command: its environment, its process group and its deadline.
 // claude_plugins_unwire.go: uninstall takes back what install wrote into the Claude settings and plugin records.
 // claude_plugins_take.go: the take-back of plugin keys and copies from one Claude config dir, uninstall's and retirement's.
 // claude_plugins_retire.go: install removes every trace of a plugin retired with no successor; doctor names one left.
@@ -37,6 +38,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -62,6 +64,12 @@ type engine struct {
 	// engineSyncDeadline is the test seam of the deadline of `engine-sync
 	// global`; zero is engineSyncGlobalTimeout.
 	engineSyncDeadline time.Duration
+	// engineSyncTimer is the test seam of the clock that deadline runs on; nil is
+	// the real clock.
+	engineSyncTimer clock.Clock
+	// claudePluginTimer is the test seam of the clock every `claude plugin`
+	// command's deadline runs on; nil is the real context timeout.
+	claudePluginTimer clock.Clock
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).

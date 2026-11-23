@@ -1,0 +1,6 @@
+{
+  "sleep 300": true,
+  "ls; sleep 5": true,
+  "tail -f log": true,
+  "make sleepy": false
+}

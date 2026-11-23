@@ -3,6 +3,7 @@ package costsink
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
@@ -14,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/costledger"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // fakeProc answers Stat for one pid from a script the test mutates.
@@ -37,6 +40,12 @@ func (f *fakeProc) Stat(_ int) (gather.ProcStat, error) {
 	return gather.ProcStat{StartTime: f.start}, nil
 }
 
+func (f *fakeProc) statCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
 func (f *fakeProc) set(start uint64, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -55,13 +64,52 @@ func runConfig(t *testing.T, proc *fakeProc) (Config, string, *syncBuffer) {
 		Listener: listener, LedgerDir: dir, Log: logs, PID: 4242, Start: 777, Proc: proc,
 		PollEvery: 10 * time.Millisecond, FlushEvery: 10 * time.Millisecond, DrainIdle: 50 * time.Millisecond,
 		DrainMax: 2 * time.Second, Wait: 20 * time.Second, MaxBody: 1 << 20, PruneAfter: 90 * 24 * time.Hour,
+		// The ledger's file times are the host's: the fake starts at the host's now.
+		Clock: clock.NewFake(time.Now()),
 	}, dir, logs
+}
+
+// meterClock is the fake clock runConfig gave cfg.
+func meterClock(t *testing.T, cfg Config) *clock.Fake {
+	t.Helper()
+	fake, ok := cfg.Clock.(*clock.Fake)
+	if !ok {
+		t.Fatalf("cfg.Clock = %T, want the *clock.Fake runConfig set", cfg.Clock)
+	}
+	return fake
+}
+
+// meterPoll moves the sink one poll on, once its poll and flush tickers are armed.
+func meterPoll(t *testing.T, cfg Config) {
+	t.Helper()
+	fake := meterClock(t, cfg)
+	testwait.Until(t, "the sink to arm its poll and flush tickers", func() (bool, string) {
+		return fake.Pending() >= 2, fmt.Sprintf("%d waits armed", fake.Pending())
+	})
+	fake.Advance(cfg.PollEvery)
+}
+
+// meterReturned drives the sink's fake clock to each wait it parks on until Meter returns on done:
+// every event the test makes (a POST, a signal) has happened by then, so the polls, the flushes and
+// the drain window run on fake time alone. Meter runs on a goroutine the test started, a member of
+// the driven family, so the clock moves only while the sink is parked.
+func meterReturned(t *testing.T, condition string, cfg Config, done <-chan error) error {
+	t.Helper()
+	var err error
+	testwait.Drive(t, condition, meterClock(t, cfg), func() { err = <-done })
+	return err
 }
 
 func postHTTP(t *testing.T, url string, body []byte) {
 	t.Helper()
-	client := &http.Client{Timeout: 3 * time.Second}
-	response, err := client.Post(url, "application/json", strings.NewReader(string(body)))
+	request, err := http.NewRequestWithContext(
+		testwait.Context(t), http.MethodPost, url, strings.NewReader(string(body)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,20 +129,22 @@ func TestRunServesUntilTheWatchedProcessIsGoneThenDrainsAndExits(t *testing.T) {
 	go func() { done <- Meter(context.Background(), cfg) }()
 
 	postHTTP(t, url+"/v1/logs", logBody(apiRequest(testSession, "req_1", "repl_main_thread", 100)))
+	// The sink has polled the watched process three times and is still serving.
+	for polls := 1; polls <= 3; polls++ {
+		meterPoll(t, cfg)
+		testwait.Until(t, fmt.Sprintf("the sink to poll the watched process %d times", polls), func() (bool, string) {
+			return proc.statCalls() >= polls, fmt.Sprintf("%d polls", proc.statCalls())
+		})
+	}
 	select {
 	case err := <-done:
 		t.Fatalf("Run returned while the watched process lives: %v", err)
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 	proc.set(0, fs.ErrNotExist)
 	postHTTP(t, url+"/v1/logs", logBody(apiRequest(testSession, "req_2", "repl_main_thread", 200)))
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Run = %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not exit after the watched process went away")
+	if err := meterReturned(t, "Run to exit after the watched process went away", cfg, done); err != nil {
+		t.Fatalf("Run = %v", err)
 	}
 	ledger, err := costledger.ForSession(dir, testSession)
 	if err != nil || len(ledger.Rows) != 2 {
@@ -104,7 +154,12 @@ func TestRunServesUntilTheWatchedProcessIsGoneThenDrainsAndExits(t *testing.T) {
 			err,
 		)
 	}
-	if _, err := (&http.Client{Timeout: time.Second}).Post(url+"/v1/logs", "application/json", nil); err == nil {
+	closedRequest, err := http.NewRequestWithContext(testwait.Context(t), http.MethodPost, url+"/v1/logs", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedRequest.Header.Set("Content-Type", "application/json")
+	if _, err := http.DefaultClient.Do(closedRequest); err == nil {
 		t.Fatal("the listener still answers after Run returned")
 	}
 }
@@ -123,13 +178,8 @@ func TestRunDrainsPendingHalvesWhenTerminated(t *testing.T) {
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Run = %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run kept serving after SIGTERM")
+	if err := meterReturned(t, "Run to stop serving after SIGTERM", cfg, done); err != nil {
+		t.Fatalf("Run = %v", err)
 	}
 	ledger, err := costledger.ForSession(dir, testSession)
 	if err != nil || len(ledger.Rows) != 1 || ledger.Rows[0].Join != costledger.JoinLog {
@@ -143,13 +193,8 @@ func TestRunTreatsAChangedStartTimeAsTheChatBeingGone(t *testing.T) {
 	cfg, _, _ := runConfig(t, proc)
 	done := make(chan error, 1)
 	go func() { done <- Meter(context.Background(), cfg) }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Run = %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run kept serving for a pid whose start time changed")
+	if err := meterReturned(t, "Run to stop serving for a pid whose start time changed", cfg, done); err != nil {
+		t.Fatalf("Run = %v", err)
 	}
 	proc.mu.Lock()
 	defer proc.mu.Unlock()
@@ -166,14 +211,10 @@ func TestRunKeepsServingThroughAnUnreadableProcessTableThenGivesUpLoudly(t *test
 	cfg.MaxStatFailures = 5
 	done := make(chan error, 1)
 	go func() { done <- Meter(context.Background(), cfg) }()
-	select {
-	case err := <-done:
-		if err == nil ||
-			err.Error() != "cost sink: read process 4242 5 times in a row: sysctl: operation not permitted" {
-			t.Fatalf("Run = %v, want the stat failure named", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run never gave up on an unreadable process table")
+	err := meterReturned(t, "Run to give up on an unreadable process table", cfg, done)
+	if err == nil ||
+		err.Error() != "cost sink: read process 4242 5 times in a row: sysctl: operation not permitted" {
+		t.Fatalf("Run = %v, want the stat failure named", err)
 	}
 	if !strings.Contains(logs.String(), "operation not permitted") {
 		t.Fatalf("sink log = %q, want the cause", logs.String())
@@ -191,7 +232,9 @@ func TestRunPrunesOldLedgerFilesAtStart(t *testing.T) {
 	if err := chtimes(old, past); err != nil {
 		t.Fatal(err)
 	}
-	if err := Meter(context.Background(), cfg); err != nil {
+	done := make(chan error, 1)
+	go func() { done <- Meter(context.Background(), cfg) }()
+	if err := meterReturned(t, "Run to exit for a watched process already gone", cfg, done); err != nil {
 		t.Fatal(err)
 	}
 	if fileExists(old) {

@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestCheckPersistsLatestReleaseForTheNextInvocation(t *testing.T) {
@@ -313,6 +316,8 @@ func TestRecentSuccessfulCheckSuppressesRedundantNetworkLookup(t *testing.T) {
 		writer.WriteHeader(http.StatusFound)
 	}))
 	defer server.Close()
+	checkedAt := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	testwait.ProcessClock(t, clock.NewFake(checkedAt))
 	cache := filepath.Join(t.TempDir(), "update.json")
 	if err := CheckForUpdate(context.Background(), cache, "v0.61.4", server.URL, server.Client()); err != nil {
 		t.Fatal(err)
@@ -324,7 +329,7 @@ func TestRecentSuccessfulCheckSuppressesRedundantNetworkLookup(t *testing.T) {
 		t.Fatalf("two immediate checks made %d network requests, want one", hits)
 	}
 	notice, _, err := Read(cache, "v0.61.4")
-	if err != nil || time.Since(notice.CheckedAt) > time.Minute {
-		t.Fatalf("cached successful check is not recent: notice=%#v err=%v", notice, err)
+	if err != nil || !notice.CheckedAt.Equal(checkedAt) {
+		t.Fatalf("cached successful check stamp: notice=%#v err=%v, want checked at %s", notice, err, checkedAt)
 	}
 }

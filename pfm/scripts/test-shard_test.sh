@@ -104,11 +104,12 @@ case "$1" in
   build)
     target="${*: -1}"
     if [ -n "${STUB_BUILD_RENDEZVOUS:-}" ]; then
-      # A directory: each build leaves its mark and waits (at most 5 s) for the other's; one that waits alone says so.
+      # A directory: each build leaves its mark and waits, through the wait door, for the other's; one that
+      # waits alone to the door's hung-only limit says so.
       : >"$STUB_BUILD_RENDEZVOUS/${target##*/}"
-      tick=0
-      while [ "$(ls "$STUB_BUILD_RENDEZVOUS" | wc -l)" -lt 2 ] && [ "$tick" -lt 50 ]; do sleep 0.1; tick=$((tick + 1)); done
-      if [ "$(ls "$STUB_BUILD_RENDEZVOUS" | wc -l)" -ge 2 ]; then printf 'build-overlap %s\n' "$target" >>"$STUB_LOG"; else printf 'build-alone %s\n' "$target" >>"$STUB_LOG"; fi
+      . "$STUB_WAIT_DOOR"
+      both_built() { [ "$(ls "$STUB_BUILD_RENDEZVOUS" | wc -l)" -ge 2 ]; }
+      if shtest_wait_until "the build of $target meets the other prebuild" both_built 2>/dev/null; then printf 'build-overlap %s\n' "$target" >>"$STUB_LOG"; else printf 'build-alone %s\n' "$target" >>"$STUB_LOG"; fi
     fi
     if [[ " $* " == *" ./cmd/mock-engine "* ]]; then
       [ "${STUB_MOCK_PREBUILD_FAIL:-0}" = 0 ] || { printf 'mock-build.go:7: broken fixture\n' >&2; exit 1; }
@@ -197,7 +198,7 @@ plain_rc=$rc
 rc=0; bash "$SUT" plan --out "$T/plan.json" --history "$T/thrashed.json" >"$T/thrashed.tsv" 2>"$T/plan.err" || rc=$?
 if [ "$plain_rc" -eq 0 ] && [ "$rc" -eq 0 ] && cmp -s <(cut -f1,2 "$T/plain.tsv") <(cut -f1,2 "$T/thrashed.tsv"); then ok thrashed-history-same-shards; else bad "thrashed-history-same-shards: rc=$rc" "$(cat "$T/plan.err")"; fi
 : >"$STUB_LOG"
-rc=0; mkdir "$T/rendezvous"; STUB_BUILD_RENDEZVOUS="$T/rendezvous" bash "$SUT" run --out "$T/run.json" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
+rc=0; mkdir "$T/rendezvous"; STUB_BUILD_RENDEZVOUS="$T/rendezvous" STUB_WAIT_DOOR="$ROOT/../scripts/shtest-wait.sh" bash "$SUT" run --out "$T/run.json" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
 if [ "$rc" -eq 1 ] && python3 - "$STUB_LOG" <<'PY'
 import os, sys
 lines = open(sys.argv[1]).read().splitlines()
@@ -278,7 +279,7 @@ printf 'usage_usec 1000000\n' >"$T/cpu.stat"
 mkdir -p "$T/clock"
 cat >"$T/clock/sitecustomize.py" <<'PY'
 import time
-_base = time.time()
+_base = 1767225600.0
 _reads = [0]
 def _stepping_back():
     _reads[0] += 1
@@ -324,9 +325,9 @@ sample_start() { # sample_start <load file> [proc.stat]: the sampler in the back
   PFM_TEST_SHARD_PROC_STAT="${2:-$T/proc.stat}" PFM_TEST_SHARD_CPU_STAT="$T/cpu.stat" bash "$SUT" sample --out "$1" >"$T/sample.log" 2>&1 &
   SAMPLER_PID=$!
 }
-wait_lines() { # wait_lines <file> <n>: until <file> holds n lines, at most 15 s in 0.1 s ticks
-  local tick=0
-  while [ "$(wc -l <"$1" 2>/dev/null || echo 0)" -lt "$2" ] && [ "$tick" -lt 150 ]; do sleep 0.1; tick=$((tick + 1)); done
+lines_at_least() { [ "$(wc -l <"$1" 2>/dev/null || echo 0)" -ge "$2" ]; } # lines_at_least <file> <n>
+wait_lines() { # wait_lines <file> <n>: until <file> holds n lines
+  shtest_wait_until "$1 holds $2 lines" lines_at_least "$1" "$2"
 }
 : >"$STUB_LOG"
 sample_start "$T/e2e.load"

@@ -218,10 +218,6 @@ func sidecarOwner(path, line string) (string, error) {
 	return owner, nil
 }
 
-// leaseClock times the history lease's heartbeat and freshness; a test drives
-// the ten-second stale boundary on a fake one instead of waiting it out.
-var leaseClock = clock.Real
-
 // Claude's proper-lockfile writer owns realpath + .lock, with a ten-second
 // stale threshold. Keep it fresh and refuse takeover of an existing lease.
 // Holding the directory descriptor also prevents inode reuse from disguising replacement.
@@ -263,7 +259,7 @@ func acquireHistoryLease(path string) (*historyLease, error) {
 	}
 	// The heartbeat's period starts at acquisition, not whenever its goroutine
 	// is first scheduled.
-	go lease.heartbeat(leaseClock.NewTicker(2 * time.Second))
+	go lease.heartbeat(clock.Real.NewTicker(2 * time.Second))
 	return lease, nil
 }
 
@@ -275,7 +271,7 @@ func (lease *historyLease) checkLocked() error {
 	if !os.SameFile(lease.expected, actual) || !lease.expected.ModTime().Equal(actual.ModTime()) {
 		return fmt.Errorf("native history lease %s was compromised; refusing cleanup", lease.path)
 	}
-	if leaseClock.Now().Sub(actual.ModTime()) >= 8*time.Second {
+	if clock.Real.Now().Sub(actual.ModTime()) >= 8*time.Second {
 		return fmt.Errorf("native history lease %s could not stay fresh; refusing cleanup", lease.path)
 	}
 	return nil
@@ -293,7 +289,7 @@ func (lease *historyLease) refresh() error {
 	if err := lease.checkLocked(); err != nil {
 		return err
 	}
-	now := unix.NsecToTimeval(leaseClock.Now().UnixNano())
+	now := unix.NsecToTimeval(clock.Real.Now().UnixNano())
 	if err := unix.Futimes(int(lease.file.Fd()), []unix.Timeval{now, now}); err != nil {
 		return fmt.Errorf("refresh native history lease %s: %w", lease.path, err)
 	}

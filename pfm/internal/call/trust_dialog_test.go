@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // trustDialogCapture is Claude Code's folder-trust dialog; its default row is
@@ -34,7 +32,7 @@ func TestCallRefusesByNameAtTheClaudeFolderTrustDialog(t *testing.T) {
 func TestRescueLaunchPromptPressesNothingAtTheClaudeFolderTrustDialog(t *testing.T) {
 	fake := &fakeTmux{capture: trustDialogCapture}
 	outcome, err := RescueLaunchPrompt(
-		context.Background(), fake, "/tmp/jail/cc-trust", "%1", clock.Real, time.Millisecond,
+		context.Background(), fake, "/tmp/jail/cc-trust", "%1", newSteppingClock(), time.Millisecond,
 	)
 	if err != nil || outcome != RescueTrustHeld {
 		t.Fatalf("outcome=%v err=%v, want RescueTrustHeld", outcome, err)
@@ -47,7 +45,7 @@ func TestRescueLaunchPromptPressesNothingAtTheClaudeFolderTrustDialog(t *testing
 func TestRescueLaunchPromptDismissesThenSubmitsOnAnOrdinaryPane(t *testing.T) {
 	fake := &fakeTmux{capture: "claude\n❯ the unsent prompt"}
 	outcome, err := RescueLaunchPrompt(
-		context.Background(), fake, "/tmp/jail/cc-rescue", "%1", clock.Real, time.Millisecond,
+		context.Background(), fake, "/tmp/jail/cc-rescue", "%1", newSteppingClock(), time.Millisecond,
 	)
 	if err != nil || outcome != RescueKeysPressed {
 		t.Fatalf("outcome=%v err=%v, want RescueKeysPressed", outcome, err)
@@ -60,7 +58,7 @@ func TestRescueLaunchPromptDismissesThenSubmitsOnAnOrdinaryPane(t *testing.T) {
 func TestRescueLaunchPromptPressesNothingOnAPaneItCannotRead(t *testing.T) {
 	fake := &fakeTmux{dead: true}
 	outcome, err := RescueLaunchPrompt(
-		context.Background(), fake, "/tmp/jail/cc-dead", "%1", clock.Real, time.Millisecond,
+		context.Background(), fake, "/tmp/jail/cc-dead", "%1", newSteppingClock(), time.Millisecond,
 	)
 	if err == nil || outcome != RescueNotSent {
 		t.Fatalf("outcome=%v err=%v, want RescueNotSent and the read error", outcome, err)

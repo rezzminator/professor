@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+// forkLoadRuns is how many runs the fork-load tests make beside the load.
+const forkLoadRuns = 100
 
 // startForkLoad starts 4 goroutines forking and execing true until the returned
 // stop function is called; stop also waits for them.
@@ -50,10 +52,9 @@ func TestExecutableCopyRunsWhileOtherGoroutinesFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer startForkLoad(t)()
-	// Unlocked, a copy fails within its first 20 runs here; a second of runs
-	// keeps the fork load short beside the heavy tests.
-	deadline := time.Now().Add(time.Second)
-	for index := 0; index < 500 && time.Now().Before(deadline); index++ {
+	// Unlocked, a copy fails within its first 20 runs here; forkLoadRuns runs
+	// keep the fork load short beside the heavy tests.
+	for index := 0; index < forkLoadRuns; index++ {
 		target := filepath.Join(dir, fmt.Sprintf("copy-%d", index))
 		if err := copyFile(source, target, 0o755); err != nil {
 			t.Fatalf("copy %d: %v", index, err)

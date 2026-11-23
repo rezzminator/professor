@@ -33,7 +33,7 @@ func TestResolveRowTargetReturnsTheComposedRowsLiveAddress(t *testing.T) {
 	socket := "probe-resolverowtarget-" + strconv.Itoa(os.Getpid())
 	session := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", "bg", "sleep", "120",
+		"new-session", "-d", "-s", "bg", "tail", "-f", "/dev/null",
 	)
 	if output, err := session.CombinedOutput(); err != nil {
 		t.Fatalf("start background pane: %v: %s", err, output)

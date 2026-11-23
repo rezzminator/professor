@@ -62,7 +62,7 @@ func (tmux *startingPaneTmux) SendKey(ctx context.Context, target pfmcall.Target
 // dies with "/exit did not complete after N polls; chat left running".
 func TestRunWaitsForTheChatsInputBoxBeforeTypingExit(t *testing.T) {
 	tmux := &startingPaneTmux{blankCaptures: 3, typedAt: -1}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-starting"),
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, IdleTries: 10},
@@ -90,7 +90,7 @@ func TestRunWaitsForTheChatsInputBoxBeforeTypingExit(t *testing.T) {
 // state it actually found.
 func TestRunNamesAPaneThatNeverShowsAnInputBox(t *testing.T) {
 	tmux := &startingPaneTmux{blankCaptures: 1 << 30, typedAt: -1}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-no-box"),
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, IdleTries: 3},
@@ -177,7 +177,7 @@ func TestRunWaitsOutAnExitAlreadyInFlight(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tmux := &slowExitTmux{dieAfter: test.dieAfter, after: test.after}
-			_, err := Run(
+			_, err := runOnFake(t,
 				context.Background(),
 				reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-slow-exit"),
 				Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: exitTries},

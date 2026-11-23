@@ -138,7 +138,7 @@ func TestRotatorRefusesAnUnwritableDirectory(t *testing.T) {
 		3,
 		1,
 		true,
-		clock.Real,
+		clock.NewFake(segmentStart),
 		io.Discard,
 	); err == nil {
 		t.Fatal("newRotator accepted a path under a regular file")
@@ -196,7 +196,7 @@ func TestRotatorWritersSharingAHomeKeepEveryRecordWhole(t *testing.T) {
 	var group sync.WaitGroup
 	failures := make(chan error, writers)
 	for index := range writers {
-		writer, err := newRotator(path, 10, 1, true, clock.Real, io.Discard)
+		writer, err := newRotator(path, 10, 1, true, clock.NewFake(segmentStart), io.Discard)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -304,7 +304,14 @@ func TestRotatorReattachesPastAHandleThatIsAlreadyClosed(t *testing.T) {
 // writer: a record the size of the live log's average (165 bytes), the
 // fleet's segment size, rolls included.
 func BenchmarkRotatorWrite(b *testing.B) {
-	writer, err := newRotator(filepath.Join(b.TempDir(), "log", "pfm.jsonl"), 10, 8, true, clock.Real, io.Discard)
+	writer, err := newRotator(
+		filepath.Join(b.TempDir(), "log", "pfm.jsonl"),
+		10,
+		8,
+		true,
+		clock.NewFake(segmentStart),
+		io.Discard,
+	)
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -28,13 +27,13 @@ const (
 func codexInProject(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Esc)
-	term.WaitFor(prompt, 20*time.Second)
+	term.WaitFor(prompt)
 	term.Type("cd " + s.Project + " && pfm\r")
 	newChatSelectedIn(term, filepath.Base(s.Project))
 	term.Press(harness.Enter)
 	pickEngine(term, "Codex")
 	term.Press(harness.Enter)
-	term.WaitFor("Ask Codex to do anything", 20*time.Second)
+	term.WaitFor("Ask Codex to do anything")
 	panes := herdrPanes(c, s)
 	if len(panes) != 1 {
 		c.Failf("Herdr lists panes %v with the Codex chat open, want one", panes)

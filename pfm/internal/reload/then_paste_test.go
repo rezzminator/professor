@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // codexPasteTmux plays a reborn Codex pane: an empty composer until the
@@ -60,7 +61,7 @@ func runCodexThen(t *testing.T, tmux *codexPasteTmux, then string) error {
 	}
 	fakeClock := clock.NewFake(time.Unix(0, 0))
 	var err error
-	driveFakeClock(t, fakeClock, func() {
+	testwait.Drive(t, "reload to run through its waits", fakeClock, func() {
 		err = deliverThen(
 			context.Background(),
 			Request{Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/cx-then-paste", Pane: "%7", Then: then},

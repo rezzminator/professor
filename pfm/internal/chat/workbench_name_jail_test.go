@@ -37,7 +37,7 @@ func TestWorkbenchNameReservesLiveAndKilledRosterNames(t *testing.T) {
 	ctx := context.Background()
 	const socket = "cc-new-workbench-test"
 	client := pfmtmux.Socket{Dir: tmuxDir}
-	if output, err := client.Command(ctx, socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "sleep 120").
+	if output, err := client.Command(ctx, socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "tail -f /dev/null").
 		CombinedOutput(); err != nil {
 		t.Fatalf("start jailed seat: %v: %s", err, output)
 	}

@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestHerdrBridgeRecordReadOnARealServer reads the session record through a
@@ -37,9 +37,9 @@ func TestHerdrBridgeRecordReadOnARealServer(t *testing.T) {
 			t.Fatalf("tmux %q: %v: %s", args, err, output)
 		}
 	}
-	tmux("new-session", "-d", "-s", "cc-1", "sleep", "120")
+	tmux("new-session", "-d", "-s", "cc-1", "tail", "-f", "/dev/null")
 	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socketPath, "kill-server").Run() })
-	tmux("new-session", "-d", "-s", "cc-10", "sleep", "120")
+	tmux("new-session", "-d", "-s", "cc-10", "tail", "-f", "/dev/null")
 	tmux("set-option", "-t", "cc-10:", "@pfm_herdr", `{"session_id":"other"}`)
 	for _, tc := range []struct {
 		name, session, record, wantErr, refuse string
@@ -131,17 +131,13 @@ func TestHerdrBridgeTmuxGivesUpOnAFrozenServer(t *testing.T) {
 		_, err := bridgeTmux(context.Background(), socketPath, "list-clients", "-F", "#{client_pid}")
 		done <- err
 	}()
-	select {
-	case err := <-done:
-		if !errors.Is(err, gather.ErrServerUnresponsive) {
-			t.Fatalf(
-				"read of a frozen server = %v, want %v within %s",
-				err,
-				gather.ErrServerUnresponsive,
-				gather.ProbeTimeout,
-			)
-		}
-	case <-time.After(gather.ProbeTimeout + 5*time.Second):
-		t.Fatalf("read of a frozen server still waiting after %s", gather.ProbeTimeout+5*time.Second)
+	err, _ = testwait.Receive(t, "the read of a frozen server to end", done)
+	if !errors.Is(err, gather.ErrServerUnresponsive) {
+		t.Fatalf(
+			"read of a frozen server = %v, want %v within %s",
+			err,
+			gather.ErrServerUnresponsive,
+			gather.ProbeTimeout,
+		)
 	}
 }

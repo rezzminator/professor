@@ -116,7 +116,7 @@ func (session *codexSession) fire(event, subject string, fields map[string]any) 
 	}
 	maps.Copy(payload, fields)
 	proc, ctx := session.proc, hookContext(session.proc.ctx, event)
-	return session.hooks.fire(ctx, event, subject, payload, proc.cwd, session.environ, proc.stderr)
+	return session.hooks.fire(ctx, proc.clock(), event, subject, payload, proc.cwd, session.environ, proc.stderr)
 }
 
 // foldContext writes each answer's additionalContext into history as a developer message, as Codex does.

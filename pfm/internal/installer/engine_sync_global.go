@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -139,6 +140,10 @@ func (installer *engine) wireEngineSyncGlobal() (returnErr error) {
 	}
 	deadline := installer.engineSyncGlobalDeadline()
 	globalContext, cancelGlobal := context.WithTimeout(context.Background(), deadline)
+	if installer.engineSyncTimer != nil {
+		cancelGlobal() // the seam's bound replaces the real one, whose timer stops here
+		globalContext, cancelGlobal = clock.WithTimeout(context.Background(), installer.engineSyncTimer, deadline)
+	}
 	result, runErr := runner.Global(globalContext, options)
 	if runErr != nil && errors.Is(globalContext.Err(), context.DeadlineExceeded) {
 		runErr = fmt.Errorf("engine-sync global timed out after %s: %w", deadline, runErr)

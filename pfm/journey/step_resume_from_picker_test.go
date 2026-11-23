@@ -5,7 +5,6 @@ package journey
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -21,27 +20,27 @@ func resumeFromPicker(c *harness.Ctx, s State) State {
 	token, _, _ := strings.Cut(name, " ") // the prompt's first word, unique to this run
 	term.WaitFor("↻ " + token)
 	term.Type(token)
-	term.WaitScreen("the picker narrowed to "+token, stepBound, func(screen string) bool {
+	term.WaitScreen("the picker narrowed to "+token, func(screen string) bool {
 		return strings.Contains(screen, "find › "+token)
 	})
 	if !rowIs(selectedRow(term.Screen()), "↻ ", token) {
 		term.Press(harness.Down)
 	}
-	term.WaitScreen("the ended chat "+token+" selected", stepBound, func(screen string) bool {
+	term.WaitScreen("the ended chat "+token+" selected", func(screen string) bool {
 		return rowIs(selectedRow(screen), "↻ ", token)
 	})
 	term.Press(harness.Enter)
 	// The resume wizard opens in the row on the chat's last cache, its one account taking no step.
 	term.WaitFor("resume · step 1 of 1 · cache")
-	term.WaitScreen("the wizard on the chat's last cache, 1h", stepBound, func(screen string) bool {
+	term.WaitScreen("the wizard on the chat's last cache, 1h", func(screen string) bool {
 		return strings.HasPrefix(selectedRow(screen), "↻ ◖ 1h ◗ [ 5m ]")
 	})
 	term.Press(harness.Enter)
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	sock := herdrSocket(s)
 	// The chat opens in its project's workspace, and the picker's, emptied, closes: the chat is in the
 	// session's only pane, a new one.
-	c.Poll("chat "+before.Session+" live again in the session's only pane", 20*time.Second, func() (bool, string) {
+	c.Poll("chat "+before.Session+" live again in the session's only pane", func() (bool, string) {
 		rows, listed := liveChats(c, sock)
 		seats := liveSeats(c, sock)
 		panes := herdrPanes(c, s)
@@ -103,7 +102,7 @@ func rowName(c *harness.Ctx, session string) string {
 // resumableName waits for session's row to be resumable and returns its name.
 func resumableName(c *harness.Ctx, session string) string {
 	name := ""
-	c.Poll("chat "+session+" resumable in pfm's list", stepBound, func() (bool, string) {
+	c.Poll("chat "+session+" resumable in pfm's list", func() (bool, string) {
 		rows := listRows(c, session)
 		if len(rows) == 1 && strings.HasPrefix(rows[0], "resume-claude\t") {
 			name = strings.Split(rows[0], "\t")[4]

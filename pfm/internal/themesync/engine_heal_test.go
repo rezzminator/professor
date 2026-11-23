@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The sync's healing and its fault doors: files that come and go after set,
@@ -42,22 +44,27 @@ func TestApplyTmuxServerNeverFinishesAfterAnOffThatRestoredTheServer(t *testing.
 	gated := &gatedTmux{fakeTmux: h.tmux, socket: "cc-born", started: make(chan struct{}), release: make(chan struct{})}
 	applied := make(chan error, 1)
 	go func() { applied <- ApplyTmuxServer(context.Background(), gated, h.stateDir, "cc-born") }()
-	select {
-	case <-gated.started:
-	case <-time.After(10 * time.Second):
-		t.Fatal("ApplyTmuxServer never reached the server")
-	}
+	testwait.Receive(t, "ApplyTmuxServer to reach the server", gated.started)
 	turnedOff := make(chan error, 1)
 	go func() {
 		_, err := Off(context.Background(), h.env)
 		turnedOff <- err
 	}()
 	var offErr error
-	select {
-	case offErr = <-turnedOff: // the apply took no lock: off ran to the end mid-apply
-		close(gated.release)
-	case <-time.After(time.Second): // off waits for the in-flight apply
-		close(gated.release)
+	// Off either ran to the end mid-apply (the apply took no lock) or waits on the state lock the
+	// in-flight apply holds; the apply is released once Off has done one or the other.
+	offDone := false
+	testwait.Until(t, "off to finish or to wait on the state lock", func() (bool, string) {
+		select {
+		case offErr = <-turnedOff:
+			offDone = true
+			return true, "off finished"
+		default:
+		}
+		return testwait.Blocked("syscall.Flock", "themesync.stateStore.lock")
+	})
+	close(gated.release)
+	if !offDone {
 		offErr = <-turnedOff
 	}
 	if err := <-applied; err != nil {

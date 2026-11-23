@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -55,18 +54,18 @@ func uninstall(c *harness.Ctx, s State) State {
 	term := c.Terminal("plain")
 	term.WaitFor(prompt)
 	if slices.ContainsFunc(herdrSessions(c), func(r State) bool { return r.Session == "" }) {
-		if code := shellRun(term, "herdr-stop", "herdr server stop", 20*time.Second); code != 0 {
+		if code := shellRun(term, "herdr-stop", "herdr server stop"); code != 0 {
 			c.Failf("herdr server stop exited %d:\n%s", code, term.Screen())
 		}
 	}
 	jobsAtRest(c, "the uninstall")
-	if code := shellRun(term, "uninstall", "pfm uninstall", 60*time.Second); code != 0 {
+	if code := shellRun(term, "uninstall", "pfm uninstall"); code != 0 {
 		c.Failf("pfm uninstall exited %d:\n%s", code, term.Screen())
 	}
 	if screen := term.Screen(); !strings.Contains(screen, "summary changed=") {
 		c.Failf("the uninstall's last screen has no summary:\n%s", screen)
 	}
-	c.Poll("pfm's services gone", stepBound, func() (bool, string) {
+	c.Poll("pfm's services gone", func() (bool, string) {
 		got := services(c)
 		return got == "", got
 	})

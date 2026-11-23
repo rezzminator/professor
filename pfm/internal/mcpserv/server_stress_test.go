@@ -11,11 +11,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
@@ -34,7 +34,6 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 	beforeGoroutines := runtime.NumGoroutine()
 	beforeFDs := openFDs(t)
 	beforeRSS := rssBytes(t)
-	started := time.Now()
 	for iteration := 0; iteration < 200; iteration++ {
 		output := callTool[LastOutput](
 			t,
@@ -42,14 +41,20 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 			"last",
 			LastInput{Target: "alpha"},
 		)
-		if !strings.Contains(output.Text, "alpha answer") {
+		if output.Text != "alpha answer" {
 			t.Fatalf("iteration %d cross-talk: %+v", iteration, output)
 		}
 	}
-	elapsed := time.Since(started)
-	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
-	afterGoroutines := runtime.NumGoroutine()
+	var afterGoroutines int
+	testwait.Until(t, "the call goroutines to wind down", func() (bool, string) {
+		runtime.GC()
+		afterGoroutines = runtime.NumGoroutine()
+		return afterGoroutines-beforeGoroutines <= 4, fmt.Sprintf(
+			"goroutines before=%d after=%d",
+			beforeGoroutines,
+			afterGoroutines,
+		)
+	})
 	afterFDs := openFDs(t)
 	afterRSS := rssBytes(t)
 	if delta := afterGoroutines - beforeGoroutines; delta > 4 {
@@ -61,12 +66,8 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 	if delta := afterRSS - beforeRSS; delta > 32<<20 {
 		t.Fatalf("RSS grew by %d bytes", delta)
 	}
-	if os.Getenv("PFM_STRESS_STRICT") == "1" && elapsed > 5*time.Second {
-		t.Fatalf("strict sequential MCP stress took %s", elapsed)
-	}
 	t.Logf(
-		"STRESS mcp_sequential calls=200 elapsed_ms=%d goroutines=%d->%d fds=%d->%d rss_bytes=%d->%d",
-		elapsed.Milliseconds(),
+		"STRESS mcp_sequential calls=200 goroutines=%d->%d fds=%d->%d rss_bytes=%d->%d",
 		beforeGoroutines,
 		afterGoroutines,
 		beforeFDs,
@@ -88,7 +89,7 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 	for index := range clients {
 		clients[index] = connectInMemory(t, service.Server())
 	}
-	started := time.Now()
+	callContext := testwait.Context(t)
 	var wait sync.WaitGroup
 	errors := make(chan error, 8)
 	for worker := range clients {
@@ -102,10 +103,7 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 				want = "beta"
 			}
 			for iteration := 0; iteration < 25; iteration++ {
-				ctx, cancel := context.WithTimeout(
-					context.Background(),
-					15*time.Second,
-				)
+				ctx, cancel := context.WithCancel(callContext)
 				result, err := clients[worker].clientSession.CallTool(
 					ctx,
 					&mcp.CallToolParams{
@@ -123,7 +121,7 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 				content, _ := json.Marshal(result.StructuredContent)
 				var output LastOutput
 				if err := json.Unmarshal(content, &output); err != nil ||
-					!strings.Contains(output.Text, want+" answer") {
+					output.Text != want+" answer" {
 					errors <- fmt.Errorf(
 						"worker %d cross-talk: %s err=%v",
 						worker,
@@ -140,14 +138,68 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 	for err := range errors {
 		t.Error(err)
 	}
-	elapsed := time.Since(started)
-	if os.Getenv("PFM_STRESS_STRICT") == "1" && elapsed > 8*time.Second {
-		t.Fatalf("strict concurrent MCP stress took %s", elapsed)
+	t.Log("STRESS mcp_concurrent clients=8 calls=200 cross_talk=0")
+}
+
+// BenchmarkMCPSequentialCalls measures what the sequential stress test no
+// longer judges: one "last" call over an in-memory session.
+func BenchmarkMCPSequentialCalls(b *testing.B) {
+	setupBackendPaths(b)
+	service := newFixtureService(b)
+	b.Cleanup(func() {
+		if err := service.Close(); err != nil {
+			b.Errorf("close service: %v", err)
+		}
+	})
+	client := connectInMemory(b, service.Server())
+	for b.Loop() {
+		output := callTool[LastOutput](b, client.clientSession, "last", LastInput{Target: "alpha"})
+		if output.Text != "alpha answer" {
+			b.Fatalf("cross-talk: %+v", output)
+		}
 	}
-	t.Logf(
-		"STRESS mcp_concurrent clients=8 calls=200 elapsed_ms=%d cross_talk=0",
-		elapsed.Milliseconds(),
-	)
+}
+
+// BenchmarkMCPConcurrentEightClients measures what the concurrent stress test
+// no longer judges: "last" calls from eight in-memory sessions at once.
+func BenchmarkMCPConcurrentEightClients(b *testing.B) {
+	setupBackendPaths(b)
+	service := newFixtureService(b)
+	b.Cleanup(func() {
+		if err := service.Close(); err != nil {
+			b.Errorf("close service: %v", err)
+		}
+	})
+	clients := make([]protocolClient, 8)
+	for index := range clients {
+		clients[index] = connectInMemory(b, service.Server())
+	}
+	callContext := testwait.Context(b)
+	for b.Loop() {
+		var wait sync.WaitGroup
+		failures := make(chan error, len(clients))
+		for _, client := range clients {
+			wait.Go(func() {
+				result, err := client.clientSession.CallTool(callContext, &mcp.CallToolParams{
+					Name: "last", Arguments: LastInput{Target: "beta"},
+				})
+				if err != nil {
+					failures <- err
+					return
+				}
+				content, _ := json.Marshal(result.StructuredContent)
+				var output LastOutput
+				if err := json.Unmarshal(content, &output); err != nil || output.Text != "beta answer" {
+					failures <- fmt.Errorf("cross-talk: %s err=%v", content, err)
+				}
+			})
+		}
+		wait.Wait()
+		close(failures)
+		for err := range failures {
+			b.Fatal(err)
+		}
+	}
 }
 
 func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
@@ -159,7 +211,7 @@ func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
 		}
 	}()
 	client := connectInMemory(t, service.Server())
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	unknown, unknownErr := client.clientSession.CallTool(
 		ctx,

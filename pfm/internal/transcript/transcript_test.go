@@ -124,13 +124,13 @@ func TestParseKeepsWhatWasSaidAndDropsTheRest(t *testing.T) {
 			engine: "cx",
 			content: strings.Join([]string{
 				`{"type":"event_msg","payload":{"type":"user_message","message":"read the report"}}`,
-				`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"sleep 600"}}`,
+				`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"make build"}}`,
 				`{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-0001","reason":"interrupted"}}`,
 				`{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-0002"}}`,
 			}, "\n") + "\n",
 			want: []string{
 				"U read the report",
-				"T exec|sleep 600",
+				"T exec|make build",
 				"A [turn aborted: interrupted]",
 				"A [turn aborted: interrupted]",
 			},

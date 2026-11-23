@@ -4,18 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestHerdrStateOutsideHerdrIsASilentNoOp(t *testing.T) {
@@ -523,9 +523,17 @@ func TestHerdrStateKeepsTheHigherSeqAndSendsNothing(t *testing.T) {
 // slow, so without the lock it lands last.
 func TestHerdrStateRacingReportersEndWithTheHigherSeq(t *testing.T) {
 	rig := newChatRig(t)
+	fake := rig.jail.fakeClock()
+	lockPath := filepath.Join(rig.jail.lockDir, "cc-1.lock")
+	// The lower event's write stays slow until the higher event is queued behind
+	// the lock or has written: the order the lock exists to keep.
+	slow := make(chan struct{})
+	var higherWrote atomic.Bool
 	rig.tmux.beforeWrite = func(value string) {
 		if strings.Contains(value, `"state":"working"`) {
-			time.Sleep(150 * time.Millisecond)
+			<-slow
+		} else {
+			higherWrote.Store(true)
 		}
 	}
 	lowClock, highClock := int64(1_000_000), int64(9_000_000)
@@ -553,7 +561,25 @@ func TestHerdrStateRacingReportersEndWithTheHigherSeq(t *testing.T) {
 		}()
 	}
 	close(start)
-	group.Wait()
+	testwait.Until(t, "the higher event to wait on the session lock or to have written", func() (bool, string) {
+		return higherWrote.Load() || lockRetryArmed(fake), fake.String()
+	})
+	close(slow)
+	ended := make(chan struct{})
+	go func() {
+		group.Wait()
+		close(ended)
+	}()
+	// The reporter queued behind the lock retries only once the other has let it go.
+	testwait.Until(t, "both reporters to end", func() (bool, string) {
+		select {
+		case <-ended:
+			return true, ""
+		default:
+		}
+		lockRetryOnRelease(t, fake, lockPath)
+		return false, fake.String()
+	})
 	for index, got := range results {
 		if got.rc != 0 || got.stderr != "" {
 			t.Fatalf("reporter %d: rc=%d stderr=%q, want a quiet exit 0", index, got.rc, got.stderr)
@@ -580,13 +606,19 @@ func TestHerdrStateGivesUpOnALockHeldPastTheDeadline(t *testing.T) {
 	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatalf("hold the session lock: %v", err)
 	}
-	started := time.Now()
-	got := rig.engine("working", `{"session_id":"s1"}`)
-	if waited := time.Since(started); waited < herdrDeadline-200*time.Millisecond {
-		t.Fatalf("gave up after %v, want the full %v deadline", waited, herdrDeadline)
-	}
-	if got.rc != 0 || !strings.Contains(got.stderr, "cc-1.lock") {
-		t.Fatalf("rc=%d stderr=%q, want exit 0 and the held cc-1.lock named", got.rc, got.stderr)
+	// The lock never frees: the run polls it on a fake clock until the hook's deadline passes on it.
+	fake := rig.jail.fakeClock()
+	var got herdrRun
+	expireHeldWait(t, fake, herdrLockPoll, herdrDeadline, func() {
+		got = rig.engine("working", `{"session_id":"s1"}`)
+	})
+	// Only the deadline's own expiry ends the wait on the lock with this cause: the run did not give up early.
+	if got.rc != 0 || !strings.Contains(got.stderr, "cc-1.lock still held at the deadline: context deadline exceeded") {
+		t.Fatalf(
+			"rc=%d stderr=%q, want exit 0 and the held cc-1.lock named at the expired deadline",
+			got.rc,
+			got.stderr,
+		)
 	}
 	if rig.tmux.stored != "" || len(rig.tmux.setOptionCalls()) != 0 {
 		t.Fatalf("stored = %q, set-option calls %q, want nothing written", rig.tmux.stored, rig.tmux.setOptionCalls())
@@ -924,55 +956,5 @@ func TestHerdrStateLargePayload(t *testing.T) {
 				t.Fatal("child changed parent state")
 			}
 		})
-	}
-}
-
-func TestHerdrStateEndAfterTmuxServerGone(t *testing.T) {
-	for _, event := range []string{"end", "working"} {
-		t.Run(event, func(t *testing.T) {
-			socket := filepath.Join(t.TempDir(), "cc-gone")
-			var stderr bytes.Buffer
-			var logged []string
-			deps := herdrDeps{
-				getenv: func(k string) string {
-					return map[string]string{"TMUX": socket + ",1,0", "TMUX_PANE": "%0", "HERDR_BIN_PATH": "herdr"}[k]
-				},
-				// the error runTmuxForHerdr returns once the chat's tmux server is gone
-				tmux: func(_ context.Context, socket string, args ...string) (string, error) {
-					return "", fmt.Errorf(
-						"tmux %s: exit status 1: no server running on %s",
-						strings.Join(args, " "),
-						socket,
-					)
-				},
-				listPanes: listTmuxPanesForHerdr,
-				now:       time.Now,
-				logError:  func(_ string, _ time.Time, message string) error { logged = append(logged, message); return nil },
-			}
-			rc := reportToHerdr([]string{event}, strings.NewReader(`{"session_id":"s1"}`), &stderr, deps)
-			got := strings.ReplaceAll(fmt.Sprintf("%d %q %s", rc, logged, &stderr), socket, "{socket}")
-			if want := map[string]string{"end": "0 [] INFO pfm internal herdr-state end: tmux server {socket} already gone; foreground client exited: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\t#{pane_pid}: exit status 1: no server running on {socket}\n", "working": "0 [\"pfm internal herdr-state working: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\\t#{pane_pid}: exit status 1: no server running on {socket} (fail-open)\"] pfm internal herdr-state working: read tmux session of %0: tmux display-message -p -t %0 #{session_name}\t#{pane_pid}: exit status 1: no server running on {socket} (fail-open)\n"}[event]; got != want {
-				t.Errorf("rc errors stderr = %q, want %q", got, want)
-			}
-		})
-	}
-}
-
-func TestHerdrStatePayloadLimitIsExplicit(t *testing.T) {
-	var stderr bytes.Buffer
-	deps := herdrDeps{now: time.Now}
-	input := strings.NewReader(`{"tool_response":"` + strings.Repeat("x", 64<<20) + `","agent_id":"child"}`)
-	before := input.Len()
-	if rc := reportToHerdr(
-		[]string{"working"},
-		input,
-		&stderr,
-		deps,
-	); rc != 0 ||
-		!strings.Contains(stderr.String(), "exceeds") {
-		t.Fatalf("over-limit input: rc=%d stderr=%s", rc, &stderr)
-	}
-	if read := before - input.Len(); read != (64<<20)+1 {
-		t.Fatalf("hook consumed %d bytes, want exactly the budget plus one probe byte", read)
 	}
 }

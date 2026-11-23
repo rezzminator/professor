@@ -8,13 +8,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type seatFixtureReport struct {
@@ -34,22 +36,33 @@ type seatFixtureReport struct {
 
 func waitSeatFixture(t *testing.T, done <-chan error, ready func() bool) {
 	t.Helper()
-	deadline := time.NewTimer(8 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(time.Millisecond)
-	defer tick.Stop()
-	for {
+	var exited error
+	var gone bool
+	testwait.Until(t, "the supervisor's expected transition", func() (bool, string) {
 		select {
-		case err := <-done:
-			t.Fatalf("supervisor exited before expected transition: %v", err)
-		case <-deadline.C:
-			t.Fatal("supervisor transition timeout")
-		case <-tick.C:
-			if ready() {
-				return
-			}
+		case exited = <-done:
+			gone = true
+			return true, ""
+		default:
 		}
+		return ready(), "the supervisor has not made the transition"
+	})
+	if gone {
+		t.Fatalf("supervisor exited before expected transition: %v", exited)
 	}
+}
+
+// releaseSeatFixture lets the fixture engine blocked on the FIFO at path go on.
+func releaseSeatFixture(path string) error {
+	release, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := release.WriteString("r"); err != nil {
+		_ = release.Close()
+		return err
+	}
+	return release.Close()
 }
 
 func TestSeatHostHangupPreservesRestorableSeat(t *testing.T) {

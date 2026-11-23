@@ -40,23 +40,26 @@ func TestPrimaryAccountAbsenceIsNotAnErrorRecord(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
+			// A database not yet given its schema is read by the schema look
+			// alone: it holds no meta table to select from.
+			want := map[bool]string{false: "meta", true: "sqlite_master"}[mode == "uncreated"]
 			var records []obs.Record
 			for _, record := range recorder.Records() {
 				op, _ := record.Field("op")
 				table, _ := record.Field("table")
-				if record.Message == "db.statement" && op == "select" && table == "meta" {
+				if record.Message == "db.statement" && op == "select" && table == want {
 					records = append(records, record)
 				}
 			}
 			if len(records) != 1 {
 				t.Fatalf("records=%v: %s", records, recorder.Raw())
 			}
-			want := "DEBUG" // a fast first-try success is routine; only a failure is louder
+			level := "DEBUG" // a fast first-try success is routine; only a failure is louder
 			if broken {
-				want = "ERROR"
+				level = "ERROR"
 			}
-			if records[0].Level != want {
-				t.Fatalf("level=%s want=%s", records[0].Level, want)
+			if records[0].Level != level {
+				t.Fatalf("level=%s want=%s", records[0].Level, level)
 			}
 			value, hasErr := records[0].Field(obs.FieldErr)
 			if broken && (!hasErr || value == "") {

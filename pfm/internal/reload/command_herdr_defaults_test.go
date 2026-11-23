@@ -95,7 +95,7 @@ func TestRunHerdrPreservesBirthDefaults(t *testing.T) {
 			f.request.AccountGiven = tc.accountGiven
 			f.request.CacheGiven = tc.cacheGiven
 			var stderr strings.Builder
-			result, err := RunHerdr(context.Background(), f.request, f.options, &stderr)
+			result, err := runHerdrOnFake(t, context.Background(), f.request, f.options, &stderr)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("error=%v want %q metadata diagnostic", err, tc.want)

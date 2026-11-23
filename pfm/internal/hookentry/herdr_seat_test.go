@@ -108,7 +108,7 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 				reportEvent = "start"
 			}
 			payload, _ := json.Marshal(map[string]string{"session_id": reportedSession, "source": "startup"})
-			deps := realHerdrDeps()
+			deps := testHerdrDeps()
 			deps.spawn = nil // the transcript watch is herdr_watch_test.go's
 			if name == "delayed working" {
 				reportEvent = "working"
@@ -355,7 +355,7 @@ func TestNativeLossNoteClearsOnlyOnActualPrompt(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stderr bytes.Buffer
-			deps := realHerdrDeps()
+			deps := testHerdrDeps()
 			deps.spawn = nil // the transcript watch is herdr_watch_test.go's
 			if rc := reportToHerdr(
 				[]string{"--engine", string(engine), tc.event},
@@ -429,7 +429,7 @@ func TestBareHerdrDegradedSeatStoreRefusesUnprovedReport(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			deps := realHerdrDeps()
+			deps := testHerdrDeps()
 			spawned := 0
 			deps.spawn = func([]string) error { spawned++; return nil }
 			var stderr bytes.Buffer
@@ -574,7 +574,7 @@ func TestNativeReporterProvesItsSupervisorAndCanonicalTarget(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			deps := realHerdrDeps()
+			deps := testHerdrDeps()
 			deps.lockDir = lockDir
 			deps.seatPaths = &values
 			inherited := herdrPaneEnv(server, "w6:p3")

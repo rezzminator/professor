@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestHerdrDoorsRequireDurableOwnership(t *testing.T) {
@@ -40,7 +40,7 @@ func TestHerdrDoorsRequireDurableOwnership(t *testing.T) {
 			})
 			engine := newTestEngine(t, "cc-1-2-3", &fakeTmux{})
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			ctx, cancel := context.WithCancel(testwait.Context(t))
 			defer cancel()
 			var err error
 			switch door {

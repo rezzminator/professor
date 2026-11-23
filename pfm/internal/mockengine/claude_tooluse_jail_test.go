@@ -11,6 +11,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/mockengine/control/controltest"
 )
 
 func TestClaudePostToolUseEdit(t *testing.T) {
@@ -230,10 +233,13 @@ func TestClaudeInlineAsyncFailureNeitherEndsTheTurnNorSkipsLaterHandlers(t *test
 	fix := newFixture(t)
 	t.Chdir(fix.work)
 	marker := filepath.Join(fix.recordDir, "after-async")
+	stalled := controltest.FIFO(t, filepath.Join(fix.root, "stalled-store"))
 	settings := inlineHookSettings(t, map[string]any{
 		hookUserPromptSubmit: []any{
 			map[string]any{"hooks": []any{
-				map[string]any{"type": "command", "command": "sleep 5", "async": true, "timeout": 0.2},
+				map[string]any{
+					"type": "command", "command": `read -r _ < "` + stalled + `"`, "async": true, "timeout": 0.2,
+				},
 				map[string]any{"type": "command", "command": `printf 'ran\n' >> "` + marker + `"`},
 			}},
 		},
@@ -246,6 +252,7 @@ func TestClaudeInlineAsyncFailureNeitherEndsTheTurnNorSkipsLaterHandlers(t *test
 	session := fix.startTUI("claude", []string{"--settings", settings}, nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 	session.typeLine("go")
+	fix.next(200 * time.Millisecond) // the stalled async handler's timeout passes on the mock's clock
 	session.waitFrame("continued", func(frame string) bool { return strings.Contains(frame, "continued") })
 	session.typeLine("/exit")
 	if code := session.waitExit(); code != 0 {

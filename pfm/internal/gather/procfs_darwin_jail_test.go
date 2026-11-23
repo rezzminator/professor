@@ -51,9 +51,9 @@ func TestDarwinProcFSReadsOfAnExitedPIDAreNotExist(t *testing.T) {
 // moments before and after it.
 func TestDarwinProcFSStartedPlacesTheSpawnOnTheWallClock(t *testing.T) {
 	before := time.Now()
-	command := exec.Command("sleep", "5")
+	command := exec.Command("tail", "-f", "/dev/null")
 	if err := command.Start(); err != nil {
-		t.Fatalf("start sleep: %v", err)
+		t.Fatalf("start tail: %v", err)
 	}
 	after := time.Now()
 	t.Cleanup(func() {

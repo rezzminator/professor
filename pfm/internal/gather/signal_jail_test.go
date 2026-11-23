@@ -16,9 +16,9 @@ import (
 // startSleeper starts a child this test owns and kills it on exit.
 func startSleeper(t *testing.T) *exec.Cmd {
 	t.Helper()
-	child := exec.Command("sleep", "300")
+	child := exec.Command("tail", "-f", "/dev/null")
 	if err := child.Start(); err != nil {
-		t.Fatalf("start sleep: %v", err)
+		t.Fatalf("start tail: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = child.Process.Kill()
@@ -47,7 +47,7 @@ func TestNativeDoorOnALiveChild(t *testing.T) {
 		t.Fatalf("Signal(later start) = %v, %v; want %v", got, err, gather.OutcomeGone)
 	}
 	changed := captured
-	changed.Argv = []string{"sleep", "301"}
+	changed.Argv = []string{"tail", "-f", "/dev/zero"}
 	if got, err := door.Signal(
 		gather.Target{Identity: changed},
 		syscall.SIGTERM,

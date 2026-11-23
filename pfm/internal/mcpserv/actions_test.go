@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // fakeChatVerbs is the MCP tests' stand-in for chat.Verbs: it records every
@@ -902,7 +902,7 @@ func TestChatExitEndsOnlyTheRequestScopedCaller(t *testing.T) {
 				allowAmbientIdentity: test.ambient,
 			})
 			protocol := connectInMemory(t, service.Server())
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithCancel(testwait.Context(t))
 			defer cancel()
 			result, err := protocol.clientSession.CallTool(ctx, &mcp.CallToolParams{
 				Meta: test.meta, Name: "exit", Arguments: test.arguments,

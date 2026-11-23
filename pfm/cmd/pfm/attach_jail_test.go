@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestPFMAttachHelper turns the package test binary into the real CLI for
@@ -210,7 +212,7 @@ func (jail *attachJail) proveAttach(
 		"new-session", "-d",
 		"-s", targetSession,
 		"-n", "chat",
-		"sleep 120",
+		"tail -f /dev/null",
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start target server: %v: %s", err, output)
 	}
@@ -246,9 +248,22 @@ func (jail *attachJail) proveAttach(
 		commandText = `eval "$(` + commandText + `)"`
 	}
 	scriptPath := filepath.Join(jail.root, suffix+".zsh")
+	// The nested driver pane blocks reading this FIFO until the test releases it.
+	// The test holds the FIFO open read-write, so a release written before the
+	// pane opens its read end is still waiting there.
 	releasePath := ""
+	var releaseFIFO *os.File
 	if mode == "inside-tmux" {
 		releasePath = filepath.Join(jail.root, suffix+".release")
+		if err := syscall.Mkfifo(releasePath, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var openErr error
+		releaseFIFO, openErr = os.OpenFile(releasePath, os.O_RDWR, 0)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		t.Cleanup(func() { _ = releaseFIFO.Close() })
 	}
 	terminalSize := ""
 	if mode == "plain" {
@@ -266,7 +281,7 @@ func (jail *attachJail) proveAttach(
 		// outer shell is already ready to exit. Keep this non-bunker driver
 		// pane alive until the parent has observed and detached that client;
 		// cleanup writes the same release file before killing the server.
-		script += "while [[ ! -e " + shellQuote(releasePath) + " ]]; do sleep 0.01; done\n"
+		script += "read -r _ < " + shellQuote(releasePath) + "\n"
 	}
 	if err := testjail.WriteExecutable(scriptPath, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -317,7 +332,7 @@ func (jail *attachJail) proveAttach(
 		}
 		t.Cleanup(func() {
 			if releasePath != "" {
-				_ = os.WriteFile(releasePath, []byte("cleanup\n"), 0o600)
+				_, _ = releaseFIFO.WriteString("cleanup\n")
 			}
 			_ = jail.tmux(driverSocket, "kill-server").Run()
 		})
@@ -337,37 +352,20 @@ func (jail *attachJail) proveAttach(
 			// one chat, JAILATTACH, so ● in the stream means its live row was
 			// painted, after the model applied the gather's refresh. Keys
 			// typed from here are read after that refresh.
-			deadline := time.Now().Add(20 * time.Second)
-			live := false
-			for time.Now().Before(deadline) {
+			testwait.Until(t, "plain picker to paint the JAILATTACH row live (● on the PTY)", func() (bool, string) {
 				painted := output.String()
-				if strings.Contains(painted, "JAILATTACH") && strings.Contains(painted, "●") {
-					live = true
-					break
-				}
-				time.Sleep(25 * time.Millisecond)
-			}
-			if !live {
-				t.Fatalf(
-					"plain picker never painted the JAILATTACH row live (● on the PTY) within 20s; output: %q",
-					output.String(),
-				)
-			}
+				return strings.Contains(painted, "JAILATTACH") && strings.Contains(painted, "●"),
+					"output: " + painted
+			})
 		} else {
-			deadline := time.Now().Add(5 * time.Second)
-			ready := false
-			for time.Now().Before(deadline) {
+			testwait.Until(t, mode+" picker to paint the target row", func() (bool, string) {
 				capture := jail.tmux(driverSocket, "capture-pane", "-p", "-t", "driver:0.0")
 				captured, captureErr := capture.Output()
-				if captureErr == nil && strings.Contains(string(captured), "JAILATTACH") {
-					ready = true
-					break
+				if captureErr != nil {
+					return false, captureErr.Error()
 				}
-				time.Sleep(25 * time.Millisecond)
-			}
-			if !ready {
-				t.Fatalf("%s picker did not paint the target row within 5s", mode)
-			}
+				return strings.Contains(string(captured), "JAILATTACH"), string(captured)
+			})
 		}
 		if mode == "plain" {
 			if _, err := io.WriteString(input, "JAILATTACH\r"); err != nil {
@@ -391,32 +389,22 @@ func (jail *attachJail) proveAttach(
 			// live glyph ● (ui.rowMarker) does, so poll for it on the SAME line
 			// as the selected JAILATTACH row rather than trusting the filtered
 			// count or the cursor alone.
-			liveDeadline := time.Now().Add(5 * time.Second)
-			live := false
-			lastFrame := ""
-			for time.Now().Before(liveDeadline) {
+			testwait.Until(t, "nested picker row for JAILATTACH to promote to live", func() (bool, string) {
 				capture := jail.tmux(driverSocket, "capture-pane", "-p", "-t", "driver:0.0")
 				captured, captureErr := capture.Output()
+				if captureErr != nil {
+					return false, captureErr.Error()
+				}
 				frame := string(captured)
-				lastFrame = frame
-				if captureErr == nil {
-					for _, line := range strings.Split(frame, "\n") {
-						if strings.Contains(line, "JAILATTACH") &&
-							strings.Contains(line, "›") &&
-							strings.Contains(line, "●") {
-							live = true
-							break
-						}
+				for _, line := range strings.Split(frame, "\n") {
+					if strings.Contains(line, "JAILATTACH") &&
+						strings.Contains(line, "›") &&
+						strings.Contains(line, "●") {
+						return true, frame
 					}
 				}
-				if live {
-					break
-				}
-				time.Sleep(25 * time.Millisecond)
-			}
-			if !live {
-				t.Fatalf("nested picker row for JAILATTACH never promoted to live; last frame: %q", lastFrame)
-			}
+				return false, "last frame: " + frame
+			})
 			send = jail.tmux(
 				driverSocket,
 				"send-keys", "-t", "driver:0.0",
@@ -428,22 +416,19 @@ func (jail *attachJail) proveAttach(
 		}
 	}
 
-	deadline := time.Now().Add(20 * time.Second)
 	var sessions string
-	for time.Now().Before(deadline) {
+	testwait.Until(t, "a client of the target server", func() (bool, string) {
 		output, listErr := jail.tmux(
 			targetSocket,
 			"list-clients",
 			"-F", "#{client_session}",
 		).Output()
-		if listErr == nil {
-			sessions = strings.TrimSpace(string(output))
-			if sessions != "" {
-				break
-			}
+		if listErr != nil {
+			return false, listErr.Error()
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
+		sessions = strings.TrimSpace(string(output))
+		return sessions != "", "no client yet"
+	})
 	if sessions != targetSession {
 		if mode != "plain" {
 			captured, captureErr := jail.tmux(driverSocket, "capture-pane", "-p", "-t", "driver:0.0").CombinedOutput()
@@ -463,7 +448,7 @@ func (jail *attachJail) proveAttach(
 		t.Fatalf("detach final proof client: %v: %s", err, output)
 	}
 	if releasePath != "" {
-		if err := os.WriteFile(releasePath, []byte("released\n"), 0o600); err != nil {
+		if _, err := releaseFIFO.WriteString("released\n"); err != nil {
 			t.Fatalf("release nested driver: %v", err)
 		}
 	}
@@ -472,24 +457,14 @@ func (jail *attachJail) proveAttach(
 		go func() {
 			wait <- command.Wait()
 		}()
-		select {
-		case err := <-wait:
-			if err != nil {
-				t.Fatalf("plain shell ended with error: %v", err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("plain shell did not return after detach")
+		if err, _ := testwait.Receive(t, "plain shell to return after detach", wait); err != nil {
+			t.Fatalf("plain shell ended with error: %v", err)
 		}
 	}
 	if mode == "bunker" {
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) &&
-			jail.tmux(driverSocket, "has-session", "-t", "driver").Run() == nil {
-			time.Sleep(25 * time.Millisecond)
-		}
-		if jail.tmux(driverSocket, "has-session", "-t", "driver").Run() == nil {
-			t.Fatal("bunker attach left its outer tmux viewport husk")
-		}
+		testwait.Until(t, "the bunker attach's outer tmux viewport to close", func() (bool, string) {
+			return jail.tmux(driverSocket, "has-session", "-t", "driver").Run() != nil, "viewport husk still there"
+		})
 		if _, err := os.Stat(marker); err == nil {
 			t.Fatal("bunker shell continued after exec attach")
 		}
@@ -502,14 +477,7 @@ func (jail *attachJail) proveAttach(
 		)
 		return
 	}
-	if !waitForAttachFile(marker, 5*time.Second) {
-		t.Fatalf(
-			"%s/%s/%s command did not return to its shell",
-			protocol,
-			mode,
-			flow,
-		)
-	}
+	waitForAttachFile(t, marker, fmt.Sprintf("%s/%s/%s command to return to its shell", protocol, mode, flow))
 	t.Logf(
 		"ATTACH protocol=%s mode=%s flow=%s client_session=%s command_returned=true",
 		protocol,
@@ -527,18 +495,18 @@ func (jail *attachJail) tmux(socket string, arguments ...string) *exec.Cmd {
 	return command
 }
 
-func waitForAttachFile(path string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+func waitForAttachFile(t *testing.T, path, condition string) {
+	t.Helper()
+	testwait.Until(t, condition, func() (bool, string) {
 		// A shell redirection creates the marker before echo/print writes its
 		// payload. Waiting only for existence races the following ReadFile and
 		// can observe an empty marker under full-suite load.
-		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
-			return true
+		info, err := os.Stat(path)
+		if err != nil {
+			return false, err.Error()
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return false
+		return info.Size() > 0, path + " is empty"
+	})
 }
 
 func replaceAttachEnv(environment []string, replacements map[string]string) []string {

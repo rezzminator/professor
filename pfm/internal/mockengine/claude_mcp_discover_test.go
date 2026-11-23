@@ -5,10 +5,11 @@ import (
 	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // methodLog records the method of every request a server connection reads.
@@ -46,8 +47,7 @@ func (connection loggedConnection) Read(ctx context.Context) (jsonrpc.Message, e
 // server first, its answer is read, and the handshake and a tools/call still go through; a server that
 // never answers the probe fails the connection when its context ends.
 func TestDiscoveringTransportProbesBeforeInitialize(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	server := mcp.NewServer(&mcp.Implementation{Name: "fixture"}, nil)
 	mcp.AddTool(server, &mcp.Tool{Name: "ping"}, func(context.Context, *mcp.CallToolRequest, struct{}) (
 		*mcp.CallToolResult, any, error,
@@ -84,15 +84,19 @@ func TestDiscoveringTransportProbesBeforeInitialize(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = reader.Close() }()
+	short, stop := context.WithCancel(context.Background())
+	defer stop()
 	go func() {
-		for {
+		// The probe read, the server stays silent and the caller's context ends.
+		for read := 0; ; read++ {
 			if _, err := reader.Read(ctx); err != nil {
 				return
 			}
+			if read == 0 {
+				stop()
+			}
 		}
 	}()
-	short, stop := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer stop()
 	if _, err := (discoveringTransport{silent}).Connect(short); err == nil {
 		t.Fatal("a server that never answered the probe connected")
 	}

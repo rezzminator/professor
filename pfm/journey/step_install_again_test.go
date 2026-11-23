@@ -27,7 +27,7 @@ func installAgain(c *harness.Ctx, s State) State {
 	chatTerm.WaitFor(prompt)
 	c.Cleanup(func() { stopPlainChat(c, &chat, chatTerm) })
 	chatTerm.Type("cd $HOME/work/demo && claude\r")
-	chatTerm.WaitFor("❯", 20*time.Second)
+	chatTerm.WaitFor("❯")
 	chat = plainClaudeLive(c, chat, attached(c, chatTerm))
 
 	stats := filepath.Join(s.Home, ".cc", "1", "stats-cache.json")
@@ -64,7 +64,6 @@ func installAgain(c *harness.Ctx, s State) State {
 			term,
 			label,
 			"clear && (cd ~/.professor && pfm install --yes) > ~/"+label+".out 2>&1",
-			150*time.Second,
 		)
 		text := read(c, "cat", out)
 		if code != 0 {
@@ -151,7 +150,7 @@ func installAgain(c *harness.Ctx, s State) State {
 
 	reply := c.Unique("reply")
 	chatTerm.Type(`after the installs mock-engine: {"type":"turn","reply":"` + reply + `"}` + "\r")
-	chatTerm.WaitFor("⏺ "+reply, 20*time.Second)
+	chatTerm.WaitFor("⏺ " + reply)
 	if live := plainClaudeLive(c, chat, attached(c, chatTerm)); live.Chat.Engine != chat.Chat.Engine {
 		c.Failf("the chat's engine changed from %d to %d across the installs", chat.Chat.Engine, live.Chat.Engine)
 	}

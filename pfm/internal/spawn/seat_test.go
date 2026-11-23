@@ -9,6 +9,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestRecordTmuxSeatRefusesEscapingSocket(t *testing.T) {
@@ -22,9 +23,7 @@ func TestRecordTmuxSeatRefusesEscapingSocket(t *testing.T) {
 }
 
 func TestRecordTmuxSeatUsesCurrentClock(t *testing.T) {
-	oldClock := clock.Real
-	clock.Real = clock.NewFake(time.Unix(1700000000, 0))
-	t.Cleanup(func() { clock.Real = oldClock })
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1700000000, 0)))
 	root := t.TempDir()
 	values := paths.Values{StateDB: filepath.Join(root, "pfm.db"), TmuxDir: filepath.Join(root, "tmux")}
 	if err := RecordTmuxSeat(context.Background(), values, fleetdb.Seat{

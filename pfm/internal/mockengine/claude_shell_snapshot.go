@@ -2,13 +2,11 @@ package mockengine
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -42,9 +40,7 @@ func (session *claudeSession) toolShell(command string) ([]string, error) {
 	}
 	if session.snapshot == "" {
 		path := filepath.Join(session.configDir, "shell-snapshots", "snapshot-zsh-"+session.sessionID+".sh")
-		bounded, cancel := context.WithTimeout(session.proc.ctx, 10*time.Second)
-		defer cancel()
-		dump := exec.CommandContext(bounded, login, "-i", "-c", claudeSnapshotDump)
+		dump := exec.CommandContext(session.proc.ctx, login, "-i", "-c", claudeSnapshotDump)
 		dump.Dir, dump.Env = session.proc.cwd, session.environ
 		// In a session of its own the interactive zsh has no terminal to take: on the chat's terminal it
 		// would make itself the foreground job, and on macOS the engine reading its keys in the background

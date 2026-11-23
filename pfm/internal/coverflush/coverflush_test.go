@@ -6,9 +6,9 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }
@@ -53,12 +53,8 @@ func TestInstallFlushesOnTheFirstTerminatingSignal(t *testing.T) {
 	}
 	var got []string
 	for len(got) < 2 {
-		select {
-		case call := <-calls:
-			got = append(got, call)
-		case <-time.After(5 * time.Second):
-			t.Fatalf("calls after SIGTERM = %q within 5s, want [write /cover raise terminated]", got)
-		}
+		call, _ := testwait.Receive(t, "a flush call after SIGTERM", calls)
+		got = append(got, call)
 	}
 	if strings.Join(got, "; ") != "write /cover; raise terminated" {
 		t.Fatalf("calls after SIGTERM = %q, want [write /cover raise terminated]", got)
@@ -66,6 +62,6 @@ func TestInstallFlushesOnTheFirstTerminatingSignal(t *testing.T) {
 	select {
 	case extra := <-calls:
 		t.Fatalf("a second flush ran: %q (the empty-dir install watched a signal)", extra)
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 }

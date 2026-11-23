@@ -1,0 +1,3 @@
+import os, select
+os.read(0, 1)
+select.select([0], [], [], 1)

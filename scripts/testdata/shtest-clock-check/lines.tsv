@@ -1,0 +1,31 @@
+# {spelling the check names, or - for a line it must pass}\t{the line planted in a scanned test file}
+sleep	sleep 1
+timeout	timeout 5 true
+usleep	usleep 1000
+read -t	read -r -t 2 line
+wait -t	wait -t 3 "$pid"
+TMOUT	TMOUT=5
+SECONDS	start=$SECONDS
+EPOCHSECONDS	now=$EPOCHSECONDS
+EPOCHREALTIME	t0=$EPOCHREALTIME
+date +%s	now=$(date +%s)
+date -d now	deadline=$(date -d 'now + 5 seconds')
+sleep()	python3 -c 'import time; time.sleep(1)'
+Time::HiRes	perl -MTime::HiRes -e 1
+select(undef	perl -e 'select(undef, undef, undef, 0.5)'
+alarm	perl -e 'alarm 5; <STDIN>'
+time.time()	python3 -c 'import time; print(time.time())'
+timeout=	python3 -c 'import subprocess; subprocess.run(["true"], timeout=2)'
+settimeout(	python3 -c 'import socket; socket.socket().settimeout(2)'
+setTimeout(	node -e 'setTimeout(() => {}, 100)'
+flock -w	flock -w 5 "$lock" true
+inotifywait -t	inotifywait -t 5 "$dir"
+--max-time	curl --max-time 5 http://h/
+sleep	printf '#!/bin/sh\necho ready\nsleep 0.5\n' > "$f"
+-	# sleep 1 in a comment
+-	echo sleeping in
+-	touch -d '3 hours ago' "$f"
+-	stamp=$(date -d '5 seconds ago' +%Y)
+-	label='timeout'
+-	name=timeout_case
+-	shtest_wait_gone 'daemon exited' "$pid"

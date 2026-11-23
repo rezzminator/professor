@@ -330,7 +330,7 @@ func watchHerdrAgentsWithWait(args []string, stderr io.Writer, deps herdrDeps, w
 }
 
 func (reporter *herdrReporter) expireAgents(session string, generation ...int64) (done bool, returnErr error) {
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	ctx, cancel := reporter.deadlineContext()
 	defer cancel()
 	unlock, err := reporter.lock(ctx, reporter.activityKey(session))
 	if err != nil {

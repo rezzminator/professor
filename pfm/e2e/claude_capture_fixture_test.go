@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestClaudeHarnessCaptureFixture(t *testing.T) {
@@ -68,8 +68,14 @@ func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := http.Client{Timeout: 2 * time.Second}
-	response, err := client.Post(endpoint.String()+"/v1/messages", "application/json", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(
+		testwait.Context(t), http.MethodPost, endpoint.String()+"/v1/messages", bytes.NewReader(body),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}

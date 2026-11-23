@@ -21,7 +21,7 @@ func init() {
 	gather.RegisterMatcher(pfmengine.OpenCode, opencodeengine.Matcher{})
 }
 
-func jailTest(t *testing.T) string {
+func jailTest(t testing.TB) string {
 	t.Helper()
 	return testjail.InstalledHome(t)
 }

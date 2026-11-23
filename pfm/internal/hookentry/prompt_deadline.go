@@ -24,6 +24,12 @@ var promptHookDeadline = 5 * time.Second
 // something it cannot cancel holds the prompt at most this much longer.
 var promptHookCommitGrace = 2 * time.Second
 
+// promptHookTimeout arms the deadline and the commit grace: a context that
+// ends once d has passed. A test replaces it to end either on a signal.
+var promptHookTimeout = func(d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), d)
+}
+
 // PromptHookBody is one UserPromptSubmit hook's work. It names the step in
 // hand through step, so a timeout says what it was waiting on, and writes only
 // to the stdout and stderr it is given.
@@ -43,7 +49,7 @@ type PromptHookBody func(ctx context.Context, step func(string), stdout, stderr 
 // timeout line says the step may be cut short.
 func RunPromptHook(name string, stdout, stderr io.Writer, failCode int, body PromptHookBody) int {
 	deadline := promptHookDeadline
-	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	ctx, cancel := promptHookTimeout(deadline)
 	defer cancel()
 	commits := &promptHookCommits{}
 	ctx = deps.WithCommitGate(ctx, commits.begin)
@@ -180,7 +186,7 @@ func (c *promptHookCommits) closeAndWait(grace time.Duration) (waited, finished 
 		c.open.Wait()
 		close(done)
 	}()
-	wait, cancel := context.WithTimeout(context.Background(), grace)
+	wait, cancel := promptHookTimeout(grace)
 	defer cancel()
 	select {
 	case <-done:

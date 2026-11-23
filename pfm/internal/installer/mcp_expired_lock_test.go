@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestClaudeMCPLockCannotReviveAfterNativeStaleWindow(t *testing.T) {
-	previous := clock.Real
 	fake := clock.NewFake(time.Now())
-	clock.Real = fake
-	t.Cleanup(func() { clock.Real = previous })
+	testwait.ProcessClock(t, fake)
 	path := filepath.Join(t.TempDir(), ".claude.json")
 	writeFixture(t, path, "native registry")
 	err := withClaudeMCPLocks([]string{path}, func(check func() error) error {

@@ -73,7 +73,7 @@ func TestInstallDeferredPluginFailureSurvivesLaterLedgerError(t *testing.T) {
 	_, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{manager: true}, Stdout: output,
 		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{"chat": true},
-		ClaudeRosterHost: true, PrimaryConfigDir: store,
+		ClaudeRosterHost: true, PrimaryConfigDir: store, Sleep: func(time.Duration) {},
 	})
 	failure := "claude plugins in " + store + ": " + store + " resolves to the Claude store — run pfm doctor"
 	ledger := "read VS Code ownership " + filepath.Join(managedRootForHome(home), vscodeOwnershipName) +

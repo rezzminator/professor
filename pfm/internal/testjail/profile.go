@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // profiler is the always-on recorder of one package test process: a summary
@@ -29,6 +30,7 @@ type profiler struct {
 	dir      string
 	pkg      string
 	start    time.Time
+	wall     func() time.Duration // the process's elapsed time, from testwait.Stopwatch
 	timeout  time.Duration
 	root     string // module root directory, "" outside a module
 	fr       *trace.FlightRecorder
@@ -75,7 +77,16 @@ func startProfile(tests int) (*profiler, string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Sprintf("mkdir %s: %v", dir, err)
 	}
-	p := &profiler{dir: dir, pkg: pkg, root: moduleDir, start: time.Now(), bundles: []string{}, run: run, tests: tests}
+	p := &profiler{
+		dir:     dir,
+		pkg:     pkg,
+		root:    moduleDir,
+		start:   time.Now(),
+		wall:    testwait.Stopwatch(),
+		bundles: []string{},
+		run:     run,
+		tests:   tests,
+	}
 	if inUnitRun(root) {
 		p.frOff = errRecorderGateOnly
 	}
@@ -113,7 +124,7 @@ func (p *profiler) armWatchdog(delay time.Duration, source string) {
 	defer p.mu.Unlock()
 	watched := make(chan struct{})
 	p.watched = watched
-	p.watch = time.AfterFunc(delay, func() {
+	p.watch = testwait.Watchdog(delay, func() {
 		defer close(watched)
 		p.stopCPU()
 		p.bundle(source)
@@ -170,9 +181,9 @@ func pickDeadline(now, start time.Time, timeout time.Duration, epoch string) (de
 }
 
 // watchdogMargin is how long before a deadline the watchdog fires: a tenth of
-// what remains, between one and fifteen seconds.
+// what remains, between one and fifteen seconds: the wait door's own Margin.
 func watchdogMargin(remaining time.Duration) time.Duration {
-	return min(max(remaining/10, time.Second), 15*time.Second)
+	return testwait.Margin(remaining)
 }
 
 // epochForm is decimal epoch seconds as $EPOCHREALTIME prints them: digits,
@@ -390,7 +401,7 @@ func (p *profiler) summary(code int, event string) map[string]any {
 		"helper_of":  p.helperOf,
 		"event":      event,
 		"exit_code":  code,
-		"wall_s":     round3(time.Since(p.start).Seconds()),
+		"wall_s":     round3(p.wall().Seconds()), // a recorded duration, never a wait or a verdict
 		"timeout_s":  p.timeout.Seconds(),
 		"goroutines": runtime.NumGoroutine(),
 		"bundles":    p.bundles,

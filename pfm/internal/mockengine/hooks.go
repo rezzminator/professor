@@ -1,7 +1,6 @@
 package mockengine
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,13 +8,12 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // pfm registers hooks through internal/claudelaunch/hooks.go HookTemplates.
@@ -86,7 +84,7 @@ func (session *claudeSession) fire(event, subject string, payload hookPayload) (
 		return nil, nil
 	}
 	proc, ctx := session.proc, hookContext(session.proc.ctx, event)
-	return session.hooks.fire(ctx, event, subject, payload, proc.cwd, session.environ, proc.stderr)
+	return session.hooks.fire(ctx, proc.clock(), event, subject, payload, proc.cwd, session.environ, proc.stderr)
 }
 
 // foldContext writes a meta user record every pfm transcript reader skips.
@@ -281,6 +279,7 @@ func loadClaudeHooks(configDir, cwd, settings string) (hookSet, statusLineSettin
 // exit code the caller interprets (2 blocks, the rest are noise).
 func (set hookSet) fire(
 	ctx context.Context,
+	clk clock.Clock,
 	event, subject string,
 	payload any,
 	cwd string,
@@ -303,7 +302,7 @@ func (set hookSet) fire(
 				continue
 			}
 			seen[handler.command] = true
-			answer, err := runHookCommand(ctx, handler.command, encoded, cwd, environ, entry.timeout)
+			answer, err := runHookCommand(ctx, clk, handler.command, encoded, cwd, environ, entry.timeout)
 			if err != nil {
 				failure := fmt.Errorf("%s hook %q: %w", event, handler.command, err)
 				if handler.async {
@@ -324,53 +323,6 @@ func (set hookSet) fire(
 		}
 	}
 	return answers, failures
-}
-
-// hookWaitDelay bounds output pipes held open after the hook exits or is killed.
-const hookWaitDelay = 250 * time.Millisecond
-
-func runHookCommand(
-	ctx context.Context,
-	command string,
-	payload []byte,
-	cwd string,
-	environ []string,
-	timeout time.Duration,
-) (hookAnswer, error) {
-	shell, err := deps.Resolve("sh")
-	if err != nil {
-		return hookAnswer{}, fmt.Errorf("sh not found: %w", err)
-	}
-	bounded, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(bounded, shell, "-c", command)
-	cmd.Dir = cwd
-	cmd.Env = environ
-	cmd.Stdin = bytes.NewReader(payload)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	cmd.WaitDelay = hookWaitDelay
-	err = cmd.Run()
-	answer := hookAnswer{stderr: strings.TrimSpace(stderr.String())}
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil:
-	case errors.Is(err, exec.ErrWaitDelay):
-	case errors.As(err, &exitErr):
-		answer.exitCode = exitErr.ExitCode()
-	default:
-		return hookAnswer{}, fmt.Errorf("run: %w", err)
-	}
-	if errors.Is(bounded.Err(), context.DeadlineExceeded) {
-		return hookAnswer{}, fmt.Errorf("timed out after %s", timeout)
-	}
-	if text := strings.TrimSpace(stdout.String()); text != "" && strings.HasPrefix(text, "{") {
-		if err := json.Unmarshal([]byte(text), &answer); err != nil {
-			return hookAnswer{}, fmt.Errorf("decode stdout %q: %w", text, err)
-		}
-	}
-	return answer, nil
 }
 
 // blocks reports whether a UserPromptSubmit answer stops the prompt, and why.

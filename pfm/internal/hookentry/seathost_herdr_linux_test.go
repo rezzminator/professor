@@ -166,10 +166,8 @@ func newSeatHostHerdr(t *testing.T, roots ...string) *fakeHerdr {
 						}
 						for _, key := range keys {
 							if key == "Enter" {
-								if err := os.WriteFile(
+								if err := releaseSeatFixture(
 									filepath.Join(roots[0], "engine-report-release"),
-									[]byte("ready"),
-									0o600,
 								); err != nil {
 									t.Error(err)
 								}

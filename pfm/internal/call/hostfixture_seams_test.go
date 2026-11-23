@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 )
 
@@ -25,7 +24,7 @@ func TestAcquireTargetLockUnderAnOddCharacteredRoot(t *testing.T) {
 	key := "/tmp/tmux-1000/cc-1-2-3:%5"
 
 	ctx := context.Background()
-	lock, err := acquireTargetLock(ctx, clock.Real, root, key, time.Second, time.Millisecond, time.Minute)
+	lock, err := acquireTargetLock(ctx, newSteppingClock(), root, key, time.Second, time.Millisecond, time.Minute)
 	if err != nil {
 		t.Fatalf("acquireTargetLock() under an odd-charactered root error = %v", err)
 	}

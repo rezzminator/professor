@@ -10,10 +10,13 @@ printf '{"event":"UserPromptSubmit"}\n{"event":"Stop"}\n{"event":"SubagentStop",
 expect_eq 'mark count' "$(lab_mark_count)" 3
 expect_eq 'finds a mark after a line' "$(lab_wait_mark Stop 1 1)" 2
 expect_eq 'filter on fields' "$(lab_wait_mark SubagentStop 0 1 '.agent_type=="lab-echo"')" 3
-start=$(date +%s)
+# the bound is counted in polls, 10 a second: a 1 s wait gives up after its 10th pause, however slow the host
+pauses=0
+sleep() { pauses=$((pauses + 1)); }
 lab_wait_mark Stop 2 1 >/dev/null; rc=$?
+unset -f sleep
 expect_eq 'absent mark times out' "$rc" 1
-expect_eq 'bounded wait' "$(( $(date +%s) - start <= 3 ))" 1
+expect_eq 'bounded wait' "$pauses" 10
 long=$(printf 'y%.0s' $(seq 1 2001))
 out=$(say "$long" 2>&1); rc=$?
 expect_eq 'say refuses over 2000 characters' "$rc $out" '2 ERROR say-too-long 2001>2000'

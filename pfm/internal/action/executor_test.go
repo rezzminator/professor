@@ -192,7 +192,8 @@ func TestOpenRecordsClaudeBeforePaneStarts(t *testing.T) {
 				newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
 				t.Cleanup(func() { newSessionID = previous })
 				executor, err := New(Dependencies{
-					Tmux: tmux, Processes: &fakeProcesses{}, Gate: fixedGate(false),
+					Clock: newLaunchStepClock(),
+					Tmux:  tmux, Processes: &fakeProcesses{}, Gate: fixedGate(false),
 					Runner: &captureRunner{}, Stderr: io.Discard,
 				})
 				if err != nil {
@@ -226,6 +227,7 @@ func TestOpenStartsPaneWhenLaunchRecordFails(t *testing.T) {
 	var stderr bytes.Buffer
 	executor, err := New(
 		Dependencies{
+			Clock:     newLaunchStepClock(),
 			Tmux:      tmux,
 			Processes: &fakeProcesses{},
 			Gate:      fixedGate(false),
@@ -346,6 +348,7 @@ func TestSoloReapsPaneAloneServerAndStrayWithKeepTTY(t *testing.T) {
 	}}
 	var stderr bytes.Buffer
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: processes,
 		Gate:      fixedGate(false),
@@ -402,6 +405,7 @@ func TestSoloSkipsStraySweepWhenKeepSocketProbeFails(t *testing.T) {
 		PID: 42, Argv: []string{"claude", "--resume", id}, TTY: "pts/1",
 	}}}
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: processes,
 		Gate:      fixedGate(false),
@@ -426,6 +430,7 @@ func TestSoloRecordsATransition(t *testing.T) {
 	jailAction(t)
 	ctx, recorder := obs.Test(t)
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      &fakeActionTmux{alive: map[string]bool{}},
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -483,6 +488,7 @@ func TestOpenEmptyKeepSetIsDestructiveOnlyForResumeClaude(t *testing.T) {
 				{PID: 43, Argv: []string{"claude", "--resume", "another-id"}, TTY: "pts/2"},
 			}}
 			executor, err := New(Dependencies{
+				Clock:     newLaunchStepClock(),
 				Tmux:      &fakeActionTmux{alive: map[string]bool{}},
 				Processes: processes,
 				Gate:      fixedGate(false),
@@ -528,6 +534,7 @@ func TestOpenRecordsATransition(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	id := "88888888-8888-4888-8888-888888888888"
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      &fakeActionTmux{alive: map[string]bool{}},
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -585,6 +592,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 	runner := &captureRunner{}
 	var stderr bytes.Buffer
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(true),
@@ -696,6 +704,7 @@ func TestExecutorCodexWindowVerificationAndDeadFallback(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -758,6 +767,7 @@ func TestVerifiedCodexWindowLogsAListPanesFailure(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	tmux := &fakeActionTmux{alive: map[string]bool{"cx-unreadable": false}}
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -791,6 +801,7 @@ func TestSelfSwitchLogsAListPanesFailure(t *testing.T) {
 	tmux := &fakeActionTmux{alive: map[string]bool{"cc-unreadable": false}}
 	var stderr bytes.Buffer
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -831,6 +842,7 @@ func TestOpenDeadLiveSplitWithNoResumableIDHardErrors(t *testing.T) {
 	tmux := &fakeActionTmux{alive: map[string]bool{}}
 	var stderr bytes.Buffer
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -927,7 +939,8 @@ func TestOpenCodexRequiresLogin(t *testing.T) {
 			}
 			heals := 0
 			executor, err := New(Dependencies{
-				Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
+				Clock: newLaunchStepClock(),
+				Tmux:  tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
 				Heal: func(context.Context, string) string { heals++; return "healed" },
 			})
 			if err != nil {

@@ -59,16 +59,18 @@ func TestRunQueuesBehindAnOverlappingPaneReload(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
-	clk := &releasePaneLockClock{Clock: clock.Real, lock: lock}
+	fake := clock.NewFake(time.Now())
+	clk := &releasePaneLockClock{Clock: fake, lock: lock}
 	clk.beforeUnlock = func() error {
+		fake.Advance(time.Second) // the overlapping reload writes its handoff after this one entered
 		return writeHandoff(lock, handoffRecord{
 			Engine: pfmengine.Claude, SessionID: id, Account: 2, Cache1H: true,
-			CWD: cwd, WrittenAt: clock.Real.Now(),
+			CWD: cwd, WrittenAt: clk.Now(),
 		})
 	}
 	tmux := &queuedThenTmux{}
 	var stderr strings.Builder
-	result, err := Run(
+	result, err := runOnFake(t,
 		context.Background(),
 		Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
@@ -208,7 +210,7 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 				t.Setenv(paths.EnvCacheDB, "")
 			}
 			tmux := &fakeReloadTmux{}
-			result, err := Run(
+			result, err := runOnFake(t,
 				context.Background(),
 				Request{
 					Engine:     pfmengine.Claude,

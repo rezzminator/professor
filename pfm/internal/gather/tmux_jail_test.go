@@ -107,7 +107,7 @@ func (jail *tmuxJail) startServer(
 		session,
 		"-n",
 		window,
-		"sleep 120",
+		"exec tail -f /dev/null",
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed tmux server %q: %v: %s", socket, err, output)

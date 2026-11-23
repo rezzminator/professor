@@ -682,16 +682,19 @@ func TestEvaluateAgesTheCacheByFetchedAtNotFileMtime(t *testing.T) {
 				}
 			}
 			// WriteCacheRecord leaves mtime at "now" — exactly the state a
-			// backoff-only write produces.
+			// backoff-only write produces; the test pins it to its own now.
 			if err := WriteCacheRecord(cachePath, record); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(cachePath, now, now); err != nil {
 				t.Fatal(err)
 			}
 			info, err := os.Stat(cachePath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if age := time.Since(info.ModTime()); age > time.Minute {
-				t.Fatalf("fixture mtime age=%s, want a just-written file", age)
+			if !info.ModTime().Equal(now) {
+				t.Fatalf("fixture mtime = %s, want the just-written stamp %s", info.ModTime(), now)
 			}
 			hits := 0
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func newTestSchedule(session string, created time.Time, interval time.Duration) Schedule {
@@ -179,7 +181,9 @@ func TestScheduleOperationsReportADegradedStore(t *testing.T) {
 // left keeps its rows under the schedules name, with the schedules indexes, at
 // the version a version-3 pfm still opens.
 func TestSharedOpenRenamesARemindersTableToSchedules(t *testing.T) {
-	t.Parallel()
+	// The backup before a migration bounds its WAL checkpoint on the process
+	// clock: on a fake one that bound arms no real timer.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	path := filepath.Join(t.TempDir(), "pfm.db")
 	ctx := context.Background()
 	seedSharedState(
@@ -274,7 +278,9 @@ func TestOneTimeScheduleFiresOnceThenLeavesWhenSeen(t *testing.T) {
 // TestSharedOpenAddsScheduleOnceToARenamedFile: a file holding schedules
 // without the once column gains it at open, its rows recurring.
 func TestSharedOpenAddsScheduleOnceToARenamedFile(t *testing.T) {
-	t.Parallel()
+	// The backup before a migration bounds its WAL checkpoint on the process
+	// clock: on a fake one that bound arms no real timer.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	path := filepath.Join(t.TempDir(), "pfm.db")
 	ctx := context.Background()
 	seedSharedState(t, path, v3Schema+hiddenRevisionDDL+";"+schedulesRenameDDL+`

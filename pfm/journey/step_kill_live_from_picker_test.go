@@ -5,7 +5,6 @@ package journey
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -23,19 +22,19 @@ func killLiveFromPicker(c *harness.Ctx, s State) State {
 	term.Press(harness.Ctrl('b'), harness.Key("c"))
 	term.WaitFor("new tab")
 	term.Press(harness.Enter)
-	term.WaitFor("New chat", 20*time.Second)
+	term.WaitFor("New chat")
 	term.Type(s.Name)
-	term.WaitScreen("the picker narrowed to "+s.Name, stepBound, func(screen string) bool {
+	term.WaitScreen("the picker narrowed to "+s.Name, func(screen string) bool {
 		return strings.Contains(screen, "find › "+s.Name)
 	})
 	// The find also lists other chats whose text holds the name's letters in order, above it or below.
 	pickerSelect(term, "live chat "+s.Name, func(cells string) bool { return rowIs(cells, "● ", s.Name) })
 	term.Press(harness.Ctrl('x'))
-	c.Poll("the engine "+fmt.Sprint(s.Chat.Engine)+" of the killed chat gone", stepBound, func() (bool, string) {
+	c.Poll("the engine "+fmt.Sprint(s.Chat.Engine)+" of the killed chat gone", func() (bool, string) {
 		_, alive := processes(c)[s.Chat.Engine]
 		return !alive, fmt.Sprintf("engine %d alive", s.Chat.Engine)
 	})
-	c.Poll(s.Name+" killed in state and gone from pfm chat ls --all", stepBound, func() (bool, string) {
+	c.Poll(s.Name+" killed in state and gone from pfm chat ls --all", func() (bool, string) {
 		out := read(c, "pfm", "chat", "ls", "--all")
 		hidden := strings.TrimSpace(
 			stateSQL(c, "select count(*) from hidden where uuid = '"+s.Chat.Session+"'"),
@@ -46,7 +45,7 @@ func killLiveFromPicker(c *harness.Ctx, s State) State {
 	// header names the hidden chat, and neither the killed row nor a shell prompt is drawn. Another
 	// branch's live chat may stay listed: the find also matches a row whose name holds the query's
 	// letters in order (a prompt naming a path under the run's scratch directory does).
-	term.WaitScreen("the picker drawn without the killed row", stepBound, func(screen string) bool {
+	term.WaitScreen("the picker drawn without the killed row", func(screen string) bool {
 		return strings.Contains(screen, "find › "+s.Name) && strings.Contains(screen, "hidden — "+s.Name) &&
 			!pickerDrawsRow(screen, s.Name) && !strings.Contains(screen, prompt)
 	})

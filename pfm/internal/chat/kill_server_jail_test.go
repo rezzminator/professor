@@ -35,7 +35,7 @@ func TestEndNowEndsATmuxChatAndConfirmsItsSocketGone(t *testing.T) {
 	}
 	socket := "cc-endnow-1-1"
 	socketPath := filepath.Join(values.TmuxDir, socket)
-	start := exec.Command("tmux", "-S", socketPath, "-f", "/dev/null", "new-session", "-d", "-s", "bg", "sleep", "120")
+	start := exec.Command("tmux", "-S", socketPath, "-f", "/dev/null", "new-session", "-d", "-s", "bg", "cat")
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)
 	}

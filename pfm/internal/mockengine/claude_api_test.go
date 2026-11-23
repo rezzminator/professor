@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // apiCatch is a RoundTripper standing in for a Messages endpoint: it records each request's URL and
@@ -157,6 +159,41 @@ func TestClaudeHeadlessAsksItsBaseURL(t *testing.T) {
 				t.Fatalf("instructions = %q, want %q then an 8-hex bucket", got, instructions)
 			}
 		})
+	}
+}
+
+// apiHang is a Messages endpoint that never answers: its round trip ends only with the request's context.
+type apiHang struct{}
+
+func (apiHang) RoundTrip(request *http.Request) (*http.Response, error) {
+	<-request.Context().Done()
+	return nil, request.Context().Err()
+}
+
+// TestClaudeHeadlessAPITimeoutPassesOnTheMocksClock: an endpoint that never answers is Claude's connection
+// error once claudeAPITimeout passes on the mock's clock, and not before.
+func TestClaudeHeadlessAPITimeoutPassesOnTheMocksClock(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.write(Scenario{SessionID: fixtureSession})
+	previous := claudeAPITransport
+	claudeAPITransport = apiHang{}
+	t.Cleanup(func() { claudeAPITransport = previous })
+	env := fix.env(map[string]string{
+		envClaudeBaseURL: "http://hung.test", envClaudeAPIKey: "k", envClaudeNoRemoteFlags: "",
+	})
+	var stdout, stderr bytes.Buffer
+	exited := make(chan int, 1)
+	go func() {
+		exited <- Main(
+			context.Background(), "claude", []string{"-p", "x"}, strings.NewReader(""), &stdout, &stderr, env,
+		)
+	}()
+	fix.next(claudeAPITimeout)
+	code, _ := testwait.Receive(t, "the headless claude to exit once its API timeout passed", exited)
+	if code != 1 || stdout.String() != claudeConnectionError+"\n" {
+		t.Fatalf("exit %d stdout %q stderr %q; want exit 1 stdout %q", code, stdout.String(), stderr.String(),
+			claudeConnectionError+"\n")
 	}
 }
 

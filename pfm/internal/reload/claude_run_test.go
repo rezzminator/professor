@@ -74,7 +74,7 @@ func (tmux *claimedReloadTmux) ListPanes(ctx context.Context, socket string) ([]
 func TestReloadClaimsAccountBeforeRespawnAndSessionMarkers(t *testing.T) {
 	account := t.TempDir()
 	tmux := &claimedReloadTmux{t: t, account: account}
-	_, err := Run(context.Background(), Request{
+	_, err := runOnFake(t, context.Background(), Request{
 		Engine:     pfmengine.Claude,
 		SocketPath: "/tmp/reload-claim",
 		Pane:       "%7",
@@ -181,7 +181,7 @@ func TestRunTellsTheStarterWhenTheReloadedChatLosesTheFleetPrompt(t *testing.T) 
 			var stderr bytes.Buffer
 			enter := &enterProbe{tmux: tmux, data: strings.NewReader("\n")}
 			t.Cleanup(launchnotice.Replace(enter, test.terminal))
-			_, err := Run(
+			_, err := runOnFake(t,
 				context.Background(),
 				Request{
 					Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-reload", Pane: "%7",

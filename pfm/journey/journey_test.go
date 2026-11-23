@@ -8,18 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
-
-// budget bounds the whole tree, first step start to last step end. Its rule: the slowest of three
-// consecutive green local trees (94.4 s, at load 8) times 3.5, CI's Linux leg against local time
-// in phase 1, times 1.5 headroom, rounded up to the next 100 s. Remeasure when the tree grows.
-const budget = 500 * time.Second
 
 // ownerVars is everything a fresh login of the owner has; no multiplexer, engine or test variable.
 // GOCOVERDIR is the owner's too: prepare.sh exports it in every login, so each pfm writes its counters.
@@ -36,17 +30,28 @@ func TestMain(m *testing.M) {
 	}
 	env := paths.OSEnv{}
 	artifacts := env.Get("JOURNEY_ARTIFACTS")
+	if artifacts != "" {
+		cpuTable = filepath.Join(artifacts, "cpu.tsv")
+		if err := os.MkdirAll(artifacts, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "journey: cpu table: FAIL create %s: %v\n", artifacts, err)
+			os.Exit(2)
+		}
+		if err := os.WriteFile(cpuTable, []byte(cpuTableHeader), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "journey: cpu table: FAIL %v\n", err)
+			os.Exit(2)
+		}
+	}
 	meter, err := startMeter()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "journey: profile: FAIL %v\n", err)
 		os.Exit(2)
 	}
-	started := clock.Real.Now()
+	elapsed := testwait.Stopwatch() // recorded in summary.md's wall line, never judged here
 	code := m.Run()
 	// The profile, green run or red: steps.tsv and waits.tsv from the walk, the coverage, summary.md.
 	if artifacts == "" {
 		fmt.Println("journey: profile: none written: JOURNEY_ARTIFACTS is unset")
-	} else if err := profile(artifacts, env.Get("GOCOVERDIR"), clock.Real.Now().Sub(started), meter); err != nil {
+	} else if err := profile(artifacts, env.Get("GOCOVERDIR"), elapsed(), meter); err != nil {
 		fmt.Fprintf(os.Stderr, "journey: profile: FAIL %v\n", err)
 		code = max(code, 1)
 	} else {
@@ -92,12 +97,14 @@ func TestJourney(t *testing.T) {
 	// The install ping switched off, as prepare.sh exports it in every login and service: a direct read
 	// (c.Read) runs no login, and its pfm would otherwise send the daily ping (pfm/internal/installping).
 	vars = append(vars, "PFM_INSTALL_PING_OFFLINE=1")
-	treeStarted = clock.Real.Now()
+	treeElapsed = testwait.Stopwatch()
+	// Once the whole tree has run and closed its terminals: every pfm process left writes its coverage
+	// counters as it exits, before TestMain merges them.
+	t.Cleanup(func() { windDown(t) })
 	harness.Run(t, tree(), State{Home: home, Release: "v" + release}, harness.Hooks{
 		Env:       vars,
 		Shell:     []string{shell, "-l", "-i"},
 		Artifacts: env.Get("JOURNEY_ARTIFACTS"),
-		Budget:    budget,
 		AfterStep: logGate,
 	})
 }

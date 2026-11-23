@@ -5,6 +5,7 @@ package e2e
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"debug/buildinfo"
 	"encoding/json"
 	"errors"
@@ -21,7 +22,6 @@ import (
 	"sync"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rogpeppe/go-internal/testscript"
 
@@ -29,6 +29,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mockengine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -291,14 +292,15 @@ func TestScriptBinaryBuildsRunConcurrently(t *testing.T) {
 	t.Parallel()
 	requireE2EFence(t)
 	started := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+	ctx := testwait.Context(t)
 	build := func(own, other int) func() error {
 		return func() error {
 			close(started[own])
 			select {
 			case <-started[other]:
 				return nil
-			case <-time.After(10 * time.Second):
-				return fmt.Errorf("build %d waited 10s for build %d to start", own, other)
+			case <-ctx.Done():
+				return fmt.Errorf("build %d waited for build %d to start: %w", own, other, context.Cause(ctx))
 			}
 		}
 	}
@@ -545,36 +547,33 @@ func runSleepUntilCommand() {
 		fmt.Fprintln(os.Stderr, "usage: sleep-until <socket> <target> <pattern>")
 		os.Exit(2)
 	}
-	deadline := time.Now().Add(10 * time.Second)
 	var last []byte
 	var lastErr error
-	for time.Now().Before(deadline) {
+	if err := testwait.UntilErr("the pane to show "+strconv.Quote(os.Args[3]), func() (bool, string) {
 		command := exec.Command(
 			os.Getenv(e2eTmuxBinaryEnv), "-L", os.Args[1], "capture-pane", "-p", "-J", "-S", "-", "-t", os.Args[2],
 		)
 		last, lastErr = command.CombinedOutput()
-		if lastErr == nil && strings.Contains(string(last), os.Args[3]) {
-			_, _ = os.Stdout.Write(last)
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
+		return lastErr == nil && strings.Contains(string(last), os.Args[3]),
+			fmt.Sprintf("error=%v capture=%q", lastErr, last)
+	}); err == nil {
+		_, _ = os.Stdout.Write(last)
+		return
 	}
 	fmt.Fprintf(os.Stderr, "sleep-until: timeout pattern=%q error=%v capture=%q\n", os.Args[3], lastErr, last)
 	os.Exit(1)
 }
 
 // runUntilGoneCommand waits for a scratch tmux server to have no pane left —
-// its last pane closed, so the server exited. The bound sits between a
-// graceful /exit (a few seconds) and the kill-exit finisher's fallback
-// kill-pane (its whole grace window): a pane only the fallback ends is a red.
+// its last pane closed, so the server exited. It waits on the condition alone,
+// bounded by the hung-only limit: how fast the pane closed is never judged.
 func runUntilGoneCommand() {
 	if len(os.Args) != 2 {
 		fmt.Fprintln(os.Stderr, "usage: gone <socket>")
 		os.Exit(2)
 	}
-	deadline := time.Now().Add(15 * time.Second)
 	var last []byte
-	for time.Now().Before(deadline) {
+	if err := testwait.UntilErr("the scratch tmux server to have no pane left", func() (bool, string) {
 		command := exec.Command(
 			os.Getenv(e2eTmuxBinaryEnv), "-L", os.Args[1], "list-panes", "-a", "-F", "#{pane_id}",
 		)
@@ -582,12 +581,11 @@ func runUntilGoneCommand() {
 		last = output
 		if err != nil && (strings.Contains(string(output), "no server running") ||
 			strings.Contains(string(output), "error connecting")) {
-			return
+			return true, ""
 		}
-		if err == nil && strings.TrimSpace(string(output)) == "" {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
+		return err == nil && strings.TrimSpace(string(output)) == "", fmt.Sprintf("panes=%q err=%v", output, err)
+	}); err == nil {
+		return
 	}
 	screen, err := exec.Command(
 		os.Getenv(e2eTmuxBinaryEnv), "-L", os.Args[1], "capture-pane", "-p", "-J",
@@ -701,16 +699,15 @@ func runLSLacksCommand() {
 		fmt.Fprintln(os.Stderr, "usage: ls-lacks <name>")
 		os.Exit(2)
 	}
-	deadline := time.Now().Add(10 * time.Second)
 	var last []byte
 	var lastErr error
-	for time.Now().Before(deadline) {
+	if err := testwait.UntilErr("pfm chat ls --all to lack "+strconv.Quote(os.Args[1]), func() (bool, string) {
 		command := exec.Command(os.Getenv(e2eScriptBinaryEnv), "chat", "ls", "--all")
 		last, lastErr = command.Output()
-		if lastErr == nil && !strings.Contains(string(last), os.Args[1]) {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
+		return lastErr == nil && !strings.Contains(string(last), os.Args[1]),
+			fmt.Sprintf("error=%v stdout=%q", lastErr, last)
+	}); err == nil {
+		return
 	}
 	fmt.Fprintf(os.Stderr, "ls-lacks: timeout name=%q error=%v stdout=%q\n", os.Args[1], lastErr, last)
 	os.Exit(1)

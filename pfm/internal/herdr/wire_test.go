@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestReportLineIsExactlyHerdrsRequest(t *testing.T) {
@@ -85,6 +87,15 @@ func TestMessageIsCappedAtTwoHundredFortyRunes(t *testing.T) {
 		) != "{\"id\":\"pfm-1\",\"method\":\"pane.report_agent\",\"params\":{\"pane_id\":\"p\",\"source\":\"pfm\",\"agent\":\"a\",\"state\":\"blocked\",\"message\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé…\",\"seq\":1}}" {
 		t.Fatalf("Line = %s, %v, want 239 runes and an ellipsis", line, err)
 	}
+}
+
+// shiftWall moves the wall clock every exchange's socket deadline is built
+// from by offset until the test ends, so a default deadline is already past,
+// or far off, for the kernel. A test that shifts it never runs in parallel.
+func shiftWall(t *testing.T, offset time.Duration) {
+	t.Helper()
+	wallOffset.Store(int64(offset))
+	t.Cleanup(func() { wallOffset.Store(0) })
 }
 
 func serve(t *testing.T, respond func(request string) string) string {
@@ -249,16 +260,22 @@ func rawServe(t *testing.T, handle func(net.Conn)) string {
 // the context's deadline, and a response that never ends a line stops at the
 // read cap, not at the I/O deadline.
 func TestSendIsBoundedByItsContextAndAResponseCap(t *testing.T) {
+	// The I/O deadline is an hour off: only the context, or the read cap, can
+	// end an exchange.
+	shiftWall(t, time.Hour)
 	silent := rawServe(t, func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) })
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	if err := Send(ctx, silent, []byte("x")); err == nil || time.Since(started) > 500*time.Millisecond {
-		t.Errorf(
-			"Send to a silent Herdr = %v after %s, want an error at the 50ms context deadline",
-			err,
-			time.Since(started),
-		)
+	ctx, expire := testwait.Deadline(t)
+	sent := make(chan error, 1)
+	go func() { sent <- Send(ctx, silent, []byte("x")) }()
+	testwait.Until(t, "Send to wait on the silent Herdr's answer", func() (bool, string) {
+		return testwait.Blocked("bufio.(*Reader).ReadBytes", "herdr.callOneWithin")
+	})
+	expire()
+	if err, _ := testwait.Receive(t, "Send to end at its context's deadline", sent); !errors.Is(
+		err,
+		context.DeadlineExceeded,
+	) {
+		t.Errorf("Send to a silent Herdr = %v, want an error at the context deadline", err)
 	}
 	endless := rawServe(t, func(conn net.Conn) {
 		chunk := []byte(strings.Repeat("x", 4096))
@@ -268,7 +285,7 @@ func TestSendIsBoundedByItsContextAndAResponseCap(t *testing.T) {
 			}
 		}
 	})
-	err := Send(context.Background(), endless, []byte("x"))
+	err := Send(testwait.Context(t), endless, []byte("x"))
 	if err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Errorf("Send with an endless response = %v, want the read cap to end it before the I/O deadline", err)
 	}

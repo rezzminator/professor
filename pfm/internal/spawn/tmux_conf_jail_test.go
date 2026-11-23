@@ -53,7 +53,7 @@ func TestChatServerLoadsTheConfigItIsGiven(t *testing.T) {
 		CWD:     root,
 		Width:   180,
 		Height:  45,
-		Run:     "sleep 120",
+		Run:     "tail -f /dev/null",
 	}); err != nil {
 		t.Fatalf("create chat server: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestChatServerCreatesMissingSocketDirectoryOnFreshMachine(t *testing.T) {
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Codex", CWD: root,
-		Width: 180, Height: 45, Run: "sleep 120",
+		Width: 180, Height: 45, Run: "tail -f /dev/null",
 	}); err != nil {
 		t.Fatalf("fresh-machine chat launch: %v", err)
 	}

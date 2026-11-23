@@ -15,6 +15,7 @@
 //   - runner_output.go: StartOutput, the output and exit a FakeRunner child plays at Start.
 //   - runner_group_linux.go, runner_group_darwin.go: GroupGone, when a refused group signal means the group is gone.
 //   - probe.go: the version and self-doctor probes and their results.
+//   - probe_bound.go: one bounded probe call, its bound on the probe clock and how it ended.
 //   - probe_home.go: the throwaway engine home a probe runs an engine in.
 //   - commit_gate.go: the commit section a deadline may not interrupt once it starts.
 //   - environment.go: the child environments: one key set once, git's repository variables dropped.

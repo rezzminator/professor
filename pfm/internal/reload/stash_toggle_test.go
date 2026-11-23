@@ -9,6 +9,7 @@ import (
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // stashToggleTmux models Claude Code's composer the way 2.1.283 actually
@@ -93,7 +94,7 @@ func runStashToggle(t *testing.T, tmux *stashToggleTmux) error {
 	fakeClock := clock.NewFake(time.Unix(0, 0))
 	sidDir := t.TempDir()
 	var err error
-	driveFakeClock(t, fakeClock, func() {
+	testwait.Drive(t, "reload to run through its waits", fakeClock, func() {
 		_, err = Run(
 			context.Background(),
 			reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-stash-toggle"),

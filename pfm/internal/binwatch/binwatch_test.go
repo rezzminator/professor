@@ -3,6 +3,7 @@ package binwatch
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // lockedBuffer is a stderr the watcher goroutine and the test can share.
@@ -39,20 +41,67 @@ func (locked *lockedBuffer) String() string {
 
 const watchTick = 10 * time.Millisecond
 
+// epoch is where every fake clock of this file starts.
+var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// handClock is a clock whose watch ticker the test fires by hand. The ticker's
+// channel is unbuffered, so a send returns only once the watcher took it: when
+// the next send returns, the check that tick started has finished.
+type handClock struct {
+	*clock.Fake
+	ticks chan time.Time
+}
+
+func newHandClock() *handClock {
+	return &handClock{Fake: clock.NewFake(epoch), ticks: make(chan time.Time)}
+}
+
+func (hand *handClock) NewTicker(time.Duration) clock.Ticker { return handTicker{hand.ticks} }
+
+type handTicker struct{ ticks chan time.Time }
+
+func (ticker handTicker) C() <-chan time.Time { return ticker.ticks }
+func (handTicker) Stop()                      {}
+
+// tick fires one watch tick and returns once the watcher took it.
+func (hand *handClock) tick(t *testing.T) {
+	t.Helper()
+	select {
+	case hand.ticks <- epoch:
+	case <-testwait.Context(t).Done():
+		t.Fatal("the watcher never took a tick")
+	}
+}
+
+// tickUntil fires ticks until replaced closes, the watcher's own report.
+func (hand *handClock) tickUntil(t *testing.T, condition string, replaced <-chan struct{}) {
+	t.Helper()
+	for {
+		select {
+		case <-replaced:
+			return
+		case hand.ticks <- epoch:
+		case <-testwait.Context(t).Done():
+			t.Fatalf("%s: never reported", condition)
+		}
+	}
+}
+
+// open reports whether replaced is still open.
+func open(replaced <-chan struct{}) bool {
+	select {
+	case <-replaced:
+		return false
+	default:
+		return true
+	}
+}
+
 // writeFakeBuild writes a build the watcher only stats: nothing starts it.
 func writeFakeBuild(t *testing.T, path, body string) {
 	t.Helper()
 	if err := testjail.WriteExecutableNeverRun(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func waitReplaced(replaced <-chan struct{}, within time.Duration) bool {
-	select {
-	case <-replaced:
-		return true
-	case <-time.After(within):
-		return false
 	}
 }
 
@@ -66,11 +115,14 @@ func TestWatchExecutableSeesAnAtomicInstall(t *testing.T) {
 	writeFakeBuild(t, binary, "old build")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	replaced, err := watch(ctx, binary, watchTick, &bytes.Buffer{}, clock.Real)
+	hand := newHandClock()
+	replaced, err := watch(ctx, binary, watchTick, &bytes.Buffer{}, hand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if waitReplaced(replaced, 20*watchTick) {
+	hand.tick(t)
+	hand.tick(t) // the first check has finished
+	if !open(replaced) {
 		t.Fatal("watcher fired with the binary untouched")
 	}
 	staged := filepath.Join(directory, "pfm.new")
@@ -78,9 +130,7 @@ func TestWatchExecutableSeesAnAtomicInstall(t *testing.T) {
 	if err := os.Rename(staged, binary); err != nil {
 		t.Fatal(err)
 	}
-	if !waitReplaced(replaced, 2*time.Second) {
-		t.Fatal("watcher never saw the binary renamed over by a new build")
-	}
+	hand.tickUntil(t, "watcher to see the binary renamed over by a new build", replaced)
 }
 
 // TestWatchExecutableSeesACopyOverTheSamePath covers the install that keeps
@@ -90,14 +140,13 @@ func TestWatchExecutableSeesACopyOverTheSamePath(t *testing.T) {
 	writeFakeBuild(t, binary, "old build")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	replaced, err := watch(ctx, binary, watchTick, &bytes.Buffer{}, clock.Real)
+	hand := newHandClock()
+	replaced, err := watch(ctx, binary, watchTick, &bytes.Buffer{}, hand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeFakeBuild(t, binary, "a longer new build")
-	if !waitReplaced(replaced, 2*time.Second) {
-		t.Fatal("watcher never saw the binary copied over in place")
-	}
+	hand.tickUntil(t, "watcher to see the binary copied over in place", replaced)
 }
 
 // TestWatchExecutableNeverRestartsOntoAMissingBinary: a path that vanishes
@@ -108,18 +157,21 @@ func TestWatchExecutableNeverRestartsOntoAMissingBinary(t *testing.T) {
 	writeFakeBuild(t, binary, "build")
 	stderr := &lockedBuffer{}
 	ctx, cancel := context.WithCancel(context.Background())
-	replaced, err := watch(ctx, binary, watchTick, stderr, clock.Real)
+	hand := newHandClock()
+	replaced, err := watch(ctx, binary, watchTick, stderr, hand)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(binary); err != nil {
 		t.Fatal(err)
 	}
-	if waitReplaced(replaced, 20*watchTick) {
+	for range 4 {
+		hand.tick(t) // the last send returns once the third check has finished
+	}
+	if !open(replaced) {
 		t.Fatal("watcher fired on a missing binary")
 	}
 	cancel()
-	time.Sleep(2 * watchTick)
 	if got, want := strings.ReplaceAll(
 		stderr.String(),
 		binary,
@@ -135,7 +187,7 @@ func TestWatchExecutableRefusesAnUnreadableStart(t *testing.T) {
 		filepath.Join(t.TempDir(), "absent"),
 		watchTick,
 		&bytes.Buffer{},
-		clock.Real,
+		clock.NewFake(epoch),
 	); err == nil {
 		t.Fatal("watching an absent executable returned no error")
 	}
@@ -152,7 +204,11 @@ func startServe(t *testing.T, replaced <-chan struct{}) (*http.Server, string, <
 	})}
 	var stderr bytes.Buffer
 	code := make(chan int, 1)
-	go func() { code <- serveUntilReplaced(server, listener, replaced, &stderr, restartDefaults) }()
+	// The default bounds, on a fake clock: no request is in flight at a
+	// replacement, so the drain ends at once and arms no real timer.
+	bounds := restartDefaults
+	bounds.clock = clock.NewFake(epoch)
+	go func() { code <- serveUntilReplaced(server, listener, replaced, &stderr, bounds) }()
 	return server, "http://" + listener.Addr().String(), code, &stderr
 }
 
@@ -170,13 +226,9 @@ func TestServeUntilReplacedExitsForTheSupervisor(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(replaced)
-	select {
-	case got := <-code:
-		if got != ExitReplaced {
-			t.Fatalf("exit code = %d, want %d", got, ExitReplaced)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("daemon kept serving after its binary was replaced")
+	got, _ := testwait.Receive(t, "the daemon to exit after its binary was replaced", code)
+	if got != ExitReplaced {
+		t.Fatalf("exit code = %d, want %d", got, ExitReplaced)
 	}
 	if !strings.Contains(stderr.String(), "own executable was replaced") {
 		t.Fatalf("stderr = %q, want the restart reason", stderr.String())
@@ -186,26 +238,22 @@ func TestServeUntilReplacedExitsForTheSupervisor(t *testing.T) {
 // TestServeUntilReplacedCloseIsAPlainStop: an ordinary server close is not a
 // replacement and must not claim one.
 func TestServeUntilReplacedCloseIsAPlainStop(t *testing.T) {
-	server, _, code, stderr := startServe(t, nil)
-	time.Sleep(20 * time.Millisecond)
+	server, endpoint, code, stderr := startServe(t, nil)
+	response, err := http.Get(endpoint)
+	if err != nil {
+		t.Fatalf("daemon not serving before the close: %v", err)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := server.Close(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case got := <-code:
-		if got != 0 {
-			t.Fatalf("plain close exit code = %d, want 0 (stderr %q)", got, stderr.String())
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("serve did not return after Close")
+	got, _ := testwait.Receive(t, "serve to return after Close", code)
+	if got != 0 {
+		t.Fatalf("plain close exit code = %d, want 0 (stderr %q)", got, stderr.String())
 	}
 }
-
-// restartExitBound is how soon after a replacement the daemon must be gone
-// when nothing but open streams and a short call hold it: the port refuses
-// every reconnect until the supervisor relaunches, so the restart gap is this
-// exit plus the relaunch, never the full shutdown grace.
-const restartExitBound = 2 * time.Second
 
 // startRestartServe runs serve over handler with short restart bounds and
 // returns its endpoint and exit code channel.
@@ -226,19 +274,6 @@ func startRestartServe(
 	return "http://" + listener.Addr().String(), code, stderr
 }
 
-// awaitExit returns serve's exit code and how long after since it arrived,
-// failing when it never arrives within limit.
-func awaitExit(t *testing.T, code <-chan int, since time.Time, limit time.Duration) (int, time.Duration) {
-	t.Helper()
-	select {
-	case got := <-code:
-		return got, time.Since(since)
-	case <-time.After(limit):
-		t.Fatalf("serve still running %v after the replacement", limit)
-		return 0, 0
-	}
-}
-
 type callOutcome struct {
 	result *mcp.CallToolResult
 	err    error
@@ -248,8 +283,8 @@ type callOutcome struct {
 // ~40 s restart gap: a connected MCP client's standalone GET stream never ends
 // on its own, so the restart's Shutdown ran out its whole grace while the
 // closed listener refused every reconnect. The restart must still answer a
-// tools/call already in flight, then end that stream and exit within
-// restartExitBound. The client keeps its default reconnect retries, as every
+// tools/call already in flight, then end that stream and exit with its
+// drain and shutdown bounds unspent. The client keeps its default reconnect retries, as every
 // real MCP client does.
 func TestServeRestartEndsStreamsAndFinishesInFlightCalls(t *testing.T) {
 	entered := make(chan struct{})
@@ -273,11 +308,15 @@ func TestServeRestartEndsStreamsAndFinishesInFlightCalls(t *testing.T) {
 		}
 		sdkHandler.ServeHTTP(writer, request)
 	})
-	bounds := restartBounds{drain: 4 * time.Second, shutdown: 6 * time.Second}
+	// The drain runs on a fake clock the test steps one re-count at a time; the
+	// bounds are far past anything a step reaches, so only the streams ending
+	// can finish the restart.
+	fake := clock.NewFake(epoch)
+	bounds := restartBounds{drain: time.Hour, shutdown: time.Hour, clock: fake}
 	replaced := make(chan struct{})
 	endpoint, code, stderr := startRestartServe(t, handler, replaced, bounds)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: endpoint}, nil)
@@ -289,52 +328,48 @@ func TestServeRestartEndsStreamsAndFinishesInFlightCalls(t *testing.T) {
 			t.Logf("close session after the daemon exited: %v", err)
 		}
 	}()
-	for deadline := time.Now().Add(5 * time.Second); openStreams.Load() == 0; {
-		if time.Now().After(deadline) {
-			t.Fatal("the client never opened its standalone GET stream")
-		}
-		time.Sleep(watchTick)
-	}
+	testwait.Until(t, "the client to open its standalone GET stream", func() (bool, string) {
+		open := openStreams.Load()
+		return open > 0, fmt.Sprintf("open streams: %d", open)
+	})
 	outcome := make(chan callOutcome, 1)
 	go func() {
 		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "slow"})
 		outcome <- callOutcome{result: result, err: err}
 	}()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the tools/call never reached the tool")
-	}
+	testwait.Receive(t, "the tools/call to reach the tool", entered)
 
-	start := time.Now()
 	close(replaced)
-	time.Sleep(200 * time.Millisecond) // the call is still running when the restart begins
+	testwait.Until(t, "the restart to park on its drain with the call still running", func() (bool, string) {
+		return fake.Pending() == 2, fake.String()
+	})
 	close(release)
 
-	got, elapsed := awaitExit(t, code, start, bounds.shutdown+5*time.Second)
-	t.Logf("restart exit %v after the replacement", elapsed)
+	var got int
+	testwait.Until(t, "serve to exit once the call finished and the streams ended", func() (bool, string) {
+		select {
+		case got = <-code:
+			return true, ""
+		default:
+		}
+		fake.Advance(drainPoll) // one re-count of the requests still in flight
+		return false, fake.String()
+	})
 	if got != ExitReplaced {
 		t.Fatalf("exit code = %d, want %d (stderr %q)", got, ExitReplaced, stderr.String())
 	}
-	if elapsed > restartExitBound {
-		t.Fatalf(
-			"restart exit took %v, want under %v: an open MCP stream held the shutdown (stderr %q)",
-			elapsed, restartExitBound, stderr.String(),
-		)
+	if strings.Contains(stderr.String(), "still running at the drain bound") {
+		t.Fatalf("stderr = %q: the restart cut a call the drain should have let finish", stderr.String())
 	}
-	select {
-	case done := <-outcome:
-		if done.err != nil {
-			t.Fatalf("in-flight tools/call failed across the restart: %v", done.err)
-		}
-		if len(done.result.Content) != 1 {
-			t.Fatalf("in-flight tools/call content = %#v, want the tool's answer", done.result.Content)
-		}
-		if text, ok := done.result.Content[0].(*mcp.TextContent); !ok || text.Text != "finished" {
-			t.Fatalf("in-flight tools/call answered %#v, want \"finished\"", done.result.Content[0])
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the in-flight tools/call never answered")
+	done, _ := testwait.Receive(t, "the in-flight tools/call to answer", outcome)
+	if done.err != nil {
+		t.Fatalf("in-flight tools/call failed across the restart: %v", done.err)
+	}
+	if len(done.result.Content) != 1 {
+		t.Fatalf("in-flight tools/call content = %#v, want the tool's answer", done.result.Content)
+	}
+	if text, ok := done.result.Content[0].(*mcp.TextContent); !ok || text.Text != "finished" {
+		t.Fatalf("in-flight tools/call answered %#v, want \"finished\"", done.result.Content[0])
 	}
 }
 
@@ -348,7 +383,8 @@ func TestServeRestartCutsAStuckRequestAtTheDrainBound(t *testing.T) {
 		<-request.Context().Done()
 		writer.WriteHeader(http.StatusServiceUnavailable)
 	})
-	bounds := restartBounds{drain: 300 * time.Millisecond, shutdown: 6 * time.Second}
+	fake := clock.NewFake(epoch)
+	bounds := restartBounds{drain: 300 * time.Millisecond, shutdown: time.Hour, clock: fake}
 	replaced := make(chan struct{})
 	endpoint, code, stderr := startRestartServe(t, handler, replaced, bounds)
 	go func() {
@@ -357,20 +393,15 @@ func TestServeRestartCutsAStuckRequestAtTheDrainBound(t *testing.T) {
 			_ = response.Body.Close()
 		}
 	}()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the request never reached the handler")
-	}
-	start := time.Now()
+	testwait.Receive(t, "the request to reach the handler", entered)
 	close(replaced)
-	got, elapsed := awaitExit(t, code, start, bounds.shutdown+5*time.Second)
-	t.Logf("restart exit %v after the replacement", elapsed)
+	testwait.Until(t, "the restart to park on its drain bound", func() (bool, string) {
+		return fake.Pending() == 2, fake.String()
+	})
+	fake.Advance(bounds.drain) // exactly the drain bound: the shutdown bound is an hour away
+	got, _ := testwait.Receive(t, "serve to exit once the drain bound cut the request", code)
 	if got != ExitReplaced {
 		t.Fatalf("exit code = %d, want %d", got, ExitReplaced)
-	}
-	if elapsed > bounds.drain+restartExitBound {
-		t.Fatalf("restart exit took %v, want under drain %v + %v", elapsed, bounds.drain, restartExitBound)
 	}
 	if !strings.Contains(stderr.String(), "still running at the drain bound") {
 		t.Fatalf("stderr = %q, want the cut request said out loud", stderr.String())

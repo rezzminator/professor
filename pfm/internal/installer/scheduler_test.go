@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
@@ -66,8 +67,8 @@ func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 			writeFixture(t, filepath.Join(themesync.DefaultStateDir(home), themesync.StateFileName), `{"enabled":true}`)
 			runner := &fakeRunner{manager: true}
 			options := Options{
-				MCPConfigPath: testConfigPath(t),
-				Mode:          ModeApply, Home: home, Runner: runner,
+				MCPConfigPath: testConfigPath(t), Sleep: func(time.Duration) {},
+				Mode: ModeApply, Home: home, Runner: runner,
 				MCPEnabled: map[string]bool{chatName: true},
 				scheduler:  schedulerFor(test.kind),
 				themeFollowerRefresh: func(context.Context, string) error {

@@ -110,6 +110,7 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 		},
 		confirmEvery:    confirmEvery,
 		confirmAttempts: confirmAttempts,
+		clock:           dependencies.Clock,
 	}, nil
 }
 
@@ -170,7 +171,8 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 		return err
 	}
 	landed, probeErr, err := pollPaneGone(
-		ctx, client, target.SocketPath, target.PaneID, manager.confirmAttempts, manager.confirmEvery, nil,
+		ctx, client, target.SocketPath, target.PaneID,
+		manager.confirmAttempts, manager.confirmEvery, manager.clock, nil,
 	)
 	if err != nil {
 		return err
@@ -194,7 +196,7 @@ func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
 		var pollErr error
 		landed, pollErr, stageErr = pollPaneGone(
 			ctx, client, target.SocketPath, target.PaneID,
-			min(manager.confirmAttempts, defaultEscalateAttempts), manager.confirmEvery, nil,
+			min(manager.confirmAttempts, defaultEscalateAttempts), manager.confirmEvery, manager.clock, nil,
 		)
 		probeErr = errors.Join(probeErr, pollErr)
 		if stageErr != nil {

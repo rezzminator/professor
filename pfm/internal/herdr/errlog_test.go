@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestErrorLogRefusesFIFOsWithoutBlocking(t *testing.T) {
@@ -29,33 +31,27 @@ func TestErrorLogRefusesFIFOsWithoutBlocking(t *testing.T) {
 					done <- AppendError(dir, "fifo", time.Now(), "message")
 				}
 			}()
-			select {
-			case err := <-done:
-				want := map[bool]string{false: "herdr error log: {dir}/fifo.log is not a regular file", true: "herdr error log: open {dir}/fifo.log: herdr error log is not a regular file"}[read]
-				if got := strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"); got != want {
-					t.Fatalf("FIFO error = %q, want %q", got, want)
-				}
-			case <-time.After(time.Second):
-				// Release an unfixed blocking open so the red regression leaves no
-				// worker behind. Opening both ends never blocks, even without peers.
+			// Release an unfixed blocking open so the red regression leaves no
+			// worker behind. Opening both ends never blocks, even without peers.
+			t.Cleanup(func() {
 				rescue, err := os.OpenFile(path, os.O_RDWR|syscall.O_NONBLOCK, 0)
 				if err != nil {
-					t.Fatal(err)
+					t.Error(err)
+					return
 				}
 				if read {
 					if _, err := rescue.WriteString("malformed\n"); err != nil {
 						t.Error(err)
 					}
 				}
-				select {
-				case <-done:
-				case <-time.After(time.Second):
-					t.Error("blocked FIFO worker did not release")
-				}
 				if err := rescue.Close(); err != nil {
 					t.Error(err)
 				}
-				t.Fatal("reporter log blocked on a FIFO instead of refusing it")
+			})
+			err, _ := testwait.Receive(t, "the FIFO log refused instead of blocking", done)
+			want := map[bool]string{false: "herdr error log: {dir}/fifo.log is not a regular file", true: "herdr error log: open {dir}/fifo.log: herdr error log is not a regular file"}[read]
+			if got := strings.ReplaceAll(fmt.Sprint(err), dir, "{dir}"); got != want {
+				t.Fatalf("FIFO error = %q, want %q", got, want)
 			}
 		})
 	}

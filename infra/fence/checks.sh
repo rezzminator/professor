@@ -639,6 +639,16 @@ checks_templates_theme_glyphs() {
   node_test_suite "theme tab glyphs" "$TMP_BASE/templates/theme-glyphs.tap" scripts/theme-glyphs.test.mjs
 }
 
+# The shell tests' clock check (scripts/shtest-clock-check.sh, no list of exceptions): no shell test sleeps,
+# times out or measures the real clock outside the one wait door, scripts/shtest-wait.sh. The door's and the
+# check's own self-tests run first; the check's broken state is `ERROR shtest-clock` and rc 2, never a PASS.
+checks_templates_shtest_clock() {
+  head_ "templates — shell-test clock check"
+  run "templates: shell wait door self-test" -- bash "$REPO_ROOT/scripts/test-shtest-wait.sh"
+  run "templates: shell-test clock check self-test" -- bash "$REPO_ROOT/scripts/test-shtest-clock-check.sh"
+  run "templates: shell-test clock check" -- bash "$REPO_ROOT/scripts/shtest-clock-check.sh"
+}
+
 checks_templates_engine_sync_action_tests() {
   head_ "templates — CI engine-sync action tests"
   node_test_suite "engine-sync action" "$TMP_BASE/templates/engine-sync-action.tap" scripts/engine-sync-action.test.mjs
@@ -781,7 +791,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   local add="$1" name
   checks_named_template_steps "$add" mirrors clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions \
     generated-agents release-check refresh-scope plugin-workflows worktree-script dev-report \
-    format-md theme-glyphs || return 1
+    format-md theme-glyphs shtest-clock || return 1
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1
   done
@@ -861,7 +871,7 @@ checks_gate_fixture() {
       return ;;
     go-fail) mode=fail; timeout=2m ;;
     go-hang) mode=hang; timeout=20s ;;
-    go-slow) mode=slow; timeout=5m; local -x PFM_PROFILE_FIXTURE_SLOW_S=120 ;;
+    go-slow) mode=slow; timeout=5m ;;
     *) fail_step "fixture: unknown kind '$kind'"; return ;;
   esac
   json="$run_dir/fixture-$kind.json"

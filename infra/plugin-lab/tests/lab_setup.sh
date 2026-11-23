@@ -14,7 +14,7 @@ printf 'fake plugin\nreads FAKE_PLUGIN_FLAG\n' > "$T/plugin/README.md"
 git -C "$T/plugin" init -q && git -C "$T/plugin" add -A && git -C "$T/plugin" -c user.name=t -c user.email=t@example.invalid commit -qm fixture
 creds() { # <minutes left>
   printf '{"claudeAiOauth":{"accessToken":"lab-canary-7f3e","refreshToken":"lab-refresh-0000","expiresAt":%s,"scopes":["user:inference"],"subscriptionType":"max","rateLimitTier":"tier_x"}}' \
-    "$(( ($(date +%s) + $1 * 60) * 1000 ))" > "$T/creds.json"
+    "$(( (LAB_NOW_S + $1 * 60) * 1000 ))" > "$T/creds.json"
 }
 creds 300
 LEDGER=$T/flight/lab-ledger.tsv

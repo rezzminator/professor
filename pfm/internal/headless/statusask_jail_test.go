@@ -40,7 +40,7 @@ func startHeadlessTmuxSession(t *testing.T) (socketPath, session string) {
 	command := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
 		"new-session", "-d", "-s", session, "-x", "80", "-y", "10",
-		"sh", "-c", "echo live pane content; sleep 60",
+		"sh", "-c", "echo live pane content; exec tail -f /dev/null",
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start tmux session: %v: %s", err, output)

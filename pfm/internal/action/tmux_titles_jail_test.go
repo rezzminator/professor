@@ -39,7 +39,7 @@ func newCodexTitlesProbeServer(t *testing.T, socket, window string, titles *pfmc
 
 	tmux := TmuxExecutor{TmuxDir: tmuxDir}
 	if err := tmux.CreateChatServer(context.Background(), ChatServer{
-		Socket: socket, CWD: root, Window: window, Run: "sleep 120", Titles: titles,
+		Socket: socket, CWD: root, Window: window, Run: "tail -f /dev/null", Titles: titles,
 	}); err != nil {
 		t.Fatalf("create Codex server: %v", err)
 	}

@@ -55,7 +55,7 @@ func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
 	session := "probe-name"
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", session, "-n", "before", "sleep 120",
+		"new-session", "-d", "-s", session, "-n", "before", "tail -f /dev/null",
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)
@@ -131,7 +131,7 @@ func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
 	session := "probe-clip"
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", session, "-n", "before", "sleep 120",
+		"new-session", "-d", "-s", session, "-n", "before", "tail -f /dev/null",
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)
@@ -182,7 +182,7 @@ func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
 	socket := "cx-self-pane-" + strconv.Itoa(os.Getpid())
 	if output, err := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "sleep", "120",
+		"new-session", "-d", "-s", socket, "tail", "-f", "/dev/null",
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start tmux: %v: %s", err, output)
 	}
@@ -198,7 +198,7 @@ func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	if output, splitErr := exec.Command(
-		"tmux", "-L", socket, "split-window", "-d", "-t", socket, "sleep", "120",
+		"tmux", "-L", socket, "split-window", "-d", "-t", socket, "tail", "-f", "/dev/null",
 	).CombinedOutput(); splitErr != nil {
 		t.Fatalf("split tmux: %v: %s", splitErr, output)
 	}

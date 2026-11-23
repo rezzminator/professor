@@ -26,25 +26,24 @@ func fleet(c *harness.Ctx, s State) State {
 		"new",
 		"mkdir -p ~/work/"+project+" && cd ~/work/"+project+" && pfm chat new --engine cc --name "+project+
 			` 'a turn mock-engine: {"type":"turn","reply":"`+reply+`"}'`,
-		30*time.Second,
 	); code != 0 {
 		c.Failf("pfm chat new exited %d:\n%s", code, term.Screen())
 	}
-	c.Poll("chat "+project+" answered", 20*time.Second, func() (bool, string) {
+	c.Poll("chat "+project+" answered", func() (bool, string) {
 		r := c.Read("pfm", "chat", "last", project)
 		return r.Code == 0 && r.Stdout == reply+"\n", r.Stdout + r.Stderr
 	})
-	if code := shellRun(term, "end", "clear && pfm chat end "+project, 30*time.Second); code != 0 {
+	if code := shellRun(term, "end", "clear && pfm chat end "+project); code != 0 {
 		c.Failf("pfm chat end %s exited %d:\n%s", project, code, term.Screen())
 	}
 	sessionEndRan(c)
 	var before []string
-	c.Poll("pfm ls carries the ended chat "+project, 20*time.Second, func() (bool, string) {
+	c.Poll("pfm ls carries the ended chat "+project, func() (bool, string) {
 		table := read(c, "pfm", "ls", "--tsv")
 		before = carried(table, project)
 		return len(before) == 11 && before[0] != "live-claude", table
 	})
-	if code := shellRun(term, "rm", "cd ~ && rm -rf ~/work/"+project, 10*time.Second); code != 0 {
+	if code := shellRun(term, "rm", "cd ~ && rm -rf ~/work/"+project); code != 0 {
 		c.Failf("deleting ~/work/%s exited %d:\n%s", project, code, term.Screen())
 	}
 	table := read(c, "pfm", "ls", "--tsv")
@@ -65,13 +64,13 @@ func fleet(c *harness.Ctx, s State) State {
 		}
 	}
 	term.Type("clear && pfm\r")
-	term.WaitScreen("the picker's first refresh drew "+project, 20*time.Second, func(screen string) bool {
+	term.WaitScreen("the picker's first refresh drew "+project, func(screen string) bool {
 		return strings.Contains(screen, "↻ "+project) && strings.Contains(screen, "find › type to find") &&
 			!strings.Contains(screen, "⟳ refreshing")
 	})
 	term.Press(harness.Esc)
 	term.WaitFor(prompt)
-	if code := shellRun(term, "chats", "clear && pfm chat ls --all", 20*time.Second); code != 0 {
+	if code := shellRun(term, "chats", "clear && pfm chat ls --all"); code != 0 {
 		c.Failf("pfm chat ls --all exited %d:\n%s", code, term.Screen())
 	}
 	term.WaitFor("live chats everywhere (name · session · state · herdr · dir · last activity):")
@@ -84,7 +83,7 @@ func fleet(c *harness.Ctx, s State) State {
 // server up, and the engine still runs it before it exits. The step ends no other chat.
 func sessionEndRan(c *harness.Ctx) {
 	from, _ := c.Window()
-	c.Poll("the ended chat's SessionEnd hooks in pfm's activity log", stepBound, func() (bool, string) {
+	c.Poll("the ended chat's SessionEnd hooks in pfm's activity log", func() (bool, string) {
 		seen := map[string]string{}
 		for _, line := range activity(c, from, time.Time{}) {
 			var record struct {

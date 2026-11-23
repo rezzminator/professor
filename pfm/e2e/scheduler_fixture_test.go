@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -77,8 +76,7 @@ func TestSchedulerFixturesRunWhileOtherGoroutinesFork(t *testing.T) {
 	requireE2EFence(t)
 	dir := t.TempDir()
 	defer startForkLoad(t)()
-	deadline := time.Now().Add(time.Second)
-	for index := 0; index < 500 && time.Now().Before(deadline); index++ {
+	for index := 0; index < forkLoadRuns; index++ {
 		home := filepath.Join(dir, fmt.Sprintf("home-%d", index))
 		bin := filepath.Join(home, ".local", "bin")
 		if err := os.MkdirAll(bin, 0o700); err != nil {

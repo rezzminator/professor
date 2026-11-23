@@ -290,6 +290,7 @@ func TestExecutorWorkbenchDoors(t *testing.T) {
 				tmux := &fakeActionTmux{alive: map[string]bool{}}
 				var stderr bytes.Buffer
 				executor, err := New(Dependencies{
+					Clock:     newLaunchStepClock(),
 					Tmux:      tmux,
 					Processes: processes,
 					Gate:      fixedGate(false),
@@ -423,7 +424,8 @@ func TestExecutorWorkbenchPrep(t *testing.T) {
 				}
 				var stderr bytes.Buffer
 				executor, err := New(Dependencies{
-					Tmux: tmux, Processes: &fakeProcesses{}, Stderr: &stderr, EngineSyncRunner: engineSync,
+					Clock: newLaunchStepClock(),
+					Tmux:  tmux, Processes: &fakeProcesses{}, Stderr: &stderr, EngineSyncRunner: engineSync,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -504,7 +506,9 @@ func TestExecutorWorkbenchOpenCodeFleetPrompt(t *testing.T) {
 				}
 			}
 			tmux := &fakeActionTmux{alive: map[string]bool{}}
-			executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
+			executor, err := New(
+				Dependencies{Clock: newLaunchStepClock(), Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -549,7 +553,9 @@ func TestExecutorOpenCodeHerdrPlugin(t *testing.T) {
 				request.Row.CWD, request.Row.Workbench = filepath.Dir(filepath.Dir(dir)), ""
 			}
 			tmux := &fakeActionTmux{alive: map[string]bool{}}
-			executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
+			executor, err := New(
+				Dependencies{Clock: newLaunchStepClock(), Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -195,7 +195,7 @@ func newBranchInheritJail(t *testing.T) *branchInheritJail {
 		"  printf '{}\\n' > \"$fork_path\"\n" +
 		"  printf '%s\\n' \"$fork_path\" > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n" +
 		"fi\n" +
-		"exec sleep 120\n"
+		"exec tail -f /dev/null\n"
 	if err := testjail.WriteExecutable(jail.fakeClaude, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -277,10 +277,7 @@ func cleanupBranchSocket(t *testing.T, jail *branchInheritJail, socket string) {
 // environment, the real run string `pfm chat branch` produced.
 func forkedEnvironment(t *testing.T, jail *branchInheritJail) map[string]string {
 	t.Helper()
-	content, err := waitForFile(t, jail.envPath, 10*time.Second)
-	if err != nil {
-		t.Fatalf("read forked claude environment: %v", err)
-	}
+	content := waitForFile(t, jail.envPath)
 	return parseEnvDump(string(content))
 }
 

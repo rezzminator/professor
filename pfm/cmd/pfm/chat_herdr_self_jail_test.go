@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // An unnamed native Herdr seat finds itself through every self door: the
@@ -84,7 +84,7 @@ func TestUnnamedHerdrSeatFindsItself(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{CodexSeats: pfmchat.CodexSeats(&runtime)})
 	if err != nil {

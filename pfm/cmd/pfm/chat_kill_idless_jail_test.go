@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // startIdlessSession starts one real tmux session named name on its own jailed
@@ -22,7 +22,7 @@ func startIdlessSession(t *testing.T, socket, name string) string {
 	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
 	start := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", name, "sleep", "120",
+		"new-session", "-d", "-s", name, "tail", "-f", "/dev/null",
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start background pane %s on %s: %v: %s", name, socket, err, output)
@@ -68,13 +68,9 @@ func TestChatKillByNameClosesALivePaneThatCarriesNoSessionID(t *testing.T) {
 	if !strings.HasPrefix(stdout.String(), "closed ") {
 		t.Fatalf("stdout=%q, want a closed outcome (no kill recorded)", stdout.String())
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for paneAlive(socket, pane) && time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
-	}
-	if paneAlive(socket, pane) {
-		t.Fatalf("pane %s on %s still alive after `chat kill walk-probe`", pane, socket)
-	}
+	testwait.Until(t, "pane "+pane+" on "+socket+" to close after `chat kill walk-probe`", func() (bool, string) {
+		return !paneAlive(socket, pane), "pane still alive"
+	})
 }
 
 // Two live seats answering to one name: nothing is killed by guess. The refusal

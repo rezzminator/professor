@@ -46,7 +46,7 @@ func scheduleDelivered(c *harness.Ctx, s State) {
 	stateSQL(c, fmt.Sprintf("update schedules set next_fire_ns = %d where id = %s",
 		time.Now().UnixNano(), id))
 	var tick string
-	c.Poll("schedule "+id+" fired by pfm internal schedule-fire", 90*time.Second, func() (bool, string) {
+	c.Poll("schedule "+id+" fired by pfm internal schedule-fire", func() (bool, string) {
 		fire := c.Read("pfm", "internal", "schedule-fire")
 		tick = fmt.Sprintf("exit %d: %s%s", fire.Code, fire.Stdout, fire.Stderr)
 		fired := strings.TrimSpace(tryStateSQL(c,
@@ -60,7 +60,7 @@ func scheduleDelivered(c *harness.Ctx, s State) {
 		)
 	})
 	head := "⏰ pfm schedule " + id + " (once): " + prompt
-	c.Poll("chat "+s.Chat.Session+" live, the scheduled turn answered", 30*time.Second, func() (bool, string) {
+	c.Poll("chat "+s.Chat.Session+" live, the scheduled turn answered", func() (bool, string) {
 		seats := seatsWhere(c, "state = 'live' and session_id = '"+s.Chat.Session+"'")
 		var delivered []string
 		for _, text := range userTexts(c, transcriptOf(c, s)) {
@@ -112,5 +112,5 @@ func endScheduled(c *harness.Ctx, session string) {
 			c.Logf("teardown: pfm chat end %s exited %d: %s", session, r.Code, r.Stderr)
 		}
 	}
-	chatEnded(c, session, 20*time.Second)
+	chatEnded(c, session)
 }

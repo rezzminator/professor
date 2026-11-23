@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestUnreachable(t *testing.T) {
@@ -30,7 +30,12 @@ func TestUnreachable(t *testing.T) {
 	}))
 	defer untagged.Close()
 	release := make(chan struct{})
+	reached := make(chan struct{}, 1)
 	timeout := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		select {
+		case reached <- struct{}{}:
+		default:
+		}
 		<-release
 	}))
 	t.Cleanup(func() {
@@ -46,12 +51,12 @@ func TestUnreachable(t *testing.T) {
 	for _, tc := range []struct {
 		name, url, current string
 		unwritable, want   bool
+		hangs              bool
 		client             *http.Client
 	}{
 		{name: "transport", url: url, current: "v1.0.0", want: true},
 		{
-			name: "timeout", url: timeout.URL, current: "v1.0.0", want: true,
-			client: &http.Client{Timeout: 50 * time.Millisecond},
+			name: "timeout", url: timeout.URL, current: "v1.0.0", want: true, hangs: true,
 		},
 		{name: "TLS failure", url: secure.URL, current: "v1.0.0", client: distrusting},
 		{name: "unsupported URL", url: "ftp://127.0.0.1/latest", current: "v1.0.0"},
@@ -67,7 +72,19 @@ func TestUnreachable(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := CheckForUpdate(context.Background(), cache, tc.current, tc.url, tc.client)
+			ctx, cancel := context.WithCancelCause(testwait.Context(t))
+			defer cancel(nil)
+			if tc.hangs {
+				// the server never answers: the caller's deadline passes once the request is at the server
+				go func() {
+					select {
+					case <-reached:
+						cancel(context.DeadlineExceeded)
+					case <-ctx.Done():
+					}
+				}()
+			}
+			err := CheckForUpdate(ctx, cache, tc.current, tc.url, tc.client)
 			if tc.want || tc.name == "TLS failure" {
 				marker, found, markerErr := ReadFailure(cache)
 				if markerErr != nil || !found || marker.Class != failureNetwork || marker.Reason == "" {

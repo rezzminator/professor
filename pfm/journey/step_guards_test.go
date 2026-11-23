@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
@@ -29,7 +30,7 @@ const (
 func guardsProject(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Esc)
-	term.WaitFor(prompt, 20*time.Second)
+	term.WaitFor(prompt)
 	name := c.Unique("guards")
 	s.Project = filepath.Join(s.Home, "work", name)
 	term.Type("mkdir -p $HOME/work/" + name + " && cd $HOME/work/" + name + " && git init -q && " +
@@ -45,7 +46,7 @@ func guardsProject(c *harness.Ctx, s State) State {
 // and then he steps down to it.
 func newChatSelected(term *harness.Terminal) {
 	const row = "✦ New chat → "
-	term.WaitFor(row, 20*time.Second)
+	term.WaitFor(row)
 	pickerSelect(term, "new chat", func(cells string) bool { return strings.HasPrefix(cells, row) })
 }
 
@@ -61,7 +62,7 @@ func pickerSelect(term *harness.Terminal, what string, is func(cells string) boo
 	for range 8 {
 		// Two polls reading the same row: a frame caught while the pane redraws shows a row half drawn.
 		var on, last string
-		term.WaitScreen("the picker's cursor resting on a row", stepBound, func(screen string) bool {
+		term.WaitScreen("the picker's cursor resting on a row", func(screen string) bool {
 			last, on = on, selected(screen)
 			return on != "" && on == last
 		})
@@ -70,20 +71,53 @@ func pickerSelect(term *harness.Terminal, what string, is func(cells string) boo
 		}
 		walked = append(walked, on)
 		term.Press(harness.Down)
-		term.WaitScreen("the picker's cursor off "+on, stepBound, func(screen string) bool {
+		term.WaitScreen("the picker's cursor off "+on, func(screen string) bool {
 			now := selected(screen)
-			return now != "" && now != on
+			return now != "" && !pickerSameRow(now, on)
 		})
 	}
-	term.WaitScreen(fmt.Sprintf("the picker's %s selected (the cursor walked %q)", what, walked), stepBound,
+	term.WaitScreen(fmt.Sprintf("the picker's %s selected (the cursor walked %q)", what, walked),
 		func(screen string) bool { return is(selected(screen)) })
+}
+
+// pickerSameRow reports whether two readings of the selected row's cells are one row: the same cells,
+// or the shorter's name cut by "…" at a stem that starts the longer, as a pane relaid out under a resting
+// cursor prints the row again in more or fewer cells. Read as two rows, a redraw counts as the cursor
+// moved, and the next press goes out while the last is still on its way: one row too far.
+func pickerSameRow(a, b string) bool {
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	stem, _, cut := strings.Cut(a, "…")
+	return a == b || cut && strings.HasPrefix(b, stem)
+}
+
+// TestPickerSameRow pins pickerSameRow on the rows of a two-tabs run whose cursor went one row past the
+// new chat: one row redrawn in two widths is one row, a neighbour is another.
+func TestPickerSameRow(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"↻ a turn mock-e… 🥇 ⚡", "↻ a turn mock-engine… 🥇 ⚡", true},
+		{"↻ a turn mock-engine… 🥇 ⚡", "↻ a turn mock-e… 🥇 ⚡", true},
+		{"↻ a turn mock-engine… 🥇 ⚡", "↻ a turn mock-engine… 🥇 ⚡", true},
+		{"↻ a turn mock-engine… 🥇 ⚡", "✦ New chat → tester", false},
+		{"✦ New chat → tester", "⚠ PROFESSOR UPDATE CHECK FAILING ⚠", false},
+		{"↻ renewed-a482ff", "↻ renewed-a482ff (be… 🥇 ⚡", false},
+		{"● renewed-a4… 🥇", "↻ renewed-a482ff 🥇", false},
+	} {
+		if got := pickerSameRow(tc.a, tc.b); got != tc.want {
+			t.Errorf("pickerSameRow(%q, %q) = %t, want %t", tc.a, tc.b, got, tc.want)
+		}
+	}
 }
 
 // newChatSelectedIn waits for the picker to select the new chat of the group of project name. The pane
 // is narrow: the row cuts the project's name short, its group's header holds it whole.
 func newChatSelectedIn(term *harness.Terminal, name string) {
 	newChatSelected(term)
-	term.WaitScreen("the picker's new chat, selected, in the group of "+name, 20*time.Second,
+	term.WaitScreen("the picker's new chat, selected, in the group of "+name,
 		func(screen string) bool {
 			return strings.Contains(screen, "╭─ "+name+" ─") && strings.Contains(screen, "› ✦ New chat → ")
 		})
@@ -277,7 +311,7 @@ func transcriptOf(c *harness.Ctx, s State) string {
 // denying with exactly reason; the reason names what the branch typed, so no other branch's matches.
 func hookDenied(c *harness.Ctx, hook, reason string) {
 	from, _ := c.Window()
-	c.Poll(hook+"'s deny in pfm's activity log", stepBound, func() (bool, string) {
+	c.Poll(hook+"'s deny in pfm's activity log", func() (bool, string) {
 		var seen []string
 		for _, line := range activity(c, from, time.Time{}) {
 			var record struct {

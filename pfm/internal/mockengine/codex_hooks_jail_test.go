@@ -3,15 +3,14 @@
 package mockengine
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestCodexAppServerRegistersAndReadsNativeHookTrust(t *testing.T) {
@@ -28,8 +27,7 @@ func TestCodexAppServerRegistersAndReadsNativeHookTrust(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	binary := filepath.Join(fix.bin, "codex")
 	handler := codexappendix.Handler{Event: "sessionStart", Matcher: "resume", Command: "printf fixture"}
 	if err := codexappendix.RegisterHookTrust(

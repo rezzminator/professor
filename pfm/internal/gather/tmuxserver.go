@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -50,7 +50,7 @@ func (state ServerState) String() string {
 // here"; any other failure, an unreadable answer included, is ServerUnknown
 // and its error. binary "" is the registered tmux.
 func ProbeServer(ctx context.Context, binary, socketPath string) (ServerState, []ProbePane, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout(ctx))
+	probeCtx, cancel := ProbeContext(ctx)
 	defer cancel()
 	output, err := pfmtmux.Exec(probeCtx, binary, socketPath, "list-panes", "-a", "-F", paneFormat).Output()
 	if err != nil {
@@ -89,9 +89,9 @@ func ProbePanes(ctx context.Context, binary, socketPath string) ([]ProbePane, er
 // read's error, never a hang of its caller. A failure reads as every probe's
 // does (tmuxReadFailure).
 func TmuxRead(ctx context.Context, socketPath string, arguments ...string) (string, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout(ctx))
+	probeCtx, cancel := ProbeContext(ctx)
 	defer cancel()
-	output, err := pfmtmux.ExecWithin(probeCtx, probeTimeout(ctx), "", socketPath, arguments...).Output()
+	output, err := pfmtmux.ExecWithin(probeCtx, ProbeTimeout, "", socketPath, arguments...).Output()
 	if err != nil {
 		return "", tmuxReadFailure(ctx, probeCtx, err, socketPath, arguments)
 	}
@@ -111,29 +111,36 @@ func tmuxReadFailure(ctx, probeCtx context.Context, err error, socketPath string
 }
 
 // Unresponsive names a probe of socket that ran past its own deadline — the
-// ProbeTimeout bound ctx gives it (probeTimeout) — while its caller's ctx was
+// ProbeTimeout bound ProbeContext gives it — while its caller's ctx was
 // still live, nil for any other probe.
 func Unresponsive(ctx, probeCtx context.Context, socket string) error {
 	if ctx.Err() == nil && errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-		return fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, probeTimeout(ctx), socket)
+		return fmt.Errorf("%w within %s: %s", ErrServerUnresponsive, ProbeTimeout, socket)
 	}
 	return nil
 }
 
-// probeTimeoutKey is the context key of a probe bound other than
-// ProbeTimeout. Nothing in production sets it; the package's own tests carry
-// a short one on the context of a probe they point at a stopped server, so
-// each call runs the same code without waiting out two seconds.
-type probeTimeoutKey struct{}
+// probeClockKey is the context key of the clock a probe bound is timed on
+// (WithProbeClock). Nothing in production sets it.
+type probeClockKey struct{}
 
-// probeTimeout is the bound one tmux probe made under ctx runs within:
-// ProbeTimeout, unless ctx carries a positive bound under probeTimeoutKey.
-// Every probe deadline and every "did not answer within" message reads it.
-func probeTimeout(ctx context.Context) time.Duration {
-	if bound, carried := ctx.Value(probeTimeoutKey{}).(time.Duration); carried && bound > 0 {
-		return bound
+// WithProbeClock is ctx whose probe bounds are timed on c: a test hands its
+// fake clock here and moves it past the bound, so a probe of a server that
+// never answers ends without the test waiting the bound out.
+func WithProbeClock(ctx context.Context, c clock.Clock) context.Context {
+	return context.WithValue(ctx, probeClockKey{}, c)
+}
+
+// ProbeContext is ctx bounded by ProbeTimeout: every probe
+// deadline of a tmux server is made here. It is timed on the clock ctx
+// carries (WithProbeClock), else on the real clock through context.WithTimeout
+// itself — clock.WithTimeout's real path — so a bound that never fires is no
+// armed real wait in every package whose tests reach a probe.
+func ProbeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if c, carried := ctx.Value(probeClockKey{}).(clock.Clock); carried && c != nil {
+		return clock.WithTimeout(ctx, c, ProbeTimeout)
 	}
-	return ProbeTimeout
+	return context.WithTimeout(ctx, ProbeTimeout)
 }
 
 // classifyProbe reads one failed list-panes: past its own deadline the server

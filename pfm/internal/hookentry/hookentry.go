@@ -5,6 +5,7 @@
 // herdr_shell_resume.go answers the shim's auto-open whether Herdr resumes the pane's agent itself.
 // herdr_settle_process.go is the detached settle process: the mode a hook hands it and its
 // bounded, backing-off retry of a Herdr state the host's load left undelivered.
+// herdr_state_clock.go gives a Herdr reporter its clock and the deadline context its hook runs under.
 // herdr_tmux_seat.go binds and ends a tmux chat's seat on its engine's session start and end.
 // install_ping.go sends pfm install's install ping and the daily one, printing nothing.
 // pcm_guard_inline.go reads the inline code an interpreter call carries (python -c, node -e,

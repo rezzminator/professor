@@ -50,7 +50,7 @@ func TestTmuxTitlesDoctorReportsBothOwnersOnProbeSockets(t *testing.T) {
 		socketPath := filepath.Join(tmuxDir, socket)
 		start := exec.Command(
 			"tmux", "-S", socketPath, "-f", "/dev/null",
-			"new-session", "-d", "-s", socket, "-n", "probe", "sleep 120",
+			"new-session", "-d", "-s", socket, "-n", "probe", "tail -f /dev/null",
 		)
 		start.Env = append(os.Environ(), "TMUX=")
 		if output, err := start.CombinedOutput(); err != nil {

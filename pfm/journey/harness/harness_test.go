@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -49,7 +48,7 @@ func TestTogetherBranchesOverlapAndTheNextSiblingWaitsForAll(t *testing.T) {
 		mu.Lock()
 		arrived++
 		mu.Unlock()
-		c.Poll("both branches inside their step at once", 5*time.Second, func() (bool, string) {
+		c.Poll("both branches inside their step at once", func() (bool, string) {
 			mu.Lock()
 			defer mu.Unlock()
 			return arrived == 2, strings.Repeat("arrived ", arrived)

@@ -12,7 +12,9 @@ import (
 	goRuntime "runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -21,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestInstallerOptionsCarryThePluginSourceAndCheckoutRoot(t *testing.T) {
@@ -274,6 +277,9 @@ func assertManagerConsulted(t *testing.T, fake *deps.FakeRunner, wantDarwinConsu
 }
 
 func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
+	// The bound it opens on reads the process clock; a fake one never ends it
+	// early and records no real wait.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	t.Setenv(paths.EnvProcRoot, t.TempDir())
 	// Apply now generates prompts in the source clone. Never discover the
 	// read-only test checkout; each subtest owns its default clone under HOME.

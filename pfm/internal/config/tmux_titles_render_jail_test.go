@@ -50,13 +50,13 @@ func TestTmuxTitlesStringRendersOneNamePerTab(t *testing.T) {
 		ccSession = "cc-1-2-3"
 		cxSession = "cx-4-5-6"
 	)
-	run("-f", "/dev/null", "new-session", "-d", "-s", ccSession, "-n", "WIN-SHORT", "sleep 60")
+	run("-f", "/dev/null", "new-session", "-d", "-s", ccSession, "-n", "WIN-SHORT", "tail -f /dev/null")
 	t.Cleanup(func() {
 		kill := exec.Command("tmux", "-S", socketPath, "kill-server")
 		kill.Env = env
 		_ = kill.Run()
 	})
-	run("new-session", "-d", "-s", cxSession, "-n", "RND:X", "sleep 60")
+	run("new-session", "-d", "-s", cxSession, "-n", "RND:X", "tail -f /dev/null")
 	run("set-option", "-g", "set-titles-string", TmuxTitlesString)
 
 	const longName = "A Chat Name Longer Than Twenty Four Runes"

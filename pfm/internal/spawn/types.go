@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -126,6 +127,24 @@ type Timings struct {
 	Boot  time.Duration
 	Step  time.Duration
 	Typed time.Duration
+	// Clock runs every wait and its deadline; nil is clock.Real, read at the
+	// call.
+	Clock clock.Clock
+}
+
+// clock is the Clock the waits run on: Timings.Clock, else clock.Real as it
+// reads now.
+func (timings Timings) clock() clock.Clock {
+	if timings.Clock != nil {
+		return timings.Clock
+	}
+	return clock.Real
+}
+
+// sleep is one wait of duration on the timings' clock; it ends early only when
+// ctx does.
+func (timings Timings) sleep(ctx context.Context, duration time.Duration) error {
+	return timings.clock().Sleep(ctx, duration)
 }
 
 // Defaults are the live timings. Boot is generous because a cold Codex or

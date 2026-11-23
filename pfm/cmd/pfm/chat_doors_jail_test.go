@@ -11,13 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestChatDoorsAnswerAlike drives each refusal through both doors of one chat function, `pfm chat {verb}` and
@@ -45,7 +45,7 @@ func TestChatDoorsAnswerAlike(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	session := connectDoorsMCP(ctx, t, mcpRuntime(runtime, true))
 
@@ -324,7 +324,7 @@ func callDoorsTool(t *testing.T, tool string, arguments map[string]any) map[stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	result, err := connectDoorsMCP(ctx, t, mcpRuntime(runtime, true)).
 		CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: arguments})

@@ -26,9 +26,6 @@ type agentRow struct {
 	busyMS           int
 }
 
-// agentTick is how often an idle pane looks at its agents' gates.
-const agentTick = 50 * time.Millisecond
-
 func (panel *agentPanel) render() string {
 	var out strings.Builder
 	const indent = "  "
@@ -85,20 +82,28 @@ func (screen *pane) agentWaitLine() string {
 	return fmt.Sprintf("\r\n✻ Waiting for %d background agent%s to finish", count, plural)
 }
 
-// agentsDue ticks while an agent runs until a gate or a finished one waits for its turn; nil,
-// which never fires, otherwise.
+// agentsDue fires when the background agents need a look: at once when a finished agent waits for its turn
+// and no menu holds it, at the next look (lookAgain) while a gated agent runs; nil, which never fires,
+// otherwise — a menu's closing key loops back here.
 func (loop *paneLoop) agentsDue() <-chan time.Time {
 	panel := &loop.screen.agents
-	if len(panel.finished) > 0 {
-		return time.After(agentTick)
+	if len(panel.finished) > 0 && loop.screen.menu == nil {
+		return agentsReady
 	}
 	for _, row := range panel.rows {
 		if row.gate != "" {
-			return time.After(agentTick)
+			return loop.proc.lookAgain()
 		}
 	}
 	return nil
 }
+
+// agentsReady is always ready: a closed channel.
+var agentsReady = func() <-chan time.Time {
+	ready := make(chan time.Time)
+	close(ready)
+	return ready
+}()
 
 // agentsEnded ends every agent whose gate is gone: its row goes at once, open question or not,
 // and once no question is open each ended agent's result arrives as Claude delivers it, a turn of

@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestRunHerdrProvesSupervisorBeforePublication(t *testing.T) {
@@ -50,7 +52,7 @@ func TestRunHerdrProvesSupervisorBeforePublication(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 			if strings.HasPrefix(mode, "moved") {
 				if err != nil {
 					t.Fatalf("moved owned reload failed: %v", err)
@@ -76,7 +78,7 @@ func TestRunHerdrRechecksSupervisorBeforeDraftMutation(t *testing.T) {
 	f := newReloadHerdrFixture(t)
 	f.text = "❯ parked draft"
 	f.onRead = func() { f.terminal = "recycled-during-ready" }
-	_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+	_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 	if err == nil || len(f.keys) != 0 || len(f.typed) != 0 {
 		t.Fatalf("unproved draft mutation keys=%v typed=%v err=%v", f.keys, f.typed, err)
 	}
@@ -85,7 +87,7 @@ func TestRunHerdrRechecksSupervisorBeforeDraftMutation(t *testing.T) {
 func TestRunHerdrTracksMoveDuringReadiness(t *testing.T) {
 	f := newReloadHerdrFixture(t)
 	f.onRead = func() { f.canonical = "w9:p2" }
-	_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+	_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 	if err != nil {
 		t.Fatalf("live supervisor move during readiness failed: %v", err)
 	}
@@ -113,9 +115,9 @@ func TestRunHerdrLocksSeatBeforeSessionDiscovery(t *testing.T) {
 			return
 		}
 		checked = true
-		lockctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
-		defer cancel()
-		unlock, err := fleetdb.LockSeat(lockctx, values, f.seat.SeatID)
+		// A caller whose deadline has passed: a held lock answers the deadline,
+		// a free one is taken.
+		unlock, err := fleetdb.LockSeat(testwait.Expired(), values, f.seat.SeatID)
 		if err == nil {
 			if err := unlock(); err != nil {
 				t.Error(err)
@@ -125,7 +127,11 @@ func TestRunHerdrLocksSeatBeforeSessionDiscovery(t *testing.T) {
 			t.Errorf("lock probe: %v", err)
 		}
 	}
-	result, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+	// The lock probe's own wait reads the process clock: the same fake serves it.
+	fake := clock.NewFake(time.Now())
+	f.options.Clock = fake
+	testwait.ProcessClock(t, fake)
+	result, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 	if err != nil || !checked || !result.New || !f.submitted {
 		t.Fatalf("pending session reload result=%+v submitted=%t err=%v", result, f.submitted, err)
 	}
@@ -134,7 +140,7 @@ func TestRunHerdrLocksSeatBeforeSessionDiscovery(t *testing.T) {
 func TestRunHerdrTracksMoveDuringStartup(t *testing.T) {
 	f := newReloadHerdrFixture(t)
 	f.onExit = func() { f.canonical = "w9:p2" }
-	_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+	_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 	if err != nil {
 		t.Fatalf("live supervisor move during startup failed: %v", err)
 	}
@@ -187,7 +193,7 @@ func TestRunHerdrNamesAnEndedChatApartFromADeadSupervisor(t *testing.T) {
 					t.Error(err)
 				}
 			}
-			_, err = RunHerdr(context.Background(), f.request, f.options, io.Discard)
+			_, err = runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 			if !fired || err == nil || !strings.Contains(err.Error(), test.want) || f.submitted {
 				t.Fatalf("fired=%v submitted=%v err=%v, want %q", fired, f.submitted, err, test.want)
 			}

@@ -133,8 +133,11 @@ func (session *claudeSession) askAPI(prompt string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode the Messages request: %w", err)
 	}
+	// The API timeout passes on the mock's clock (clockBound), as a Claude's own passes on its.
+	bounded, cancel := clockBound(session.proc.ctx, session.proc.clock(), claudeAPITimeout)
+	defer cancel()
 	request, err := http.NewRequestWithContext(
-		session.proc.ctx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/messages", bytes.NewReader(body),
+		bounded, http.MethodPost, strings.TrimRight(base, "/")+"/v1/messages", bytes.NewReader(body),
 	)
 	if err != nil {
 		return "", fmt.Errorf("build the Messages request to %s: %w", base, err)
@@ -142,7 +145,7 @@ func (session *claudeSession) askAPI(prompt string) (string, error) {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Anthropic-Version", "2023-06-01")
 	request.Header.Set("X-Api-Key", key)
-	response, err := (&http.Client{Transport: claudeAPITransport, Timeout: claudeAPITimeout}).Do(request)
+	response, err := (&http.Client{Transport: claudeAPITransport}).Do(request)
 	if err != nil {
 		return claudeConnectionError, nil
 	}

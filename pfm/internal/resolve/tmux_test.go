@@ -7,10 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -147,16 +149,34 @@ func TestTmuxListingsKeepEveryParsedPane(t *testing.T) {
 	// A stopped tmux server never answers its client: the lookup costs that
 	// server alone, named, within the probe bound.
 	t.Run("pane owners on a stopped server", func(t *testing.T) {
-		ctx := pfmtmux.WithClientRunner(context.Background(), testjail.HungTmuxRunner(1))
-		started := time.Now()
-		owners, err := CommandPaneOwners{Binary: "tmux"}.PaneOwners(ctx, "/sockets/cc-1")
-		elapsed := time.Since(started)
-		want := "tmux server did not answer within 2s: /sockets/cc-1"
-		if owners != nil || err == nil || err.Error() != want || !errors.Is(err, gather.ErrServerUnresponsive) {
-			t.Fatalf("PaneOwners() = %+v, %v; want nil, %q", owners, err, want)
+		// The probe bound is timed on the clock the context carries: the fake fires it.
+		fake := clock.NewFake(time.Unix(0, 0))
+		ctx := gather.WithProbeClock(
+			pfmtmux.WithClientRunner(context.Background(), testjail.HungTmuxRunner(1)), fake,
+		)
+		type answer struct {
+			owners []PaneOwner
+			err    error
 		}
-		if elapsed > 10*time.Second {
-			t.Fatalf("PaneOwners() took %s on a stopped server, want the %s probe bound", elapsed, gather.ProbeTimeout)
+		answered := make(chan answer, 1)
+		go func() {
+			owners, err := CommandPaneOwners{Binary: "tmux"}.PaneOwners(ctx, "/sockets/cc-1")
+			answered <- answer{owners, err}
+		}()
+		testwait.Until(t, "the pane-owner probe to arm its bound", func() (bool, string) {
+			return fake.Pending() == 1, fake.String()
+		})
+		// A moment before the bound the probe still waits; at the bound it gives up.
+		fake.Advance(gather.ProbeTimeout - time.Nanosecond)
+		if pending := fake.Pending(); pending != 1 {
+			t.Fatalf("probe bound fired %s before %s: %s", time.Nanosecond, gather.ProbeTimeout, fake)
+		}
+		fake.Advance(time.Nanosecond)
+		got, _ := testwait.Receive(t, "the pane-owner probe to give up at its bound", answered)
+		want := "tmux server did not answer within 2s: /sockets/cc-1"
+		if got.owners != nil || got.err == nil || got.err.Error() != want ||
+			!errors.Is(got.err, gather.ErrServerUnresponsive) {
+			t.Fatalf("PaneOwners() = %+v, %v; want nil, %q", got.owners, got.err, want)
 		}
 	})
 }

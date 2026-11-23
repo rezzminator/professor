@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A real tmux server proves what the fake cannot: the chat-server options make
@@ -49,7 +49,7 @@ func TestHerdrStateFollowsTheClientThatAttachedOnARealTmuxServer(t *testing.T) {
 		}
 		return strings.TrimSpace(string(output))
 	}
-	tmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-herdr", "sleep", "120")
+	tmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-herdr", "cat")
 	t.Cleanup(func() {
 		kill := exec.Command("tmux", "-L", "cc-herdr", "kill-server")
 		kill.Env = environment
@@ -283,8 +283,7 @@ func TestHerdrStateFollowsTheClientThatAttachedOnARealTmuxServer(t *testing.T) {
 	// (tmux expands #{client_pid} to nothing once the client is gone), and the
 	// quoting is intact in both.
 	var seen map[string]bool
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	testwait.Until(t, "tmux's own attach and detach hooks to run pfm", func() (bool, string) {
 		logged, _ := os.ReadFile(hookLog)
 		seen = map[string]bool{}
 		for _, call := range strings.Split(strings.TrimSuffix(string(logged), "END\n"), "END\n") {
@@ -312,29 +311,28 @@ func TestHerdrStateFollowsTheClientThatAttachedOnARealTmuxServer(t *testing.T) {
 				)
 			}
 		}
-		if seen["attach "+first] && seen["attach "+second] && seen["detach"] {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("client hooks seen = %v, want an attach for clients %s and %s and a detach", seen, first, second)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return seen["attach "+first] && seen["attach "+second] && seen["detach"],
+			fmt.Sprintf(
+				"client hooks seen = %v, want an attach for clients %s and %s and a detach",
+				seen,
+				first,
+				second,
+			)
+	})
 }
 
 // waitForAttached polls session_attached until it differs from before (a
 // client attached) or equals it again (the client left).
 func waitForAttached(t *testing.T, tmux func(...string) string, before string, wantBack bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		now := tmux("display-message", "-p", "-t", "cc-herdr", "#{session_attached}")
-		if (now == before) == wantBack {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("session_attached never reached the wanted state (before=%s, back=%t)", before, wantBack)
+	testwait.Until(
+		t,
+		fmt.Sprintf("session_attached to differ from %s (back=%t)", before, wantBack),
+		func() (bool, string) {
+			now := tmux("display-message", "-p", "-t", "cc-herdr", "#{session_attached}")
+			return (now == before) == wantBack, "session_attached = " + now
+		},
+	)
 }
 
 func atoi(t *testing.T, text string) int {
@@ -346,54 +344,73 @@ func atoi(t *testing.T, text string) int {
 	return value
 }
 
-// The cost the adoption adds to every reporter run when the registry holds no
-// client for a live one (D2): one tmux list-clients and one environment read
-// of the unregistered client, measured on a real tmux server and a real
-// process. The logged median is what the docs print; the bound is the D2 flip
-// (20 ms) with room for a loaded fence.
-func TestHerdrStateAdoptionCostPerEvent(t *testing.T) {
-	testjail.TmuxServer(t)
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
+// adoptionCostRun is the work the adoption adds to every reporter run when the
+// registry holds no client for a live one (D2): one tmux list-clients and one
+// environment read of the unregistered client, against a real tmux server and
+// a real process.
+func adoptionCostRun(tb testing.TB, socket string, environ func(int) (map[string]string, error)) {
+	tb.Helper()
+	if _, err := runTmuxForHerdr(
+		context.Background(), socket, "list-clients", "-t", "cc-herdr-cost", "-F", "#{client_pid}",
+	); err != nil {
+		tb.Fatal(err)
 	}
-	root := testjail.ShortRoot(t)
+	if _, err := environ(os.Getpid()); err != nil {
+		tb.Fatalf("read the environment of the test process: %v", err)
+	}
+}
+
+// adoptionCostFixture starts the tmux server the cost is measured against and
+// returns its socket and the environment reader.
+func adoptionCostFixture(tb testing.TB, root string) (string, func(int) (map[string]string, error)) {
+	tb.Helper()
+	testjail.TmuxServer(tb)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		tb.Skip("tmux is not installed")
+	}
 	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
 	tmux := func(args ...string) string {
-		t.Helper()
+		tb.Helper()
 		command := exec.Command("tmux", append([]string{"-L", "cc-herdr-cost"}, args...)...)
 		command.Env = environment
 		output, err := command.CombinedOutput()
 		if err != nil {
-			t.Fatalf("tmux %v: %v: %s", args, err, output)
+			tb.Fatalf("tmux %v: %v: %s", args, err, output)
 		}
 		return strings.TrimSpace(string(output))
 	}
-	tmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-herdr-cost", "sleep", "120")
-	t.Cleanup(func() {
+	tmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-herdr-cost", "cat")
+	tb.Cleanup(func() {
 		kill := exec.Command("tmux", "-L", "cc-herdr-cost", "kill-server")
 		kill.Env = environment
 		_ = kill.Run()
 	})
 	socket := tmux("display-message", "-p", "-t", "cc-herdr-cost", "#{socket_path}")
-	environ := gather.NewProcFS("").Environ
-	const runs = 21
-	took := make([]time.Duration, 0, runs)
-	for range runs {
-		start := time.Now()
-		if _, err := runTmuxForHerdr(
-			context.Background(), socket, "list-clients", "-t", "cc-herdr-cost", "-F", "#{client_pid}",
-		); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := environ(os.Getpid()); err != nil {
-			t.Fatalf("read the environment of the test process: %v", err)
-		}
-		took = append(took, time.Since(start))
+	return socket, gather.NewProcFS("").Environ
+}
+
+// The cost of the adoption per event (D2), run 21 times on a real tmux server;
+// a test never judges its own speed, so the number is read from
+// BenchmarkHerdrStateAdoptionCostPerEvent, which times the same call against
+// the D2 flip (20 ms).
+func TestHerdrStateAdoptionCostPerEvent(t *testing.T) {
+	socket, environ := adoptionCostFixture(t, testjail.ShortRoot(t))
+	for range 21 {
+		adoptionCostRun(t, socket, environ)
 	}
-	slices.Sort(took)
-	median := took[runs/2]
-	t.Logf("adoption cost per event, median of %d: %v (list-clients + one environment read)", runs, median)
-	if median > 100*time.Millisecond {
-		t.Fatalf("adoption cost per event = %v, want well under the 20 ms D2 flip", median)
+}
+
+// BenchmarkHerdrStateAdoptionCostPerEvent measures the adoption's cost per
+// reporter event: one list-clients and one environment read.
+func BenchmarkHerdrStateAdoptionCostPerEvent(b *testing.B) {
+	root, err := testjail.CreateShortRoot()
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = os.RemoveAll(root) })
+	socket, environ := adoptionCostFixture(b, root)
+	b.ResetTimer()
+	for range b.N {
+		adoptionCostRun(b, socket, environ)
 	}
 }

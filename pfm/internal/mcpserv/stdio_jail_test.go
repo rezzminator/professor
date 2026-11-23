@@ -5,6 +5,8 @@ package mcpserv
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // With no daemon, the in-process server resolves a Codex caller by its
@@ -102,8 +105,9 @@ func TestRunStdioUsesHealthyDaemonProxy(t *testing.T) {
 // environment variable that would name its caller, so the stdio server can
 // only find it by walking its process chain, starts pfm's stdio server,
 // handshakes, asks whoami, waits for the test's install, asks again and
-// reports both answers.
-const handoverJailClient = `import json, os, subprocess, sys, time
+// reports both answers. The test's install and release signals are FIFOs:
+// the client blocks reading one until the test opens and closes it.
+const handoverJailClient = `import json, os, subprocess, sys
 binary, config, report, installed, release = sys.argv[1:6]
 strip = set(sys.argv[6:])
 env = {k: v for k, v in os.environ.items() if k not in strip}
@@ -121,11 +125,8 @@ def answer(id):
         if frame.get("id") == id:
             return frame
 def wait_for(path):
-    for _ in range(2000):
-        if os.path.exists(path):
-            return
-        time.sleep(0.01)
-    raise SystemExit("never saw " + path)
+    with open(path) as signal:
+        signal.read()
 def whoami(id):
     send({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": "whoami", "arguments": {}}})
     return answer(id)["result"]["structuredContent"]
@@ -162,6 +163,11 @@ func TestStdioHandoverMovesALiveChatOntoTheInstalledBuild(t *testing.T) {
 	}
 	report := filepath.Join(jail.root, "handover")
 	installDone, release := report+".installed", report+".release"
+	for _, signal := range []string{installDone, release} {
+		if err := syscall.Mkfifo(signal, 0o600); err != nil {
+			t.Fatalf("make the client's signal FIFO %s: %v", signal, err)
+		}
+	}
 	// The client takes over the fixture chat's own pane, the one its fleet row names.
 	command := exec.Command("tmux", "-L", jail.socket, "respawn-pane", "-k", "-t", jail.pane,
 		"python3", client, installed, writeEnabledMCPConfig(t, jail.root), report, installDone, release,
@@ -171,7 +177,9 @@ func TestStdioHandoverMovesALiveChatOntoTheInstalledBuild(t *testing.T) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start the chat's pane: %v: %s", err, output)
 	}
-	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
+	// A client still waiting on release is let go; one that is not ends with
+	// the jail's tmux server.
+	t.Cleanup(func() { _ = signalHandoverClient(release) })
 	var first struct {
 		PID    int          `json:"pid"`
 		Pane   string       `json:"pane"`
@@ -189,9 +197,7 @@ func TestStdioHandoverMovesALiveChatOntoTheInstalledBuild(t *testing.T) {
 	if err := os.Rename(installed+".new", installed); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(installDone, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	awaitHandoverSignal(t, report, installDone)
 	var second struct {
 		Whoami WhoamiOutput `json:"whoami"`
 	}
@@ -211,9 +217,7 @@ func TestStdioHandoverMovesALiveChatOntoTheInstalledBuild(t *testing.T) {
 		t.Fatalf("server child %d: parent %d (%v), image %+v (%v); want parent %d running the installed %s %+v (%v)",
 			child, parent, parentErr, running, imageErr, first.PID, installed, want, wantErr)
 	}
-	if err := os.WriteFile(release, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	awaitHandoverSignal(t, report, release)
 	var exit int
 	readHandoverReport(t, report, ".exit", &exit)
 	if exit != 0 {
@@ -239,25 +243,52 @@ func processChildren(t *testing.T, proc gather.ProcFS, pid int) []int {
 	return children
 }
 
+// signalHandoverClient lets go a client reading the signal FIFO at path: the
+// open succeeds only while the client holds its read end, and the close is
+// the end of file its read returns. syscall.ENXIO is a client not reading it.
+func signalHandoverClient(path string) error {
+	signal, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	return signal.Close()
+}
+
+// awaitHandoverSignal gives the client its signal at path once it is reading
+// it.
+func awaitHandoverSignal(t *testing.T, report, path string) {
+	t.Helper()
+	testwait.Until(t, "the client to read its signal at "+path, func() (bool, string) {
+		err := signalHandoverClient(path)
+		if err != nil && !errors.Is(err, syscall.ENXIO) {
+			t.Fatalf("signal the client at %s: %v", path, err)
+		}
+		stderr, _ := os.ReadFile(report + ".stderr")
+		return err == nil, fmt.Sprintf("signal %s: %v; server stderr %s:\n%s",
+			path, err, report+".stderr", strings.TrimSpace(string(stderr)))
+	})
+}
+
 // readHandoverReport waits for the client's report file and decodes it.
 func readHandoverReport(t *testing.T, report, suffix string, into any) {
 	t.Helper()
 	path := report + suffix
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		body, err := os.ReadFile(path)
-		if err == nil && len(body) != 0 {
-			if err := json.Unmarshal(body, into); err != nil {
-				t.Fatalf("decode %s: %v: %s", path, err, body)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			stderr, _ := os.ReadFile(report + ".stderr")
-			t.Fatalf("no report at %s within 30s (%v); server stderr %s:\n%s", path, err, report+".stderr",
-				strings.TrimSpace(string(stderr)))
-		}
-		time.Sleep(20 * time.Millisecond)
+	var body []byte
+	testwait.Until(t, "the client's report at "+path, func() (bool, string) {
+		var err error
+		body, err = os.ReadFile(path)
+		stderr, _ := os.ReadFile(report + ".stderr")
+		return err == nil &&
+				len(body) != 0, fmt.Sprintf(
+				"read %s: %v; server stderr %s:\n%s",
+				path,
+				err,
+				report+".stderr",
+				strings.TrimSpace(string(stderr)),
+			)
+	})
+	if err := json.Unmarshal(body, into); err != nil {
+		t.Fatalf("decode %s: %v: %s", path, err, body)
 	}
 }
 

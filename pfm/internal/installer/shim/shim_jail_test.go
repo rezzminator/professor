@@ -7,10 +7,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // jailedZshCommand builds the zsh invocation these tests run their scripts in.
@@ -741,6 +742,7 @@ for arg; do
   previous=$arg
 done
 printf '%s\n' "$line" >> "$FAKE_PFM_LOG"
+if [ -n "$FAKE_PFM_GATE" ]; then exec 3<>"$FAKE_PFM_GATE"; echo >&3; fi
 `
 
 // A plain shell in a Herdr pane hands a command that ran at least the
@@ -790,15 +792,21 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 			}
 			writeShimFile(t, filepath.Join(binDir, "pfm"), fakeShellReporterPFM)
 			log := filepath.Join(home, "pfm.log")
+			// The fake pfm writes one line here after each logged call; the driver reads one to know its report landed.
+			gate := filepath.Join(home, "pfm.gate")
+			if err := syscall.Mkfifo(gate, 0o600); err != nil {
+				t.Fatal(err)
+			}
 			// The driver plays one long command, waits for its report (handed
 			// over in the background), then starts the next command or exits.
 			script := "source " + quoteZsh(embeddedShimPath(t)) + "\n" +
 				"export FAKE_SHELL_PID=$$\n" +
+				"exec {gate}<>$FAKE_PFM_GATE\n" +
 				"state=\"hooked=$+functions[_pfm_herdr_precmd]\"\n" +
 				"if (( $+functions[_pfm_herdr_precmd] )); then\n" +
 				"  _pfm_herdr_preexec 'make test'; (exit 3); _pfm_herdr_precmd\n" +
 				"  state+=\" reported=$_pfm_herdr_reported\"\n" +
-				"  [[ -z $_pfm_herdr_reported ]] || for i in {1..50}; do [[ -s $FAKE_PFM_LOG ]] && break; sleep 0.1; done\n" +
+				"  [[ -z $_pfm_herdr_reported ]] || read -r -u $gate\n" +
 				"fi\n" +
 				"print -r -- \"STATE[$state]\"\n"
 			if !test.exits {
@@ -806,11 +814,13 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 			}
 			environ := append([]string{
 				"HERDR_ENV=1", "TMUX=", "PFM_HERDR_LONG_COMMAND_SECS=0", "PFM_HERDR_SHELL_REPORT=",
-				"FAKE_PFM_LOG=" + log,
+				"FAKE_PFM_LOG=" + log, "FAKE_PFM_GATE=" + gate,
 			}, test.environ...)
 			command := jailedZshCommand(zsh, script, home, environ...)
 			command.Args = append([]string{command.Args[0], "-i"}, command.Args[1:]...)
-			output, err := command.CombinedOutput()
+			guarded := exec.CommandContext(testwait.Context(t), command.Path)
+			guarded.Args, guarded.Env = command.Args, command.Env
+			output, err := guarded.CombinedOutput()
 			if err != nil {
 				t.Fatalf("driver: %v: %s", err, output)
 			}
@@ -818,15 +828,13 @@ func TestHerdrShellReporterHandsAFinishedLongCommandToPFM(t *testing.T) {
 				t.Fatalf("shell state: %s\nwant STATE[%s]", output, test.state)
 			}
 			got := ""
-			for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			testwait.Until(t, "the pfm herdr-shell calls reached the log", func() (bool, string) {
 				content, _ := os.ReadFile(log)
 				// The shell counts whole clock seconds, so an instant command that
 				// straddles a second boundary reports 1: both readings are correct.
 				got = strings.ReplaceAll(string(content), "[--seconds][1]", "[--seconds][0]")
-				if got == test.want || time.Now().After(deadline) {
-					break
-				}
-			}
+				return got == test.want, got
+			})
 			if got != test.want {
 				t.Fatalf("pfm herdr-shell calls:\n%s\nwant:\n%s", got, test.want)
 			}

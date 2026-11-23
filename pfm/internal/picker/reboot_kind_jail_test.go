@@ -16,12 +16,12 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestNativeLifecycleUsesSelectedPane(t *testing.T) {
@@ -132,41 +132,29 @@ func TestNativeLiveRebootUsesSamePaneReload(t *testing.T) {
 
 func waitPickerEndWorker(t *testing.T, marker, seat string) {
 	t.Helper()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(5 * time.Millisecond)
-	defer tick.Stop()
-	for {
+	var pid int
+	testwait.Until(t, "the owned worker's acknowledgement in "+marker, func() (bool, string) {
 		body, err := os.ReadFile(marker)
-		if err == nil {
-			fields := strings.Fields(string(body))
-			if len(fields) != 2 || fields[1] != seat {
-				t.Fatalf("worker acknowledgement=%q", body)
-			}
-			pid, err := strconv.Atoi(fields[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			// The marker is written only on the fixture's exit-0 path; the
-			// runner's reaper collects the detached worker, so it must be gone.
-			for syscall.Kill(pid, 0) == nil {
-				select {
-				case <-deadline.C:
-					t.Fatalf("owned worker %d still in the process table after its marker", pid)
-				case <-tick.C:
-				}
-			}
-			return
+		if os.IsNotExist(err) {
+			return false, err.Error()
 		}
-		if !os.IsNotExist(err) {
+		if err != nil {
 			t.Fatal(err)
 		}
-		select {
-		case <-deadline.C:
-			t.Fatal("owned worker acknowledgement timed out")
-		case <-tick.C:
+		fields := strings.Fields(string(body))
+		if len(fields) != 2 || fields[1] != seat {
+			t.Fatalf("worker acknowledgement=%q", body)
 		}
-	}
+		if pid, err = strconv.Atoi(fields[0]); err != nil {
+			t.Fatal(err)
+		}
+		return true, ""
+	})
+	// The marker is written only on the fixture's exit-0 path; the runner's
+	// reaper collects the detached worker, so it must be gone.
+	testwait.Until(t, "the owned worker "+strconv.Itoa(pid)+" to leave the process table", func() (bool, string) {
+		return syscall.Kill(pid, 0) != nil, "still in the process table after its marker"
+	})
 }
 
 // A test selection flag bounds the old binary to this assertion, not the suite.
@@ -175,10 +163,8 @@ func TestNativeEndWorkerInvocationIsOwned(t *testing.T) {
 		t.Fatal("unowned worker re-entered picker test suite")
 	}
 	marker := filepath.Join(t.TempDir(), "worker")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	command := exec.CommandContext(
-		ctx,
+		testwait.Context(t),
 		os.Args[0],
 		"-test.run=^TestNativeEndWorkerInvocationIsOwned$",
 		"chat",

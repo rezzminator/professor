@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func adversarialSeat(t *testing.T, account int) (root, configDir, cacheDir string) {
@@ -290,22 +291,20 @@ func TestReadCacheRecordRejectsUnsafeArtifacts(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() { _, err := ReadCacheRecord(path); done <- err }()
-			select {
-			case err := <-done:
-				if err == nil {
-					t.Fatalf("unsafe %s accepted as a normal cache", shape)
-				}
-			case <-time.After(time.Second):
-				// Release an unfixed blocking FIFO reader before failing the case.
-				writer, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
-				if err != nil {
-					t.Fatal(fmt.Errorf("release blocked reader: %w", err))
-				}
-				if err := writer.Close(); err != nil {
-					t.Fatal(err)
-				}
-				<-done
-				t.Fatalf("unsafe %s blocked the synchronous cache reader", shape)
+			if shape == "fifo" {
+				// Release an unfixed blocking FIFO reader when the wait below fails the case.
+				t.Cleanup(func() {
+					if writer, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+						_ = writer.Close()
+					}
+				})
+			}
+			if err, _ := testwait.Receive(
+				t,
+				"the synchronous cache reader to return on an unsafe "+shape,
+				done,
+			); err == nil {
+				t.Fatalf("unsafe %s accepted as a normal cache", shape)
 			}
 		})
 	}

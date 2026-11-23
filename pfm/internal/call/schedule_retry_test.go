@@ -109,7 +109,7 @@ func TestScheduleWakeIntoWorkingNativeThenIdleOnlyRetry(t *testing.T) {
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "claude"}
 			engine := nativeEngine(t, target)
 			// The startup hold refuses the unknown agent once this bound runs out.
-			engine.options.ComposerWait, engine.options.Poll = time.Second, time.Millisecond
+			engine.options.ComposerWait, engine.options.Poll = time.Second, time.Second/4
 			fired, err := engine.Call(context.Background(), Request{Target: "chat", Message: "scheduled wake"})
 			if err != nil || !fired.Typed || fired.Status != statusTypedUnconfirmed ||
 				fired.Code != CodeUndelivered || inputs != 1 {

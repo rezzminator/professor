@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
@@ -24,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestInstallCheckRefusesYes(t *testing.T) {
@@ -203,7 +205,14 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 			}
 			before := installCheckTree(t, home)
 			var out, errOut bytes.Buffer
-			code := runInstall([]string{"--check"}, &out, &errOut, loaded)
+			// The schedule gate pauses between probes on the process clock: a fake
+			// one runs each pause at once, the probes answering by request count.
+			fake := clock.NewFake(time.Unix(1_800_000_000, 0))
+			testwait.ProcessClock(t, fake)
+			var code int
+			testwait.Drive(t, "pfm install --check", fake, func() {
+				code = runInstall([]string{"--check"}, &out, &errOut, loaded)
+			})
 			if code != wantCode {
 				t.Fatalf("code=%d want=%d stdout=%q stderr=%q", code, wantCode, out.String(), errOut.String())
 			}

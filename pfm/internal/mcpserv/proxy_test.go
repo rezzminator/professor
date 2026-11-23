@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,12 +19,14 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const proxyTestInitialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"proxy-test","version":"test"}}}`
@@ -119,6 +120,7 @@ func TestStdioProxyReinitializesAfterDaemonReplacement(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxyTestStepping(proxy)
 	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
@@ -183,6 +185,7 @@ func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
+	proxyTestStepping(proxy)
 	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryDelay = time.Millisecond
@@ -227,6 +230,9 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 	started := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
 	release := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
 	readDone := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+	// The writer forwards one handshake frame between two chunks the transport
+	// reads: the interleaving that exposes a body sharing storage with a store.
+	writerTick := [2]chan struct{}{make(chan struct{}, 1), make(chan struct{}, 1)}
 	var bodies [2][]byte
 	var calls atomic.Int32
 	transport := proxyTestTransport(func(request *http.Request) (*http.Response, error) {
@@ -243,13 +249,13 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 			for {
 				count, err := request.Body.Read(chunk)
 				body.Write(chunk[:count])
-				runtime.Gosched()
 				if err == io.EOF {
 					break
 				}
 				if err != nil {
 					return nil, err
 				}
+				<-writerTick[index]
 			}
 			content = body.Bytes()
 			bodies[index] = content
@@ -299,6 +305,10 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 				default:
 				}
 				proxy.forward(cancelled, alternates[index], io.Discard)
+				select {
+				case writerTick[index] <- struct{}{}:
+				default:
+				}
 			}
 		}(index)
 		<-writerReady
@@ -342,14 +352,12 @@ func TestStdioProxyBoundsUnavailableDaemonPerRequest(t *testing.T) {
 	server := httptest.NewServer(proxyTestDaemon(service))
 	address := proxyTestAddress(server)
 	proxy := newStdioProxy(context.Background(), address, io.Discard)
-	proxy.retryWindow = 120 * time.Millisecond
-	proxy.retryDelay = 10 * time.Millisecond
+	proxyTestStepping(proxy)
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
 	server.Close()
 
-	started := time.Now()
 	harness.write(t, proxyTestToolCall(7, "new", `{"name":"down"}`))
 	response := harness.read(t)
 	if response["id"] != float64(7) {
@@ -360,13 +368,10 @@ func TestStdioProxyBoundsUnavailableDaemonPerRequest(t *testing.T) {
 		t.Fatalf("bounded response = %+v, want JSON-RPC error", response)
 	}
 	message, _ := errorObject["message"].(string)
-	for _, part := range []string{"pfm MCP daemon", address, "120ms", "pfm mcp serve"} {
+	for _, part := range []string{"pfm MCP daemon", address, "45s", "pfm mcp serve"} {
 		if !strings.Contains(message, part) {
 			t.Errorf("bounded error %q does not name %q", message, part)
 		}
-	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("bounded call took %v, want under one second", elapsed)
 	}
 }
 
@@ -384,8 +389,7 @@ func TestStdioProxyDoesNotReplayMutationAfterResponseEOF(t *testing.T) {
 	}))
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-	proxy.retryWindow = 100 * time.Millisecond
-	proxy.retryDelay = time.Millisecond
+	proxyTestStepping(proxy)
 
 	_, err := proxy.sendWithRetry(
 		context.Background(),
@@ -420,8 +424,7 @@ func TestStdioProxyDoesNotReplayMutationAfterInvalidSuccessResponse(t *testing.T
 			}))
 			defer server.Close()
 			proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-			proxy.retryWindow = 50 * time.Millisecond
-			proxy.retryDelay = time.Millisecond
+			proxyTestStepping(proxy)
 
 			_, err := proxy.sendWithRetry(
 				context.Background(),
@@ -440,22 +443,43 @@ func TestStdioProxyDoesNotReplayMutationAfterInvalidSuccessResponse(t *testing.T
 
 func TestStdioProxyAllowsHealthyCallsPastRetryWindow(t *testing.T) {
 	t.Parallel()
+	entered := make(chan struct{})
+	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		<-time.After(100 * time.Millisecond)
+		close(entered)
+		<-release
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(writer, `{"jsonrpc":"2.0","id":2,"result":{}}`)
 	}))
 	defer server.Close()
+	var answered sync.Once
+	// Runs before server.Close: a failed assertion never leaves the handler held.
+	defer answered.Do(func() { close(release) })
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	if proxy.client.Timeout != 0 {
 		t.Fatalf("proxy client timeout = %s, want tool execution governed by its request context", proxy.client.Timeout)
 	}
-	proxy.retryWindow = 30 * time.Millisecond
-	if _, err := proxy.sendWithRetry(
-		context.Background(),
-		[]byte(proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`)),
-		false,
-	); err != nil {
+	fake := proxyTestStepping(proxy)
+	sent := make(chan error, 1)
+	go func() {
+		_, err := proxy.sendWithRetry(
+			context.Background(),
+			[]byte(proxyTestToolCall(2, "status", `{"target":"seat","ask":true}`)),
+			false,
+		)
+		sent <- err
+	}()
+	testwait.Receive(t, "the healthy call to reach the daemon", entered)
+	if step, due := fake.NextDue(); !due || step != proxyRetryWindow {
+		t.Fatalf("retry window bound = %s armed %t, want %s while the call runs: %s", step, due, proxyRetryWindow, fake)
+	}
+	// The daemon is still working when the retry window runs out.
+	fake.Advance(proxyRetryWindow)
+	if pending := fake.Pending(); pending != 0 {
+		t.Fatalf("retry window bound still pending after the window: %s", fake)
+	}
+	answered.Do(func() { close(release) })
+	if err, _ := testwait.Receive(t, "the healthy call to answer", sent); err != nil {
 		t.Fatalf("healthy request beyond the retry window failed: %v", err)
 	}
 }
@@ -543,6 +567,7 @@ func TestStdioProxyEnrichesSplitCallerWithoutExportedID(t *testing.T) {
 	t.Cleanup(func() { proxyWhoami = previous })
 	var warnings proxyTestBuffer
 	proxy := newStdioProxy(context.Background(), "unused", &warnings)
+	proxyTestStepping(proxy)
 	var received map[string]any
 	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
 		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
@@ -610,6 +635,7 @@ func TestStdioProxyRefusesReplayIntoDifferentRuntime(t *testing.T) {
 			}))
 			defer server.Close()
 			proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+			proxyTestStepping(proxy)
 			proxy.expectedRuntimeIdentity = "sha256:selected"
 			proxy.sessionID = "old-session"
 			proxy.protocol = "2025-06-18"
@@ -643,23 +669,16 @@ func TestStdioProxyDropsUndeliverableNotification(t *testing.T) {
 	address := proxyTestAddress(server)
 	var warnings proxyTestBuffer
 	proxy := newStdioProxy(context.Background(), address, &warnings)
-	proxy.retryWindow = 80 * time.Millisecond
-	proxy.retryDelay = 10 * time.Millisecond
+	proxyTestStepping(proxy)
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
 	server.Close()
 
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":44}}`)
-	deadline := time.After(10 * time.Second)
-	for !strings.Contains(warnings.String(), "dropped notification") {
-		select {
-		case <-deadline:
-			t.Fatalf("notification warning = %q", warnings.String())
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
+	testwait.Until(t, "the proxy's dropped-notification warning", func() (bool, string) {
+		return strings.Contains(warnings.String(), "dropped notification"), "warnings: " + warnings.String()
+	})
 }
 
 func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
@@ -674,6 +693,7 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxyTestStepping(proxy)
 	proxy.sidDir = t.TempDir()
 	proxy.identify = func(context.Context) (resolve.Identity, error) {
 		return resolve.Identity{
@@ -733,6 +753,7 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	writeCrumb("conversation-a")
 	var warnings bytes.Buffer
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), &warnings)
+	proxyTestStepping(proxy)
 	proxy.sidDir = sidDir
 	proxy.identify = func(context.Context) (resolve.Identity, error) {
 		return resolve.Identity{
@@ -826,6 +847,7 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxyTestStepping(proxy)
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
@@ -855,6 +877,7 @@ func TestStdioProxyClosesDaemonSessionAtEOF(t *testing.T) {
 	}))
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxyTestStepping(proxy)
 	var output bytes.Buffer
 	if err := proxy.run(
 		context.Background(),
@@ -889,33 +912,25 @@ func TestStdioProxyCancelsOutstandingCallAtEOF(t *testing.T) {
 	}))
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxyTestStepping(proxy)
 	input, inputWriter := io.Pipe()
 	returned := make(chan error, 1)
 	go func() { returned <- proxy.run(context.Background(), input, io.Discard) }()
 	if _, err := io.WriteString(inputWriter, proxyTestToolCall(2, "whoami", `{}`)+"\n"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("outstanding proxy call did not start")
-	}
+	testwait.Receive(t, "the outstanding proxy call to start", started)
 	if err := inputWriter.Close(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case err := <-returned:
-		if err != nil {
-			t.Fatalf("proxy EOF returned error: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("proxy EOF did not cancel its outstanding call")
+	if err, _ := testwait.Receive(
+		t,
+		"the proxy to return after EOF cancelled its outstanding call",
+		returned,
+	); err != nil {
+		t.Fatalf("proxy EOF returned error: %v", err)
 	}
-	select {
-	case <-cancelled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("daemon request context survived proxy EOF")
-	}
+	testwait.Receive(t, "the daemon request context to end with the proxy's EOF", cancelled)
 }
 
 func TestOptionalProxyRequestsRecordWarn(t *testing.T) {
@@ -940,7 +955,7 @@ func TestOptionalProxyRequestsRecordWarn(t *testing.T) {
 		var warnings bytes.Buffer
 		proxy := &stdioProxy{
 			endpoint: server.URL, client: obs.WrapClient(&http.Client{}),
-			warnings: &warnings, sessionID: "session",
+			warnings: &warnings, sessionID: "session", clock: clock.NewFake(time.Unix(0, 0)),
 		}
 		proxy.closeSession()
 		if !strings.Contains(warnings.String(), "close daemon session") {
@@ -970,6 +985,7 @@ func TestBirthProxyResolvesEveryRequest(t *testing.T) {
 	}))
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxyTestStepping(proxy)
 	environment.TMUX = "/tmp/tmux-1000/cc-seat,1,0"
 	environment.TMUXPane = "%7"
 	environment.CodexThreadID = "thread-a"

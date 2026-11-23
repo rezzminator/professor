@@ -7,6 +7,7 @@ import (
 )
 
 func TestStdioHandoverReplayForwardsWhatPrecedesTheInitializeAnswer(t *testing.T) {
+	probeClock(t)
 	child := newHandoverChild("new", "notice-first", nil)
 	runner := &handoverRunner{children: []*handoverChildScript{child}}
 	handover, output, warnings, binary := newTestHandover(t, runner)
@@ -25,6 +26,7 @@ func TestStdioHandoverReplayForwardsWhatPrecedesTheInitializeAnswer(t *testing.T
 }
 
 func TestStdioHandoverFailureKeepsTheRunningImage(t *testing.T) {
+	probeClock(t)
 	for _, tc := range []struct {
 		name, answer string
 		startErr     error

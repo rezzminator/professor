@@ -16,11 +16,13 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/themetmux"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
@@ -214,19 +216,10 @@ func newSessionCancelledWhileBlocked(t *testing.T, block string) error {
 			Height:  24,
 		})
 	}()
-	select {
-	case <-reached:
-	case <-time.After(5 * time.Second):
-		t.Fatal("tmux command did not reach blocking arm")
-	}
+	testwait.Receive(t, "the tmux command reached its blocking arm", reached)
 	cancel()
-	select {
-	case err := <-result:
-		return err
-	case <-time.After(5 * time.Second):
-		t.Fatal("NewSession did not return after cancellation")
-		return nil
-	}
+	err, _ := testwait.Receive(t, "NewSession returned after cancellation", result)
+	return err
 }
 
 // TestNewSessionReturnsCancellation: a cancel that kills the tmux call in
@@ -475,4 +468,35 @@ func TestNewSessionBirthEnvironmentDropsTheCallersPane(t *testing.T) {
 	if !maps.Equal(got, want) {
 		t.Fatalf("caller names in the birth environment (%s) = %v, want %v", dump, got, want)
 	}
+}
+
+// spawnStepClock is the clock of a spawn whose screen changes only when it is
+// read: Now stands still and Sleep moves it on by the duration and returns, so
+// a poll loop runs to its count at once. The embedded fake carries the timers
+// no spawn wait arms.
+type spawnStepClock struct {
+	clock.Clock
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newSpawnStepClock() *spawnStepClock {
+	start := time.Unix(1_786_838_400, 0)
+	return &spawnStepClock{Clock: clock.NewFake(start), now: start}
+}
+
+func (step *spawnStepClock) Now() time.Time {
+	step.mu.Lock()
+	defer step.mu.Unlock()
+	return step.now
+}
+
+func (step *spawnStepClock) Sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	step.mu.Lock()
+	defer step.mu.Unlock()
+	step.now = step.now.Add(d)
+	return nil
 }

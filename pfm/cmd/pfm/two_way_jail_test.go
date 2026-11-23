@@ -125,9 +125,9 @@ func TestAskReportsATimeoutWithoutLosingDelivery(t *testing.T) {
 	defer jail.killSockets(t)
 	t.Setenv("STUB_MUTE", "1")
 	// A chat still at work when the reply watch closes is a launch that
-	// worked: the watch is shortened, never skipped.
+	// worked: the watch is already over at its first look, never skipped.
 	restoreReply := launchReplyWindow
-	launchReplyWindow = 250 * time.Millisecond
+	launchReplyWindow = time.Nanosecond
 	t.Cleanup(func() { launchReplyWindow = restoreReply })
 
 	var stdout, stderr bytes.Buffer
@@ -176,14 +176,11 @@ func TestRunRefusesToCallAnUnheardPromptDelivered(t *testing.T) {
 	jail := newRunJail(t)
 	defer jail.killSockets(t)
 	t.Setenv("CC_STUB_DEAF", "1")
-	restoreGrace, restoreWindow := launchGrace, launchProofWindow
-	restoreRescue := launchRescueWindow
-	launchGrace, launchProofWindow = 50*time.Millisecond, 250*time.Millisecond
-	launchRescueWindow = 250 * time.Millisecond
-	t.Cleanup(func() {
-		launchGrace, launchProofWindow = restoreGrace, restoreWindow
-		launchRescueWindow = restoreRescue
-	})
+	// The deaf stub never records the prompt, so both proof windows are the
+	// limit that wins: each is already over at its first look.
+	restoreWindow, restoreRescue := launchProofWindow, launchRescueWindow
+	launchProofWindow, launchRescueWindow = time.Nanosecond, time.Nanosecond
+	t.Cleanup(func() { launchProofWindow, launchRescueWindow = restoreWindow, restoreRescue })
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{

@@ -14,6 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // Every state plays its frames in order, wrapping past the last: emoji mode
@@ -217,6 +220,10 @@ func TestTabStatusPulseAndNoop(t *testing.T) {
 }
 
 func TestTabStatusNewNameWins(t *testing.T) {
+	// The tab lock's poll runs on the process clock: a parked poll is the
+	// pulse waiting on the name writer's lock.
+	polls := clock.NewFake(time.Now())
+	testwait.ProcessClock(t, polls)
 	f := newTabStatusFixture()
 	dir := t.TempDir()
 	d := tabObservation("blocked")
@@ -237,16 +244,29 @@ func TestTabStatusNewNameWins(t *testing.T) {
 			return f.call(ctx, socket, lines...)
 		})
 	}()
-	<-locked
+	testwait.Receive(t, "the name writer to hold the tab lock", locked)
 	go func() {
 		_, _, err := reconcileTab(context.Background(), "endpoint", dir, d, 1, f.call)
 		pulseDone <- err
 	}()
+	testwait.Until(t, "the pulse to wait on the name writer's tab lock", func() (bool, string) {
+		select {
+		case err := <-pulseDone:
+			return true, fmt.Sprintf("the pulse ended past the lock: %v", err)
+		default:
+		}
+		return polls.Pending() > 0, polls.String()
+	})
+	if polls.Pending() == 0 {
+		t.Fatal("the pulse ended while the name writer held the tab lock")
+	}
 	close(proceed)
-	if err := <-nameDone; err != nil {
+	if err, _ := testwait.Receive(t, "the name writer to end", nameDone); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-pulseDone; err != nil {
+	// The name writer released the lock: the pulse's next poll takes it.
+	polls.Advance(time.Minute)
+	if err, _ := testwait.Receive(t, "the pulse to end after the name writer", pulseDone); err != nil {
 		t.Fatal(err)
 	}
 	if f.label != "⭕ Newest" {
@@ -611,8 +631,7 @@ func TestTabRestorePastItsBudgetIsRepaintedByTheReplacement(t *testing.T) {
 	if _, err := stale.paintTabs(context.Background(), blocked, 0, true); err != nil {
 		t.Fatal(err)
 	}
-	expired, cancel := context.WithTimeout(context.Background(), 0)
-	defer cancel()
+	expired := testwait.Expired()
 	late := tabObservation("blocked")
 	late.Validate = func(ctx context.Context) (bool, error) { return false, ctx.Err() }
 	stale.tabObservations = []TabDecoration{late}

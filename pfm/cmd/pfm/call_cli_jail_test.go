@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const callCLIUI = `import os, sys, tty
@@ -45,6 +46,20 @@ while True:
     sys.stdout.buffer.write(ch)
     sys.stdout.flush()
 `
+
+// awaitProbePane waits until the probe pane of a tmux server under root shows want.
+func awaitProbePane(t *testing.T, socket, session, root, home, want, condition string) {
+	t.Helper()
+	testwait.Until(t, condition, func() (bool, string) {
+		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-t", session, "-p", "-J")
+		capture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root, "HOME="+home)
+		output, captureErr := capture.Output()
+		if captureErr != nil {
+			return false, captureErr.Error()
+		}
+		return strings.Contains(string(output), want), "capture=" + string(output)
+	})
+}
 
 func TestCallFailurePrintsContradictionProofOnStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -157,19 +172,7 @@ func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 		_ = kill.Run()
 	})
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-t", session, "-p", "-J")
-		capture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root, "HOME="+home)
-		output, captureErr := capture.Output()
-		if captureErr == nil && strings.Contains(string(output), "❯") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("probe UI did not become ready: %v", captureErr)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	awaitProbePane(t, socket, session, root, home, "❯", "probe UI to become ready")
 
 	statedTestSender(t)
 	var stdout, stderr bytes.Buffer
@@ -195,7 +198,7 @@ func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 	selectorScript := filepath.Join(root, "selector.py")
 	if err := testjail.WriteExecutable(
 		selectorScript,
-		[]byte("import time\nprint('Question\\n❯ 1. Allow\\n  2. Deny', flush=True)\ntime.sleep(30)\n"),
+		[]byte("import sys\nprint('Question\\n❯ 1. Allow\\n  2. Deny', flush=True)\nsys.stdin.read()\n"),
 		0o700,
 	); err != nil {
 		t.Fatal(err)
@@ -224,19 +227,7 @@ func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 		kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root, "HOME="+home)
 		_ = kill.Run()
 	})
-	selectorDeadline := time.Now().Add(5 * time.Second)
-	for {
-		capture := exec.Command("tmux", "-L", selectorSocket, "capture-pane", "-t", selectorSession, "-p", "-J")
-		capture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root, "HOME="+home)
-		output, captureErr := capture.Output()
-		if captureErr == nil && strings.Contains(string(output), "❯ 1. Allow") {
-			break
-		}
-		if time.Now().After(selectorDeadline) {
-			t.Fatalf("selector probe did not become ready: err=%v capture=%q", captureErr, output)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	awaitProbePane(t, selectorSocket, selectorSession, root, home, "❯ 1. Allow", "selector probe to become ready")
 	stdout.Reset()
 	stderr.Reset()
 	code = run([]string{"chat", "call", selectorSession, "must not type"}, &stdout, &stderr)
@@ -279,7 +270,7 @@ func TestChatCallResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) {
 	if err := os.WriteFile(messagePath, []byte(longBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
+	awaitProbePane(t, fileSocket, fileSession, root, home, "❯", "file-backed probe UI to become ready")
 	stdout.Reset()
 	stderr.Reset()
 	code = run([]string{"chat", "call", "--file", messagePath, fileSession}, &stdout, &stderr)
@@ -739,8 +730,9 @@ func TestChatCallResumeRefusesLiveSocketCrumbSession(t *testing.T) {
 		"-d",
 		"-s",
 		"probe-resume",
-		"sleep",
-		"30",
+		"tail",
+		"-f",
+		"/dev/null",
 	)
 	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
 	if output, err := start.CombinedOutput(); err != nil {
@@ -825,13 +817,8 @@ func TestBroadcastHeadlessCallRunsInParallelAndReportsInOrder(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	done := make(chan int, 1)
 	go func() { done <- broadcastHeadlessCall(targets, deliver, &stdout, &stderr) }()
-	select {
-	case code := <-done:
-		if code != codeUndelivered {
-			t.Fatalf("exit=%d, want %d", code, codeUndelivered)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("broadcast ran its deliveries one at a time")
+	if code, _ := testwait.Receive(t, "broadcast to run every delivery at once", done); code != codeUndelivered {
+		t.Fatalf("exit=%d, want %d", code, codeUndelivered)
 	}
 	if want := "=== a: delivered\ncalled LIVE a\n=== c: delivered\ncalled LIVE c\n"; stdout.String() != want {
 		t.Fatalf("stdout=%q, want %q", stdout.String(), want)

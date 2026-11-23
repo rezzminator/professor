@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestParseOpenCodeJSONLRejectsMalformedAndIncompleteResults(t *testing.T) {
@@ -214,13 +215,14 @@ func TestCollectOpenCodeRunOutputReadsAnUnreadableMarkerAgain(t *testing.T) {
 			failure <- err
 			close(done)
 		}()
-		for fake.Pending() == 0 { // the collector waits on its first tick, unless it already returned
+		testwait.Until(t, "the collector to wait on its first tick or return", func() (bool, string) {
 			select {
 			case <-done:
-				return output, failure
-			case <-time.After(time.Millisecond):
+				return true, ""
+			default:
 			}
-		}
+			return fake.Pending() > 0, fake.String()
+		})
 		return output, failure
 	}
 

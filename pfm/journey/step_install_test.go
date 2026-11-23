@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -31,7 +30,6 @@ func install(c *harness.Ctx, s State) State {
 		"install",
 		// From a tool shell: SHELL names bash, not the owner's login shell.
 		"SHELL=/bin/bash bash -euo pipefail ~/.local/share/journey/install.sh",
-		150*time.Second,
 	); code != 0 {
 		c.Failf("INSTALL.md's install exited %d:\n%s", code, term.Screen())
 	}

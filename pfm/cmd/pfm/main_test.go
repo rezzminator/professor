@@ -15,7 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
@@ -24,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestRRDirEntryUsesInjectedHome(t *testing.T) {
@@ -339,6 +342,9 @@ func TestKilledPruneOrphansCLI(t *testing.T) {
 }
 
 func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
+	// The bound it opens on reads the process clock; a fake one never ends it
+	// early and records no real wait.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	jailTest(t)
 	dbPath := os.Getenv(paths.EnvCacheDB)
 	if err := os.WriteFile(dbPath, []byte("not a sqlite database"), 0o600); err != nil {

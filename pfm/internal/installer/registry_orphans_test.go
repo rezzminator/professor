@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestRetireDeadRegistryLinks(t *testing.T) {
@@ -271,13 +272,12 @@ func TestRetireDeadRegistryRootLink(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() { done <- installer.retireDeadRegistryLinks() }()
-			select {
-			case err := <-done:
-				if err != nil {
-					t.Fatal(err)
-				}
-			case <-time.After(10 * time.Second):
-				t.Fatal("retireDeadRegistryLinks never returned on a dead registry root link")
+			if err, _ := testwait.Receive(
+				t,
+				"retireDeadRegistryLinks returned on a dead registry root link",
+				done,
+			); err != nil {
+				t.Fatal(err)
 			}
 			want := "  change  retire " + root + " (dead pfm link -> " + target + ")\n"
 			if output.String() != want {

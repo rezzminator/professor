@@ -15,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // engineSyncGlobalEngine is an installer over home whose source clone is
@@ -608,7 +610,12 @@ func TestWireEngineSyncGlobalHasADeadline(t *testing.T) {
 			installer, output, _ := engineSyncGlobalEngine(t, mode, nil)
 			installer.options.EngineSyncRunner = hungEngineSync{}
 			installer.engineSyncDeadline = 50 * time.Millisecond
-			err := installer.wireEngineSyncGlobal()
+			fake := clock.NewFake(time.Now())
+			installer.engineSyncTimer = fake
+			var err error
+			testwait.Drive(t, "the hung engine-sync run to end at its deadline", fake, func() {
+				err = installer.wireEngineSyncGlobal()
+			})
 			if err == nil || !strings.Contains(err.Error(), "engine-sync global") ||
 				!strings.Contains(err.Error(), "timed out after 50ms") {
 				t.Fatalf(

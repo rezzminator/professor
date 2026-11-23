@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // name-sync converges a live server onto the same option list a fresh one is
@@ -46,8 +46,9 @@ func TestNameSyncFreezesAWindowNameTheServerStillAutoRenames(t *testing.T) {
 			"-d",
 			"-s",
 			socket,
-			"sleep",
-			"120",
+			"tail",
+			"-f",
+			"/dev/null",
 		)
 		start.Env = environment
 		if output, err := start.CombinedOutput(); err != nil {
@@ -89,7 +90,7 @@ func startNameSyncFixture(t *testing.T, socket string) (root string, environment
 	environment = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
 	start := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "sleep", "120",
+		"new-session", "-d", "-s", socket, "tail", "-f", "/dev/null",
 	)
 	start.Env = environment
 	if output, err := start.CombinedOutput(); err != nil {
@@ -182,25 +183,28 @@ func TestWindowRenamedHookRunsTheReporterOnceForACommandClientRename(t *testing.
 
 	want := "internal herdr-state name --socket " +
 		filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()), socket) + " --session " + socket
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	condition := "the window-renamed hook to run the reporter for rename-window from a command client"
+	testwait.Until(t, condition, func() (bool, string) {
 		logged, _ := os.ReadFile(logPath)
-		if lines := strings.Fields(string(logged)); len(lines) > 0 {
-			// Let a second, wrongly fired run land before counting.
-			time.Sleep(300 * time.Millisecond)
-			logged, err := os.ReadFile(logPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := strings.TrimSpace(string(logged)); got != want {
-				t.Fatalf("reporter log = %q, want exactly one run %q", got, want)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the window-renamed hook never ran the reporter for rename-window from a command client")
-		}
-		time.Sleep(20 * time.Millisecond)
+		return len(strings.Fields(string(logged))) > 0, "reporter log empty"
+	})
+	// A rename of a second session's window through the same path is the
+	// sentinel: a run the first rename wrongly caused was queued before it, so
+	// once the sentinel's own run is logged the count is exact.
+	nameSyncTmux(t, environment, socket, "new-session", "-d", "-s", "sentinel", "tail", "-f", "/dev/null")
+	nameSyncTmux(t, environment, socket, "rename-window", "-t", "sentinel", "Y")
+	sentinel := "internal herdr-state name --socket " +
+		filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()), socket) + " --session sentinel"
+	testwait.Until(t, "the sentinel rename's reporter run", func() (bool, string) {
+		logged, _ := os.ReadFile(logPath)
+		return strings.Contains(string(logged), sentinel+"\n"), "reporter log:\n" + string(logged)
+	})
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(logged); got != want+"\n"+sentinel+"\n" {
+		t.Fatalf("reporter log = %q, want exactly one run per rename %q", got, want+"\n"+sentinel+"\n")
 	}
 }
 

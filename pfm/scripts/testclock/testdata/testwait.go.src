@@ -1,0 +1,5 @@
+package testwait
+
+import "time"
+
+func Until() { time.Sleep(1) }

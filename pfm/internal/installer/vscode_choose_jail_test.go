@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // fakePfm is the pfm the Choose Theme command finds at ~/.local/bin/pfm in a
@@ -373,12 +374,14 @@ func TestVSCodeChooseThemeRunsInARemoteWindowWhosePfmIsHere(t *testing.T) {
 // editor (lensClick: in no active editor, the command the file's CodeLens
 // carries, run with the arguments it carries), runs the professor.promptLint
 // handler (runs times; secondClick clicks again while the first runs;
-// editDuringRun edits the text then; cancelAfterMs cancels the progress;
-// cancelLensAfterMs runs the command the running lens carries then) and prints
+// editDuringRun edits the text then; cancelOnStart cancels the progress once the
+// fake pfm has said through the started FIFO that its run is held;
+// cancelLensOnStart fires the extension's lens refresh interval by hand then and
+// runs the command the running lens carries) and prints
 // the messages, the professor-prompt-lint diagnostics left, every progress shown,
 // the quick fixes offered over the whole file (after editBeforeFix appends to
 // that 1-based line), every setContext, the lenses the file had before the
-// run (lensIdle), mid-run when cancelLensAfterMs is set (lensRunning) and
+// run (lensIdle), mid-run when cancelLensOnStart is set (lensRunning) and
 // after it (lensAfter), the selector the lens provider registered for and how
 // many times it announced a change (lensFires); globsAfter sets
 // professor.promptLint.globs before the run and announces the change, printing
@@ -526,8 +529,8 @@ const vscodeStub = {
         isCancellationRequested: false,
         onCancellationRequested: (listener) => { listeners.push(listener); return { dispose() {} }; },
       };
-      if (scenario.cancelAfterMs) {
-        setTimeout(() => { token.isCancellationRequested = true; listeners.forEach((listener) => listener()); }, scenario.cancelAfterMs);
+      if (scenario.cancelOnStart) {
+        runStarted().then(() => { token.isCancellationRequested = true; listeners.forEach((listener) => listener()); });
       }
       return task({ report() {} }, token);
     },
@@ -553,6 +556,12 @@ Module._load = function (request, parent, isMain) {
   return originalLoad.apply(this, arguments);
 };
 
+// The extension's refresh interval never runs on a clock here: the driver fires
+// it by hand. runStarted settles once the fake pfm opens the started FIFO.
+const intervals = [];
+global.setInterval = (callback) => { intervals.push(callback); return callback; };
+global.clearInterval = (callback) => { const at = intervals.indexOf(callback); if (at >= 0) intervals.splice(at, 1); };
+const runStarted = () => fs.promises.readFile(path.join(process.env.HOME, 'fake-pfm', 'started'));
 const extension = require(extensionPath);
 const store = {};
 const context = {
@@ -607,8 +616,9 @@ if (mode === 'route') {
       const runs = [scenario.lensClick ? registered[lens.command.command](...lens.command.arguments) : handler()];
       if (scenario.editDuringRun) document.version++;
       if (scenario.secondClick) runs.push(handler());
-      if (scenario.cancelLensAfterMs) {
-        runs.push(new Promise((resolve) => setTimeout(resolve, scenario.cancelLensAfterMs)).then(() => {
+      if (scenario.cancelLensOnStart) {
+        runs.push(runStarted().then(() => {
+          intervals.slice().forEach((tick) => tick());
           lensRunning = lensView();
           const running = codeLensProvider.provideCodeLenses(document)[0];
           return registered[running.command.command](...running.command.arguments);
@@ -677,7 +687,7 @@ func runVSCodeExtensionDriverFrom(t *testing.T, extensionPath, mode, home string
 		t.Fatal(err)
 	}
 
-	command := exec.Command(node, driverPath, extensionPath, mode)
+	command := exec.CommandContext(testwait.Context(t), node, driverPath, extensionPath, mode)
 	command.Env = append(append(os.Environ(), "HOME="+home), env...)
 	output, err := command.Output()
 	if err != nil {

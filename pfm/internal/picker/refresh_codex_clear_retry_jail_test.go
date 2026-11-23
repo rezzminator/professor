@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -171,48 +173,20 @@ func TestParkedPickerRetriesRefreshAfterCodexClear(t *testing.T) {
 // probe retries the database write instead of treating the unchanged rollout
 // as proof that reconciliation succeeded.
 func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *testing.T) {
-	shortenRefreshIntervals(t)
+	testjail.TmuxServer(t)
 	database, manager, socket, oldID, currentID := codexRegatherJailFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
-	updates := make(chan ui.Snapshot, 8)
-	var stderr bytes.Buffer
 	const warning = "record clear kill"
-	warningEvents := make(chan string, 8)
-	warn := func(message string) {
-		fleet.PrintWarn(&stderr)(message)
-		if strings.Contains(message, warning) {
-			warningEvents <- message
-		}
-	}
-	go streamFleetRefreshesWith(
-		ctx,
-		database,
-		scanRequest{},
-		warn,
-		&stderr,
-		updates,
-		refreshDependencies{activity: ui.NewActivityClock(time.Now())},
-	)
-	defer func() {
-		cancel()
-		for range updates {
-		}
-	}()
-
-	for completed := 0; completed < 2; {
-		select {
-		case snapshot, ok := <-updates:
-			if !ok {
-				t.Fatalf("stream closed before park: %s", stderr.String())
+	var warnings atomic.Int64
+	stream := startParkedStream(t, ctx, database, func(stderr *bytes.Buffer) fleet.Warn {
+		return func(message string) {
+			fleet.PrintWarn(stderr)(message)
+			if strings.Contains(message, warning) {
+				warnings.Add(1)
 			}
-			if !snapshot.Refreshing {
-				completed++
-			}
-		case <-time.After(15 * time.Second):
-			t.Fatalf("stream did not reach park: %s", stderr.String())
 		}
-	}
+	}, refreshDependencies{})
 
 	// The stream's first pass normally advances oldID to the status-line
 	// identity. Put the binding back so the next parked probe has one clear to
@@ -248,61 +222,31 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 		t.Fatal(err)
 	}
 
-	bound := 2*fleetRefreshCodexPollInterval + fleetRefreshParkPollInterval + 5*time.Second
-	deadline := time.After(bound)
-	for attempts := 0; attempts < 2; attempts++ {
-		select {
-		case <-warningEvents:
-			continue
-		case _, ok := <-updates:
-			if !ok {
-				t.Fatalf("stream closed before the second binding warning: %s", stderr.String())
-			}
-		case <-deadline:
-			t.Fatalf(
-				"parked probe retried binding failure fewer than twice within %s: warnings=%q",
-				bound,
-				stderr.String(),
-			)
-		}
-	}
+	// Each probe that fails to retire the binding warns: the fingerprint cache
+	// must not hold, so the next probe tries the write again. A cache that held
+	// would stop the probes after their first warning, leaving the count at the
+	// few the passes' own attempts make; a probe that retries keeps it climbing.
+	const retries = 8
+	stream.await(t, "the parked probe to retry the binding failure until its warning is the 8th",
+		func(ui.Snapshot) {}, func() bool { return warnings.Load() >= retries })
 }
 
 func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	t.Helper()
-	shortenRefreshIntervals(t)
 	database, manager, socket, oldID, currentID := codexRegatherJailFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	if _, _, err := manager.AdvanceCodexPane(ctx, socket, "%0", currentID); err != nil {
 		t.Fatal(err)
 	}
 	resolved := jailPaths(t)
-	updates := make(chan ui.Snapshot, 8)
-	var stderr bytes.Buffer
-	dependencies := refreshDependencies{activity: ui.NewActivityClock(time.Now())}
+	dependencies := refreshDependencies{}
 	if failRefresh {
 		dependencies.newIndexer = func(*store.Store) (indexRunner, error) { return &clearRetryIndexRunner{}, nil }
 	}
-	go streamFleetRefreshesWith(ctx, database, scanRequest{}, fleet.PrintWarn(&stderr), &stderr, updates, dependencies)
-	defer func() {
-		cancel()
-		for range updates {
-		}
-	}()
-	for completed := 0; completed < 2; {
-		select {
-		case snapshot, ok := <-updates:
-			if !ok {
-				t.Fatal("stream closed before park")
-			}
-			if !snapshot.Refreshing {
-				completed++
-			}
-		case <-time.After(15 * time.Second):
-			t.Fatal("stream did not reach park")
-		}
-	}
+	stream := startParkedStream(t, ctx, database, func(stderr *bytes.Buffer) fleet.Warn {
+		return fleet.PrintWarn(stderr)
+	}, dependencies)
 	current, found, err := database.Rollout(ctx, currentID)
 	if err != nil || !found {
 		t.Fatalf("current rollout missing: %v", err)
@@ -324,36 +268,24 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("change fixture identity: %v: %s", err, output)
 	}
-	// The expensive Codex identity probe has its own 10s cadence, separate
-	// from the cheap 2s parked presence poll. Give the probe one full interval
-	// plus headroom, rather than timing this test against the presence timer.
-	bound := fleetRefreshCodexPollInterval + 15*time.Second
-	deadline := time.After(bound)
-waitForClear:
-	for {
-		select {
-		case snapshot, ok := <-updates:
-			if !ok {
-				t.Fatal("stream closed after clear")
-			}
-			// A failed pass publishes a snapshot with no fleet (the injected
-			// index failure above): it is the stale marker, not a look at the rows.
-			if snapshot.Refreshing || snapshot.RefreshFailure != nil {
-				continue
-			}
-			for index := range snapshot.Rows {
-				row := &snapshot.Rows[index]
-				if row.ID == currentID {
-					// A pre-clear snapshot may already be queued on the channel.
-					continue waitForClear
-				}
-			}
-			assertNoStaleCodexRow(t, snapshot.Rows, currentID, oldID, "parked clear")
+	// The expensive Codex identity probe has its own cadence, separate from
+	// the cheap parked presence poll: the stream's polls pass until it runs.
+	cleared := false
+	stream.await(t, "the parked picker to publish the Codex /clear", func(snapshot ui.Snapshot) {
+		// A failed pass publishes a snapshot with no fleet (the injected
+		// index failure above): it is the stale marker, not a look at the rows.
+		if snapshot.Refreshing || snapshot.RefreshFailure != nil {
 			return
-		case <-deadline:
-			t.Fatalf("parked picker missed Codex /clear within %s", bound)
 		}
-	}
+		for index := range snapshot.Rows {
+			if snapshot.Rows[index].ID == currentID {
+				// A pre-clear snapshot may already be queued on the channel.
+				return
+			}
+		}
+		assertNoStaleCodexRow(t, snapshot.Rows, currentID, oldID, "parked clear")
+		cleared = true
+	}, func() bool { return cleared })
 }
 
 func appendCodexClearPrompt(t *testing.T, path string) {

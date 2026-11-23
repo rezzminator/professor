@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestProbeServerNeverReadsAFailureAsDead pins the one liveness answer: only
@@ -86,24 +88,23 @@ func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
 		// exec, so the killed client is the process holding its pipes: the
 		// probe returns at its bound, not after the door's pipe wait.
 		binary := filepath.Join(t.TempDir(), "tmux")
-		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec sleep 5\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec tail -f /dev/null\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
+		fake := clock.NewFake(time.Unix(0, 0))
 		var state ServerState
-		err := within(t, stoppedBound, map[string]func() error{"ProbeServer": func() error {
+		err := endAtProbeBound(t, fake, 1, func() error {
 			var err error
-			state, _, err = ProbeServer(stoppedProbe(context.Background()), binary, "/tmp/x")
+			state, _, err = ProbeServer(WithProbeClock(context.Background(), fake), binary, "/tmp/x")
 			return err
-		}})["ProbeServer"]
-		want := "tmux server did not answer within 200ms: /tmp/x"
+		})
+		want := "tmux server did not answer within 2s: /tmp/x"
 		if state != ServerUnresponsive || !errors.Is(err, ErrServerUnresponsive) || err.Error() != want {
 			t.Fatalf("ProbeServer() over a hung server = %v %v, want unresponsive %q", state, err, want)
 		}
 	})
 	t.Run("production bound", func(t *testing.T) {
-		expired, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
-		defer cancel()
-		err := Unresponsive(context.Background(), expired, "/tmp/x")
+		err := Unresponsive(context.Background(), testwait.Expired(), "/tmp/x")
 		if want := "tmux server did not answer within 2s: /tmp/x"; err == nil || err.Error() != want {
 			t.Fatalf("Unresponsive() under a context carrying no bound = %v, want %q", err, want)
 		}
@@ -147,20 +148,13 @@ func TestTmuxReadGivesUpOnAFrozenServer(t *testing.T) {
 			held <- conn // held open, never answered
 		}
 	}()
-	done := make(chan error, 1)
-	go func() {
-		_, err := TmuxRead(context.Background(), socketPath, "show-options", "-qv", "-t", "cc-1", "@pfm_herdr")
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), ProbeTimeout.String()) {
-			t.Fatalf("read of a frozen server = %v, want an error naming the %s bound", err, ProbeTimeout)
-		}
-	case <-time.After(ProbeTimeout + 5*time.Second):
-		t.Fatalf(
-			"read of a frozen server still waiting after %s: its caller would hang",
-			ProbeTimeout+5*time.Second,
-		)
+	fake := clock.NewFake(time.Unix(0, 0))
+	err = endAtProbeBound(t, fake, 1, func() error {
+		_, err := TmuxRead(WithProbeClock(context.Background(), fake), socketPath,
+			"show-options", "-qv", "-t", "cc-1", "@pfm_herdr")
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), ProbeTimeout.String()) {
+		t.Fatalf("read of a frozen server = %v, want an error naming the %s bound", err, ProbeTimeout)
 	}
 }

@@ -10,11 +10,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
@@ -144,24 +145,27 @@ func TestShowMarksOnlyTmuxsUnsetAnswerAsUnset(t *testing.T) {
 }
 
 // barrierProbe answers ServerPID only once every expected call is in flight
-// at once, or fails at its deadline: a serial liveness loop never gets there.
+// at once: a serial liveness loop never gets there and stays parked until abandon closes.
 type barrierProbe struct {
 	fakeProbe
-	arrived chan struct{}
-	all     int
+	arrived  chan struct{}
+	all      int
+	together chan struct{}
+	abandon  chan struct{}
+	once     sync.Once
 }
 
 func (probe *barrierProbe) ServerPID(_ context.Context, socket string) (int, error) {
 	probe.arrived <- struct{}{}
-	deadline := time.After(2 * time.Second)
-	for len(probe.arrived) < probe.all {
-		select {
-		case <-deadline:
-			return 0, fmt.Errorf("%s: probed alone, %d of %d in flight", socket, len(probe.arrived), probe.all)
-		case <-time.After(5 * time.Millisecond):
-		}
+	if len(probe.arrived) == probe.all {
+		probe.once.Do(func() { close(probe.together) })
 	}
-	return 42, nil
+	select {
+	case <-probe.together:
+		return 42, nil
+	case <-probe.abandon:
+		return 0, fmt.Errorf("%s: probed alone, %d of %d in flight", socket, len(probe.arrived), probe.all)
+	}
 }
 
 // TestSocketsProbesEveryServerTogether: the liveness reads run concurrently,
@@ -173,9 +177,23 @@ func TestSocketsProbesEveryServerTogether(t *testing.T) {
 	for _, name := range names {
 		listenSocket(t, directory, name)
 	}
-	probe := &barrierProbe{arrived: make(chan struct{}, len(names)), all: len(names)}
+	probe := &barrierProbe{
+		arrived: make(chan struct{}, len(names)), all: len(names),
+		together: make(chan struct{}), abandon: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(probe.abandon) })
 
-	got, err := Servers{Probe: probe, TmuxDir: directory}.Sockets(context.Background())
+	type probed struct {
+		got []string
+		err error
+	}
+	result := make(chan probed, 1)
+	go func() {
+		got, err := Servers{Probe: probe, TmuxDir: directory}.Sockets(testwait.Context(t))
+		result <- probed{got, err}
+	}()
+	outcome, _ := testwait.Receive(t, "Sockets to probe every server at once", result)
+	got, err := outcome.got, outcome.err
 	if err != nil || !reflect.DeepEqual(got, names) {
 		t.Fatalf("Sockets = %v, %v; want %v with every server probed at once", got, err, names)
 	}

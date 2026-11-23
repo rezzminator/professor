@@ -154,7 +154,7 @@ func testOptions(t *testing.T, endpoint string, clk clock.Clock) Options {
 	return Options{
 		Env: &paths.MapEnv{Values: map[string]string{}}, StateDir: filepath.Join(root, "state"),
 		ClaudeConfigDir: config, Version: "0.42.0-alpha", OS: "linux", Arch: "arm64", Endpoint: endpoint,
-		Client: obs.WrapClient(&http.Client{Timeout: Timeout}), Clock: clk,
+		Client: obs.WrapClient(&http.Client{}), Clock: clk,
 	}
 }
 

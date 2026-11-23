@@ -5,8 +5,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestSpaceRecordsOverwritesAndClears(t *testing.T) {
@@ -64,7 +67,9 @@ func TestSpaceRefusesAnEmptyChatIDAndADegradedStore(t *testing.T) {
 }
 
 func TestSpaceTableReachesAnOlderFile(t *testing.T) {
-	t.Parallel()
+	// The backup before a migration bounds its WAL checkpoint on the process
+	// clock: on a fake one that bound arms no real timer.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pfm.db")
 	seedSharedState(t, path, v3Schema)

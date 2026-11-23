@@ -29,7 +29,8 @@ const (
 )
 
 // wallClock is the time seam for backup stamps and the VS Code ack grace window.
-var wallClock clock.Clock = clock.Real
+// Nil reads clock.Real at the call.
+var wallClock clock.Clock
 
 // vscodeProducts are the macOS VS Code family user dirs whose settings.json is
 // backed up; elsewhere the candidates are paths.VSCodeSettingsCandidates'.
@@ -468,7 +469,7 @@ func (s *session) readVscode(_ context.Context) SurfaceResult {
 		haveAck,
 		s.state.Generation,
 		vscodeRunning(processes, s.env.platform().vscodeMarkers),
-		wallClock.Now().Sub(info.ModTime()),
+		clockOr(wallClock).Now().Sub(info.ModTime()),
 		filepath.Join(s.store.dir, vscodeAckFile),
 	)
 	generation := 0

@@ -1,7 +1,7 @@
-// Package run owns the one-shot process boundary for every supported headless
-// engine. Callers may choose the normalized contract or ask the native client
-// to pass through its output, but process lifetime and account identity always
-// cross this package.
+// Package run owns the one-shot process boundary of every headless engine: a
+// caller takes the normalized contract or the native client's own output, and
+// process lifetime and account identity always cross this package.
+// opencode_marker.go: the assistant marker the OpenCode plugin writes, and its read.
 package run
 
 import (

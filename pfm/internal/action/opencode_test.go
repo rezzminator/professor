@@ -171,6 +171,7 @@ func TestOpenLiveOpenCodeAttachesAndDemotesToItsOwnResume(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(true),

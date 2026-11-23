@@ -79,7 +79,7 @@ func ClearName(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime
 		(payload.Event != clearNameStartEvent || payload.Source != "clear")) {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), promptHookDeadline)
+	ctx, cancel := clock.WithTimeout(context.Background(), clock.Real, promptHookDeadline)
 	defer cancel()
 	if payload.Path != "" && !filepath.IsAbs(payload.Path) {
 		fmt.Fprintf(

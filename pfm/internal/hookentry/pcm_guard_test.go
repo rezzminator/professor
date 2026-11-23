@@ -162,80 +162,21 @@ func (f pcmGuardFixture) editTargets() []string {
 	}
 }
 
-// pcmGuardBashWrites is every Bash write form, each run from the project.
-func (f pcmGuardFixture) bashWrites() []string {
-	return []string{
-		`echo x > CLAUDE.md`,
-		`echo x >> .claude/agents/a.md`,
-		`echo x &> CLAUDE.md`,
-		`echo x 2> CLAUDE.md`,
-		`echo x >| CLAUDE.md`,
-		`{ echo a; echo b; } > CLAUDE.md`,
-		`for i in 1 2; do echo $i; done >> CLAUDE.md`,
-		`> CLAUDE.md`,
-		`cat > CLAUDE.md <<'EOF'` + "\nnew\nEOF",
-		`echo x | tee -a notes.md CLAUDE.md`,
-		`echo x | sudo tee .claude/agents/a.md`,
-		`sed -i 's/a/b/' CLAUDE.md`,
-		`sed -i.bak -e 's/a/b/' .claude/agents/a.md`,
-		`sed --in-place=.orig 's/a/b/' CLAUDE.md`,
-		`sed -ni 's/a/b/p' CLAUDE.md`,
-		`sed -i -e's/a/b/' CLAUDE.md`,
-		`perl -pi -e 's/a/b/' CLAUDE.md`,
-		`perl -i.bak -pe 's/a/b/' .claude/agents/a.md`,
-		`cp /tmp/x CLAUDE.md`,
-		`cp /tmp/CLAUDE.md .`,
-		`cp -r /tmp/agents/a.md .claude/agents/`,
-		`cp -t .claude/agents /tmp/new.md`,
-		`cp -t.claude/agents /tmp/new.md`,
-		`cp --target-directory=.claude/agents /tmp/new.md`,
-		`mv /tmp/x CLAUDE.md`,
-		`mv CLAUDE.md /tmp/old.md`,
-		`install -m 644 /tmp/x .claude/agents/b.md`,
-		`rsync -a /tmp/x.md .claude/agents/`,
-		`ln -sf /tmp/x CLAUDE.md`,
-		`ln -s /tmp/elsewhere/CLAUDE.md`,
-		`rm CLAUDE.md`,
-		`rm -rf .claude`,
-		`rm CLAUDE.*`,
-		`unlink CLAUDE.md`,
-		`touch .claude/agents/new.md`,
-		`touch -d 2020-01-01 CLAUDE.md`,
-		`truncate -s 0 CLAUDE.md`,
-		`dd if=/dev/zero of=CLAUDE.md bs=1 count=1`,
-		`python3 -c "open('CLAUDE.md','w').write('x')"`,
-		`python3 -c"open('CLAUDE.md','w').write('x')"`,
-		`node -pe"require('fs').writeFileSync('CLAUDE.md', 'x')"`,
-		`python3 - <<'EOF'` + "\nopen('.claude/agents/a.md', 'w').write('x')\nEOF",
-		`python3 <<< "import os; os.remove('CLAUDE.md')"`,
-		`node -e "require('fs').writeFileSync('CLAUDE.md', 'x')"`,
-		`perl -e 'unlink "CLAUDE.md"'`,
-		`ruby -e 'File.write("CLAUDE.md", "x")'`,
-		`bash -c "echo x > CLAUDE.md"`,
-		`sh -c 'rm .claude/agents/a.md'`,
-		`bash <<'EOF'` + "\nrm CLAUDE.md\nEOF",
-		`cd .claude && echo x > agents/a.md`,
-		`cd /tmp && cd ` + f.project + ` && rm CLAUDE.md`,
-		`echo x > "$HOME/.claude/rules/new.md"`,
-		`echo x > ~/.claude/agents/z.md`,
-		`echo x > "$DIR/CLAUDE.md"`,
-		`git show HEAD:CLAUDE.md > CLAUDE.md`,
-		`timeout 5 env A=1 tee CLAUDE.md`,
-		`echo x > notes/link.md`,
-		`echo x > ` + filepath.Join(f.clone, "templates", "project", "agents", "a.md"),
-		`cd ` + f.clone + ` && sed -i s/a/b/ templates/project/agents/a.md`,
-		`cd ` + f.clone + ` && (cd /tmp) && echo x > templates/project/agents/a.md`,
-		`cd ` + f.clone + ` && bash -c 'cd /tmp' && rm templates/project/agents/a.md`,
-		`cd ` + f.clone + ` && pushd /tmp && popd && rm templates/project/agents/a.md`,
-		`dash -c 'echo x > CLAUDE.md'`,
-		`ksh -c 'rm .claude/agents/a.md'`,
-		`cp /tmp/new.md .cl*/agents/`,
-		`echo x >& CLAUDE.md`,
-		`echo x &>> CLAUDE.md`,
-		`node --eval "require('fs').writeFileSync('CLAUDE.md', 'x')"`,
-		`rm -rf ` + filepath.Join(f.clone, "templates", "global", "rules") + `/*`,
-		`echo x > ` + filepath.Join(f.seat, "rules", "x.md"),
+// bashWrites is every Bash write form, each run from the project: data in
+// testdata/pcm_guard_bash_writes.json, never shell text this file runs (the guard's subject is
+// the commands it reads), with {project}, {clone} and {seat} standing for the fixture's paths.
+func (f pcmGuardFixture) bashWrites(t *testing.T) []string {
+	t.Helper()
+	var commands []string
+	readHookentryData(t, "pcm_guard_bash_writes.json", &commands)
+	if len(commands) != 70 {
+		t.Fatalf("testdata/pcm_guard_bash_writes.json holds %d commands, want 70", len(commands))
 	}
+	fill := strings.NewReplacer("{project}", f.project, "{clone}", f.clone, "{seat}", f.seat)
+	for index, command := range commands {
+		commands[index] = fill.Replace(command)
+	}
+	return commands
 }
 
 func TestPcmGuardDeniesEveryEditToolToTheMainChatAndOtherAgents(t *testing.T) {
@@ -254,7 +195,7 @@ func TestPcmGuardDeniesEveryEditToolToTheMainChatAndOtherAgents(t *testing.T) {
 func TestPcmGuardDeniesEveryBashWriteFormToTheMainChatAndOtherAgents(t *testing.T) {
 	f := pcmGuardHome(t)
 	for _, agent := range []string{"", "general-purpose"} {
-		for _, command := range f.bashWrites() {
+		for _, command := range f.bashWrites(t) {
 			t.Run(agent+"/"+command, func(t *testing.T) {
 				pcmGuardRequireDeny(t, pcmGuardBash(t, command, f.project, agent), pcmGuardOnlyPcm)
 			})
@@ -269,7 +210,7 @@ func TestPcmGuardAllowsPcmEveryPromptFile(t *testing.T) {
 			pcmGuardRequireAllow(t, pcmGuardEdit(t, tool, target, pcmGuardWriter))
 		}
 	}
-	for _, command := range f.bashWrites() {
+	for _, command := range f.bashWrites(t) {
 		pcmGuardRequireAllow(t, pcmGuardBash(t, command, f.project, pcmGuardWriter))
 	}
 }

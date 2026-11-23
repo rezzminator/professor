@@ -13,11 +13,36 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
+// parkBoundaryClock is a fake clock whose timers tell the test each time the
+// refresh stream comes back to its select: the stream reads Timer.C once per
+// loop turn, so one receipt on boundary is one finished turn.
+type parkBoundaryClock struct {
+	*clock.Fake
+	boundary chan struct{}
+}
+
+func (observed *parkBoundaryClock) NewTimer(d time.Duration) clock.Timer {
+	return &parkBoundaryTimer{Timer: observed.Fake.NewTimer(d), observed: observed}
+}
+
+type parkBoundaryTimer struct {
+	clock.Timer
+	observed *parkBoundaryClock
+}
+
+func (timer *parkBoundaryTimer) C() <-chan time.Time {
+	select {
+	case timer.observed.boundary <- struct{}{}:
+	default: // a test that is not counting turns lets them pass
+	}
+	return timer.Timer.C()
+}
+
 func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
-	shortenRefreshIntervals(t)
 	jailTest(t)
 
 	database, err := store.Open()
@@ -30,12 +55,14 @@ func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 		}
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	updates := make(chan ui.Snapshot, 1)
 	var stderr bytes.Buffer
 	runner := &immediateIndexRunner{}
-	clock := ui.NewActivityClock(time.Now())
+	epoch := time.Unix(1_800_000_000, 0)
+	observed := &parkBoundaryClock{Fake: clock.NewFake(epoch), boundary: make(chan struct{}, 64)}
+	activity := ui.NewActivityClock(epoch)
 	go streamFleetRefreshesWith(
 		ctx,
 		database,
@@ -47,48 +74,56 @@ func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 			newIndexer: func(*store.Store) (indexRunner, error) {
 				return runner, nil
 			},
-			activity: clock,
+			activity: activity,
+			clock:    observed,
 		},
 	)
-
-	completed := 0
-	starve := time.After(20 * time.Second)
-	for completed < 2 {
-		select {
-		case snapshot, ok := <-updates:
+	settled := func(what string) {
+		t.Helper()
+		for {
+			snapshot, ok := testwait.Receive(t, what, updates)
 			if !ok {
-				t.Fatalf("refresh stream closed after %d of 2 passes: %s", completed, stderr.String())
+				t.Fatalf("refresh stream closed while %s: %s", what, stderr.String())
 			}
 			if !snapshot.Refreshing {
-				completed++
+				return
 			}
-		case <-starve:
-			t.Fatalf("refresh stream produced %d of 2 passes in 20s: %s", completed, stderr.String())
 		}
+	}
+	turn := func(what string) { testwait.Receive(t, what, observed.boundary) }
+
+	// The opening pass, then one timed pass: the idle cadence backs off past
+	// the park threshold on it.
+	settled("the opening pass to publish")
+	turn("the stream to wait on its first timer")
+	observed.Advance(fleetRefreshInterval)
+	settled("the second pass to publish")
+	turn("the stream to wait on its park poll")
+	runner.mutex.Lock()
+	passes := len(runner.options)
+	runner.mutex.Unlock()
+
+	// Parked: each park poll that passes (the stream back at its select, one
+	// boundary per poll) starts no pass and publishes nothing.
+	for poll := 1; poll <= 3; poll++ {
+		observed.Advance(fleetRefreshParkPollInterval)
+		turn("the park poll to finish")
+		if len(updates) != 0 {
+			t.Fatalf("a pass published while parked after %d polls: %#v", poll, <-updates)
+		}
+	}
+	runner.mutex.Lock()
+	calls := len(runner.options)
+	runner.mutex.Unlock()
+	if calls != passes {
+		t.Fatalf("index calls after 3 park polls = %d, want the %d before parking", calls, passes)
 	}
 
-	// Parked: no further pass for well over several fleetRefreshParkPollInterval
-	// ticks proves the loop actually stopped, not merely slowed to something
-	// this test's patience could still outlast.
-	select {
-	case snapshot, ok := <-updates:
-		if ok {
-			t.Fatalf("a third pass arrived while parked and untouched: %#v", snapshot)
-		}
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	// A keystroke must wake it inside a poll or two — not wait on an
-	// already-scheduled timer that was never armed for anything this soon.
-	clock.Stamp(time.Now())
-	select {
-	case _, ok := <-updates:
-		if !ok {
-			t.Fatal("refresh stream closed instead of waking on a keystroke")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("no pass arrived within 1s of a keystroke while parked")
-	}
+	// A keystroke must wake it inside a poll or two: the next poll sees the
+	// new stamp, drops the park and runs a pass.
+	activity.Stamp(observed.Now())
+	observed.Advance(fleetRefreshParkPollInterval)
+	settled("a pass to arrive after a keystroke while parked")
 	cancel()
 	for range updates {
 	}
@@ -144,7 +179,7 @@ func (observed *refreshObservedClock) waitNow(t *testing.T, want time.Time) {
 		}
 	case <-observed.selecting:
 		t.Fatal("stream went idle instead of reading the clock for this key's pass")
-	case <-time.After(20 * time.Second):
+	case <-testwait.Context(t).Done():
 		t.Fatal("stream never read the clock for this key's pass")
 	}
 }
@@ -156,7 +191,7 @@ func (observed *refreshObservedClock) waitSelect(t *testing.T) chan struct{} {
 		return resume
 	case got := <-observed.reads:
 		t.Fatalf("unexpected refresh clock read at %v; want an idle stream before the next key", got)
-	case <-time.After(20 * time.Second):
+	case <-testwait.Context(t).Done():
 		t.Fatal("stream never returned to its select boundary")
 	}
 	return nil
@@ -220,7 +255,7 @@ func awaitSettledRefresh(t *testing.T, updates <-chan ui.Snapshot) {
 			if !snapshot.Refreshing {
 				return
 			}
-		case <-time.After(20 * time.Second):
+		case <-testwait.Context(t).Done():
 			t.Fatal("refresh pass never published")
 		}
 	}
@@ -261,11 +296,7 @@ func TestPickerRefreshStreamWakesOnKeystrokeWithoutWaitingForThePoll(t *testing.
 func TestPickerRefreshStreamMeasuresStalenessFromThePassStartTheHeaderReads(t *testing.T) {
 	runner := &slowIndexRunner{started: make(chan struct{}), release: make(chan struct{})}
 	observed, activity, updates, _ := fakeRefreshStream(t, runner)
-	select {
-	case <-runner.started:
-	case <-time.After(20 * time.Second):
-		t.Fatal("first pass never reached the held indexer")
-	}
+	testwait.Receive(t, "the first pass to reach the held indexer", runner.started)
 	observed.Advance(9 * time.Second)
 	close(runner.release)
 	awaitSettledRefresh(t, updates)
@@ -386,7 +417,6 @@ func (runner *toggledFailingIndexRunner) Run(
 // stays open and retries on its cadence, and the first pass that lands
 // publishes a snapshot with no failure, which is what clears the picker's mark.
 func TestPickerRefreshStreamPublishesAFailedPassAndStaysOpen(t *testing.T) {
-	shortenRefreshIntervals(t)
 	jailTest(t)
 	database, err := store.Open()
 	if err != nil {
@@ -397,12 +427,13 @@ func TestPickerRefreshStreamPublishesAFailedPassAndStaysOpen(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	updates := make(chan ui.Snapshot, 1)
 	var stderr bytes.Buffer
 	runner := &toggledFailingIndexRunner{}
 	runner.failing.Store(true)
+	fake := clock.NewFake(time.Unix(1_800_000_000, 0))
 	go streamFleetRefreshesWith(
 		ctx,
 		database,
@@ -410,22 +441,20 @@ func TestPickerRefreshStreamPublishesAFailedPassAndStaysOpen(t *testing.T) {
 		fleet.PrintWarn(&stderr),
 		&stderr,
 		updates,
-		refreshDependencies{newIndexer: func(*store.Store) (indexRunner, error) {
-			return runner, nil
-		}},
+		refreshDependencies{
+			newIndexer: func(*store.Store) (indexRunner, error) {
+				return runner, nil
+			},
+			clock: fake,
+		},
 	)
 	next := func(what string) ui.Snapshot {
 		t.Helper()
-		select {
-		case snapshot, ok := <-updates:
-			if !ok {
-				t.Fatalf("refresh stream closed while %s: %s", what, stderr.String())
-			}
-			return snapshot
-		case <-time.After(20 * time.Second):
-			t.Fatalf("no snapshot while %s: %s", what, stderr.String())
+		snapshot, open := nextRefreshSnapshot(t, what, updates, fake)
+		if !open {
+			t.Fatalf("refresh stream closed while %s: %s", what, stderr.String())
 		}
-		return ui.Snapshot{}
+		return snapshot
 	}
 
 	var failure *ui.RefreshFailure

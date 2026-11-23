@@ -16,6 +16,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // autoClock is a fake clock a watch drives by itself: every timer the watch
@@ -139,7 +140,7 @@ func runFleet(
 	options WatchOptions,
 ) ([]string, WatchResult, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	options.Poll = time.Millisecond
 	var out bytes.Buffer

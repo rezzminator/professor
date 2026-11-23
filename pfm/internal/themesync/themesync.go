@@ -8,6 +8,7 @@
 // each account's settings.json, through the editor it is handed. Nothing here runs until `pfm theme on` writes the state
 // file: every door other packages call is a no-op without it.
 //
+// clock.go: the time seams (flip latency, backup stamps) and the read of clock.Real at the call.
 // herdr_table.go: HerdrTableSpan, where a Herdr config holds a table; the theme block and install's keys block both place through it.
 package themesync
 

@@ -52,7 +52,7 @@ func TestRunTypesAndReadsThroughTheScreenDoor(t *testing.T) {
 		AccountIDs: []int{1}, Machine: reloadTestMachine("", t.TempDir()),
 	}
 	options := Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}
-	if _, err := Run(context.Background(), request, options, tmux, nil, io.Discard); err != nil {
+	if _, err := runOnFake(t, context.Background(), request, options, tmux, nil, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	want := pfmcall.Target{SocketPath: request.SocketPath, Pane: request.Pane, Engine: string(pfmengine.Claude)}
@@ -82,7 +82,7 @@ func TestRunRefusesWhenTheCopyModeReadFails(t *testing.T) {
 		AccountIDs: []int{1}, Machine: reloadTestMachine("", t.TempDir()),
 	}
 	options := Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}
-	_, err := Run(context.Background(), request, options, tmux, nil, io.Discard)
+	_, err := runOnFake(t, context.Background(), request, options, tmux, nil, io.Discard)
 	if err == nil || err.Error() != "server not responding" {
 		t.Fatalf("Run error = %v, want the failed copy-mode read", err)
 	}

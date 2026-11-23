@@ -54,6 +54,7 @@ func TestOpenCodeTUIWritesTheStorePfmReads(t *testing.T) {
 				"pfm busy footer",
 				func(frame string) bool { return pfmcall.IsBusyFor(pfmengine.OpenCode, frame) },
 			)
+			fix.next(600 * time.Millisecond)
 			session.waitFrame("idle reply", func(frame string) bool {
 				return strings.Contains(frame, "⏺ first reply") && !pfmcall.IsBusyFor(pfmengine.OpenCode, frame)
 			})

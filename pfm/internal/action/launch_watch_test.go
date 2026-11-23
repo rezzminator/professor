@@ -3,8 +3,44 @@ package action
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
+
+// launchStepClock is the launch watch's clock over a fake pane that changes
+// only when it is read: Now stands still and Sleep moves it on by the poll and
+// returns, so the watch's quiet and deadline run out after so many polls,
+// never after so much host time. The embedded fake carries the timers no
+// launch watch arms.
+type launchStepClock struct {
+	clock.Clock
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newLaunchStepClock() *launchStepClock {
+	start := time.Unix(1_786_838_400, 0)
+	return &launchStepClock{Clock: clock.NewFake(start), now: start}
+}
+
+func (step *launchStepClock) Now() time.Time {
+	step.mu.Lock()
+	defer step.mu.Unlock()
+	return step.now
+}
+
+func (step *launchStepClock) Sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	step.mu.Lock()
+	defer step.mu.Unlock()
+	step.now = step.now.Add(d)
+	return nil
+}
 
 // recordRetires replaces retireLaunchSeat for one test and returns the sockets it was asked to retire.
 func recordRetires(t *testing.T) *[]string {

@@ -128,7 +128,7 @@ steps_prof_field() { # steps_prof_field <prof.tsv> <key>: the value, nothing whe
 steps_run() { # steps_run <run-dir>
   local run="$1" jobs heavy_jobs default_bound bound i n="${#STEPS_NAMES[@]}" active=0 heavy_active=0 completed=0 red=0 first="" last=""
   local name log meta prof command start finish elapsed pid rc failures done_pid row pick ended records
-  local -a verdict=() seconds=() pids=() starts=() started=() launched=()
+  local -a verdict=() seconds=() pids=() starts=() started=() launched=() running=()
   local -A pid_index=()
   jobs="$(steps_jobs)" || return 1
   heavy_jobs="$(steps_heavy_jobs)" || return 1
@@ -178,6 +178,12 @@ steps_run() { # steps_run <run-dir>
     done
     if (( active > 0 )); then
       done_pid=""
+      # STEPS_BEFORE_WAIT: a test's seam, a command run with the running steps' names before each wait
+      if [[ -n "${STEPS_BEFORE_WAIT:-}" ]]; then
+        running=()
+        for pid in "${pids[@]}"; do running+=("${STEPS_NAMES[${pid_index[$pid]}]}"); done
+        "$STEPS_BEFORE_WAIT" "${running[@]}" || return 1
+      fi
       if wait -n -p done_pid "${pids[@]}" 2>/dev/null; then rc=0; else rc=$?; fi
       if [[ -z "${done_pid:-}" ]]; then
         # Bash may have reaped a child before wait -n sees it; wait by PID

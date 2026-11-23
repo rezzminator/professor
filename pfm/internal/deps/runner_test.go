@@ -7,7 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestFakeRunnerLookPathScriptedAndUnscripted(t *testing.T) {
@@ -107,7 +108,7 @@ func TestFakeRunnerInteractiveLifecycleLedger(t *testing.T) {
 
 func TestFakeRunnerInteractiveProcessCanReleaseBlockedWrite(t *testing.T) {
 	t.Parallel()
-	input := &blockingWriteCloser{released: make(chan struct{})}
+	input := &blockingWriteCloser{released: make(chan struct{}), entered: make(chan struct{}, 1)}
 	fake := &FakeRunner{}
 	fake.ScriptInteractive([]string{"worker"}, InteractiveScript{
 		Pid:    88,
@@ -127,19 +128,18 @@ func TestFakeRunnerInteractiveProcessCanReleaseBlockedWrite(t *testing.T) {
 		_, writeErr := processInput(process, []byte("blocked"))
 		writeDone <- writeErr
 	}()
+	testwait.Until(t, "the write to reach the pipe or return", func() (bool, string) {
+		return len(input.entered) != 0 || len(writeDone) != 0, "the write neither reached the pipe nor returned"
+	})
 	select {
 	case <-writeDone:
 		t.Fatal("write completed before pipe close")
-	case <-time.After(10 * time.Millisecond):
+	default:
 	}
 	if err := input.Close(); err != nil {
 		t.Fatalf("close input: %v", err)
 	}
-	select {
-	case <-writeDone:
-	case <-time.After(time.Second):
-		t.Fatal("blocked write did not release after pipe close")
-	}
+	_, _ = testwait.Receive(t, "the blocked write to release after pipe close", writeDone)
 }
 
 func processInput(process Process, body []byte) (int, error) {
@@ -152,6 +152,7 @@ func processInput(process Process, body []byte) (int, error) {
 
 type blockingWriteCloser struct {
 	released chan struct{}
+	entered  chan struct{}
 }
 
 type discardWriteCloser struct{}
@@ -160,6 +161,7 @@ func (discardWriteCloser) Write(body []byte) (int, error) { return len(body), ni
 func (discardWriteCloser) Close() error                   { return nil }
 
 func (w *blockingWriteCloser) Write([]byte) (int, error) {
+	w.entered <- struct{}{}
 	<-w.released
 	return 0, errors.New("input closed")
 }

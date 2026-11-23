@@ -1,7 +1,6 @@
 package hookentry
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -57,7 +56,7 @@ func reportToHerdr(args []string, stdin io.Reader, stderr io.Writer, deps herdrD
 			return 0
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	ctx, cancel := reporter.deadlineContext()
 	defer cancel()
 	if reporter.codexSubagent(ctx, payload) {
 		return 0

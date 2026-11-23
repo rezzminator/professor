@@ -3,14 +3,15 @@ package mockengine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestServeBackgroundJobHoldsItsRecordWhileTheHostLives: the daemon's per-process record is the shape pfm's
@@ -27,41 +28,39 @@ func TestServeBackgroundJobHoldsItsRecordWhileTheHostLives(t *testing.T) {
 		"procStart": strconv.FormatUint(stat.StartTime, 10),
 	}
 	for _, test := range []struct {
-		name string
-		host int
+		name      string
+		hostLives bool
 	}{
-		{"stopped while its host lives", os.Getpid()},
-		{"host gone", 1<<22 + 1},
+		{"stopped while its host lives", true},
+		{"host gone", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "sessions", strconv.Itoa(os.Getpid())+".json")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			done := make(chan error, 1)
-			go func() { done <- serveBackgroundJob(ctx, dir, session, test.host) }()
-			if test.host == os.Getpid() {
-				var got map[string]any
-				deadline := time.Now().Add(5 * time.Second)
-				for time.Now().Before(deadline) && !reflect.DeepEqual(got, want) {
-					got = nil
-					if content, err := os.ReadFile(path); err == nil {
-						_ = json.Unmarshal(content, &got)
-					}
-					time.Sleep(20 * time.Millisecond)
-				}
-				if !reflect.DeepEqual(got, want) {
-					t.Fatalf("record %s = %v, want %v", path, got, want)
-				}
-				cancel()
+			link, host, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
 			}
-			select {
-			case err := <-done:
-				if err != nil {
-					t.Fatal(err)
+			defer func() { _ = link.Close() }()
+			defer func() { _ = host.Close() }()
+			done := make(chan error, 1)
+			go func() { done <- serveBackgroundJob(ctx, dir, session, link) }()
+			testwait.Until(t, "the record "+path+" to hold the job", func() (bool, string) {
+				var got map[string]any
+				if content, err := os.ReadFile(path); err == nil {
+					_ = json.Unmarshal(content, &got)
 				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("serveBackgroundJob did not return")
+				return reflect.DeepEqual(got, want), fmt.Sprintf("record %v, want %v", got, want)
+			})
+			if test.hostLives {
+				cancel()
+			} else {
+				_ = host.Close() // the host's end of the link closes as its process exits
+			}
+			if err, _ := testwait.Receive(t, "serveBackgroundJob to return", done); err != nil {
+				t.Fatal(err)
 			}
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
 				t.Fatalf("record %s after the job ended: %v, want it removed", path, err)

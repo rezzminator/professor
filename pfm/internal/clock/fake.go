@@ -18,6 +18,7 @@ type Fake struct {
 	now     time.Time
 	waiters []*fakeWaiter
 	nextID  uint64
+	calls   []func() // afterFunc callbacks fired by the running Advance, run once it unlocks
 }
 
 type fakeWaiter struct {
@@ -26,6 +27,7 @@ type fakeWaiter struct {
 	period  time.Duration // 0 for a one-shot Sleep/After/Timer.
 	channel chan time.Time
 	active  bool
+	call    func() // afterFunc's callback, run by Advance in place of a send; nil for every other wait
 }
 
 // NewFake returns a Fake clock reading start. A caller that only compares
@@ -100,6 +102,11 @@ func (f *Fake) registerLocked(delay, period time.Duration) *fakeWaiter {
 }
 
 func (f *Fake) fireLocked(waiter *fakeWaiter, at time.Time) {
+	if waiter.call != nil {
+		f.calls = append(f.calls, waiter.call)
+		waiter.active = false
+		return
+	}
 	select {
 	case waiter.channel <- at:
 	default:
@@ -120,7 +127,6 @@ func (f *Fake) fireLocked(waiter *fakeWaiter, at time.Time) {
 // call, catching up the way a real, undrained time.Ticker does.
 func (f *Fake) Advance(d time.Duration) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	target := f.now.Add(d)
 	for {
 		due := f.earliestDueLocked(target)
@@ -131,6 +137,12 @@ func (f *Fake) Advance(d time.Duration) {
 		f.fireLocked(due, f.now)
 	}
 	f.now = target
+	calls := f.calls
+	f.calls = nil
+	f.mu.Unlock()
+	for _, call := range calls {
+		call()
+	}
 }
 
 func (f *Fake) earliestDueLocked(target time.Time) *fakeWaiter {
@@ -161,6 +173,24 @@ func (f *Fake) Pending() int {
 		}
 	}
 	return count
+}
+
+// NextDue reports how far ahead of now the earliest active sleep, timer or
+// ticker is due, and false when none is registered: the step a test driving
+// a blocked caller advances by to release exactly the next wait, no more.
+func (f *Fake) NextDue() (time.Duration, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var earliest *fakeWaiter
+	for _, waiter := range f.waiters {
+		if waiter.active && (earliest == nil || waiter.due.Before(earliest.due)) {
+			earliest = waiter
+		}
+	}
+	if earliest == nil {
+		return 0, false
+	}
+	return earliest.due.Sub(f.now), true
 }
 
 // String renders the fake clock's own time, for a test failure message that

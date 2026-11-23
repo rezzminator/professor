@@ -4,6 +4,7 @@ package call
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // callTmuxJail runs real tmux servers on a scratch TMUX_TMPDIR so no test
@@ -97,36 +99,34 @@ func (jail *callTmuxJail) command(arguments ...string) *exec.Cmd {
 }
 
 // busyThenIdleUI is a fake chat TUI: it renders the busy spinner detail chat.sh
-// keys on, then clears to an idle composer after a delay, and echoes a
-// submitted line as "USER:<text>". A line typed while it is still busy is
-// echoed as "BUSY-TYPED:", so a premature steer is visible in the capture.
+// keys on, stays busy until the test releases it (busyRelease, a byte typed
+// into the pane), then clears to an idle composer, and echoes a submitted line
+// as "USER:<text>". A line typed while it is still busy is echoed as
+// "BUSY-TYPED:", so a premature steer is visible in the capture. It reads its
+// input blocking and keeps no timer: a pane never released is busy for good.
 // The idle composer overwrites the spinner's row so scrollback cannot keep
 // the old busy footer inside SettledTurn's live-footer window.
-const busyThenIdleUI = `import os, select, sys, time, tty
+const busyThenIdleUI = `import os, sys, tty
 tty.setraw(0)
-delay = float(sys.argv[1])
-glyph = sys.argv[2] if len(sys.argv) > 2 else ""
-start = time.time()
+glyph = sys.argv[1] if len(sys.argv) > 1 else ""
 sys.stdout.write("Working (2s · 9 tokens)" + ("\r\n" + glyph + " " if glyph else ""))
 sys.stdout.flush()
 idle = False
 buf = bytearray()
 while True:
-    if not idle and time.time() - start >= delay:
-        idle = True
-        if glyph:
-            sys.stdout.write("\x1b7\x1b[1;1H\x1b[2K\x1b8")
-        sys.stdout.write("\r\x1b[2K❯ ")
-        sys.stdout.flush()
-    ready, _, _ = select.select([0], [], [], 0.05)
-    if not ready:
-        continue
     chunk = os.read(0, 4096)
     if not chunk:
         break
     for byte in chunk:
         ch = bytes((byte,))
-        if ch == b"\x13":
+        if ch == b"\x1d":
+            if not idle:
+                idle = True
+                if glyph:
+                    sys.stdout.write("\x1b7\x1b[1;1H\x1b[2K\x1b8")
+                sys.stdout.write("\r\x1b[2K❯ ")
+                sys.stdout.flush()
+        elif ch == b"\x13":
             if not idle:
                 sys.stdout.write("\r\nCONTROL-S-ERROR\r\n")
             buf.clear()
@@ -151,12 +151,16 @@ while True:
     sys.stdout.flush()
 `
 
+// busyRelease is the byte, in tmux send-keys -H form, that ends the busy
+// turn of busyThenIdleUI: Ctrl-], which no delivery ever types.
+const busyRelease = "1d"
+
 // compactTranscriptUI is a deliberately small TUI probe. It emits output
 // while bytes are arriving, but keeps the logical composer in buf and records
 // every submitted command to a transcript file. The assertion below therefore
 // proves the full focus reached the command handler; a pane glance cannot
 // substitute for that proof when the body is wider than the terminal.
-const compactTranscriptUI = `import os, select, sys, time, tty
+const compactTranscriptUI = `import os, sys, tty
 tty.setraw(0)
 transcript = sys.argv[1]
 buf = bytearray()
@@ -167,9 +171,6 @@ while True:
     if not event_emitted and len(buf) >= 256:
         os.write(1, b"\r\nEVENT:busy-output\r\n" + prompt + bytes(buf))
         event_emitted = True
-    ready, _, _ = select.select([0], [], [], 0.005)
-    if not ready:
-        continue
     ch = os.read(0, 1)
     if not ch:
         break
@@ -184,15 +185,14 @@ while True:
         continue
     buf.extend(ch)
     os.write(1, ch)
-    time.sleep(0.00005)
 `
 
-// startBusyPane starts the busy-then-idle UI; a non-empty glyph draws the
-// composer row under the busy line, the way Codex keeps it while working.
+// startBusyPane starts the busy-then-idle UI, busy until releaseBusyPane; a
+// non-empty glyph draws the composer row under the busy line, the way Codex
+// keeps it while working.
 func (jail *callTmuxJail) startBusyPane(
 	t *testing.T,
 	socket, session string,
-	busyFor time.Duration,
 	glyph string,
 ) string {
 	t.Helper()
@@ -213,7 +213,6 @@ func (jail *callTmuxJail) startBusyPane(
 		"steer-window",
 		"python3",
 		script,
-		strconv.FormatFloat(busyFor.Seconds(), 'f', 2, 64),
 		glyph,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -227,9 +226,9 @@ func (jail *callTmuxJail) startBusyPane(
 	pane := strings.TrimSpace(string(output))
 	// The pane is only busy once its UI has rendered the spinner detail line;
 	// asserting before that would measure the fixture's startup, not the guard.
-	started := time.Now()
-	deadline := started.Add(jailPaneReadyBudget)
-	for {
+	testwait.Until(t, "the jailed pane to render its busy spinner", func() (bool, string) {
+		// A failing capture is a broken jail and a blank pane is a fixture that
+		// never rendered: the state names which one the last look saw.
 		capture, err := TmuxCaller{}.Capture(
 			context.Background(),
 			filepath.Join(jail.tmuxDir, socket),
@@ -237,38 +236,60 @@ func (jail *callTmuxJail) startBusyPane(
 			false,
 			0,
 		)
-		if err == nil && IsBusy(capture) {
-			return pane
+		if err != nil {
+			return false, fmt.Sprintf("capture kept failing; last error: %v: %q", err, capture)
 		}
-		if time.Now().After(deadline) {
-			// The capture error was consulted above and then thrown away here,
-			// so a capture that never succeeded reported itself as an empty
-			// pane — an error rendering as absence. Say which happened, and
-			// for how long, because the recoveries differ: a failing capture
-			// is a broken jail, a blank pane is a fixture that never rendered.
-			waited := time.Since(started)
-			if err != nil {
-				t.Fatalf("jailed pane capture kept failing for %s; last error: %v: %q", waited, err, capture)
-			}
-			t.Fatalf(
-				"jailed pane never became busy within %s; capture succeeded throughout and the fixture never rendered a spinner: %q",
-				waited,
-				capture,
-			)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return IsBusy(capture), fmt.Sprintf("capture succeeded but shows no spinner: %q", capture)
+	})
+	return pane
 }
 
-// jailPaneReadyBudget bounds how long a jailed fixture pane may take to render
-// its first frame. These fixtures start a python3 interpreter inside tmux, not
-// a shell, so readiness pays interpreter startup plus a first render; under
-// `go test ./...` on macOS that ran past the previous 10s and the pane was
-// still blank when the deadline fired. It is scaffolding readiness, never the
-// contract under test — the guards these tests assert on run after the pane is
-// ready — and it is only ever paid in full when a fixture genuinely never
-// starts.
-const jailPaneReadyBudget = 60 * time.Second
+// releaseBusyPane ends the busy turn of a pane startBusyPane started: it
+// types busyRelease into it, the one input that turns the fixture idle.
+func (jail *callTmuxJail) releaseBusyPane(socket, pane string) error {
+	output, err := jail.command("-L", socket, "send-keys", "-t", pane, "-H", busyRelease).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("release busy pane %s on %s: %w: %s", pane, socket, err, output)
+	}
+	return nil
+}
+
+// releasingChatTmux releases a busy pane once the --then waiter is proven
+// waiting on it (ruling 45). Each settled-turn sample reads paneScrollbackLines
+// of history, then the visible pane, whose footer decides busy: the first
+// sample is the waiter's baseline, the second its first look at the turn. The
+// release is typed right after that look's visible capture is read, so the
+// waiter has seen the turn busy before the pane can turn idle.
+type releasingChatTmux struct {
+	verifiedChatTmux
+	t        *testing.T
+	release  func() error
+	samples  int
+	released bool
+}
+
+func (tmux *releasingChatTmux) Capture(
+	ctx context.Context,
+	socketPath, target string,
+	styled bool,
+	scrollback int,
+) (string, error) {
+	capture, err := tmux.verifiedChatTmux.Capture(ctx, socketPath, target, styled, scrollback)
+	switch {
+	case err != nil || tmux.released:
+	case scrollback == paneScrollbackLines:
+		tmux.samples++
+	case scrollback == 0 && tmux.samples >= 2:
+		if !IsBusy(capture) {
+			tmux.t.Errorf("the waiter's first look was taken before the release yet reads idle: %q", capture)
+		}
+		tmux.released = true
+		if releaseErr := tmux.release(); releaseErr != nil {
+			tmux.t.Error(releaseErr)
+		}
+	}
+	return capture, err
+}
 
 func (jail *callTmuxJail) startCompactTranscriptPane(
 	t *testing.T,
@@ -301,9 +322,7 @@ func (jail *callTmuxJail) startCompactTranscriptPane(
 		t.Fatal(err)
 	}
 	pane := strings.TrimSpace(string(output))
-	started := time.Now()
-	deadline := started.Add(jailPaneReadyBudget)
-	for {
+	testwait.Until(t, "the compact transcript pane to render its working line", func() (bool, string) {
 		capture, captureErr := TmuxCaller{}.Capture(
 			context.Background(),
 			filepath.Join(jail.tmuxDir, socket),
@@ -311,30 +330,13 @@ func (jail *callTmuxJail) startCompactTranscriptPane(
 			false,
 			0,
 		)
-		if captureErr == nil && strings.Contains(capture, "Working (10s · 9 tokens)") {
-			return pane
+		if captureErr != nil {
+			return false, fmt.Sprintf("capture kept failing; last error: %v: %q", captureErr, capture)
 		}
-		if time.Now().After(deadline) {
-			// Same asymmetry as startBusyPane: captureErr gated the success
-			// test and then vanished from the report, so a jail that could not
-			// be read at all looked identical to a pane that stayed blank.
-			waited := time.Since(started)
-			if captureErr != nil {
-				t.Fatalf(
-					"compact transcript pane capture kept failing for %s; last error: %v: %q",
-					waited,
-					captureErr,
-					capture,
-				)
-			}
-			t.Fatalf(
-				"compact transcript pane never became ready within %s; capture succeeded throughout and the fixture never rendered its working line: %q",
-				waited,
-				capture,
-			)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return strings.Contains(capture, "Working (10s · 9 tokens)"),
+			fmt.Sprintf("capture succeeded but shows no working line: %q", capture)
+	})
+	return pane
 }
 
 // TestJailedThenWaiterDeliversAfterIdleExactlyOnce is the --then contract in a
@@ -344,31 +346,36 @@ func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 	testjail.TmuxServer(t)
 	jail := newCallTmuxJail(t)
 	socket := "probe-pfm-call-then"
-	pane := jail.startBusyPane(t, socket, "steer-session", 900*time.Millisecond, "")
+	pane := jail.startBusyPane(t, socket, "steer-session", "")
 	socketPath := filepath.Join(jail.tmuxDir, socket)
+	tmux := &releasingChatTmux{
+		verifiedChatTmux: verifiedChatTmux{command: "claude"},
+		t:                t,
+		release:          func() error { return jail.releaseBusyPane(socket, pane) },
+	}
 
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: pane},
-		Tmux:     verifiedChatTmux{command: "claude"},
+		Tmux:     tmux,
 		Spawner:  &fakeSpawner{},
 		Options: Options{
-			Poll:            50 * time.Millisecond,
-			EnterSettle:     200 * time.Millisecond,
+			Poll:            testwait.ProcessPace,
+			EnterSettle:     testwait.ProcessPace,
 			ProofSettle:     150 * time.Millisecond,
 			BusyTries:       2,
 			InterruptTries:  2,
 			StashTries:      2,
 			SettleTries:     10,
-			EnterTries:      6,
-			LockTimeout:     5 * time.Second,
-			LockPoll:        20 * time.Millisecond,
+			EnterTries:      testwait.ProcessTries,
+			LockTimeout:     testwait.HungLimit,
+			LockPoll:        testwait.ProcessPace,
 			LockMaxHold:     30 * time.Second,
 			LockRoot:        filepath.Join(jail.root, "chat-call-locks"),
 			ThenLogRoot:     jail.root,
 			ThenMin:         100 * time.Millisecond,
 			ThenBusyTries:   10,
-			ThenIdlePoll:    100 * time.Millisecond,
-			ThenIdleTries:   80,
+			ThenIdlePoll:    testwait.ProcessPace,
+			ThenIdleTries:   testwait.ProcessTries,
 			ThenIdleStable:  3,
 			ThenSettle:      100 * time.Millisecond,
 			Sender:          &Sender{Session: "sender", Label: "Operator", UUID: "abcdef123456"},
@@ -383,7 +390,7 @@ func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 	// DeliverThen is deliberately different from an ordinary call: normal
 	// busy delivery queues in the composer, while a post-turn steer must wait
 	// until the primary turn has settled before it starts the next turn.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	steer := "post compact steer landed"
 	result, err := engine.DeliverThen(ctx, ThenWait{SocketPath: socketPath, Target: pane, Steers: []string{steer}})
@@ -412,6 +419,12 @@ func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 	if !strings.Contains(result.Proof, "USER:"+steer) {
 		t.Fatalf("delivery proof missing the steer: %q", result.Proof)
 	}
+	if !tmux.released {
+		t.Fatalf(
+			"the waiter delivered without the busy pane ever being released (%d settled-turn samples)",
+			tmux.samples,
+		)
+	}
 }
 
 // TestJailedBusyCodexQueuesAndLongFileDeliversByPaste is the real-tmux
@@ -427,20 +440,20 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 	// Deliberately keep a non-Codex socket spelling: the verified foreground
 	// process, not the immutable address, decides queue semantics.
 	socket := "probe-pfm-call-codex-queue"
-	pane := jail.startBusyPane(t, socket, "queue-session", 30*time.Second, "›")
+	pane := jail.startBusyPane(t, socket, "queue-session", "›")
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: pane},
 		Tmux:     verifiedChatTmux{command: "codex"},
 		Spawner:  &fakeSpawner{},
 		Options: Options{
-			Poll:            20 * time.Millisecond,
-			EnterSettle:     100 * time.Millisecond,
+			Poll:            testwait.ProcessPace,
+			EnterSettle:     testwait.ProcessPace,
 			ProofSettle:     50 * time.Millisecond,
 			SettleTries:     30,
-			EnterTries:      4,
-			LockTimeout:     5 * time.Second,
-			LockPoll:        20 * time.Millisecond,
+			EnterTries:      testwait.ProcessTries,
+			LockTimeout:     testwait.HungLimit,
+			LockPoll:        testwait.ProcessPace,
 			LockMaxHold:     30 * time.Second,
 			LockRoot:        filepath.Join(jail.root, "queue-locks"),
 			ThenLogRoot:     jail.root,
@@ -452,7 +465,7 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	queued, err := engine.Call(ctx, Request{Target: "queue-session", Message: "queued while working"})
 	if err != nil {
@@ -503,20 +516,20 @@ func TestJailedBusyClaudeQueuesWithoutControlKeys(t *testing.T) {
 	testjail.TmuxServer(t)
 	jail := newCallTmuxJail(t)
 	socket := "probe-pfm-call-claude-queue"
-	pane := jail.startBusyPane(t, socket, "claude-queue-session", 30*time.Second, "")
+	pane := jail.startBusyPane(t, socket, "claude-queue-session", "")
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: pane},
 		Tmux:     verifiedChatTmux{command: "claude"},
 		Spawner:  &fakeSpawner{},
 		Options: Options{
-			Poll:            20 * time.Millisecond,
-			EnterSettle:     100 * time.Millisecond,
+			Poll:            testwait.ProcessPace,
+			EnterSettle:     testwait.ProcessPace,
 			ProofSettle:     50 * time.Millisecond,
 			SettleTries:     30,
-			EnterTries:      4,
-			LockTimeout:     5 * time.Second,
-			LockPoll:        20 * time.Millisecond,
+			EnterTries:      testwait.ProcessTries,
+			LockTimeout:     testwait.HungLimit,
+			LockPoll:        testwait.ProcessPace,
 			LockMaxHold:     30 * time.Second,
 			LockRoot:        filepath.Join(jail.root, "claude-queue-locks"),
 			ThenLogRoot:     jail.root,
@@ -528,7 +541,7 @@ func TestJailedBusyClaudeQueuesWithoutControlKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	queued, err := engine.Call(ctx, Request{
 		Target:  "claude-queue-session",
@@ -580,19 +593,19 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 		Spawner:  &fakeSpawner{},
 		Options: Options{
 			Poll:            10 * time.Millisecond,
-			EnterSettle:     100 * time.Millisecond,
+			EnterSettle:     testwait.ProcessPace,
 			ProofSettle:     100 * time.Millisecond,
 			SettleTries:     500,
-			EnterTries:      6,
-			LockTimeout:     5 * time.Second,
-			LockPoll:        20 * time.Millisecond,
+			EnterTries:      testwait.ProcessTries,
+			LockTimeout:     testwait.HungLimit,
+			LockPoll:        testwait.ProcessPace,
 			LockMaxHold:     30 * time.Second,
 			LockRoot:        filepath.Join(jail.root, "compact-locks"),
 			ThenLogRoot:     jail.root,
 			ThenMin:         100 * time.Millisecond,
 			ThenBusyTries:   10,
-			ThenIdlePoll:    100 * time.Millisecond,
-			ThenIdleTries:   80,
+			ThenIdlePoll:    testwait.ProcessPace,
+			ThenIdleTries:   testwait.ProcessTries,
 			ThenIdleStable:  3,
 			ThenSettle:      100 * time.Millisecond,
 			Sender:          &Sender{Session: "sender", Label: "Operator", UUID: "abcdef123456"},
@@ -608,7 +621,7 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 	// deliberately slow fixture instead of matching an earlier repeated run.
 	focus := strings.Repeat("f", focusRunes-1) + "z"
 	want := "/compact " + focus
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	result, err := engine.callChain(ctx, Request{
 		Target:  session,
@@ -637,18 +650,13 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 			recorded,
 		)
 	}
-	deadline := time.Now().Add(10 * time.Second)
 	var recorded []byte
-	for {
-		recorded, err = os.ReadFile(transcript)
-		if err == nil && strings.Contains(string(recorded), "FIRED-END\n") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("compact command never fired: err=%v transcript=%q", err, recorded)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	testwait.Until(t, "the compact command to fire into the transcript", func() (bool, string) {
+		var readErr error
+		recorded, readErr = os.ReadFile(transcript)
+		return readErr == nil && strings.Contains(string(recorded), "FIRED-END\n"),
+			fmt.Sprintf("err=%v transcript=%q", readErr, recorded)
+	})
 	wantRecord := "FIRED-BEGIN\n" + want + "\nFIRED-END\n"
 	if string(recorded) != wantRecord {
 		t.Fatalf(
@@ -684,7 +692,7 @@ func TestJailedCaptureReturnsWholeScrollback(t *testing.T) {
 		"10",
 		"sh",
 		"-c",
-		"i=1; while [ $i -le 60 ]; do echo scrollrow-$i; i=$((i+1)); done; sleep 60",
+		"i=1; while [ $i -le 60 ]; do echo scrollrow-$i; i=$((i+1)); done; exec tail -f /dev/null",
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start scrollback pane: %v: %s", err, output)
@@ -700,10 +708,9 @@ func TestJailedCaptureReturnsWholeScrollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
+	testwait.Until(t, "the capture to reach the top of the scrollback", func() (bool, string) {
 		_, text, code, detail, captureErr := engine.Capture(ctx, session, 0)
 		if captureErr != nil {
 			t.Fatal(captureErr)
@@ -711,15 +718,8 @@ func TestJailedCaptureReturnsWholeScrollback(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("Capture() code=%d detail=%q", code, detail)
 		}
-		if strings.Contains(text, "scrollrow-1\n") &&
-			strings.Contains(text, "scrollrow-60") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("capture never reached the top of the scrollback:\n%s", text)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+		return strings.Contains(text, "scrollrow-1\n") && strings.Contains(text, "scrollrow-60"), text
+	})
 	_, tailed, _, _, err := engine.Capture(ctx, session, 5)
 	if err != nil {
 		t.Fatal(err)
@@ -744,7 +744,7 @@ func TestJailedClientActivityReportsUnattendedAndDeadSocket(t *testing.T) {
 	session := "probe-pfm-client-activity-session"
 	command := jail.command(
 		"-f", "/dev/null", "-L", socket, "new-session", "-d", "-s", session,
-		"sleep", "30",
+		"tail", "-f", "/dev/null",
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed pane: %v: %s", err, output)

@@ -63,7 +63,7 @@ mkfifo "$T/ff"
 stepprof_run "$T/hang" h 2 -- cat "$T/ff" > "$T/hang.out" 2>&1; rc=$?
 P=$T/hang/h.prof.tsv TREE=$T/hang/h.hang/tree.txt
 eq 'bound reached: returns 124' 124 "$rc"
-eq 'bound reached: ended timeout, rc 124' 'timeout 124' "$(pv "$P" ended) $(pv "$P" rc)"
+eq 'bound reached: ended timeout, rc 124' 'timeout,124' "$(pv "$P" ended),$(pv "$P" rc)"
 has 'bound reached: tree.txt names cat, its state and its wchan' "$TREE" '^pid [0-9]+  state [A-Z] cat  wchan [^ ]'
 has 'bound reached: tree.txt holds the fifo path in the cmdline' "$TREE" "^  cmd: cat $T/ff "
 has 'bound reached: tree.txt names the fifo, nobody holding it, cat awaiting it' "$TREE" "^$T/ff held by: nobody"

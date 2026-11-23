@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // While auto-effort's live keeper holds a level, the line shows that
@@ -164,15 +166,18 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 // KEEPER_ARGV, last element KEEPER_MARK) for the test's life and returns its pid.
 func startKeeper(t *testing.T) int {
 	t.Helper()
-	keeper := exec.Command(
-		"/bin/sh", "-c", `echo $$; while kill -0 "$PPID" 2>/dev/null; do sleep 2; done`, "auto-effort-keeper",
-	)
-	// Stdout stays /dev/null: a pipe would hold Wait until the loop's orphaned
-	// sleep exits.
+	// The keeper blocks reading its stdin, which the test holds open: it ends
+	// when the test kills it or the test process goes (the pipe closes).
+	keeper := exec.Command("/bin/sh", "-c", `read -r _`, "auto-effort-keeper")
+	hold, err := keeper.StdinPipe()
+	if err != nil {
+		t.Fatalf("hold the keeper's stdin: %v", err)
+	}
 	if err := keeper.Start(); err != nil {
 		t.Fatalf("start the keeper: %v", err)
 	}
 	t.Cleanup(func() {
+		_ = hold.Close()
 		if err := keeper.Process.Kill(); err != nil {
 			t.Errorf("kill the keeper %d: %v", keeper.Process.Pid, err)
 		}
@@ -218,12 +223,7 @@ func renderEffort(t *testing.T, home, payload string) (string, string) {
 	}()
 	// A render that waits on what sits at the state path fails here, never
 	// hangs the suite.
-	var got rendered
-	select {
-	case got = <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("render still blocked after 5s under %s", home)
-	}
+	got, _ := testwait.Receive(t, "the render to return under "+home, done)
 	if got.err != nil {
 		t.Fatal(got.err)
 	}

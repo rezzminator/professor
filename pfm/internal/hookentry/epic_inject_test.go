@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestEpicInjectDedupeFollowsSessionAndEpicRename(t *testing.T) {
@@ -89,9 +89,7 @@ func TestEpicInjectNativeWindowNameIsTheSeatName(t *testing.T) {
 		Pane:       "w1:p2",
 		Session:    "E_alpha_native",
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	window, err := epicInjectWindowName(ctx, identity)
+	window, err := epicInjectWindowName(testwait.Context(t), identity)
 	if err != nil || window != "E_alpha_native" {
 		t.Fatalf("window name = %q, %v; want the seat name %q and no error", window, err, "E_alpha_native")
 	}

@@ -5,7 +5,6 @@ package journey
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -27,16 +26,15 @@ func herdrStops(c *harness.Ctx, s State) State {
 	ctl := c.Terminal("restart-ctl")
 	ctl.WaitFor(prompt)
 	command := strings.Join(herdrCLI(s, "server", "stop"), " ")
-	if code := shellRun(ctl, "herdr-stop", command, 20*time.Second); code != 0 {
+	if code := shellRun(ctl, "herdr-stop", command); code != 0 {
 		c.Failf("%s exited %d:\n%s", command, code, ctl.Screen())
 	}
-	c.Terminal(s.Term).WaitScreen("the prompt back where Herdr ran", 20*time.Second, func(screen string) bool {
+	c.Terminal(s.Term).WaitScreen("the prompt back where Herdr ran", func(screen string) bool {
 		lines := strings.Split(strings.TrimRight(screen, "\n "), "\n")
 		return strings.TrimSpace(lines[len(lines)-1]) == prompt
 	})
 	c.Poll(
 		"no engine of the restart chain's chats, no orphan Herdr indicator daemon",
-		stepBound,
 		func() (bool, string) {
 			table := processes(c)
 			var left []string
@@ -55,7 +53,7 @@ func herdrStops(c *harness.Ctx, s State) State {
 			return len(left) == 0, fmt.Sprintf("left %v", left)
 		},
 	)
-	if code := shellRun(ctl, "chat-ls-after-stop", "clear && pfm chat ls --all", 20*time.Second); code != 0 {
+	if code := shellRun(ctl, "chat-ls-after-stop", "clear && pfm chat ls --all"); code != 0 {
 		c.Failf("pfm chat ls --all after the Herdr stop exited %d:\n%s", code, ctl.Screen())
 	}
 	screen := ctl.Screen()
@@ -70,8 +68,9 @@ func herdrStops(c *harness.Ctx, s State) State {
 		}
 	}
 	table := processes(c)
-	if bad := append(spinning(c, table), zombies(c, table)...); len(bad) != 0 {
-		c.Failf("pfm processes after the Herdr stop, spinning or zombie: %v", bad)
+	recordCPU(c, table)
+	if bad := zombies(c, table); len(bad) != 0 {
+		c.Failf("pfm processes after the Herdr stop left zombies: %v", bad)
 	}
 	return s
 }

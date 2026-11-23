@@ -13,10 +13,44 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
+
+// openUnderHeldLock runs open under a deadline bound on fake, the process
+// clock, while another holder keeps the migration lock. An open that finishes
+// without waiting returns as it is; one that waits on the lock is proven
+// waiting (parked in flockWait's pause) before fake fires its deadline, so the
+// wait ends at the deadline and never races it.
+func openUnderHeldLock(
+	t *testing.T, fake *clock.Fake, bound time.Duration, open func(context.Context) error,
+) error {
+	t.Helper()
+	waiting, cancel := clock.WithTimeout(context.Background(), fake, bound)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- open(waiting) }()
+	var openErr error
+	finished := false
+	testwait.Until(t, "the open to finish or wait on the held migration lock", func() (bool, string) {
+		select {
+		case openErr = <-done:
+			finished = true
+			return true, ""
+		default:
+		}
+		return testwait.Blocked("clock.(*Fake).Sleep", "fleetdb.flockWait")
+	})
+	if finished {
+		return openErr
+	}
+	fake.Advance(bound)
+	openErr, _ = testwait.Receive(t, "the open waiting on the held migration lock to end at its deadline", done)
+	return openErr
+}
 
 // v3Schema is the schema a version-3 pfm leaves: hidden has no revision.
 var v3Schema = strings.Replace(
@@ -42,7 +76,9 @@ func seedSharedState(t *testing.T, path, script string) {
 }
 
 func TestSharedOpenUpgradesSupportedSchemasAndPreservesKills(t *testing.T) {
-	t.Parallel()
+	// The backup before a migration bounds its WAL checkpoint on the process
+	// clock: on a fake one that bound arms no real timer.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	for _, version := range []int{0, 1, 3, 4} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			ctx := context.Background()
@@ -143,13 +179,14 @@ func TestSharedOpenRepairsMovedTmuxSeatsWithoutSchemaBump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waiting, cancel := context.WithTimeout(ctx, time.Second)
-	again := OpenSharedState(waiting, values)
-	openedErr := again.Degraded()
-	closeErr := again.Close()
-	cancel()
+	fake := clock.NewFake(time.Unix(1_800_000_000, 0))
+	testwait.ProcessClock(t, fake)
+	openedErr := openUnderHeldLock(t, fake, time.Second, func(waiting context.Context) error {
+		again := OpenSharedState(waiting, values)
+		return errors.Join(again.Degraded(), again.Close())
+	})
 	releaseErr := release()
-	if err := errors.Join(openedErr, closeErr, releaseErr); err != nil {
+	if err := errors.Join(openedErr, releaseErr); err != nil {
 		t.Fatalf("second clean open took migration lock: %v", err)
 	}
 	state = OpenSharedState(ctx, values)
@@ -240,7 +277,6 @@ func openWarnings(recorder *obs.Recorder, event string) []string {
 // lock, so two first openers never both apply it; a file that already has both
 // opens without the lock.
 func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name  string
 		seed  string
@@ -253,7 +289,6 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "pfm.db")
 			seedSharedState(t, path, test.seed)
@@ -267,12 +302,18 @@ func TestSharedOpenMigratesAtOpenUnderTheMigrationLock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// A held lock never releases, so only the configure step races this deadline.
-			waiting, cancel := context.WithTimeout(ctx, 2*time.Second)
-			held := OpenSharedState(waiting, paths.Values{StateDB: path})
-			cancel()
-			heldErr := held.Degraded()
-			if err := errors.Join(held.Close(), release()); err != nil {
+			// A held lock never releases: the deadline fires only once the open waits on it.
+			fake := clock.NewFake(time.Unix(1_800_000_000, 0))
+			testwait.ProcessClock(t, fake)
+			var heldErr, closeErr error
+			if err := openUnderHeldLock(t, fake, 2*time.Second, func(waiting context.Context) error {
+				held := OpenSharedState(waiting, paths.Values{StateDB: path})
+				heldErr, closeErr = held.Degraded(), held.Close()
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := errors.Join(closeErr, release()); err != nil {
 				t.Fatal(err)
 			}
 			waited := heldErr != nil && strings.Contains(heldErr.Error(), "wait for migration lock")
@@ -350,6 +391,9 @@ func TestSharedIssuesDropRefusesARowFiledAfterItsBackup(t *testing.T) {
 // A backup that cannot be written leaves the ledger in place and the store
 // open: the cleanup warns and retries at the next open. Serial: obs.Test.
 func TestSharedOpenKeepsTheIssuesTableWhenItsBackupFails(t *testing.T) {
+	// The backup before a migration bounds its WAL checkpoint on the process
+	// clock: on a fake one that bound arms no real timer.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	ctx, recorder := obs.Test(t)
 	path := filepath.Join(t.TempDir(), "pfm.db")
 	seedSharedState(t, path, retiredIssuesSeed(1))
@@ -404,7 +448,6 @@ func TestSharedReadOnlyOpenLeavesTheIssuesTable(t *testing.T) {
 // guard: a second opener waits while the lock is held, gives up with its
 // context, and acquires once the holder releases — which unlinks the lock file.
 func TestLockMigrationSerializesOpenersAndRemovesItsFile(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "pfm.db")
 	lockPath := path + ".migrate.lock"
 	release, err := LockMigration(context.Background(), path)
@@ -414,9 +457,13 @@ func TestLockMigrationSerializesOpenersAndRemovesItsFile(t *testing.T) {
 	if _, err := os.Stat(lockPath); err != nil {
 		t.Fatalf("held lock file: %v", err)
 	}
-	waiting, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if second, err := LockMigration(waiting, path); err == nil {
+	fake := clock.NewFake(time.Unix(1_800_000_000, 0))
+	testwait.ProcessClock(t, fake)
+	var second func() error
+	if err := openUnderHeldLock(t, fake, 50*time.Millisecond, func(waiting context.Context) (err error) {
+		second, err = LockMigration(waiting, path)
+		return err
+	}); err == nil {
 		if releaseErr := second(); releaseErr != nil {
 			t.Error(releaseErr)
 		}

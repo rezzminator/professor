@@ -40,11 +40,6 @@ type Cmd struct {
 	waited chan error
 }
 
-// defaultTimeout bounds a tmux call whose context carries no deadline: a
-// stopped or wedged server accepts the connection and never answers, so an
-// unbounded call hangs its caller and leaves its client blocked forever.
-var defaultTimeout = 10 * time.Second
-
 // waitDelay is how long a killed client may keep its pipes open: a tmux
 // client hands its stdout to the server it talks to, so a client killed for
 // a stopped server leaves that server holding the pipe and Wait would block
@@ -64,7 +59,7 @@ func Exec(ctx context.Context, binary, socketPath string, arguments ...string) *
 func ExecWithin(ctx context.Context, timeout time.Duration, binary, socketPath string, arguments ...string) *Cmd {
 	var cancel context.CancelFunc
 	if _, bounded := ctx.Deadline(); !bounded {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
+		ctx, cancel = boundedWithin(ctx, timeout)
 	}
 	if binary == "" && runnerFrom(ctx) != nil {
 		binary = Binary // the runner resolves it, so its argv never names a host path

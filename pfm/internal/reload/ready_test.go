@@ -30,7 +30,7 @@ func TestRunHerdrReadyAgentRegistration(t *testing.T) {
 				f.request.Then = "resume the port"
 			}
 			var stderr strings.Builder
-			_, err := RunHerdr(context.Background(), f.request, f.options, &stderr)
+			_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, &stderr)
 			if tc.want != "" {
 				if err == nil || err.Error() != tc.want {
 					t.Fatalf("RunHerdr error=%v, want %q", err, tc.want)

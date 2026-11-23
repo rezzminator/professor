@@ -24,17 +24,25 @@ import (
 var errThemeOff = errors.New("herdr indicators: pfm's Herdr theme was turned off")
 
 // failed handles a paint's err: its Herdr server shutting down (ServerStopping)
-// takes every pane the painter would paint, so the painter stands down with a
-// note and no diagnostic, returning nil; any other err is logged with its
-// context and returned.
+// or already gone, the socket file there at the painter's start removed
+// (SocketFileGone), takes every pane the painter would paint, so the painter
+// stands down with a note and no diagnostic, returning nil; any other err, a
+// socket missing from the start too, is logged with its context and returned.
+// Herdr runs the painter as a plugin hook and never waits for it, so a hook
+// still on its way when its server stops meets either.
 func (painter *indicatorPainter) failed(err error) error {
-	if ServerStopping(err) {
-		_, _ = fmt.Fprintf(painter.stderr,
-			"herdr indicators: socket %s stands down: its Herdr server is shutting down\n", painter.socket)
-		return nil
+	var reason string
+	switch {
+	case ServerStopping(err):
+		reason = "its Herdr server is shutting down"
+	case SocketFileGone(err) && painter.socketAtStart:
+		reason = "its socket is gone"
+	default:
+		painter.logf("%v", err)
+		return err
 	}
-	painter.logf("%v", err)
-	return err
+	_, _ = fmt.Fprintf(painter.stderr, "herdr indicators: socket %s stands down: %s\n", painter.socket, reason)
+	return nil
 }
 
 // stopPath is the socket's stop marker: ClearIndicators writes it before it

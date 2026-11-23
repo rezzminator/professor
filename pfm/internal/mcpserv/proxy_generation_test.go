@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
@@ -26,6 +27,7 @@ func TestStdioProxyForwardsCallsThroughDaemon(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxyTestStepping(proxy)
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
@@ -92,6 +94,7 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
+	proxyTestStepping(proxy)
 	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryWindow = 2 * time.Second
@@ -183,6 +186,7 @@ func TestStdioProxyCurrentFailureClearsSessionBeforeRecovery(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
+	proxyTestStepping(proxy)
 	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat)
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryDelay = time.Millisecond
@@ -297,6 +301,7 @@ func TestStdioProxyCloseDoesNotClearNewerSession(t *testing.T) {
 	proxy.client = &http.Client{Transport: transport}
 	proxy.sessionID = "session-old"
 	proxy.protocol = "protocol-old"
+	proxy.clock = clock.NewFake(time.Unix(0, 0))
 	closed := make(chan struct{})
 	go func() {
 		proxy.closeSession()

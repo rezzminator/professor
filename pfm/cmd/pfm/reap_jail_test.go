@@ -207,7 +207,9 @@ func TestReapNeverKillsASocketHostingNonChatWork(t *testing.T) {
 	const orphan = "cc-1800000002-42-2"
 	startShellPane(t, root, hosting)
 	startShellPane(t, root, orphan)
-	runInPane(t, root, hosting, "tail -f /dev/null", "tail")
+	// The hold runs as a job of the pane's shell, never in its place: the
+	// socket's shape is a shell hosting typed work.
+	runInPane(t, root, hosting, "sh -c '"+testwait.Hold+"'", "tail")
 
 	// Both sockets carry a breadcrumb: without one a claude socket is
 	// busy-unknown and skipped, which would kill the difference under a rule

@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // startSleeper starts a child this test owns and kills it on exit.
 func startSleeper(t *testing.T) *exec.Cmd {
 	t.Helper()
-	child := exec.Command("tail", "-f", "/dev/null")
+	hold := testwait.HoldArgv()
+	child := exec.Command(hold[0], hold[1:]...)
 	if err := child.Start(); err != nil {
 		t.Fatalf("start tail: %v", err)
 	}

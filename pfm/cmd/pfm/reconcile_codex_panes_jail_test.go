@@ -22,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // startCodexStatusPane brings up a real tmux server on a scratch socket
@@ -43,7 +44,7 @@ func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 	command := exec.Command(
 		"tmux", "-f", "/dev/null", "-L", socket,
 		"new-session", "-d", "-s", socket, "-n", "codex",
-		"printf '"+statusLine+"'; tail -f /dev/null",
+		"printf '"+statusLine+"'; "+testwait.Hold,
 	)
 	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
 	if output, err := command.CombinedOutput(); err != nil {

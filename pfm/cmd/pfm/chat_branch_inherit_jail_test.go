@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -195,7 +196,7 @@ func newBranchInheritJail(t *testing.T) *branchInheritJail {
 		"  printf '{}\\n' > \"$fork_path\"\n" +
 		"  printf '%s\\n' \"$fork_path\" > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n" +
 		"fi\n" +
-		"exec tail -f /dev/null\n"
+		testwait.Hold + "\n"
 	if err := testjail.WriteExecutable(jail.fakeClaude, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

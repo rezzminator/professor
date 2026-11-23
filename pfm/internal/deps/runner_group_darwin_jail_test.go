@@ -40,7 +40,7 @@ func TestKillGroupOfAnExitedUnreapedGroupSucceeds(t *testing.T) {
 func TestGroupGoneReadsARefusedSignalToALiveGroup(t *testing.T) {
 	process, err := (RealRunner{}).Start(
 		context.Background(),
-		[]string{"sh", "-c", "exec tail -f /dev/null"},
+		[]string{"sh", "-c", testwait.Hold},
 		StartOptions{ProcessGroup: true},
 	)
 	if err != nil {

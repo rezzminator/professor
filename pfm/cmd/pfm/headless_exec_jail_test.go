@@ -14,6 +14,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func writeHeadlessCLIStub(t *testing.T, body string) string {
@@ -270,7 +271,7 @@ func TestHeadlessExecOutCarriesOnlyAPaidAnswer(t *testing.T) {
 		}
 	})
 	t.Run("timeout", func(t *testing.T) {
-		binary := writeHeadlessCLIStub(t, "exec tail -f /dev/null")
+		binary := writeHeadlessCLIStub(t, testwait.Hold)
 		commandEnv := headlessCLIRuntime(t, binary)
 		out := filepath.Join(t.TempDir(), "out.json")
 		receipt := filepath.Join(t.TempDir(), "receipt.jsonl")

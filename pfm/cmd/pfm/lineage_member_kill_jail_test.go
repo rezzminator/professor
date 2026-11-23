@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // THE BUG. `pfm kill <member-id>` addressed by a Codex lineage member's
@@ -34,7 +35,7 @@ func TestKillCLIResolvesUnindexedLineageMemberToRoot(t *testing.T) {
 	socket := "cc-killcli-lineage-" + strconv.Itoa(os.Getpid())
 	session := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", "bg", "tail", "-f", "/dev/null",
+		"new-session", "-d", "-s", "bg", testwait.Hold,
 	)
 	if output, err := session.CombinedOutput(); err != nil {
 		t.Fatalf("start background pane: %v: %s", err, output)

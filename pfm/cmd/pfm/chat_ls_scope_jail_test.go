@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestChatLSScopesByRepositoryNotByPathPrefix pins `pfm chat ls`'s repo scope
@@ -30,7 +31,7 @@ func TestChatLSScopesByRepositoryNotByPathPrefix(t *testing.T) {
 	socket := "cc-" + strconv.FormatInt(time.Now().Unix(), 10) + "-" + strconv.Itoa(os.Getpid()) + "-7"
 	if output, err := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-c", fixture.Outer, "tail", "-f", "/dev/null",
+		"new-session", "-d", "-s", socket, "-c", fixture.Outer, testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start worktree pane %q: %v: %s", socket, err, output)
 	}
@@ -88,7 +89,7 @@ func TestChatLSListsAndReapsAnAbandonedEmptyServer(t *testing.T) {
 	const empty, foreign, live = "probe-abandoned-empty", "work-empty", "probe-live-pane"
 	for _, socket := range []string{empty, foreign, live} {
 		if output, err := exec.Command(
-			"tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "only", "tail", "-f", "/dev/null",
+			"tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "only", testwait.Hold,
 		).CombinedOutput(); err != nil {
 			t.Fatalf("start tmux server %q: %v: %s", socket, err, output)
 		}

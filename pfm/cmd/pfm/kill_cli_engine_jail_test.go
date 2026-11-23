@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestKillCLIVouchesEngineForUnindexedButVisibleRows reproduces the CLI kill
@@ -50,7 +51,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 		t.Helper()
 		start := exec.Command(
 			"tmux", "-L", socket, "-f", "/dev/null",
-			"new-session", "-d", "-s", session, "tail", "-f", "/dev/null",
+			"new-session", "-d", "-s", session, testwait.Hold,
 		)
 		if output, err := start.CombinedOutput(); err != nil {
 			t.Fatalf("start background pane %s: %v: %s", session, err, output)
@@ -292,7 +293,7 @@ func TestKillSelfResolveAndInternalCLI(t *testing.T) {
 	}
 	socket := filepath.Join(t.TempDir(), "cc-1-1-1")
 	command := exec.Command(
-		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "cc-1-1-1", "tail -f /dev/null",
+		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "cc-1-1-1", testwait.Hold,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start caller fixture: %v: %s", err, output)

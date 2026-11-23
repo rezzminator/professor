@@ -90,7 +90,7 @@ func startNameSyncFixture(t *testing.T, socket string) (root string, environment
 	environment = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
 	start := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "tail", "-f", "/dev/null",
+		"new-session", "-d", "-s", socket, testwait.Hold,
 	)
 	start.Env = environment
 	if output, err := start.CombinedOutput(); err != nil {
@@ -191,7 +191,7 @@ func TestWindowRenamedHookRunsTheReporterOnceForACommandClientRename(t *testing.
 	// A rename of a second session's window through the same path is the
 	// sentinel: a run the first rename wrongly caused was queued before it, so
 	// once the sentinel's own run is logged the count is exact.
-	nameSyncTmux(t, environment, socket, "new-session", "-d", "-s", "sentinel", "tail", "-f", "/dev/null")
+	nameSyncTmux(t, environment, socket, "new-session", "-d", "-s", "sentinel", testwait.Hold)
 	nameSyncTmux(t, environment, socket, "rename-window", "-t", "sentinel", "Y")
 	sentinel := "internal herdr-state name --socket " +
 		filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()), socket) + " --session sentinel"

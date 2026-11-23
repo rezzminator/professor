@@ -29,6 +29,20 @@ kill "$held"
 if shtest_wait_gone 'held fake exited' "$held"; then ok 'gone: returns once the process exits'; else bad 'gone: returns once the process exits'; fi
 wait "$held" 2>/dev/null
 
+# hold: writes nothing where tail warns on stderr (a host with no inotify instance to spare): a tail that
+# prints the runner's warning, then execs the real one, stands first on PATH.
+mkdir "$T/warn-bin"
+printf '#!/bin/sh\necho "tail: inotify cannot be used, reverting to polling: Too many open files" >&2\n: > "%s"\nexec %s "$@"\n' \
+  "$T/warned" "$(command -v tail)" > "$T/warn-bin/tail"
+chmod +x "$T/warn-bin/tail"
+( export PATH="$T/warn-bin:$PATH"; shtest_hold quiet-test ) 2> "$T/hold.err" &
+held=$!
+shtest_wait_until 'the warning tail ran' test -e "$T/warned"
+kill "$held"
+wait "$held" 2>/dev/null
+if [ "$(cat "$T/hold.err")" = '' ]; then ok 'hold: writes nothing on its stderr where tail warns'
+else bad 'hold: writes nothing on its stderr where tail warns' "expected: (empty)" "actual: $(cat "$T/hold.err")"; fi
+
 # line: blocks for one line a writer puts in the FIFO and hands it back.
 mkfifo "$T/lines"
 printf 'booted 42\n' > "$T/lines" &

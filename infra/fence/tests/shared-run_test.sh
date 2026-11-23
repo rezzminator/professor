@@ -58,8 +58,19 @@ srun() { # srun <id> <mode> <command string>: a run whose caller holds its heart
   return "$rc"
 }
 release() { # release <fifo>: lets the command blocked reading the FIFO go on (its read sees EOF)
-  : >"$1"
+  # The open blocks until a reader opens the FIFO, so it runs apart under the wait door: a reader that
+  # died reports a hung wait and a FAIL, never a suite held to its step's timeout.
+  (: >"$1") &
+  local writer=$!
+  shtest_wait_gone "a reader takes the release of $1" "$writer" && return 0
+  kill "$writer" 2>/dev/null
+  wait "$writer" 2>/dev/null
+  bad "release $1" "no reader opened the FIFO: the command meant to read it is gone"
 }
+# A run's command that holds until killed goes through the wait door's shtest_hold. The marker is this
+# test's alone: the gate runs other suites' processes in this pid namespace.
+hold_cmd() { printf ". /worktree/shtest-wait.sh; shtest_hold '%s.%s'" "$1" "$$"; } # hold_cmd <run id>
+holding() { pgrep -f "^shtest-hold $1.$$ " >/dev/null; } # holding <run id>: the run's command is alive
 
 # --- exit code, tree, cwd -----------------------------------------------------------------------------
 out="$(srun r-exit shared 'exit 7')"; rc=$?
@@ -162,19 +173,17 @@ out="$(srun r-hide shared '[ -z "$(ls -A /mnt/state)" ] && [ -z "$(ls -A /mnt/ho
 if [ "$rc" = 0 ]; then ok "a run sees neither the state directory nor the host directory"; else bad "a run sees the state or host directory" "$out"; fi
 
 # --- live record, PFM_FENCE_CONCURRENT, pid namespace -------------------------------------------------------
-# r-la holds a process named sleep (cat under that name, blocked on a FIFO) until r-lb has looked for it.
-mkdir -p "$T/tree/hold" && cp "$(command -v cat)" "$T/tree/hold/sleep"
-mkfifo "$TIMING/la.hold"
-( srun r-la shared 'echo "$PFM_FENCE_CONCURRENT" > /pfm-timing/conc-a; exec /worktree/hold/sleep /pfm-timing/la.hold' >"$T/la.out" ) &
+# r-la holds its command until r-lb has looked for it, then the test kills the hold.
+( srun r-la shared "echo \"\$PFM_FENCE_CONCURRENT\" > /pfm-timing/conc-a; $(hold_cmd r-la)" >"$T/la.out" ) &
 la=$!
-la_holds() { [ -s "$TIMING/conc-a" ] && pgrep -fx '/worktree/hold/sleep /pfm-timing/la.hold' >/dev/null; }
-shtest_wait_until "run r-la holds its sleep" la_holds || bad "run r-la never started" "$(cat "$T/la.out")"
+la_holds() { [ -s "$TIMING/conc-a" ] && holding r-la; }
+shtest_wait_until "run r-la holds its command" la_holds || bad "run r-la never started" "$(cat "$T/la.out")"
 if [ -n "$(cat "$FENCE_STATE_DIR/live/r-la" 2>/dev/null)" ]; then ok "a live run has its live record"; else bad "no live record for a live run" "$(ls -R "$FENCE_STATE_DIR")"; fi
-out="$(srun r-lb shared 'echo "$PFM_FENCE_CONCURRENT" > /pfm-timing/conc-b; n=$(ls -d /proc/[0-9]* | wc -l); [ "$n" -lt 12 ] || { echo "$n processes visible"; exit 1; }; ! pgrep -x sleep')"; rc=$?
-if [ "$rc" = 0 ]; then ok "a run sees only its own processes (another run's sleep is invisible)"; else bad "a run sees other runs' processes" "$out"; fi
+out="$(srun r-lb shared 'echo "$PFM_FENCE_CONCURRENT" > /pfm-timing/conc-b; n=$(ls -d /proc/[0-9]* | wc -l); [ "$n" -lt 12 ] || { echo "$n processes visible"; exit 1; }; ! pgrep -f "^shtest-hold r-la"')"; rc=$?
+if [ "$rc" = 0 ]; then ok "a run sees only its own processes (another run's hold is invisible)"; else bad "a run sees other runs' processes" "$out"; fi
 if [ "$(cat "$FENCE_HOST_DIR/wt/timing/conc-b")" = 2 ]; then ok "PFM_FENCE_CONCURRENT counts the live runs, this one included"
 else bad "PFM_FENCE_CONCURRENT" "conc-a=$(cat "$FENCE_HOST_DIR/wt/timing/conc-a") conc-b=$(cat "$FENCE_HOST_DIR/wt/timing/conc-b")"; fi
-release "$TIMING/la.hold"
+pkill -f "^shtest-hold r-la.$$ "
 shtest_wait_gone "run r-la ends" "$la"
 wait
 
@@ -202,11 +211,8 @@ out="$(srun r-pc private 'python3 -c "import socket; socket.create_connection((\
 if [ "$rc" = 0 ]; then ok "a private run has lo up and no outside connection"; else bad "a private run's network" "$out"; fi
 
 # --- the heartbeat kill -----------------------------------------------------------------------------------
-# Each run's command holds until killed: a run that ends at all was killed, and the door's hung-only
-# limit turns a kill that never comes into a failure. The marker is this test's alone: the gate runs
-# other suites' processes in this pid namespace.
-hold_cmd() { printf "exec -a 'shtest-hold %s.%s' tail -f /dev/null" "$1" "$$"; } # hold_cmd <run id>
-holding() { pgrep -f "^shtest-hold $1.$$ " >/dev/null; } # holding <run id>: the run's command is alive
+# Each run's command holds until killed (hold_cmd): a run that ends at all was killed, and the door's
+# hung-only limit turns a kill that never comes into a failure.
 # The heartbeat EOF: one beat, then the caller closes the stream once the run's command holds.
 ( { printf '.\n'; shtest_wait_until "run r-eof holds its command" holding r-eof; } \
   | bash "$SUT" run r-eof shared "$TREE" - wt -- bash -c "$(hold_cmd r-eof)" >"$T/eof.out" 2>&1; echo "${PIPESTATUS[1]}" >"$T/eof.rc" ) &

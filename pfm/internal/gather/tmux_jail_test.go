@@ -19,6 +19,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type tmuxJail struct {
@@ -107,7 +108,7 @@ func (jail *tmuxJail) startServer(
 		session,
 		"-n",
 		window,
-		"exec tail -f /dev/null",
+		testwait.Hold,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed tmux server %q: %v: %s", socket, err, output)

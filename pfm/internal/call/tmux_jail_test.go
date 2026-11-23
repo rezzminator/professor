@@ -707,7 +707,7 @@ func TestJailedCaptureReturnsWholeScrollback(t *testing.T) {
 		"10",
 		"sh",
 		"-c",
-		"i=1; while [ $i -le 60 ]; do echo scrollrow-$i; i=$((i+1)); done; exec tail -f /dev/null",
+		"i=1; while [ $i -le 60 ]; do echo scrollrow-$i; i=$((i+1)); done; "+testwait.Hold,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start scrollback pane: %v: %s", err, output)
@@ -759,7 +759,7 @@ func TestJailedClientActivityReportsUnattendedAndDeadSocket(t *testing.T) {
 	session := "probe-pfm-client-activity-session"
 	command := jail.command(
 		"-f", "/dev/null", "-L", socket, "new-session", "-d", "-s", session,
-		"tail", "-f", "/dev/null",
+		testwait.Hold,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed pane: %v: %s", err, output)

@@ -14,6 +14,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // pfm takes over a host-level surface when it sets the title options, so the
@@ -42,7 +43,7 @@ func newTitlesProbeServer(t *testing.T, socket string, titles *pfmconfig.TmuxTit
 	tmux := TmuxSpawner{TmuxDir: tmuxDir, Titles: titles}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Claude", CWD: root,
-		Width: 180, Height: 45, Run: "tail -f /dev/null",
+		Width: 180, Height: 45, Run: testwait.Hold,
 	}); err != nil {
 		t.Fatalf("create chat server: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
 	socket := "probe-cc-1800000014-1-1"
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
-		Socket: socket, Session: socket, Window: "Claude", CWD: root, Run: "tail -f /dev/null",
+		Socket: socket, Session: socket, Window: "Claude", CWD: root, Run: testwait.Hold,
 	}); err != nil {
 		t.Fatalf("create an unsized chat server: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestNewSessionStoresTheExactChatNameInTheSameCommand(t *testing.T) {
 		// A pool name or a branch's default name is no user's: marked automatic.
 		"probe-cc-1800000017-1-1": {Window: "Pool name", ChatName: "Pool name;", ChatNameAutomatic: true},
 	} {
-		spec.Socket, spec.Session, spec.CWD, spec.Run = socket, socket, root, "tail -f /dev/null"
+		spec.Socket, spec.Session, spec.CWD, spec.Run = socket, socket, root, testwait.Hold
 		if err := tmux.NewSession(context.Background(), spec); err != nil {
 			t.Fatalf("create chat server %s: %v", socket, err)
 		}

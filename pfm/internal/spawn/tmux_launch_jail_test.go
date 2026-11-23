@@ -86,7 +86,7 @@ func TestNewSessionLaunchesARunLongerThanATmuxMessage(t *testing.T) {
 	marker := filepath.Join(root, "launched")
 	// An env-assignment prefix, as a launch line may carry one, a 64 KiB
 	// argument, and a target that execs tail so the pane process is known.
-	run := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; exec tail -f /dev/null' pfm-launch '" +
+	run := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; " + testwait.Hold + "' pfm-launch '" +
 		strings.Repeat("x", 64<<10) + "'"
 	const socket = "cx-1800000011-1-1"
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
@@ -135,7 +135,7 @@ func TestNewSessionKeepsAShortRunInline(t *testing.T) {
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Codex", CWD: root,
-		Width: 180, Height: 45, Run: "tail -f /dev/null",
+		Width: 180, Height: 45, Run: testwait.Hold,
 	}); err != nil {
 		t.Fatalf("launch a short run: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestNewSessionKeepsAShortRunInline(t *testing.T) {
 	); strings.Trim(
 		start,
 		`"`,
-	) != "tail -f /dev/null" {
+	) != testwait.Hold {
 		t.Fatalf("a short run did not launch inline: pane_start_command = %q", start)
 	}
 	if left := launchLeftovers(t, tmuxDir, socket); len(left) != 0 {

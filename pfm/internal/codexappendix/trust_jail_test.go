@@ -25,7 +25,7 @@ func TestRPCCancelKillsTheHelpersProcessGroup(t *testing.T) {
 	binary := filepath.Join(root, "fake-codex")
 	// The descendant's output leaves the helper's pipe: a tail writing to a
 	// closed pipe ends by itself, which would pass for the group kill.
-	script := "#!/bin/sh\ntail -f /dev/null </dev/null >/dev/null 2>&1 &\n" +
+	script := "#!/bin/sh\n" + testwait.Hold + " </dev/null >/dev/null 2>&1 &\n" +
 		"echo \"$$ $!\" > '" + pidFile + ".tmp' && mv '" + pidFile + ".tmp' '" + pidFile + "'\n" +
 		"while IFS= read -r line; do :; done\n"
 	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {

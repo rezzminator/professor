@@ -753,7 +753,7 @@ func init() {
 	if os.Getenv("PFM_S3_MODE") == "int" {
 		// A job the engine leaves behind in its group, deaf to the forwarded
 		// SIGINT: only the host's final stop of the group ends it.
-		lingering := exec.Command("sh", "-c", `trap "" INT; exec tail -f /dev/null`)
+		lingering := exec.Command("sh", "-c", `trap "" INT; `+testwait.Hold)
 		if err := lingering.Start(); err != nil {
 			panic(err)
 		}

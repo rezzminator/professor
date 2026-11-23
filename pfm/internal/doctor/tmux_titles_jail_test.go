@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The check exists so a reader can tell "pfm owns this title" from "the host
@@ -50,7 +51,7 @@ func TestTmuxTitlesDoctorReportsBothOwnersOnProbeSockets(t *testing.T) {
 		socketPath := filepath.Join(tmuxDir, socket)
 		start := exec.Command(
 			"tmux", "-S", socketPath, "-f", "/dev/null",
-			"new-session", "-d", "-s", socket, "-n", "probe", "tail -f /dev/null",
+			"new-session", "-d", "-s", socket, "-n", "probe", testwait.Hold,
 		)
 		start.Env = append(os.Environ(), "TMUX=")
 		if output, err := start.CombinedOutput(); err != nil {

@@ -212,7 +212,7 @@ func (jail *attachJail) proveAttach(
 		"new-session", "-d",
 		"-s", targetSession,
 		"-n", "chat",
-		"tail -f /dev/null",
+		testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start target server: %v: %s", err, output)
 	}

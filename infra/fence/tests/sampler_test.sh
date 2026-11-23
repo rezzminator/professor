@@ -218,7 +218,7 @@ eq "parent gone: nothing on stderr" "" "$(cat "$T/pg.stderr")"
 # a zombie parent (exited, not reaped) is gone too: its parent execs a holder that never reaps, then the
 # test lets it exit
 mkfifo "$T/zombie.release"
-bash -c 'cat "$1" > /dev/null & echo $!; exec -a "shtest-hold zombie-reaper" tail -f /dev/null' _ "$T/zombie.release" > "$T/zombie.pid" &
+( cat "$T/zombie.release" > /dev/null & echo $!; shtest_hold zombie-reaper ) > "$T/zombie.pid" &
 holder=$!
 wait_lines "$T/zombie.pid" 1
 zpid=$(< "$T/zombie.pid")

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestTmuxTitlesStringRendersOneNamePerTab drives a REAL tmux server on a
@@ -50,13 +52,13 @@ func TestTmuxTitlesStringRendersOneNamePerTab(t *testing.T) {
 		ccSession = "cc-1-2-3"
 		cxSession = "cx-4-5-6"
 	)
-	run("-f", "/dev/null", "new-session", "-d", "-s", ccSession, "-n", "WIN-SHORT", "tail -f /dev/null")
+	run("-f", "/dev/null", "new-session", "-d", "-s", ccSession, "-n", "WIN-SHORT", testwait.Hold)
 	t.Cleanup(func() {
 		kill := exec.Command("tmux", "-S", socketPath, "kill-server")
 		kill.Env = env
 		_ = kill.Run()
 	})
-	run("new-session", "-d", "-s", cxSession, "-n", "RND:X", "tail -f /dev/null")
+	run("new-session", "-d", "-s", cxSession, "-n", "RND:X", testwait.Hold)
 	run("set-option", "-g", "set-titles-string", TmuxTitlesString)
 
 	const longName = "A Chat Name Longer Than Twenty Four Runes"

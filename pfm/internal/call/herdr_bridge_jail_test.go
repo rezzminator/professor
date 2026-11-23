@@ -40,9 +40,9 @@ func TestHerdrBridgeRecordReadOnARealServer(t *testing.T) {
 			t.Fatalf("tmux %q: %v: %s", args, err, output)
 		}
 	}
-	tmux("new-session", "-d", "-s", "cc-1", "tail", "-f", "/dev/null")
+	tmux("new-session", "-d", "-s", "cc-1", testwait.Hold)
 	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socketPath, "kill-server").Run() })
-	tmux("new-session", "-d", "-s", "cc-10", "tail", "-f", "/dev/null")
+	tmux("new-session", "-d", "-s", "cc-10", testwait.Hold)
 	tmux("set-option", "-t", "cc-10:", "@pfm_herdr", `{"session_id":"other"}`)
 	for _, tc := range []struct {
 		name, session, record, wantErr, refuse string

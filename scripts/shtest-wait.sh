@@ -8,7 +8,8 @@
 #   shtest_wait_until <name> <command> [args...]  polls until the command exits 0
 #   shtest_wait_gone <name> <pid>                 polls until the process is gone (a child: `wait` it after)
 #   shtest_wait_line <name> <fifo>                blocks for one line a writer puts in the FIFO; sets SHTEST_LINE
-#   shtest_hold [marker]                          blocks until killed: a fake that must stay alive (`shtest_hold m &`)
+#   shtest_hold [marker]                          blocks until killed: a fake that must stay alive (`shtest_hold m &`);
+#                                                 writes nothing and keeps the caller's stderr open (Go twin: testwait.Hold)
 # BROKEN STATE: a condition not reached within the limit prints `WAIT HUNG {name}` on stderr, returns 1 and
 # counts in SHTEST_WAITS_HUNG, which the harnesses' verdicts (shtest_end, testlib's finish) add to their failures,
 # so a wait whose status a test ignores still turns its suite red.
@@ -47,6 +48,7 @@ shtest_wait_line() {
   (( rc == 0 )) || { shtest_wait_hung "$1"; return 1; }
 }
 
-shtest_hold() {
-  exec -a "shtest-hold${1:+ $1}" tail -f /dev/null
+shtest_hold() { # tail warns on stderr where the host has no inotify instance to spare: fd 9 keeps the caller's
+  # stderr open, unwritten, and stderr goes to /dev/null
+  exec -a "shtest-hold${1:+ $1}" tail -f /dev/null 9>&2 2>/dev/null
 }

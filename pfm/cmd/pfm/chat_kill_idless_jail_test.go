@@ -22,7 +22,7 @@ func startIdlessSession(t *testing.T, socket, name string) string {
 	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
 	start := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", name, "tail", "-f", "/dev/null",
+		"new-session", "-d", "-s", name, testwait.Hold,
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start background pane %s on %s: %v: %s", name, socket, err, output)

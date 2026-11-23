@@ -88,7 +88,7 @@ func TestProbeServerNeverReadsAFailureAsDead(t *testing.T) {
 		// exec, so the killed client is the process holding its pipes: the
 		// probe returns at its bound, not after the door's pipe wait.
 		binary := filepath.Join(t.TempDir(), "tmux")
-		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexec tail -f /dev/null\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\n"+testwait.Hold+"\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		fake := clock.NewFake(time.Unix(0, 0))

@@ -17,6 +17,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestResolveSelectedRowAttachesALiveChatInsteadOfResumingAStaleCachedRow pins
@@ -97,7 +98,7 @@ func TestResolveSelectedRowAttachesALiveChatInsteadOfResumingAStaleCachedRow(t *
 	socket := "cc-1800000010-50-1"
 	session := exec.Command(
 		"tmux", "-f", "/dev/null", "-L", socket,
-		"new-session", "-d", "-s", "chat", "exec tail -f /dev/null",
+		"new-session", "-d", "-s", "chat", testwait.Hold,
 	)
 	session.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
 	if output, err := session.CombinedOutput(); err != nil {

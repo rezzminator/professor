@@ -33,9 +33,11 @@
 // condition and the last state observed; it never judges speed, and no caller
 // passes a duration of its own.
 //
-// This file holds every wait and the one limit; the other file:
+// This file holds every wait and the one limit; the other files:
 //   - stacks.go: the parsed stack dump under Blocked, Drive's family rule
 //     and Goroutines.
+//   - hold.go: Hold, HoldAs, HoldArgv: a child kept alive until the test
+//     kills it, quiet whatever the host's inotify capacity.
 package testwait
 
 import (

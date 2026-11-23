@@ -65,7 +65,7 @@ func TestInternalLaunchNoTTYCreatesListedSessionAndPropagatesExit(t *testing.T) 
 	realBinary := filepath.Join(root, "bin", "claude")
 	writeExecutable(t, realBinary, `#!/bin/sh
 set -eu
-/bin/bash -c 'exec -a claude tail -f /dev/null' &
+/bin/bash -c '`+testwait.HoldAs("claude")+`' &
 claude_child=$!
 trap 'kill "$claude_child" 2>/dev/null || true; wait "$claude_child" 2>/dev/null || true' EXIT
 socket=$(basename "${TMUX%%,*}")

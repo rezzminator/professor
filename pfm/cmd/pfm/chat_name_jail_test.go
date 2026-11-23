@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
@@ -55,7 +56,7 @@ func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
 	session := "probe-name"
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", session, "-n", "before", "tail -f /dev/null",
+		"new-session", "-d", "-s", session, "-n", "before", testwait.Hold,
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)
@@ -131,7 +132,7 @@ func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
 	session := "probe-clip"
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", session, "-n", "before", "tail -f /dev/null",
+		"new-session", "-d", "-s", session, "-n", "before", testwait.Hold,
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)
@@ -182,7 +183,7 @@ func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
 	socket := "cx-self-pane-" + strconv.Itoa(os.Getpid())
 	if output, err := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "tail", "-f", "/dev/null",
+		"new-session", "-d", "-s", socket, testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start tmux: %v: %s", err, output)
 	}
@@ -198,7 +199,7 @@ func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	if output, splitErr := exec.Command(
-		"tmux", "-L", socket, "split-window", "-d", "-t", socket, "tail", "-f", "/dev/null",
+		"tmux", "-L", socket, "split-window", "-d", "-t", socket, testwait.Hold,
 	).CombinedOutput(); splitErr != nil {
 		t.Fatalf("split tmux: %v: %s", splitErr, output)
 	}

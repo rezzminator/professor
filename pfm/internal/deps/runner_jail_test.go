@@ -175,7 +175,7 @@ func TestRealRunnerStartDetachReleasesAndWaitNamesIt(t *testing.T) {
 	defer func() { _ = extra.Close() }()
 	process, err := RealRunner{}.Start(
 		context.Background(),
-		[]string{"/bin/sh", "-c", "echo on-fd-3 >&3; exec tail -f /dev/null"},
+		[]string{"/bin/sh", "-c", "echo on-fd-3 >&3; " + testwait.Hold},
 		StartOptions{Detach: true, ExtraFiles: []*os.File{extra}},
 	)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestRealRunnerSignalGroup(t *testing.T) {
 	t.Parallel()
 	live, err := RealRunner{}.Start(
 		context.Background(),
-		[]string{"sh", "-c", "exec tail -f /dev/null"},
+		[]string{"sh", "-c", testwait.Hold},
 		StartOptions{ProcessGroup: true},
 	)
 	if err != nil {
@@ -306,7 +306,7 @@ func TestRealRunnerStartWaitDelayClosesInheritedPipe(t *testing.T) {
 	var stdout bytes.Buffer
 	process, err := (RealRunner{}).Start(
 		context.Background(),
-		[]string{"sh", "-c", "tail -f /dev/null & exit 0"},
+		[]string{"sh", "-c", testwait.Hold + " & exit 0"},
 		StartOptions{Stdout: &stdout, WaitDelay: 25 * time.Millisecond, ProcessGroup: true},
 	)
 	if err != nil {
@@ -326,7 +326,7 @@ func TestRealRunnerStartWaitDelayClosesInheritedPipe(t *testing.T) {
 func TestRealRunnerRunWaitDelayClosesInheritedPipe(t *testing.T) {
 	t.Parallel()
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
-	script := fmt.Sprintf("tail -f /dev/null & echo $! > %s; exit 0", shellQuote(pidFile))
+	script := fmt.Sprintf(testwait.Hold+" & echo $! > %s; exit 0", shellQuote(pidFile))
 	t.Cleanup(func() {
 		if raw, readErr := os.ReadFile(pidFile); readErr == nil {
 			if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw))); parseErr == nil {
@@ -361,7 +361,7 @@ func TestRealRunnerKillGroupStopsDescendants(t *testing.T) {
 	t.Parallel()
 	process, err := (RealRunner{}).Start(
 		context.Background(),
-		[]string{"sh", "-c", "exec tail -f /dev/null"},
+		[]string{"sh", "-c", testwait.Hold},
 		StartOptions{ProcessGroup: true},
 	)
 	if err != nil {
@@ -431,7 +431,7 @@ func TestRealRunnerProcessGroupDeadlineKillsBackgroundedDescendants(t *testing.T
 			[]string{
 				"sh",
 				"-c",
-				`tail -f /dev/null >/dev/null & echo $! > "$1"; exec tail -f /dev/null`,
+				testwait.Hold + ` >/dev/null & echo $! > "$1"; ` + testwait.Hold,
 				"sh",
 				pidFile,
 			},

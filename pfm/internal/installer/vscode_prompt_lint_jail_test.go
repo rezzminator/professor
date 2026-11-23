@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // promptLintCall is one answer of the fake pfm the Prompt Lint command runs: stdout,
@@ -151,7 +152,7 @@ cat "$d/out.$n" 2>/dev/null
 cat "$d/err.$n" >&2 2>/dev/null
 if [ "$(cat "$d/hold.$n" 2>/dev/null || echo false)" = true ]; then
   [ -p "$d/started" ] && echo started > "$d/started"
-  exec tail -f /dev/null
+  ` + testwait.Hold + `
 fi
 exit "$(cat "$d/exit.$n" 2>/dev/null || echo 64)"
 `

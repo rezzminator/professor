@@ -57,7 +57,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 		"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_TEST_BRANCH_ARGS\"\n"+
 			// the fork's SID crumb, so the session-id wait resolves at once
 			"printf '/fork/f1000000-0000-4000-8000-000000000001.jsonl\\n' > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n"+
-			"exec tail -f /dev/null\n",
+			testwait.Hold+"\n",
 	), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	callerPath := filepath.Join(tmuxDir, callerSocket)
 	start := exec.Command(
 		"tmux", "-f", "/dev/null", "-S", callerPath,
-		"new-session", "-d", "-s", callerSocket, "-n", "Parent seat", "tail -f /dev/null",
+		"new-session", "-d", "-s", callerSocket, "-n", "Parent seat", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {

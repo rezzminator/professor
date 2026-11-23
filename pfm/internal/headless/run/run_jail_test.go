@@ -128,9 +128,9 @@ func waitForFile(t *testing.T, path string) {
 func TestRunTimeoutKillsProcessGroup(t *testing.T) {
 	headlessJail(t)
 	capture := t.TempDir()
-	binary := writeEngineStub(t, `(tail -f /dev/null >/dev/null) &
+	binary := writeEngineStub(t, `(`+testwait.Hold+` >/dev/null) &
 echo "$!" > "$CAPTURE_DIR/child-pid"
-tail -f /dev/null`)
+`+testwait.Hold)
 	request := Request{
 		Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude, Prompt: "hello",
 		Env: testEnv(capture),

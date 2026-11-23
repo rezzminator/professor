@@ -239,9 +239,9 @@ func TestAmbientClaudeSplitSelfRetainsItsExactPane(t *testing.T) {
 			t.Fatalf("tmux %v: %v: %s", args, err, output)
 		}
 	}
-	runTmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-new-review-split", "tail -f /dev/null")
+	runTmux("-f", "/dev/null", "new-session", "-d", "-s", "cc-new-review-split", testwait.Hold)
 	t.Cleanup(func() { _ = exec.Command("tmux", "-S", socket, "kill-server").Run() })
-	runTmux("split-window", "-d", "-t", "cc-new-review-split", "tail -f /dev/null")
+	runTmux("split-window", "-d", "-t", "cc-new-review-split", testwait.Hold)
 	for pane, id := range map[string]string{"%0": first, "%1": second} {
 		transcript := filepath.Join(root, "claude", "project", id+".jsonl")
 		if err := os.WriteFile(
@@ -282,7 +282,7 @@ func TestAmbientSelfWithoutExportedIDEnrichesFromItsExactSocket(t *testing.T) {
 	socket := filepath.Join(tmuxDir, "cc-new-review")
 	command := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", "cc-new-review", "tail -f /dev/null",
+		"new-session", "-d", "-s", "cc-new-review", testwait.Hold,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start tmux: %v: %s", err, output)

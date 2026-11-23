@@ -282,9 +282,9 @@ func TestRunOpenCodeTimeoutKillsProcessGroup(t *testing.T) {
 	headlessJail(t)
 	capture := t.TempDir()
 	scratch := t.TempDir()
-	binary := writeOpenCodeStub(t, `(tail -f /dev/null >/dev/null) &
+	binary := writeOpenCodeStub(t, `(`+testwait.Hold+` >/dev/null) &
 echo "$!" > "$CAPTURE_DIR/child-pid"
-tail -f /dev/null`)
+`+testwait.Hold)
 	ctx := newArmedDeadlineContext()
 	done := make(chan struct{})
 	var result Result

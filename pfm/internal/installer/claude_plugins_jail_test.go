@@ -49,10 +49,10 @@ func TestClaudePluginCommandTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	// the account dir (the one path the command's environment carries), then
 	// hangs, the way a stuck plugin command does.
 	binary := writeScript(t, t.TempDir(), "claude-hang", "#!/bin/sh\n"+
-		"tail -f /dev/null &\n"+
+		testwait.Hold+" &\n"+
 		"echo $! >> \"$CLAUDE_CONFIG_DIR/child.pids\"\n"+
 		"echo $$ >> \"$CLAUDE_CONFIG_DIR/main.pids\"\n"+
-		"exec tail -f /dev/null\n")
+		testwait.Hold+"\n")
 	t.Cleanup(func() {
 		for _, name := range []string{"child.pids", "main.pids"} {
 			for _, pid := range recordedPIDs(t, filepath.Join(account, name)) {

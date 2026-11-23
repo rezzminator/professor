@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // `pfm chat reload --sock ox-…` used to print "reload scheduled in place" and
@@ -37,7 +38,7 @@ func TestChatReloadRefusesAnOpenCodeSocketUpFront(t *testing.T) {
 	}
 	socket := filepath.Join(dir, "ox-probe-pfm-reload-"+strconv.Itoa(os.Getpid()))
 	server := exec.Command(
-		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe", "tail -f /dev/null",
+		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe", testwait.Hold,
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -91,7 +92,7 @@ func TestChatReloadRefusesAnUnknownAccountUpFront(t *testing.T) {
 	}
 	socket := filepath.Join(dir, "cc-probe-pfm-reload-"+strconv.Itoa(os.Getpid()))
 	server := exec.Command(
-		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe", "tail -f /dev/null",
+		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe", testwait.Hold,
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {

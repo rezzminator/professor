@@ -92,7 +92,7 @@ func (jail *resolveJail) script(t testing.TB, label string) string {
 	)
 	content := "#!/bin/sh\nprintf '%s\\n' " +
 		shellSingleQuote("🥇 │ 🔖 "+label+" │ status") +
-		"\nexec tail -f /dev/null\n"
+		"\n" + testwait.Hold + "\n"
 	if err := testjail.WriteExecutable(path, []byte(content), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestJailedColonLabelResolvesToAPaneNeverATmuxTarget(t *testing.T) {
 	// arrangement in which the colon-target fallback below can be seen for
 	// what it is.
 	if output, err := jail.command(
-		"-L", "cc-500-1-1", "new-window", "-n", "other", "tail -f /dev/null",
+		"-L", "cc-500-1-1", "new-window", "-n", "other", testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("second window: %v: %s", err, output)
 	}

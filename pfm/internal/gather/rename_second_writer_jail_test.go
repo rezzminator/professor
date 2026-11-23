@@ -28,7 +28,7 @@ func startRenameProbeServer(t *testing.T, name string) (socket, windowID, tty st
 	socket = fmt.Sprintf("probe-pfm-rename-%s-%d", name, os.Getpid())
 	start := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "exec tail -f /dev/null",
+		"new-session", "-d", "-s", socket, "-n", "before", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR=/tmp")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -100,7 +100,7 @@ func windowNameSettles(t *testing.T, socket, tty, title string) string {
 func automaticRenamePassed(t *testing.T, socket string) {
 	t.Helper()
 	control := renameProbeTmux(
-		t, socket, "new-window", "-d", "-P", "-F", "#{window_id}", "-n", "CONTROL", "exec tail -f /dev/null",
+		t, socket, "new-window", "-d", "-P", "-F", "#{window_id}", "-n", "CONTROL", testwait.Hold,
 	)
 	renameProbeTmux(t, socket, "set-window-option", "-t", control, "automatic-rename", "on")
 	tty := renameProbeTmux(t, socket, "display-message", "-p", "-t", control, "#{pane_tty}")

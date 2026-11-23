@@ -18,4 +18,5 @@ stdout '^PREVIEW_TARGET$'
 -- name-fixture.sh --
 #!/bin/sh
 printf '🥇 acct  🔖 PREVIEW_TARGET │ 42%%\n'
-exec tail -f /dev/null
+# testwait.Hold spelled out: a txtar script cannot reach the Go door
+exec tail -f /dev/null 9>&2 2>/dev/null

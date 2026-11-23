@@ -34,7 +34,7 @@ func TestRunSkillGitReturnsWithinItsBound(t *testing.T) {
 	if err := testjail.WriteExecutable(
 		script,
 		[]byte("#!/bin/sh\necho 'fatal: slow remote' >&2\n: > '"+printed+"'\n"+
-			"tail -f /dev/null &\nexec tail -f /dev/null\n"),
+			testwait.Hold+" &\n"+testwait.Hold+"\n"),
 		0o755,
 	); err != nil {
 		t.Fatal(err)

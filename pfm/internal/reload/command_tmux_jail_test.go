@@ -35,7 +35,7 @@ func TestReloadRespawnLaunchesACommandLongerThanATmuxMessage(t *testing.T) {
 	const socket = "cx-1800000013-1-1"
 	ctx := context.Background()
 	if err := (spawn.TmuxSpawner{TmuxDir: tmuxDir}).NewSession(ctx, spawn.SessionSpec{
-		Socket: socket, Session: socket, Window: "Codex", CWD: root, Width: 180, Height: 45, Run: "tail -f /dev/null",
+		Socket: socket, Session: socket, Window: "Codex", CWD: root, Width: 180, Height: 45, Run: testwait.Hold,
 	}); err != nil {
 		t.Fatalf("create chat server: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestReloadRespawnLaunchesACommandLongerThanATmuxMessage(t *testing.T) {
 		}
 	})
 	marker := filepath.Join(root, "respawned")
-	command := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; exec tail -f /dev/null' pfm-launch '" +
+	command := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; " + testwait.Hold + "' pfm-launch '" +
 		strings.Repeat(
 			"x",
 			64<<10,

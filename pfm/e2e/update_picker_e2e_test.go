@@ -122,13 +122,13 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		// non-empty file and must never read it between the two writes.
 		"{ printf 'cwd=%s\\n' \"$PWD\"; printf 'args=%s\\n' \"$*\"; } > \"$PFM_UPDATE_LAUNCH_PROOF.tmp\"\n" +
 		"mv \"$PFM_UPDATE_LAUNCH_PROOF.tmp\" \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
-		"exec tail -f /dev/null\n"
+		testwait.Hold + "\n"
 	if err := testjail.WriteExecutable(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, engine := range []string{"opencode"} {
 		stub := "#!/bin/sh\nprintf 'unexpected engine=" + engine + "\\n' > \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
-			"exec tail -f /dev/null\n"
+			testwait.Hold + "\n"
 		if err := testjail.WriteExecutable(filepath.Join(binDir, engine), []byte(stub), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -263,7 +263,7 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 func startUpdatePickerE2E(t *testing.T, socket, pfm string, environment []string) {
 	t.Helper()
 	commandLine := updateE2EShellQuote(pfm) + " ls --no-sky; " +
-		"rc=$?; printf '\\nPFM_RC=%s\\n' \"$rc\"; exec tail -f /dev/null"
+		"rc=$?; printf '\\nPFM_RC=%s\\n' \"$rc\"; " + testwait.Hold
 	command := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
 		"new-session", "-d", "-x", "150", "-y", "30", "-s", "picker", commandLine,

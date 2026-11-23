@@ -54,7 +54,7 @@ func TestRenderConvergesTheWindowNameOnAProbeSocket(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "tail -f /dev/null",
+		"new-session", "-d", "-s", socket, "-n", "before", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -154,7 +154,7 @@ func TestRenderLeavesASharedWindowAlone(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "SHARED", "tail -f /dev/null",
+		"new-session", "-d", "-s", socket, "-n", "SHARED", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -165,7 +165,7 @@ func TestRenderLeavesASharedWindowAlone(t *testing.T) {
 		kill.Env = append(os.Environ(), "TMUX=")
 		_ = kill.Run()
 	})
-	split := exec.Command("tmux", "-S", socketPath, "split-window", "-d", "tail -f /dev/null")
+	split := exec.Command("tmux", "-S", socketPath, "split-window", "-d", testwait.Hold)
 	split.Env = append(os.Environ(), "TMUX=")
 	if output, err := split.CombinedOutput(); err != nil {
 		t.Fatalf("split the window: %v: %s", err, output)
@@ -249,7 +249,7 @@ func TestRenderConvergesToTheSameClipNameSyncUses(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "tail -f /dev/null",
+		"new-session", "-d", "-s", socket, "-n", "before", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -303,7 +303,7 @@ func TestRenderRenamesWhenOnlyTheExactNameChangesPastTheClip(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "tail -f /dev/null",
+		"new-session", "-d", "-s", socket, "-n", "before", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {

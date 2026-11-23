@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -37,7 +38,7 @@ func TestWorkbenchNameReservesLiveAndKilledRosterNames(t *testing.T) {
 	ctx := context.Background()
 	const socket = "cc-new-workbench-test"
 	client := pfmtmux.Socket{Dir: tmuxDir}
-	if output, err := client.Command(ctx, socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "tail -f /dev/null").
+	if output, err := client.Command(ctx, socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, testwait.Hold).
 		CombinedOutput(); err != nil {
 		t.Fatalf("start jailed seat: %v: %s", err, output)
 	}

@@ -132,15 +132,15 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 	keepSocket := "cc-600-1-1"
 	duplicateSocket := "cc-700-1-1"
 	sharedSocket := "cc-800-1-1"
-	jail.start(t, keepSocket, "keep", "tail -f /dev/null")
-	jail.start(t, duplicateSocket, "duplicate", "tail -f /dev/null")
-	targetPane := jail.start(t, sharedSocket, "shared", "tail -f /dev/null")
+	jail.start(t, keepSocket, "keep", testwait.Hold)
+	jail.start(t, duplicateSocket, "duplicate", testwait.Hold)
+	targetPane := jail.start(t, sharedSocket, "shared", testwait.Hold)
 	if output, err := jail.command(
 		"-L",
 		sharedSocket,
 		"split-window",
 		"-d",
-		"tail -f /dev/null",
+		testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("split shared server: %v: %s", err, output)
 	}

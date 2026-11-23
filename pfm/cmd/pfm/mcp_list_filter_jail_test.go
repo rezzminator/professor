@@ -95,7 +95,7 @@ func TestMCPListAdmitsBootingRow(t *testing.T) {
 	socket := "cc-1700000000-" + strconv.Itoa(os.Getpid()) + "-9"
 	session := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "tail", "-f", "/dev/null",
+		"new-session", "-d", "-s", socket, testwait.Hold,
 	)
 	if output, err := session.CombinedOutput(); err != nil {
 		t.Fatalf("start booting pane: %v: %s", err, output)

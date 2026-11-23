@@ -6,13 +6,16 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A process's start lands on the wall clock between the moments before and
 // after its spawn, within the one 10 ms tick the kernel counts it in.
 func TestLinuxProcFSStartedPlacesTheSpawnOnTheWallClock(t *testing.T) {
 	before := time.Now()
-	command := exec.Command("tail", "-f", "/dev/null")
+	hold := testwait.HoldArgv()
+	command := exec.Command(hold[0], hold[1:]...)
 	if err := command.Start(); err != nil {
 		t.Fatalf("start tail: %v", err)
 	}

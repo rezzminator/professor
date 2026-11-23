@@ -72,14 +72,25 @@ func TestTheLaunchingChatsDeathDoesNotCutTheRestartShort(t *testing.T) {
 		}
 		return strings.TrimSpace(string(body)) == "survived", string(body)
 	})
-	body, err := os.ReadFile(filepath.Join(dir, "worker.log"))
+	// The worker writes its marker before its exit line: the log is read once that line has landed.
+	logPath := filepath.Join(dir, "worker.log")
+	testwait.Until(t, fmt.Sprintf("worker pid %d to write its exit line to %s", worker, logPath),
+		func() (bool, string) {
+			body, err := os.ReadFile(logPath)
+			if err != nil {
+				return false, err.Error()
+			}
+			return strings.Contains(string(body), ExitMarker) && strings.HasSuffix(string(body), "\n"), string(body)
+		})
+	body, err := os.ReadFile(logPath)
 	if err != nil || string(body) != "restart: exit 0\n" {
-		t.Fatalf("worker log = %q, %v", body, err)
+		t.Fatalf("worker log %s = %q, %v; want %q", logPath, body, err, "restart: exit 0\n")
 	}
 }
 
 func TestChildExitedTellsARunningChildFromAFinishedOne(t *testing.T) {
-	child := exec.Command("tail", "-f", "/dev/null")
+	hold := testwait.HoldArgv()
+	child := exec.Command(hold[0], hold[1:]...)
 	if err := child.Start(); err != nil {
 		t.Fatal(err)
 	}

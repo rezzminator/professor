@@ -67,7 +67,7 @@ func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 		socket,
 		"-n",
 		"codex",
-		"printf '"+statusLine+"'; exec tail -f /dev/null",
+		"printf '"+statusLine+"'; "+testwait.Hold,
 	)
 	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
 	if output, err := command.CombinedOutput(); err != nil {

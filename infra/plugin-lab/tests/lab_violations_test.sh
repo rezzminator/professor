@@ -62,7 +62,7 @@ pid=$(cat "$RUN/fake/pid" 2>/dev/null || echo none)
 expect_eq 'fake claude killed' "$(kill -0 "$pid" 2>/dev/null && echo alive || echo gone)" gone
 expect_eq 'tmux server gone' "$(tmux -S "$RUN/t.sock" ls >/dev/null 2>&1 && echo alive || echo gone)" gone
 # a stale claude.pid the OS gave to a live chat on the same binary: lab stop leaves it running
-bash -c 'exec -a "$0" tail -f /dev/null' "$FAKES/claude --setting-sources project --settings $T/live/settings.json" & decoy=$!
+bash -c 'exec -a "$0" tail -f /dev/null 2>/dev/null' "$FAKES/claude --setting-sources project --settings $T/live/settings.json" & decoy=$!
 printf '%s\n' "$decoy" > "$RUN/claude.pid"
 "$LAB_DIR/lab" stop "$RUN" >/dev/null 2>&1
 expect_eq 'live chat on the same binary survives lab stop' "$(kill -0 "$decoy" 2>/dev/null && echo alive || echo gone)" alive

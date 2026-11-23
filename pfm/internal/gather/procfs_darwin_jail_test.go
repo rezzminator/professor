@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // An exited pid reads as absent, as a missing /proc entry does on Linux, so a
@@ -51,7 +53,8 @@ func TestDarwinProcFSReadsOfAnExitedPIDAreNotExist(t *testing.T) {
 // moments before and after it.
 func TestDarwinProcFSStartedPlacesTheSpawnOnTheWallClock(t *testing.T) {
 	before := time.Now()
-	command := exec.Command("tail", "-f", "/dev/null")
+	hold := testwait.HoldArgv()
+	command := exec.Command(hold[0], hold[1:]...)
 	if err := command.Start(); err != nil {
 		t.Fatalf("start tail: %v", err)
 	}

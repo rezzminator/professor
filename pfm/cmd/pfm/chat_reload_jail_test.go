@@ -35,7 +35,7 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 	socket := probeReloadSocket(t, "selector")
 	server := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
-		"printf '❯ 1. choose\\n'; tail -f /dev/null",
+		"printf '❯ 1. choose\\n'; "+testwait.Hold,
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -112,7 +112,7 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 	socket := probeReloadSocket(t, "schedule")
 	server := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
-		"tail -f /dev/null",
+		testwait.Hold,
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -178,7 +178,7 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 	socket := probeReloadSocket(t, "ambient")
 	server := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
-		"tail -f /dev/null",
+		testwait.Hold,
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -253,7 +253,7 @@ func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 	socket := probeReloadSocket(t, "explicit-multi")
 	server := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe",
-		"tail -f /dev/null",
+		testwait.Hold,
 	)
 	server.Env = append(server.Environ(), "TMUX=")
 	if output, err := server.CombinedOutput(); err != nil {
@@ -261,7 +261,7 @@ func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 	}
 	cleanupProbeReloadSocket(t, socket)
 	if output, err := exec.Command(
-		"tmux", "-S", socket, "new-window", "-d", "-n", "second", "tail -f /dev/null",
+		"tmux", "-S", socket, "new-window", "-d", "-n", "second", testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start second probe pane: %v: %s", err, output)
 	}

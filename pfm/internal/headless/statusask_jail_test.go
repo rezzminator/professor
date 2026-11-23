@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // startHeadlessTmuxSession mirrors internal/call's newCallTmuxJail
@@ -40,7 +41,7 @@ func startHeadlessTmuxSession(t *testing.T) (socketPath, session string) {
 	command := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
 		"new-session", "-d", "-s", session, "-x", "80", "-y", "10",
-		"sh", "-c", "echo live pane content; exec tail -f /dev/null",
+		"sh", "-c", "echo live pane content; "+testwait.Hold,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start tmux session: %v: %s", err, output)

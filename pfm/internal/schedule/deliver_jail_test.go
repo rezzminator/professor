@@ -50,7 +50,7 @@ mkdir -p "$entry/fd" && printf 'claude\000' > "$entry/cmdline" && ln -s "$(readl
 : > %q
 read -r _ < %q
 printf '❯ \n'
-exec tail -f /dev/null
+`+testwait.Hold+`
 `, laid, paint)
 	if err := testjail.WriteExecutable(engine, []byte(script), 0o700); err != nil {
 		t.Fatal(err)

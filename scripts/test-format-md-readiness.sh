@@ -7,12 +7,13 @@ SHTEST_TAG=format-md-readiness
 source "$(dirname "$0")/shtest.sh"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export REAL_HOOK="$ROOT/templates/project/scripts/format-md.sh"
+export SHTEST_WAIT_SH="$ROOT/scripts/shtest-wait.sh" # the stalled hook holds through the wait door
 cat > "$T/hook.sh" <<'HOOK'
 #!/usr/bin/env bash
 input=$(cat)
 if [[ $(jq -r '.session_id' <<< "$input") == overlap ]]; then
   # a stalled hook announces it will never reach the formatter, then blocks until killed
-  if [[ $EARLY_HOOK_MODE == stall ]]; then : > "$STUB_FMT_GATE/stalled"; exec tail -f /dev/null; fi
+  if [[ $EARLY_HOOK_MODE == stall ]]; then : > "$STUB_FMT_GATE/stalled"; . "$SHTEST_WAIT_SH"; shtest_hold early-hook; fi
   exit "$EARLY_HOOK_MODE"
 fi
 printf '%s' "$input" | bash "$REAL_HOOK"

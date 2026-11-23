@@ -179,7 +179,7 @@ func startNamedBootingPane(t *testing.T, socket, window string) int {
 	t.Helper()
 	session := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", window, "tail", "-f", "/dev/null",
+		"new-session", "-d", "-s", socket, "-n", window, testwait.Hold,
 	)
 	if output, err := session.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed pane %q: %v: %s", socket, err, output)
@@ -464,7 +464,7 @@ func (jail *bootingPickerJail) tmux(socket string, arguments ...string) *exec.Cm
 func (jail *bootingPickerJail) startTarget(t *testing.T, socket string) {
 	t.Helper()
 	if output, err := jail.tmux(
-		socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "tail", "-f", "/dev/null",
+		socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("start booting target %q: %v: %s", socket, err, output)
 	}

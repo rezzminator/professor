@@ -6,6 +6,8 @@ import (
 	"errors"
 	"syscall"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestClosingATerminalEndsItsShell(t *testing.T) {
@@ -16,7 +18,7 @@ func TestClosingATerminalEndsItsShell(t *testing.T) {
 	}{
 		{"the hangup ends it", "echo up\r", "up\nREADY$", false},
 		{
-			"a foreground job ignoring the hangup is killed", "trap '' HUP; echo sleeping; exec tail -f /dev/null\r",
+			"a foreground job ignoring the hangup is killed", "trap '' HUP; echo sleeping; " + testwait.Hold + "\r",
 			"\nsleeping", true,
 		},
 	} {

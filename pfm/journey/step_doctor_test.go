@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
@@ -145,7 +146,7 @@ var codexBindingsClean = regexp.MustCompile(
 // it by SIGTERM, and no tmux process names the socket after.
 func emptyTmuxReaped(c *harness.Ctx, term *harness.Terminal) {
 	socket := "cc-" + c.Unique("empty")
-	if r := c.Read("sh", "-c", `tmux -L "$1" new-session -d -s held 'tail -f /dev/null' && `+
+	if r := c.Read("sh", "-c", `tmux -L "$1" new-session -d -s held '`+testwait.Hold+`' && `+
 		`tmux -L "$1" set-option -g exit-empty off && tmux -L "$1" kill-session -t held`, "sh", socket); r.Code != 0 {
 		c.Failf("leaving an empty tmux server on %s exited %d: %s%s", socket, r.Code, r.Stdout, r.Stderr)
 	}

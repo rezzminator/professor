@@ -144,35 +144,23 @@ func TestScheduleHerdrEndRejectsUnsafeLog(t *testing.T) {
 				return
 			}
 			runtime.Paths.SIDDir = dir
+			if kind == "fifo" {
+				// No reader holds the FIFO, so an open that waits for one never returns and the receive
+				// below reports a hung test; this reader lets that blocked writer leave afterwards.
+				t.Cleanup(func() {
+					reader, openErr := os.OpenFile(leaf, os.O_RDWR|unix.O_NONBLOCK, 0)
+					if openErr != nil {
+						t.Errorf("open the read end of FIFO %s: %v", leaf, openErr)
+						return
+					}
+					_ = reader.Close()
+				})
+			}
 			done := make(chan error, 1)
 			go func() {
 				done <- ScheduleHerdrEnd(context.Background(), headless.Chat{ID: seat.SessionID, SeatID: seat.SeatID}, runtime)
 			}()
-			var err error
-			returned := false
-			testwait.Until(
-				t,
-				"ScheduleHerdrEnd to return, or to block opening the end worker log",
-				func() (bool, string) {
-					select {
-					case err = <-done:
-						returned = true
-						return true, ""
-					default:
-					}
-					return testwait.Blocked("unix.Openat", "chat.openEndWorkerLog")
-				},
-			)
-			if !returned {
-				t.Error("end worker log open blocked on FIFO while holding conversation lock")
-				// Unstick the unfixed writer so this regression fails on an assertion, not a suite timeout.
-				reader, openErr := os.OpenFile(leaf, os.O_RDWR|unix.O_NONBLOCK, 0)
-				if openErr != nil {
-					t.Fatal(openErr)
-				}
-				defer func() { _ = reader.Close() }()
-				err, _ = testwait.Receive(t, "the blocked schedule to leave after a FIFO reader opened", done)
-			}
+			err, _ := testwait.Receive(t, "ScheduleHerdrEnd to refuse the unsafe end worker log", done)
 			if err == nil || !strings.Contains(err.Error(), "end worker log") {
 				t.Errorf("unsafe %s accepted: %v", kind, err)
 			}

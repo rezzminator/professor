@@ -12,7 +12,9 @@ import (
 // each matched as the suffix of a function name ("mcpserv.waitForProxyRequest",
 // "mcpserv.(*stdioProxy).forwardRequest"). Its state names the matching
 // goroutine, or how many goroutines hold the frames and in which states. It
-// is a predicate for Until, never a wait of its own.
+// is a predicate for Until, never a wait of its own. A goroutine inside a
+// system call counts as blocked, one that returns at once too: Blocked waits
+// for a block that is sure to come and never proves that a call blocked.
 func Blocked(frames ...string) (bool, string) {
 	var unblocked []string
 	all := Goroutines(true)

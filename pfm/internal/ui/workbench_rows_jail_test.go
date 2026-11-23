@@ -29,15 +29,13 @@ func TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage(t *testing.T)
 	const name = "TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage"
 	if os.Getenv(ownLauncherHelper) != "1" {
 		t.Parallel()
-		command := exec.Command(os.Args[0], "-test.run=^"+name+"$", "-test.v")
+		// No -test.v: a verbose run prints the test's elapsed time, which differs run to run. Without it
+		// a run that matched this test prints PASS alone, and a run that matched none adds a warning line.
+		command := exec.Command(os.Args[0], "-test.run=^"+name+"$")
 		command.Env = append(os.Environ(), ownLauncherHelper+"=1")
 		output, err := command.CombinedOutput()
-		if err != nil ||
-			testjail.ChildOutput(output) != `=== RUN   TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage
---- PASS: TestNewChatPickerOffersALauncherRegisteredOnlyInItsOwnPackage (0.00s)
-PASS
-` {
-			t.Fatalf("own-launcher proof failed: %v\n%s", err, output)
+		if got := testjail.ChildOutput(output); err != nil || got != "PASS\n" {
+			t.Fatalf("own-launcher proof: child exit = %v, output = %q, want a nil exit and %q", err, got, "PASS\n")
 		}
 		return
 	}

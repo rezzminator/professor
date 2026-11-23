@@ -59,10 +59,14 @@ func TestRealTimerFiresOnItsOwnChannel(t *testing.T) {
 }
 
 func TestRealTickerFiresRepeatedly(t *testing.T) {
+	before := time.Now()
 	ticker := realClock{}.NewTicker(time.Nanosecond)
 	defer ticker.Stop()
-	first := <-ticker.C()
-	if second := <-ticker.C(); !second.After(first) {
-		t.Fatalf("real ticker's second tick %v is not after its first %v", second, first)
+	// A tick carries the time it was due, read by a sender the scheduler can pause mid-stamp, so two
+	// ticks prove nothing about each other's order: each is held only to the ticker's own start.
+	for _, tick := range []string{"first", "second"} {
+		if fired := <-ticker.C(); fired.Before(before) {
+			t.Fatalf("real ticker's %s tick fired at %v, before the ticker was made at %v", tick, fired, before)
+		}
 	}
 }

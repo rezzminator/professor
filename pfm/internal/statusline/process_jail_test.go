@@ -23,9 +23,12 @@ import (
 // Codex App Server (TestCodexAppServerFixture).
 const appServerFixtureEnv = "PFM_GPT_APP_SERVER_FIXTURE"
 
-// appServerReleaseEnv names the FIFO the App Server fixture answers on: the
-// test opens it once the parent is proven waiting on the answer.
-const appServerReleaseEnv = "PFM_APP_SERVER_FIXTURE_RELEASE"
+// appServerReleaseFD is the descriptor the App Server fixture inherits its
+// release pipe on (the first of the command's extra files): the fixture answers
+// once that pipe reaches its end, which the test brings by closing the write
+// end it kept. An inherited pipe needs no open on either side, so the release
+// depends on no meeting of a reader and a writer at a path.
+const appServerReleaseFD = 3
 
 // readFromAppServerFixture runs readCodexRateLimitsCommand against the App
 // Server fixture, and releases the fixture to answer once the parent is
@@ -33,12 +36,17 @@ const appServerReleaseEnv = "PFM_APP_SERVER_FIXTURE_RELEASE"
 // its request has closed it by then, and the fixture sees its EOF.
 func readFromAppServerFixture(t *testing.T, ctx context.Context) ([]byte, error) {
 	t.Helper()
-	release := filepath.Join(t.TempDir(), "release")
-	if err := syscall.Mkfifo(release, 0o600); err != nil {
+	held, release, err := os.Pipe()
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_ = held.Close()
+		_ = release.Close()
+	})
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=TestCodexAppServerFixture", "--", "app-server")
-	command.Env = append(os.Environ(), appServerFixtureEnv+"=1", appServerReleaseEnv+"="+release)
+	command.Env = append(os.Environ(), appServerFixtureEnv+"=1")
+	command.ExtraFiles = []*os.File{held}
 	type read struct {
 		body []byte
 		err  error
@@ -48,6 +56,7 @@ func readFromAppServerFixture(t *testing.T, ctx context.Context) ([]byte, error)
 		body, err := readCodexRateLimitsCommand(ctx, command)
 		done <- read{body, err}
 	}()
+	waited := false
 	testwait.Until(t, "the parent to wait on the App Server's answer", func() (bool, string) {
 		select {
 		case got := <-done:
@@ -55,27 +64,16 @@ func readFromAppServerFixture(t *testing.T, ctx context.Context) ([]byte, error)
 			return true, "the read returned"
 		default:
 		}
-		return testwait.Blocked("bufio.(*Scanner).Scan", "statusline.readCodexRateLimitsCommand")
+		blocked, state := testwait.Blocked("bufio.(*Scanner).Scan", "statusline.readCodexRateLimitsCommand")
+		waited = blocked
+		return blocked, state
 	})
-	opened := make(chan error, 1)
-	go func() {
-		fifo, err := os.OpenFile(release, os.O_WRONLY, 0)
-		if err == nil {
-			err = fifo.Close()
-		}
-		opened <- err
-	}()
+	if err := release.Close(); err != nil {
+		t.Fatalf("release the App Server fixture: %v", err)
+	}
 	got, _ := testwait.Receive(t, "the App Server read to return", done)
-	select {
-	case err := <-opened:
-		if err != nil {
-			t.Fatalf("release the App Server fixture: %v", err)
-		}
-	default:
-		// The fixture ended without taking its release; free the opener.
-		if fifo, err := os.OpenFile(release, os.O_RDONLY|syscall.O_NONBLOCK, 0); err == nil {
-			_ = fifo.Close()
-		}
+	if got.err != nil && !waited {
+		t.Logf("the read returned before the parent was seen waiting on the App Server's answer")
 	}
 	return got.body, got.err
 }
@@ -202,6 +200,7 @@ func TestCodexAppServerFixture(t *testing.T) {
 	if os.Getenv(appServerFixtureEnv) != "1" {
 		t.Skip("Codex App Server fixture runs only as a helper process")
 	}
+	appServerFixtureStage("started")
 	reader := bufio.NewReader(os.Stdin)
 	lines := make([]string, 0, 3)
 	for len(lines) < 3 {
@@ -217,17 +216,18 @@ func TestCodexAppServerFixture(t *testing.T) {
 			os.Exit(93)
 		}
 	}
+	appServerFixtureStage("handshake read, waiting for the release")
 	// The real App Server cancels outstanding work when stdin reaches EOF.
 	// Refuse to answer a parent that closes the transport immediately after
 	// writing the request: that is the production failure this fixture pins.
 	// The test releases this fixture once the parent waits on the answer, so
 	// such a parent's EOF is queued by then.
-	release, err := os.Open(os.Getenv(appServerReleaseEnv))
-	if err != nil {
+	release := os.NewFile(appServerReleaseFD, "release")
+	if _, err := io.Copy(io.Discard, release); err != nil {
 		os.Exit(95)
 	}
-	_, _ = io.Copy(io.Discard, release)
 	_ = release.Close()
+	appServerFixtureStage("released")
 	if reader.Buffered() == 0 && appServerStdinClosed() {
 		os.Exit(94)
 	}
@@ -242,6 +242,13 @@ func TestCodexAppServerFixture(t *testing.T) {
 		}
 	}
 	os.Exit(0)
+}
+
+// appServerFixtureStage writes the stage the fixture reached to its stderr,
+// which the parent's error quotes: a fixture killed before it answered names
+// where it stood.
+func appServerFixtureStage(stage string) {
+	_, _ = os.Stderr.WriteString("app server fixture: " + stage + "\n")
 }
 
 // appServerStdinClosed reads stdin once without blocking: true when it is at

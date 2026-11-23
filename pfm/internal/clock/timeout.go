@@ -22,6 +22,12 @@ func WithTimeout(parent context.Context, c Clock, d time.Duration) (context.Cont
 		return context.WithTimeout(parent, d)
 	}
 	bound := &clockBound{parent: parent, deadline: c.Now().Add(d), done: make(chan struct{})}
+	// The returned context is the standard library's own, so its children, its Cause and every
+	// caller that inspects it behave as under context.WithTimeout; it ends with bound, synchronously,
+	// through bound's AfterFunc. It attaches before anything below can end bound: the context
+	// package registers the child's cancel holding the child's lock, the lock that cancel takes, so
+	// an end landing inside that registration would hang the caller for good.
+	ctx, cancel := context.WithCancel(bound)
 	stopParent := func() bool { return false }
 	if err := parent.Err(); err != nil {
 		bound.end(err)
@@ -46,10 +52,6 @@ func WithTimeout(parent context.Context, c Clock, d time.Duration) (context.Cont
 			}
 		}()
 	}
-	// The returned context is the standard library's own, so its children, its Cause and every
-	// caller that inspects it behave as under context.WithTimeout; it ends with bound, synchronously,
-	// through bound's AfterFunc.
-	ctx, cancel := context.WithCancel(bound)
 	return ctx, func() {
 		cancel()
 		stopParent()
@@ -121,13 +123,15 @@ func (b *clockBound) end(err error) {
 }
 
 // AfterFunc is the context package's afterFuncer: the standard library child WithTimeout returns
-// registers its cancel here, so the child ends inside end, never on a goroutine of its own. f runs
-// at once when the bound has already ended. stop reports whether it kept f from running.
+// registers its cancel here, before anything can end the bound, so the child ends inside end, never
+// on a goroutine of its own. On a bound that has already ended f runs on a goroutine of its own,
+// as context.AfterFunc's does: the caller may hold a lock f takes. stop reports whether it kept f
+// from running.
 func (b *clockBound) AfterFunc(f func()) (stop func() bool) {
 	b.mu.Lock()
 	if b.err != nil {
 		b.mu.Unlock()
-		f()
+		go f()
 		return func() bool { return false }
 	}
 	entry := &f

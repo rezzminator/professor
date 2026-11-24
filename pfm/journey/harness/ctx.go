@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -9,15 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
-
-// PollTick is how often Poll and every terminal wait look again.
-const PollTick = 25 * time.Millisecond
-
-// readBound bounds one Read: a read of state that has not answered by then is a failure, never a hang.
-const readBound = 2 * time.Minute
 
 // Ctx is a step's handle on its node: it fails the step, reads state, waits, keeps evidence and tears
 // down what the step started.
@@ -27,11 +20,14 @@ type Ctx struct {
 	parent     *Ctx
 	path       string
 	concurrent bool
-	clock      clock.Clock
+	now        func() time.Time
 	unique     func(string) string
 	window     [2]time.Time
 	failed     bool
 	waited     func(WaitTime) // the walker's record of every named wait; nil keeps none
+	// deadline is the runner deadline the step's waits run under, t.Deadline; a harness test sets one
+	// already past to reach a wait's miss without waiting (as testwait.Expired does for a context).
+	deadline func() (time.Time, bool)
 
 	mu        sync.Mutex
 	terminals map[string]*session
@@ -48,21 +44,27 @@ type Result struct {
 type stepAbort struct{}
 
 func newCtx(
-	t *testing.T, hooks Hooks, parent *Ctx, path string, concurrent bool, clk clock.Clock, unique func(string) string,
+	t *testing.T,
+	hooks Hooks,
+	parent *Ctx,
+	path string,
+	concurrent bool,
+	now func() time.Time,
+	unique func(string) string,
 ) *Ctx {
 	c := &Ctx{
-		t: t, hooks: hooks, parent: parent, path: path, concurrent: concurrent, clock: clk, unique: unique,
-		terminals: map[string]*session{},
+		t: t, hooks: hooks, parent: parent, path: path, concurrent: concurrent, now: now, unique: unique,
+		deadline: t.Deadline, terminals: map[string]*session{},
 	}
-	c.window[0] = clk.Now()
+	c.window[0] = now()
 	return c
 }
 
 // over is the together node's window as one more Ctx on the parent's test: the log gate's view of
 // every branch at once.
 func (c *Ctx) over(t *testing.T) *Ctx {
-	group := newCtx(t, c.hooks, c.parent, c.path, false, c.clock, c.unique)
-	group.window = [2]time.Time{c.window[0], c.clock.Now()}
+	group := newCtx(t, c.hooks, c.parent, c.path, false, c.now, c.unique)
+	group.window = [2]time.Time{c.window[0], c.now()}
 	group.expected = c.Expected()
 	group.waited = c.waited
 	return group
@@ -112,45 +114,15 @@ func (c *Ctx) Logf(format string, args ...any) {
 // Read runs argv directly as the owner, with the suite's environment, to read state.
 func (c *Ctx) Read(argv ...string) Result {
 	c.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), readBound)
-	defer cancel()
+	ctx := testwait.Context(doorT{TB: c.t, deadline: c.deadline})
 	result, err := deps.RealRunner{}.Run(ctx, argv, deps.RunOptions{Env: c.hooks.Env, ProcessGroup: true})
 	if err != nil {
 		c.Failf("read %q: %v", argv, err)
 	}
 	if ctx.Err() != nil {
-		c.Failf("read %q: no answer within %s", argv, readBound)
+		c.Failf("read %q: no answer within the hung-only limit %s", argv, testwait.HungLimit)
 	}
 	return Result{Stdout: string(result.Stdout), Stderr: string(result.Stderr), Code: result.ExitCode}
-}
-
-// Poll waits until cond holds, looking every PollTick; past within the step fails with what was awaited,
-// the bound and the last thing cond saw.
-func (c *Ctx) Poll(what string, within time.Duration, cond func() (ok bool, seen string)) {
-	c.t.Helper()
-	deadline := c.clock.Now().Add(within)
-	ticker := c.clock.NewTicker(PollTick)
-	defer ticker.Stop()
-	from := c.clock.Now()
-	for {
-		ok, seen := cond()
-		if ok {
-			c.noteWait(what, from, true)
-			return
-		}
-		if !c.clock.Now().Before(deadline) {
-			c.noteWait(what, from, false)
-			c.Failf("waited %s for %s; last seen:\n%s", within, what, seen)
-		}
-		<-ticker.C()
-	}
-}
-
-// noteWait records a wait this step made, from its start until now, and whether its condition held.
-func (c *Ctx) noteWait(what string, from time.Time, met bool) {
-	if c.waited != nil {
-		c.waited(WaitTime{Path: c.path, What: what, Took: c.clock.Now().Sub(from), Met: met})
-	}
 }
 
 // Unique is a run-unique name for a resource this step creates.
@@ -203,7 +175,7 @@ func (c *Ctx) Terminal(name string) *Terminal {
 			return &Terminal{s: s, c: c}
 		}
 	}
-	s, err := openSession(name, c.hooks.Shell, c.hooks.Env, c.clock)
+	s, err := openSession(name, c.hooks.Shell, c.hooks.Env)
 	if err != nil {
 		c.Failf("open terminal %s: %v", name, err)
 	}
@@ -230,7 +202,7 @@ func (c *Ctx) closeTerminals() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for name, s := range c.terminals {
-		if err := s.close(); err != nil {
+		if err := s.close(c); err != nil {
 			c.t.Errorf("%s: close terminal %s: %v", c.path, name, err)
 		}
 	}

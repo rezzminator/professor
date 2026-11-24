@@ -15,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // Historical native=false targets are not proof of a tmux transport.
@@ -431,7 +433,7 @@ func TestHerdrNativeBackgroundAgents(t *testing.T) {
 	if err := os.WriteFile(transcript, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	deps := realHerdrDeps()
+	deps := testHerdrDeps()
 	now := time.Unix(1000, 0)
 	deps.now = func() time.Time { now = now.Add(time.Millisecond); return now }
 	var spawned [][]string
@@ -589,7 +591,7 @@ func TestHerdrInterruptWithBackgroundAgentStaysWorking(t *testing.T) {
 	argv := rig.block("Bash")
 	rig.appendEntries(watchRejectionEntry, watchInterruptEntry)
 	watch := rig.start(argv, fastPoll)
-	watch.wait(t, time.Second)
+	watch.wait(t)
 	assertActivityReport(t, rig.herdr, "working", "1 agent running")
 	if state := rig.tmux.storedState(t); state.State != "working" || len(state.Agents) != 1 {
 		t.Fatalf("stored interrupted state=%+v", state)
@@ -815,7 +817,7 @@ func TestHerdrTranscriptWatchPreservesActivityFence(t *testing.T) {
 	}
 	watch := rig.start(argv, fastPoll)
 	rig.appendEntries(watchRejectionEntry, watchInterruptEntry)
-	watch.wait(t, 3*time.Second)
+	watch.wait(t)
 	after, err := reporter.readActivity("s1")
 	if err != nil || after.Stored.State != "idle" || after.Stored.Seq != watchInterruptAt {
 		t.Fatalf("activity after the interrupt = %+v (err %v), want idle at seq %d above the held %d",
@@ -834,7 +836,7 @@ func TestHerdrTranscriptWatchDoesNotCrossSessions(t *testing.T) {
 	before, sent := rig.tmux.stored, len(rig.herdr.calls())
 	watch := rig.start(argv, fastPoll)
 	rig.appendEntries(watchRejectionEntry, watchInterruptEntry)
-	watch.wait(t, 3*time.Second)
+	watch.wait(t)
 	if got := rig.herdr.calls()[sent:]; len(got) != 0 || rig.tmux.stored != before {
 		t.Fatalf("requests %q, stored %q, want none and the replacement's %q", got, rig.tmux.stored, before)
 	}
@@ -885,6 +887,8 @@ func TestHerdrNativeWatchReportsIdleOnTheInterruptEntry(t *testing.T) {
 				return nil
 			}
 			var stderr bytes.Buffer
+			fake := clock.NewFake(time.Now())
+			testwait.ProcessClock(t, fake)
 			done := make(chan int)
 			go func() { done <- watchForHerdr(argv[3:], &stderr, deps, fastPoll) }()
 			file, err := os.OpenFile(rig.transcript, os.O_APPEND|os.O_WRONLY, 0o600)
@@ -896,19 +900,14 @@ func TestHerdrNativeWatchReportsIdleOnTheInterruptEntry(t *testing.T) {
 			}
 			_ = file.Close()
 			var settle []string
-			select {
-			case settle = <-settles:
-			case <-time.After(3 * time.Second):
-				t.Fatal("the watch started no settle process within 3s of the interrupt entry")
-			}
+			testwait.Drive(t, "the watch to start a settle process after the interrupt entry", fake, func() {
+				settle = <-settles
+			})
 			runSpawned(t, [][]string{settle}, rig.deps)
-			select {
-			case rc := <-done:
-				if rc != 0 || stderr.Len() != 0 {
-					t.Fatalf("watch rc=%d stderr=%s, want a quiet exit 0", rc, &stderr)
-				}
-			case <-time.After(3 * time.Second):
-				t.Fatal("the watch still runs 3s after its idle was recorded")
+			var rc int
+			testwait.Drive(t, "the watch to exit once its idle was recorded", fake, func() { rc = <-done })
+			if rc != 0 || stderr.Len() != 0 {
+				t.Fatalf("watch rc=%d stderr=%s, want a quiet exit 0", rc, &stderr)
 			}
 			assertActivityReport(t, rig.server, test.state, test.message)
 			reporter := &herdrReporter{deps: rig.deps}

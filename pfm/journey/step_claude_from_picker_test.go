@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -25,7 +24,7 @@ func claudeFromPicker(c *harness.Ctx, s State) State {
 	term.Press(harness.Enter)
 	term.WaitFor("choose the cache")
 	term.Press(harness.Enter)
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	s.Chat = oneLiveChat(c, s, "live-claude")
 	s.Chat.Engine = engineOf(c, s)
 	// A fresh chat is reachable from the owner's phone: Remote Control is on for every launch.
@@ -49,7 +48,7 @@ func engineArgv(c *harness.Ctx, pid int) []string {
 func engineOf(c *harness.Ctx, s State) int {
 	pid := 0
 	what := "one engine of session " + s.Chat.Session + " under the Herdr server of " + herdrSocket(s)
-	c.Poll(what, stepBound, func() (bool, string) {
+	c.Poll(what, func() (bool, string) {
 		table := processes(c)
 		var found []int
 		for p, session := range engines(table) {

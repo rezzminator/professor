@@ -15,7 +15,7 @@ import (
 func TestRunRecordsEveryStateTransition(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	tmux := &fakeReloadTmux{}
-	if _, err := Run(ctx, Request{
+	if _, err := runOnFake(t, ctx, Request{
 		Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-reload", Pane: "%7",
 		SessionID: "11111111-1111-4111-8111-111111111111", CWD: "/jail/project", Account: 2, AccountIDs: []int{2},
 		Machine: reloadTestMachine("", t.TempDir()),
@@ -48,7 +48,7 @@ func TestRunRecordsEveryStateTransition(t *testing.T) {
 	}
 
 	refused := &fakeReloadTmux{}
-	_, err := Run(ctx, Request{
+	_, err := runOnFake(t, ctx, Request{
 		Engine:     pfmengine.OpenCode,
 		SocketPath: "/tmp/ox-session",
 		Pane:       "%7",

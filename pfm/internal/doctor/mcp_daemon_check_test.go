@@ -11,26 +11,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // useRealDaemonReachability opts a test back into the real
 // mcpserv.DaemonReachability probe (against its own listener/httptest
 // server) instead of the jailed TestMain stub, and restores the stub after
 // the test so a later test in the same package never probes a live daemon.
-func useRealDaemonReachability(t *testing.T) {
+// The probe's deadline is read from the process clock, put on the fake it
+// returns: an answering daemon never waits on it, a silent one is fired by
+// advancing it.
+func useRealDaemonReachability(t *testing.T) *clock.Fake {
 	t.Helper()
 	previous := DaemonReachabilityOverride
 	DaemonReachabilityOverride = nil
 	t.Cleanup(func() { DaemonReachabilityOverride = previous })
-}
-
-func shortenDoctorDaemonProbeTimeout(t *testing.T) {
-	t.Helper()
-	previous := mcpserv.DaemonProbeTimeoutOverride
-	mcpserv.DaemonProbeTimeoutOverride = 100 * time.Millisecond
-	t.Cleanup(func() { mcpserv.DaemonProbeTimeoutOverride = previous })
+	fake := clock.NewFake(time.Unix(0, 0))
+	testwait.ProcessClock(t, fake)
+	return fake
 }
 
 func runtimeForPort(port int) pfmconfig.Runtime {
@@ -255,8 +256,7 @@ func TestMCPDaemonDoctorWarnsOnVersionSkew(t *testing.T) {
 // connection but never answers /status within the probe timeout is a slow
 // daemon, never the "unreachable" row an absent one gets.
 func TestMCPDaemonDoctorNamesAnUnresponsiveDaemon(t *testing.T) {
-	useRealDaemonReachability(t)
-	shortenDoctorDaemonProbeTimeout(t)
+	fake := useRealDaemonReachability(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +269,10 @@ func TestMCPDaemonDoctorNamesAnUnresponsiveDaemon(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 
 	var output bytes.Buffer
-	warnings := printMCPDaemonDoctor(&output, runtimeForPort(port))
+	var warnings int
+	testwait.Drive(t, "the doctor's probe of a silent listener to end at its deadline", fake, func() {
+		warnings = printMCPDaemonDoctor(&output, runtimeForPort(port))
+	})
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
 	}

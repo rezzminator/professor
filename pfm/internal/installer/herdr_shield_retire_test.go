@@ -1,11 +1,17 @@
 package installer
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -63,6 +69,149 @@ func TestRetireHerdrShieldHook(t *testing.T) {
 			want.Skip = strings.ReplaceAll(want.Skip, "{config}", config)
 			if got != want {
 				t.Fatalf("verdict\n%+v\nwant\n%+v", got, want)
+			}
+		})
+	}
+}
+
+// A registry listing herdr-shield gets exactly one unlink; a registry without
+// it gets no command (beside a linked run proving the step ran); no herdr on
+// PATH, no server up, a registry that does not parse or a Herdr whose
+// default_shell still runs herdr-shield is a skip row; a failed unlink is an
+// error naming the command and Herdr's text.
+func TestRetireHerdrShieldPlugin(t *testing.T) {
+	unlink := []string{fakeHerdrBinary, "plugin", "unlink", "herdr-shield"}
+	stays := "  skip    herdr plugin herdr-shield stays registered until `herdr plugin unlink herdr-shield` runs: "
+	for _, tc := range []struct {
+		name, registry string
+		// config is Herdr's config.toml, "" none.
+		config  string
+		noHerdr bool
+		// hang keeps `herdr plugin unlink` running until its bound ends it.
+		hang      bool
+		result    deps.RunResult
+		wantRows  string
+		wantCalls [][]string
+		wantErr   string
+	}{
+		{
+			name: "registry lists herdr-shield", registry: `[{"plugin_id":"professor.indicators"},{"plugin_id":"herdr-shield"}]`,
+			wantRows: "  change  herdr plugin unlink herdr-shield\n", wantCalls: [][]string{unlink},
+		},
+		{name: "registry without herdr-shield", registry: `[{"plugin_id":"professor.indicators"}]`},
+		{name: "no registry"},
+		{
+			name: "herdr off PATH", registry: `[{"plugin_id":"herdr-shield"}]`, noHerdr: true,
+			wantRows: "  skip    herdr plugin herdr-shield stays registered until `herdr plugin unlink herdr-shield` runs: herdr is not on PATH\n",
+		},
+		{
+			name: "no Herdr server up", registry: `[{"plugin_id":"herdr-shield"}]`,
+			result:    deps.RunResult{ExitCode: 1, Stderr: []byte("error: herdr server is not running\n")},
+			wantRows:  "  skip    herdr plugin herdr-shield stays registered until `herdr plugin unlink herdr-shield` runs: no Herdr server is up (herdr said: error: herdr server is not running)\n",
+			wantCalls: [][]string{unlink},
+		},
+		{
+			name: "registry that does not parse", registry: `{`,
+			wantRows: stays + "herdr: parse {registry}: unexpected end of JSON input\n",
+		},
+		{
+			name: "Herdr still runs herdr-shield", registry: `[{"plugin_id":"herdr-shield"}]`,
+			config: "[terminal]\ndefault_shell = \"/opt/bin/herdr-shield -l\"\n",
+			wantRows: stays + "Herdr's default_shell in {config} still names herdr-shield — end the chats in Herdr," +
+				` remove default_shell = "/opt/bin/herdr-shield -l" from {config}, restart Herdr, then run pfm install --yes again` + "\n",
+		},
+		{
+			name: "Herdr runs another shell", registry: `[{"plugin_id":"herdr-shield"}]`,
+			config:   "[terminal]\ndefault_shell = \"zsh\"\n",
+			wantRows: "  change  herdr plugin unlink herdr-shield\n", wantCalls: [][]string{unlink},
+		},
+		{
+			name: "Herdr config that does not parse", registry: `[{"plugin_id":"herdr-shield"}]`, config: "[terminal\n",
+			wantRows: "  FAIL    herdr plugin herdr-shield: read Herdr's default_shell: parse Herdr config {config}: " +
+				`toml: line 2: expected '.' or ']' to end table name, but got '\n' instead` + "\n",
+			wantErr: "herdr plugin herdr-shield: read Herdr's default_shell: parse Herdr config {config}: " +
+				`toml: line 2: expected '.' or ']' to end table name, but got '\n' instead`,
+		},
+		{
+			name: "unlink fails on a missing file", registry: `[{"plugin_id":"herdr-shield"}]`,
+			result:    deps.RunResult{ExitCode: 1, Stderr: []byte("error: open /opt/herdr-shield/plugin.toml: no such file or directory\n")},
+			wantRows:  "  FAIL    herdr plugin unlink herdr-shield exited 1: error: open /opt/herdr-shield/plugin.toml: no such file or directory\n",
+			wantCalls: [][]string{unlink},
+			wantErr:   "herdr plugin unlink herdr-shield exited 1: error: open /opt/herdr-shield/plugin.toml: no such file or directory",
+		},
+		{
+			name: "a hung Herdr server is named and the entry stays", registry: `[{"plugin_id":"herdr-shield"}]`,
+			hang:      true,
+			wantRows:  stays + "herdr did not answer within 10ms, so its server may be hung; restart Herdr\n",
+			wantCalls: [][]string{unlink},
+		},
+		{
+			name: "unlink exits non-zero", registry: `[{"plugin_id":"herdr-shield"}]`,
+			result:    deps.RunResult{ExitCode: 2, Stderr: []byte("plugin is locked\n")},
+			wantRows:  "  FAIL    herdr plugin unlink herdr-shield exited 2: plugin is locked\n",
+			wantCalls: [][]string{unlink},
+			wantErr:   "herdr plugin unlink herdr-shield exited 2: plugin is locked",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			config := filepath.Join(t.TempDir(), "config.toml")
+			if tc.config != "" {
+				if err := os.WriteFile(config, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env := &paths.MapEnv{Values: map[string]string{"HERDR_CONFIG_PATH": config}}
+			fill := strings.NewReplacer("{registry}", paths.HerdrPluginRegistry(home, env), "{config}", config)
+			if tc.registry != "" {
+				path := paths.HerdrPluginRegistry(home, env)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(tc.registry), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runner := &deps.FakeRunner{}
+			if tc.noHerdr {
+				runner.ScriptLookPath("herdr", "", errors.New("not found"))
+			} else {
+				runner.ScriptLookPath("herdr", fakeHerdrBinary, nil)
+			}
+			if !tc.hang {
+				runner.Script(unlink, tc.result, nil)
+			} else {
+				bound := herdrShieldUnlinkBound
+				herdrShieldUnlinkBound = 10 * time.Millisecond
+				t.Cleanup(func() { herdrShieldUnlinkBound = bound })
+				// The real runner answers a run its context kills as exit -1, no error.
+				runner.Handle(unlink, func(ctx context.Context, _ deps.RunCall) (deps.RunResult, error) {
+					<-ctx.Done()
+					return deps.RunResult{ExitCode: -1}, nil
+				})
+			}
+			var output bytes.Buffer
+			installer := &engine{apply: true, options: Options{
+				Mode: ModeApply, Home: home, Env: env,
+				ProcessRunner: runner, Stdout: &output,
+			}}
+			err := installer.retireHerdrShieldPlugin(context.Background())
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if want := fill.Replace(tc.wantErr); gotErr != want {
+				t.Fatalf("error %q; want %q", gotErr, want)
+			}
+			if want := fill.Replace(tc.wantRows); output.String() != want {
+				t.Fatalf("rows %q; want %q", output.String(), want)
+			}
+			var calls [][]string
+			for _, call := range runner.Calls() {
+				calls = append(calls, call.Argv)
+			}
+			if !reflect.DeepEqual(calls, tc.wantCalls) {
+				t.Fatalf("ran %q; want %q", calls, tc.wantCalls)
 			}
 		})
 	}

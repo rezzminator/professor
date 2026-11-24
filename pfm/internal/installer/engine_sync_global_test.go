@@ -15,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/enginesync"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // engineSyncGlobalEngine is an installer over home whose source clone is
@@ -56,7 +58,7 @@ func TestWireEngineSyncGlobalRendersEveryEvent(t *testing.T) {
 	installer, output, home := engineSyncGlobalEngine(t, ModeApply, nil)
 	record, engineSync := testjail.FakeEngineSyncRunner(t, everyEventReply, 0)
 	installer.options.EngineSyncRunner = engineSync
-	if err := installer.wireEngineSyncGlobal(nil); err != nil {
+	if err := installer.wireEngineSyncGlobal(); err != nil {
 		t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
 	}
 	want := "  change  link /h/.claude/agents/a.md -> /r/templates/global/agents/a.md\n" +
@@ -122,7 +124,7 @@ func TestWireEngineSyncGlobalArgv(t *testing.T) {
 			}
 			record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 			installer.options.EngineSyncRunner = engineSync
-			if err := installer.wireEngineSyncGlobal(nil); err != nil {
+			if err := installer.wireEngineSyncGlobal(); err != nil {
 				t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
 			}
 			calls := testjail.EngineSyncCalls(t, record)
@@ -155,7 +157,7 @@ func TestWireEngineSyncGlobalConflictBlocksTheApplyAndIsAPlanError(t *testing.T)
 		installer, output, _ := engineSyncGlobalEngine(t, mode, nil)
 		_, engineSync := testjail.FakeEngineSyncRunner(t, reply, 1)
 		installer.options.EngineSyncRunner = engineSync
-		err := installer.wireEngineSyncGlobal(nil)
+		err := installer.wireEngineSyncGlobal()
 		if !strings.Contains(output.String(), "  conflict CONFLICT /h/.codex/prompts/a.md\n") {
 			t.Fatalf("mode %d transcript lacks the conflict:\n%s", mode, output.String())
 		}
@@ -184,7 +186,7 @@ func TestWireEngineSyncGlobalWithoutTheBinaryFailsTheStep(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				err := installer.wireEngineSyncGlobal(nil)
+				err := installer.wireEngineSyncGlobal()
 				stable := enginesync.StablePath(installer.env(), home)
 				if err == nil || !strings.HasPrefix(err.Error(), "engine-sync binary unavailable: "+stable+": ") {
 					t.Fatalf("wireEngineSyncGlobal = %v, want the unavailable binary at %s", err, stable)
@@ -241,7 +243,7 @@ func TestBinaryOnlyInstallWithoutEngineSync(t *testing.T) {
 			installer, output, home := engineSyncGlobalEngine(t, mode, []string{})
 			installer.options.SourceRepo = ""
 			stable := enginesync.StablePath(installer.env(), home)
-			if err := installer.wireEngineSyncGlobal(nil); err != nil {
+			if err := installer.wireEngineSyncGlobal(); err != nil {
 				t.Fatalf("binary-only wireEngineSyncGlobal: %v\n%s", err, output.String())
 			}
 			if strings.Count(output.String(), "  skip    ") != 1 ||
@@ -433,7 +435,7 @@ func TestWireEngineSyncGlobalUninstallPreviewWithoutTheBinarySkips(t *testing.T)
 		`{"version":1}`,
 	)
 	withoutEngineSync(t)
-	if err := installer.wireEngineSyncGlobal(nil); err != nil {
+	if err := installer.wireEngineSyncGlobal(); err != nil {
 		t.Fatalf("wireEngineSyncGlobal: %v", err)
 	}
 	if len(installer.planErrors) != 0 || len(installer.deferred) != 0 {
@@ -491,7 +493,7 @@ func TestWireEngineSyncGlobalUninstallFaultPreviewSkipsAndApplyDefers(t *testing
 				)
 				want, engineSync := engineSyncFault(t, fault)
 				installer.options.EngineSyncRunner = engineSync
-				if err := installer.wireEngineSyncGlobal(nil); err != nil {
+				if err := installer.wireEngineSyncGlobal(); err != nil {
 					t.Fatalf("wireEngineSyncGlobal: %v\n%s", err, output.String())
 				}
 				if len(installer.planErrors) != 0 {
@@ -608,7 +610,12 @@ func TestWireEngineSyncGlobalHasADeadline(t *testing.T) {
 			installer, output, _ := engineSyncGlobalEngine(t, mode, nil)
 			installer.options.EngineSyncRunner = hungEngineSync{}
 			installer.engineSyncDeadline = 50 * time.Millisecond
-			err := installer.wireEngineSyncGlobal(nil)
+			fake := clock.NewFake(time.Now())
+			installer.engineSyncTimer = fake
+			var err error
+			testwait.Drive(t, "the hung engine-sync run to end at its deadline", fake, func() {
+				err = installer.wireEngineSyncGlobal()
+			})
 			if err == nil || !strings.Contains(err.Error(), "engine-sync global") ||
 				!strings.Contains(err.Error(), "timed out after 50ms") {
 				t.Fatalf(
@@ -631,6 +638,11 @@ func TestUninstallWithoutEngineSyncStillTearsDownEverythingPfmOwns(t *testing.T)
 	home := t.TempDir()
 	runner := &fakeRunner{manager: true}
 	writeFixture(t, engineSyncPolicySource(filepath.Join(home, ".professor")), engineSyncTemplate)
+	writeFixture(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "commands", "audit-fixture.md"),
+		"# audit\n",
+	)
 	_, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	if _, err := Run(context.Background(), Options{
 		EngineSyncRunner: engineSync,
@@ -643,7 +655,7 @@ func TestUninstallWithoutEngineSyncStillTearsDownEverythingPfmOwns(t *testing.T)
 	if _, err := os.Lstat(globalFile); err != nil {
 		t.Fatalf("install wrote no %s: %v", globalFile, err)
 	}
-	command := filepath.Join(home, ".claude", "commands", "reload.md")
+	command := filepath.Join(home, ".claude", "commands", "audit-fixture.md")
 	if _, err := os.Lstat(command); err != nil {
 		t.Fatalf("install wired no command %s: %v", command, err)
 	}
@@ -745,7 +757,7 @@ func TestEngineSyncGlobalRequiresCompatibleVersion(t *testing.T) {
 			)
 			runner.Script([]string{binary}, deps.RunResult{Stdout: []byte(`{"ok":true,"events":[]}` + "\n")}, nil)
 			installer.options.EngineSyncRunner = runner
-			err := installer.wireEngineSyncGlobal(nil)
+			err := installer.wireEngineSyncGlobal()
 			if calls := runner.Calls(); len(calls) == 0 || !slices.Equal(calls[0].Argv, []string{binary, "version"}) {
 				t.Fatalf("engine-sync calls = %v, want the version probe first", calls)
 			}

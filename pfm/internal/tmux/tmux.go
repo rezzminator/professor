@@ -4,10 +4,12 @@
 // its own narrow interface over it (its fake is its test seam).
 //
 // Entry points: Command and Invocation (tmux.go) build a call; Exec,
-// ExecWithin and ExecAttached (exec.go) run one with its record; WithClientRunner
+// ExecWithin and ExecAttached (exec.go) run one with its record, WithBoundClock
+// (bound.go) times their bound on a test clock; WithClientRunner
 // (runner.go) runs a context's calls through a deps.Runner.
 // Files:
 //   - exec.go: Cmd, the observed call: its deadline, its completion record.
+//   - bound.go: the default bound of a call and WithBoundClock, the clock it is timed on.
 //   - runner.go: a context's runner, the test-process refusal of a real tmux, ExitError.
 //   - socket.go: Socket, a socket directory's calls: KillPane, KillServer.
 //   - accepts.go: Accepts, whether a server answers a connect, with no exec.

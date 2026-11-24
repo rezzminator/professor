@@ -9,7 +9,7 @@ dir=$T/cc/2
 expect_eq 'service for a non-default dir' "$(lab_auth_service "$dir")" "Claude Code-credentials-$(sha256_of "$dir" | cut -c1-8)"
 expect_eq 'service for the default dir' "$(HOME=$T/h lab_auth_service "$T/h/.claude")" 'Claude Code-credentials'
 
-now_ms=$(( $(date +%s) * 1000 ))
+now_ms=$(( LAB_NOW_S * 1000 ))
 creds() { # <expiresAt ms>
   printf '{"claudeAiOauth":{"accessToken":"lab-canary-7f3e","refreshToken":"lab-refresh-0000","expiresAt":%s,"scopes":["user:inference","user:profile"],"subscriptionType":"max","rateLimitTier":"tier_x"}}' "$1" > "$T/creds.json"
 }

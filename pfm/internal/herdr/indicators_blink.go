@@ -7,6 +7,8 @@ import (
 	"os"
 	"syscall"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // The blinker's cadence. Re-reading the tab observations (the fleet scan
@@ -198,11 +200,7 @@ func (painter *indicatorPainter) ownerIdentity() (int64, error) {
 		read = painter.serverStart
 	}
 	if read == nil {
-		info, err := os.Stat(painter.socket)
-		if err != nil {
-			return 0, fmt.Errorf("stat Herdr socket %s: %w", painter.socket, err)
-		}
-		return info.ModTime().UnixNano(), nil
+		return ServerStart(painter.socket)
 	}
 	return read()
 }
@@ -214,5 +212,5 @@ func (painter *indicatorPainter) restoreContext(ctx context.Context) (context.Co
 	if budget <= 0 {
 		budget = restoreBudget
 	}
-	return context.WithTimeout(context.WithoutCancel(ctx), budget)
+	return clock.WithTimeout(context.WithoutCancel(ctx), painter.clock, budget)
 }

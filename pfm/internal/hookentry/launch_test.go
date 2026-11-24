@@ -12,7 +12,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -21,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -73,11 +73,12 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 }
 
 // interruptingReader is a starter pressing Ctrl-C at the Enter prompt: its read
-// interrupts the process, then waits for a line that never comes, giving up
-// after a bound so an interrupt nobody handles fails the test, not hangs it.
+// interrupts the process, then waits for a line that never comes, until the
+// test releases it or ends, so an interrupt nobody handles fails the test, not hangs it.
 type interruptingReader struct {
 	released chan struct{}
 	finished chan struct{}
+	ended    <-chan struct{}
 }
 
 func (reader interruptingReader) Read([]byte) (int, error) {
@@ -87,7 +88,7 @@ func (reader interruptingReader) Read([]byte) (int, error) {
 	}
 	select {
 	case <-reader.released:
-	case <-time.After(5 * time.Second):
+	case <-reader.ended:
 	}
 	return 0, io.EOF
 }
@@ -259,19 +260,24 @@ func TestLaunchPassthroughWaitsForParentAccountRegistration(t *testing.T) {
 	LaunchExec = func(string, []string, []string) error { return nil }
 	// The parent publishes its child's generation and releases ownership while
 	// the managed child launcher is starting, before that child execs Claude.
-	released := make(chan error, 1)
-	time.AfterFunc(20*time.Millisecond, func() { released <- parent.Close() })
 	var out, stderr bytes.Buffer
-	code := Launch(
-		[]string{"--real", "/bin/echo", "--", "--resume", "fixture-session"},
-		&out,
-		&stderr,
-		config.Runtime{},
-		paths.OSEnv{},
-	)
-	if err := <-released; err != nil {
+	launched := make(chan int, 1)
+	go func() {
+		launched <- Launch(
+			[]string{"--real", "/bin/echo", "--", "--resume", "fixture-session"},
+			&out,
+			&stderr,
+			config.Runtime{},
+			paths.OSEnv{},
+		)
+	}()
+	testwait.Until(t, "Launch to block on the account ownership its parent holds", func() (bool, string) {
+		return testwait.Blocked("gather.flockAccount")
+	})
+	if err := parent.Close(); err != nil {
 		t.Fatal(err)
 	}
+	code, _ := testwait.Receive(t, "Launch to return once its parent released ownership", launched)
 	if err := parent.Abort(); err != nil {
 		t.Fatal(err)
 	}

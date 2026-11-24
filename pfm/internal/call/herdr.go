@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -243,7 +244,7 @@ func (engine *Engine) deliverHerdrThen(ctx context.Context, wait ThenWait) (resu
 	}
 	budget := engine.options.ThenMin + time.Duration(engine.options.ThenBusyTries)*engine.options.Poll +
 		time.Duration(engine.options.ThenIdleTries)*engine.options.ThenIdlePoll + engine.options.ThenSettle
-	bounded, cancel := context.WithTimeout(ctx, budget)
+	bounded, cancel := clock.WithTimeout(ctx, engine.options.Clock, budget)
 	defer cancel()
 	if err := engine.waitHerdrTurn(bounded, target, turn); err != nil {
 		return fail(err)
@@ -318,7 +319,7 @@ func (engine *Engine) waitHerdrTurn(ctx context.Context, target Target, turn her
 		if !ok {
 			return fmt.Errorf("herdr agent.wait for %q: missing deadline", target.Pane)
 		}
-		remaining := time.Until(deadline)
+		remaining := deadline.Sub(engine.options.Clock.Now())
 		var err error
 		target, err = ProveHerdrTarget(ctx, target)
 		if err != nil {

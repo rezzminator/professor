@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/place"
@@ -34,11 +35,26 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 		moved    string // "socket id" the placement ran for; "" for none
 		unheld   bool   // the scan does not hold the chat yet, so files it by its folder
 		homeless bool   // the chat's folder files under no place
+		late     bool   // a prompt hook's deadline closed the commit gate before the move
+		followed bool   // the chat's pane was the one Herdr has focused, so the view moved with it
 	}{
 		{
 			name: "a Herdr chat moves into its space", identity: herdr, space: " glass ",
 			line:   `chat is in space "glass", Herdr workspace "glass"`,
 			spaces: map[string]string{"seat-session": "glass"}, moved: "SOCKET seat-session glass",
+		},
+		{
+			name: "a Herdr chat the user is looking at moves into its space with the view", identity: herdr,
+			space: "glass", followed: true,
+			line:   `chat is in space "glass", Herdr workspace "glass"; the view moved with it`,
+			spaces: map[string]string{"seat-session": "glass"}, moved: "SOCKET seat-session glass",
+		},
+		{
+			name: "clearing returns a Herdr chat the user is looking at with the view", identity: herdr,
+			recorded: "glass", followed: true,
+			line: `chat space cleared: the chat is back in its folder place, Herdr workspace "atlas"; ` +
+				`the view moved with it`,
+			spaces: map[string]string{}, moved: "SOCKET seat-session ",
 		},
 		{
 			name: "clearing returns a Herdr chat to its folder place", identity: herdr, recorded: "glass",
@@ -79,6 +95,13 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 			spaces:  map[string]string{"seat-session": "glass"}, moved: "SOCKET seat-session glass",
 		},
 		{
+			name: "a deadline past before the move keeps the space and moves nothing", identity: herdr,
+			space: "glass", late: true,
+			err: `space "glass" is recorded; the deadline passed before Herdr moved the chat, ` +
+				`so the next placement of the chat moves it`,
+			spaces: map[string]string{"seat-session": "glass"},
+		},
+		{
 			name: "a name with a control character is refused", identity: tmux, space: "gla\nss",
 			err: `the space name "gla\nss" must be one printable line`, spaces: map[string]string{},
 		},
@@ -96,6 +119,9 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			testjail.Fleet(t)
 			ctx := context.Background()
+			if test.late {
+				ctx = deps.WithCommitGate(ctx, func() (func(), bool) { return func() {}, false })
+			}
 			values, err := paths.Resolve()
 			if err != nil {
 				t.Fatal(err)
@@ -129,16 +155,16 @@ func TestSpaceRecordsTheSpaceAndSaysWhereTheChatSits(t *testing.T) {
 					return &place.Fleet{Spaces: recorded}, err
 				},
 				move: func(_ context.Context, _ paths.Values, socket string, fleet place.Fleet, id string) (
-					place.Place, error,
+					place.Place, bool, error,
 				) {
 					moved = socket + " " + id + " " + fleet.Spaces[id]
 					switch space := fleet.Spaces[id]; {
 					case space != "":
-						return place.Place{Root: place.SpaceRoot(space), Label: space}, test.moveErr
+						return place.Place{Root: place.SpaceRoot(space), Label: space}, test.followed, test.moveErr
 					case test.homeless:
-						return place.Place{}, test.moveErr
+						return place.Place{}, false, test.moveErr
 					}
-					return place.Place{Root: "/fixture/atlas", Label: "atlas"}, test.moveErr
+					return place.Place{Root: "/fixture/atlas", Label: "atlas"}, test.followed, test.moveErr
 				},
 			}
 			line, err := spaceCaller(ctx, config.Runtime{Paths: values}, test.identity, test.space, doors)

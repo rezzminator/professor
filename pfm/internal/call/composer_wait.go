@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
@@ -41,6 +43,21 @@ var ErrStartupSplash = errors.New("still on the startup splash: no composer row 
 // the line LastComposerLine finds. A screen without one cannot take a message.
 func ComposerRowShown(capture string) bool {
 	return composerLastLine(capture) != ""
+}
+
+// ComposerBoxed reports whether the active composer row sits inside Claude
+// Code's input box: a rule right above the row and a closing rule below it.
+// A shell's prompt line is drawn with neither: once a fullscreen Claude exits,
+// the terminal's primary screen shows the line that started it
+// ("❯ claude --resume …"), which LastComposerLine takes for a composer row.
+func ComposerBoxed(capture string) bool {
+	lines := strings.Split(capture, "\n")
+	row := lastComposerRow(lines)
+	if row <= 0 || !ComposerBoxRule(ansi.Strip(lines[row-1])) {
+		return false
+	}
+	_, bounded := ComposerBoxText(capture)
+	return bounded
 }
 
 // ComposerWait configures AwaitComposerRow. Read captures the pane; the zero

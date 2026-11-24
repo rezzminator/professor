@@ -3,6 +3,7 @@ package fleetdb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -86,5 +88,87 @@ func TestOpenSharedStateMemoryMatchesTheFile(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
 		t.Fatalf("working directory %s holds %v (%v), want nothing", dir, entries, err)
+	}
+}
+
+// TestSharedOpenBringsASchemaOncePerProcess: a second open of a database this
+// process already brought to schema reads its fingerprint and runs no schema
+// step; a schema or version changed between the two opens gets every step
+// again. Serial: obs.Test.
+func TestSharedOpenBringsASchemaOncePerProcess(t *testing.T) {
+	const fingerprint, schema, repair = "select pragma_user_version", "create meta", "select seat"
+	for _, test := range []struct {
+		name         string
+		between      string
+		statements   []string
+		wantDegraded string
+	}{
+		{
+			name:       "an untouched database runs no schema step",
+			statements: []string{fingerprint, repair},
+		},
+		{
+			name:       "a dropped column is added again",
+			between:    "ALTER TABLE hidden DROP COLUMN revision",
+			statements: []string{fingerprint, schema, fingerprint, repair},
+		},
+		{
+			name:       "a newer version is refused",
+			between:    fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion+1),
+			statements: []string{fingerprint, schema},
+			wantDegraded: fmt.Sprintf(
+				"migrate shared state database: shared database %%s schema version %d is newer than binary version %d",
+				SchemaVersion+1, SchemaVersion,
+			),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, recorder := obs.Test(t)
+			path := filepath.Join(t.TempDir(), "pfm.db")
+			values := paths.Values{StateDB: path}
+			first := OpenSharedState(ctx, values)
+			if err := errors.Join(first.Degraded(), first.Close()); err != nil {
+				t.Fatal(err)
+			}
+			if test.between != "" {
+				seedSharedState(t, path, test.between)
+			}
+			before := len(recorder.Records())
+			state := OpenSharedState(ctx, values)
+			defer func() { _ = state.Close() }()
+			var statements []string
+			for _, record := range recorder.Records()[before:] {
+				if record.Message == "db.statement" {
+					op, _ := record.Field("op")
+					table, _ := record.Field("table")
+					statements = append(statements, fmt.Sprint(op, " ", table))
+				}
+			}
+			if !reflect.DeepEqual(statements, test.statements) {
+				t.Errorf("second open of %s ran %q, want %q", path, statements, test.statements)
+			}
+			if test.wantDegraded != "" {
+				want := fmt.Sprintf(test.wantDegraded, path)
+				if err := state.Degraded(); err == nil || err.Error() != want {
+					t.Fatalf("second open of %s degraded = %v, want %s", path, err, want)
+				}
+				return
+			}
+			if err := state.Degraded(); err != nil {
+				t.Fatalf("second open of %s degraded: %v", path, err)
+			}
+			if columns := queryColumn(t, state, "SELECT name FROM pragma_table_info('hidden')"); !reflect.DeepEqual(
+				columns, []string{"uuid", "hidden_at", "at_payload", "revision"},
+			) {
+				t.Fatalf("hidden columns of %s after the second open = %v", path, columns)
+			}
+			if err := state.Kill(ctx, "warm-kill", 42); err != nil {
+				t.Fatal(err)
+			}
+			if killed, err := state.KilledAt(ctx); err != nil ||
+				!reflect.DeepEqual(killed, map[string]int64{"warm-kill": 42}) {
+				t.Fatalf("KilledAt() on %s = %v, %v; want warm-kill at 42", path, killed, err)
+			}
+		})
 	}
 }

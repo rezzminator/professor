@@ -33,7 +33,7 @@ case "$1" in
   fmt)
     if [[ -n ${STUB_FMT_GATE:-} ]]; then
       printf 'ready\n' > "$STUB_FMT_GATE/ready"
-      while [[ ! -f "$STUB_FMT_GATE/release" ]]; do sleep 0.1; done
+      read -r _ < "$STUB_FMT_GATE/release" # a FIFO: blocks until the test releases the formatter
     fi
     exit "${STUB_FMT_RC:-0}" ;;
   check)
@@ -211,20 +211,18 @@ fi
 
 # Both hooks report standing uncommitted diagnostics once per session.
 gate="$T/overlap"
-mkdir -p "$gate" || exit 2
+mkdir -p "$gate" && mkfifo "$gate/release" || exit 2
 printf '{"session_id":"overlap","tool_input":{"file_path":"%s"}}' "$C/docs/dev/a.md" |
   STUB_FMT_GATE="$gate" STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced" TMPDIR="$T/cache" \
-    timeout 15 bash "$HOOK" > "$gate/first.out" 2> "$gate/first.err" &
+    bash "$HOOK" > "$gate/first.out" 2> "$gate/first.err" &
 first_hook=$!
-# The formatter seam parks the first actor inside its snapshot transaction.
-for ((tick=0; tick<50; tick++)); do
-  [[ ! -f "$gate/ready" ]] || break
-  kill -0 "$first_hook" 2>/dev/null || break
-  sleep 0.1
-done
+# The formatter seam parks the first actor inside its snapshot transaction; a hook that dies before the
+# formatter ends the wait too, and one stuck before it is the wait door's hung limit.
+formatter_settled() { [[ -f "$gate/ready" ]] || ! kill -0 "$first_hook" 2>/dev/null; }
+shtest_wait_until "the first hook to reach the formatter or exit" formatter_settled
 if [[ ! -f "$gate/ready" ]]; then
   if kill -0 "$first_hook" 2>/dev/null; then
-    reason='timed out waiting for formatter'
+    reason='hook stalled before formatter readiness'
     kill -TERM "$first_hook" 2>/dev/null || true
     wait "$first_hook" || true
   else

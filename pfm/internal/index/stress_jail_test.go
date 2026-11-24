@@ -14,11 +14,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -32,29 +32,23 @@ const (
 )
 
 type indexStressResult struct {
-	ColdDuration  time.Duration
-	WarmDuration  time.Duration
-	DeltaDuration time.Duration
-	AppendBytes   int
-	Cold          Counters
-	Warm          Counters
-	Delta         Counters
+	AppendBytes int
+	// PeakRSS is the helper's own peak resident memory in bytes, read by the
+	// helper itself (indexStressPeakRSS).
+	PeakRSS int64
+	Cold    Counters
+	Warm    Counters
+	Delta   Counters
 }
 
 func TestIndexStress(t *testing.T) {
 	if os.Getenv(indexStressEnv) != "1" {
 		t.Skip("set PFM_STRESS=1 to run the index stress battery")
 	}
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 
-	root, giantPath, generationDuration := setupIndexStressCorpus(t)
+	root, giantPath := setupIndexStressCorpus(t)
 	resultPath := filepath.Join(root, "stress-result.json")
-	helperTimeout := 10 * time.Minute
-	if strict {
-		helperTimeout = 2 * time.Minute
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), helperTimeout)
-	defer cancel()
+	ctx := testwait.Context(t)
 
 	var output bytes.Buffer
 	command := exec.CommandContext(
@@ -83,11 +77,7 @@ func TestIndexStress(t *testing.T) {
 		t.Fatalf("decode index stress result: %v", err)
 	}
 
-	usage, ok := command.ProcessState.SysUsage().(*syscall.Rusage)
-	if !ok {
-		t.Fatalf("index stress process usage has type %T", command.ProcessState.SysUsage())
-	}
-	peakRSS := usage.Maxrss * 1024
+	peakRSS := result.PeakRSS
 	if peakRSS >= indexStressRSSBound {
 		t.Fatalf(
 			"index stress peak RSS = %d MiB, want <%d MiB for a 200 MiB transcript",
@@ -95,35 +85,15 @@ func TestIndexStress(t *testing.T) {
 			indexStressRSSBound>>20,
 		)
 	}
-	t.Logf(
-		"generated %d small transcripts + 200 MiB stream in %s (strict=%t)",
-		indexStressSmall,
-		generationDuration.Round(time.Millisecond),
-		strict,
-	)
-	t.Logf(
-		"cold=%s peakRSS=%d MiB counters=%+v",
-		result.ColdDuration.Round(time.Millisecond),
-		peakRSS>>20,
-		result.Cold,
-	)
-	t.Logf(
-		"warm=%s counters=%+v",
-		result.WarmDuration.Round(time.Millisecond),
-		result.Warm,
-	)
-	t.Logf(
-		"delta=%s append=%d bytes counters=%+v",
-		result.DeltaDuration.Round(time.Millisecond),
-		result.AppendBytes,
-		result.Delta,
-	)
+	t.Logf("generated %d small transcripts + 200 MiB stream", indexStressSmall)
+	t.Logf("cold peakRSS=%d MiB counters=%+v", peakRSS>>20, result.Cold)
+	t.Logf("warm counters=%+v", result.Warm)
+	t.Logf("delta append=%d bytes counters=%+v", result.AppendBytes, result.Delta)
 }
 
-func setupIndexStressCorpus(t *testing.T) (root, giantPath string, elapsed time.Duration) {
+func setupIndexStressCorpus(t testing.TB) (root, giantPath string) {
 	t.Helper()
 
-	started := time.Now()
 	root = t.TempDir()
 	claudeRoot := filepath.Join(root, "claude")
 	project := filepath.Join(claudeRoot, "project")
@@ -155,10 +125,10 @@ func setupIndexStressCorpus(t *testing.T) (root, giantPath string, elapsed time.
 	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
-	return root, giantPath, time.Since(started)
+	return root, giantPath
 }
 
-func writeGiantTranscript(t *testing.T, path string, targetBytes int64) {
+func writeGiantTranscript(t testing.TB, path string, targetBytes int64) {
 	t.Helper()
 
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
@@ -196,7 +166,6 @@ func TestIndexStressHelper(t *testing.T) {
 	if os.Getenv(paths.EnvCacheDB) == "" || os.Getenv(paths.EnvClaudeRoots) == "" {
 		t.Fatal("index stress helper is not jailed")
 	}
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 
 	database := openIndexStore(t)
 	defer func() {
@@ -210,50 +179,22 @@ func TestIndexStressHelper(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	started := time.Now()
 	cold, err := indexer.Run(ctx, Options{})
 	if err != nil {
 		t.Fatalf("cold stress Run() error = %v", err)
 	}
-	coldDuration := time.Since(started)
 	wantFiles := indexStressSmall + 1
 	if cold.FilesSeen != wantFiles ||
 		cold.FullParsed != wantFiles ||
 		cold.BytesRead < indexStressFileBytes {
 		t.Fatalf("cold stress counters = %+v", cold)
 	}
-	coldLimit := 5 * time.Minute
-	if strict {
-		coldLimit = time.Minute
-	}
-	if coldDuration > coldLimit {
-		t.Fatalf(
-			"cold stress duration = %s, want <%s (strict=%t)",
-			coldDuration,
-			coldLimit,
-			strict,
-		)
-	}
 
-	started = time.Now()
 	warm, err := indexer.Run(ctx, Options{})
 	if err != nil {
 		t.Fatalf("warm stress Run() error = %v", err)
 	}
-	warmDuration := time.Since(started)
 	assertNoChangeCounters(t, warm, wantFiles)
-	warmLimit := time.Minute
-	if strict {
-		warmLimit = 5 * time.Second
-	}
-	if warmDuration > warmLimit {
-		t.Fatalf(
-			"warm stress duration = %s, want <%s (strict=%t)",
-			warmDuration,
-			warmLimit,
-			strict,
-		)
-	}
 
 	appendLine, err := json.Marshal(map[string]any{
 		"type": "user",
@@ -269,12 +210,10 @@ func TestIndexStressHelper(t *testing.T) {
 	giantPath := os.Getenv(indexStressGiantEnv)
 	appendBytes(t, giantPath, appendLine)
 
-	started = time.Now()
 	delta, err := indexer.Run(ctx, Options{})
 	if err != nil {
 		t.Fatalf("delta stress Run() error = %v", err)
 	}
-	deltaDuration := time.Since(started)
 	if delta.FilesSeen != wantFiles ||
 		delta.FilesSkipped != wantFiles-1 ||
 		delta.DeltaParsed != 1 ||
@@ -287,27 +226,16 @@ func TestIndexStressHelper(t *testing.T) {
 			len(appendLine),
 		)
 	}
-	deltaLimit := time.Minute
-	if strict {
-		deltaLimit = 5 * time.Second
-	}
-	if deltaDuration > deltaLimit {
-		t.Fatalf(
-			"delta stress duration = %s, want <%s (strict=%t)",
-			deltaDuration,
-			deltaLimit,
-			strict,
-		)
-	}
 
 	result := indexStressResult{
-		ColdDuration:  coldDuration,
-		WarmDuration:  warmDuration,
-		DeltaDuration: deltaDuration,
-		AppendBytes:   len(appendLine),
-		Cold:          cold,
-		Warm:          warm,
-		Delta:         delta,
+		AppendBytes: len(appendLine),
+		Cold:        cold,
+		Warm:        warm,
+		Delta:       delta,
+	}
+	result.PeakRSS, err = indexStressPeakRSS()
+	if err != nil {
+		t.Fatalf("read index stress helper peak RSS: %v", err)
 	}
 	content, err := json.Marshal(result)
 	if err != nil {
@@ -316,4 +244,42 @@ func TestIndexStressHelper(t *testing.T) {
 	if err := os.WriteFile(os.Getenv(indexStressResultEnv), content, 0o600); err != nil {
 		t.Fatalf("write index stress result: %v", err)
 	}
+}
+
+// BenchmarkIndexStressRun is the cold and the no-change index run over the
+// stress corpus that TestIndexStress asserts the counters of.
+func BenchmarkIndexStressRun(b *testing.B) {
+	root, _ := setupIndexStressCorpus(b)
+	open := func(name string) *Indexer {
+		b.Setenv(paths.EnvCacheDB, filepath.Join(root, name, "pfm-cache.db"))
+		database, err := store.Open()
+		if err != nil {
+			b.Fatalf("store.Open() error = %v", err)
+		}
+		b.Cleanup(func() { _ = database.Close() })
+		indexer, err := New(database)
+		if err != nil {
+			b.Fatalf("New() error = %v", err)
+		}
+		return indexer
+	}
+	b.Run("cold", func(b *testing.B) {
+		for iteration := 0; b.Loop(); iteration++ {
+			indexer := open(fmt.Sprintf("cold-%d", iteration))
+			if _, err := indexer.Run(context.Background(), Options{}); err != nil {
+				b.Fatalf("cold Run() error = %v", err)
+			}
+		}
+	})
+	b.Run("warm", func(b *testing.B) {
+		indexer := open("warm")
+		if _, err := indexer.Run(context.Background(), Options{}); err != nil {
+			b.Fatalf("priming Run() error = %v", err)
+		}
+		for b.Loop() {
+			if _, err := indexer.Run(context.Background(), Options{}); err != nil {
+				b.Fatalf("warm Run() error = %v", err)
+			}
+		}
+	})
 }

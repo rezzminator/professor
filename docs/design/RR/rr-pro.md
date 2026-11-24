@@ -1,6 +1,6 @@
 # rr-pro
 
-`rr-pro` is the `rr` lead with wider caps, more reasoning and the repository lane: 6 diggers a round, a ceiling of 5 rounds, 12 verification pages, `opus` at effort `medium`, and a `clone-distiller` for each repository whose code holds an answer. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, how the variant is built, what it costs, when a caller picks it, and what its runs measured.
+`rr-pro` is the `rr` lead on `opus` with wider caps and the repository lane: 6 diggers a round, a ceiling of 5 rounds, 12 verification pages, `opus` at effort `medium`, and a `clone-distiller` for each repository whose code holds an answer. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, how the variant is built, what it costs, when a caller picks it, and what its runs measured.
 
 ## Contents
 
@@ -26,7 +26,7 @@ Description, verbatim: `rr tier 2 on opus medium`
 
 ## How the variant is built
 
-`pfm install` renders the variant from `rr.md` through engine-sync: its frontmatter overrides `description` and `effort`, its body replaces § Budget, and `extends: [shared/repo-lane.md]` supplies § Spawning. Both sections carry their base-text hash in `pins:`:
+`pfm install` renders the variant from `rr.md` through engine-sync: its frontmatter overrides `description` and pins `model: opus` and `effort: medium`, its body replaces § Budget, and `extends: [shared/repo-lane.md]` supplies § Spawning. Both sections carry their base-text hash in `pins:`:
 
 | `rr.md` section | `rr-pro` text |
 | --- | --- |

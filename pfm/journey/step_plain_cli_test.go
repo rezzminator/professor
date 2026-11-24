@@ -5,10 +5,12 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/mockengine/control"
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
@@ -100,7 +102,7 @@ func plainChatNew(c *harness.Ctx, s State) State {
 		c.Failf("pfm chat end %s exited %d: %s", held, r.Code, r.Stderr)
 	}
 	if heldSession != "" {
-		chatEnded(c, heldSession, 20*time.Second)
+		chatEnded(c, heldSession)
 	}
 
 	long, reply := c.Unique("long-brief"), c.Unique("await-reply")
@@ -109,8 +111,8 @@ func plainChatNew(c *harness.Ctx, s State) State {
 	text := strings.Repeat("the brief goes on past tmux's message cap. ", 400) +
 		`mock-engine: {"type":"turn","reply":"` + reply + `"}`
 	read(c, "sh", "-c", `printf %s "$2" >"$1"`, "sh", brief, text)
-	out, errs, code = typedRunWithin(c, term, "await-long", "cd "+project+" && pfm chat new --engine cc --name "+long+
-		` --await "$(cat `+brief+`)"`, 60*time.Second)
+	out, errs, code = typedRun(c, term, "await-long", "cd "+project+" && pfm chat new --engine cc --name "+long+
+		` --await "$(cat `+brief+`)"`)
 	if code != 0 || out != reply+"\n" {
 		c.Failf("pfm chat new --await with a %d-byte brief: exit %d, stdout %q, stderr %q; want exit 0 printing %q",
 			len(text), code, out, errs, reply+"\n")
@@ -135,16 +137,40 @@ func plainChatNew(c *harness.Ctx, s State) State {
 		c.Failf("pfm chat end %s exited %d: %s", long, r.Code, r.Stderr)
 	}
 	if session != "" {
-		chatEnded(c, session, 20*time.Second)
+		chatEnded(c, session)
 	}
 
 	// An open whose chat dies at launch fails with the pane's own words and leaves no live seat.
 	crashed := c.Unique("crashed")
 	crashScenario, crashDot := ownerHome+"/"+crashed+".json", ownerHome+"/"+crashed+".zdot"
-	out, errs, code = typedRun(c, term, "launch-crash", `sed 's/^{/{"launch_crash":"Error: crashed at launch",/' `+
-		`"$MOCK_ENGINE_SCENARIO" >`+crashScenario+" && mkdir -p "+crashDot+` && printf '. ~/.zshenv\nexport `+
-		`MOCK_ENGINE_SCENARIO=%s\n' `+crashScenario+" >"+crashDot+"/.zshenv && cd "+project+" && ZDOTDIR="+crashDot+
-		" pfm chat open "+long)
+	// The crashing engines read a control FIFO named for this open, not their pids: each one's runtime loads
+	// on its own clock, moved once it holds the FIFO, before the fault it prints. The resume's engine dies
+	// first; the fallback the pane then runs starts a second one, under the words the first left, and it
+	// dies the same way.
+	crashControl := filepath.Join(engineControlDir(), crashed)
+	out, errs, code = typedRunWhile(
+		c,
+		term,
+		"launch-crash",
+		`sed -e 's/^{/{"launch_crash":"Error: crashed at launch",/' `+
+			`-e 's/{pid}/`+crashed+`/' "$MOCK_ENGINE_SCENARIO" >`+crashScenario+" && mkdir -p "+crashDot+
+			` && printf '. ~/.zshenv\nexport MOCK_ENGINE_SCENARIO=%s\n' `+crashScenario+" >"+crashDot+"/.zshenv && cd "+
+			project+" && ZDOTDIR="+crashDot+" pfm chat open "+long,
+		func() {
+			previous := ""
+			for _, engine := range []string{"the resume's engine", "the fallback's engine"} {
+				previous = crashReader(c, crashControl, previous)
+				if moved := tickEngine(c, crashControl); moved != 500*time.Millisecond {
+					c.Failf(
+						"%s's boot moved its clock %s, want 500ms (control log %s)",
+						engine,
+						moved,
+						control.LogPath(crashControl),
+					)
+				}
+			}
+		},
+	)
 	said := "pfm chat open: the chat " + long + " exited at launch — its pane said: "
 	if code == 0 || !strings.HasPrefix(errs, said) || !strings.Contains(errs, " | Error: crashed at launch | ") {
 		c.Failf("pfm chat open of a chat whose Claude dies at launch: exit %d, stdout %q, stderr %q;"+
@@ -160,9 +186,8 @@ func plainChatNew(c *harness.Ctx, s State) State {
 	// name with the attach command, and pfm reads the chat in state error.
 	refused := c.Unique("refused")
 	names = append(names, refused)
-	out, errs, code = typedRunWithin(c, term, "refused", "cd "+project+" && pfm chat new --engine cc --name "+refused+
-		` 'a refused turn mock-engine: {"type":"api_error","reply":"API Error: 400 refused","error":"invalid_request"}'`,
-		60*time.Second)
+	out, errs, code = typedRun(c, term, "refused", "cd "+project+" && pfm chat new --engine cc --name "+refused+
+		` 'a refused turn mock-engine: {"type":"api_error","reply":"API Error: 400 refused","error":"invalid_request"}'`)
 	refusal := regexp.MustCompile(
 		`^pfm chat new: ` + regexp.QuoteMeta(refused) + `'s first turn ended on an API error ` +
 			`\(invalid_request\): API Error: 400 refused — the model server refused the prompt; attach it and look: ` +
@@ -186,7 +211,7 @@ func plainChatNew(c *harness.Ctx, s State) State {
 
 // nestedTmux: in a plain terminal the owner starts a tmux server of his own and, inside it, types
 // claude with a settings file of his own; the fake Claude's box comes up, its engine carrying --settings
-// once: pfm's own, his file's keys merged in. Then he kills his tmux server from outside: within 10 s no live row, seat, engine
+// once: pfm's own, his file's keys merged in. Then he kills his tmux server from outside: no live row, seat, engine
 // or tmux process of the chat is left.
 func nestedTmux(c *harness.Ctx, s State) State {
 	outer, mine := c.Unique("outer"), ownerHome+"/"+c.Unique("mine")+".json"
@@ -209,9 +234,9 @@ func nestedTmux(c *harness.Ctx, s State) State {
 	term.Type("tmux -L " + outer + " new -s outer\r")
 	term.WaitFor(prompt)
 	term.Type("mkdir -p " + project + " && cd " + project + " && claude --settings " + mine + "\r")
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	var engine int
-	c.Poll("one Claude engine carrying the owner's settings "+mine, stepBound, func() (bool, string) {
+	c.Poll("one Claude engine carrying the owner's settings "+mine, func() (bool, string) {
 		var found []string
 		for pid, p := range processes(c) {
 			if p.Engine == "claude" && (strings.Contains(p.Args, mine) || strings.Contains(p.Args, `"OWNER_OWN":"1"`)) {
@@ -221,7 +246,7 @@ func nestedTmux(c *harness.Ctx, s State) State {
 		}
 		return len(found) == 1 && session != "", fmt.Sprintf("engines %v", found)
 	})
-	c.Poll("chat "+session+" live on a live seat", stepBound, func() (bool, string) {
+	c.Poll("chat "+session+" live on a live seat", func() (bool, string) {
 		rows, _ := liveChats(c, "")
 		seats := seatsWhere(c, "state = 'live' and session_id = '"+session+"'")
 		return rows[session][0] == "live-claude" &&
@@ -255,7 +280,7 @@ func nestedTmux(c *harness.Ctx, s State) State {
 	if r := c.Read("tmux", "-L", outer, "kill-server"); r.Code != 0 {
 		c.Failf("tmux -L %s kill-server exited %d: %s", outer, r.Code, r.Stderr)
 	}
-	c.Poll("chat "+session+" gone with the owner's tmux server", 10*time.Second, func() (bool, string) {
+	c.Poll("chat "+session+" gone with the owner's tmux server", func() (bool, string) {
 		rows, _ := liveChats(c, "")
 		seats := seatsWhere(c, "state = 'live' and session_id = '"+session+"'")
 		var left []string
@@ -269,17 +294,4 @@ func nestedTmux(c *harness.Ctx, s State) State {
 			fmt.Sprintf("listed %t, seats %v, processes %v", listed, seats, left)
 	})
 	return s
-}
-
-// typedRunWithin is typedRun for a command that may take longer than a step's bound.
-func typedRunWithin(
-	c *harness.Ctx, term *harness.Terminal, label, command string, within time.Duration,
-) (stdout, stderr string, code int) {
-	base := ownerHome + "/" + c.Unique(label)
-	code = shellRun(term, label, "{ "+command+"; } >"+base+".out 2>"+base+".err", within)
-	stdout, stderr = read(c, "cat", base+".out"), read(c, "cat", base+".err")
-	if r := c.Read("rm", base+".out", base+".err"); r.Code != 0 {
-		c.Logf("rm %s.{out,err} exited %d: %s", base, r.Code, r.Stderr)
-	}
-	return stdout, stderr, code
 }

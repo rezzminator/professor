@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -25,6 +26,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestBirthBackendHonorsRequestBoundary(t *testing.T) {
@@ -155,7 +157,7 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 			t.Setenv("HERDR_SOCKET_PATH", socket)
 			t.Setenv("HERDR_PANE_ID", "w6:p3")
 			t.Setenv("TMUX", "")
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithCancel(testwait.Context(t))
 			defer cancel()
 			if mode == "cancel" {
 				cancel()
@@ -176,7 +178,10 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 				plan.Record = nil
 			}
 			var stdout, stderr bytes.Buffer
-			options := headless.AwaitOptions{}
+			// The await's patience runs on a fake clock Drive advances, so the
+			// trust, timeout and settle modes count polls, never host speed.
+			fake := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+			options := headless.AwaitOptions{Clock: fake}
 			if mode == "trust" {
 				options.Timeout = 100 * time.Millisecond
 				options.Poll = time.Millisecond
@@ -187,23 +192,27 @@ func TestBirthHerdrAwaitsTranscriptAndAttachesNativePane(t *testing.T) {
 			if strings.HasPrefix(mode, "stale-trust") {
 				options.Poll, options.Settle = time.Millisecond, time.Millisecond
 			}
-			born, code := BirthHerdr(
-				ctx,
-				spawn.BackendChoice{
-					Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6",
-					Places: func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil },
-				},
-				plan,
-				&config.Runtime{Paths: values},
-				"INTEGRATION",
-				prompt,
-				mode == "await" || mode == "cancel" || mode == "timeout" || mode == "trust" ||
-					strings.HasPrefix(mode, "stale-trust"),
-				mode == "attach",
-				&stdout,
-				&stderr,
-				options,
-			)
+			var born bool
+			var code int
+			testwait.Drive(t, "native birth to return", fake, func() {
+				born, code = BirthHerdr(
+					ctx,
+					spawn.BackendChoice{
+						Backend: "herdr", HerdrSocket: socket, HerdrPane: "w6:p3", HerdrWorkspace: "w6",
+						Places: func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil },
+					},
+					plan,
+					&config.Runtime{Paths: values},
+					"INTEGRATION",
+					prompt,
+					mode == "await" || mode == "cancel" || mode == "timeout" || mode == "trust" ||
+						strings.HasPrefix(mode, "stale-trust"),
+					mode == "attach",
+					&stdout,
+					&stderr,
+					options,
+				)
+			})
 			if mode == "trust" {
 				if !born || code != 6 || !strings.Contains(stderr.String(), "folder-trust dialog") ||
 					!strings.Contains(stderr.String(), "w6:p9") {
@@ -329,11 +338,16 @@ func TestNativeBirthAwaitReportsTrustBeforeTranscript(t *testing.T) {
 			})
 			runtime, db, seat = nativeChatSeat(t, socket, "live")
 			seat = nativeChatHost(t, db, seat, state != "dead")
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			turn, err := headless.Await(ctx, func(ctx context.Context) (headless.Chat, bool, error) {
-				return nativeBirthTarget(ctx, seat, &runtime)
-			}, headless.AwaitOptions{Grace: time.Nanosecond, Timeout: 50 * time.Millisecond, Poll: time.Millisecond})
+			fake := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+			var turn headless.Turn
+			var err error
+			testwait.Drive(t, "native await to report the trust state", fake, func() {
+				turn, err = headless.Await(testwait.Context(t), func(ctx context.Context) (headless.Chat, bool, error) {
+					return nativeBirthTarget(ctx, seat, &runtime)
+				}, headless.AwaitOptions{
+					Grace: time.Nanosecond, Timeout: 50 * time.Millisecond, Poll: time.Millisecond, Clock: fake,
+				})
+			})
 			if state == "quoted" || state == "unnumbered-quoted" {
 				if !errors.Is(err, headless.ErrAwaitTimeout) || turn.State == headless.StateBlocked {
 					t.Fatalf("trust quotes above composer state=%q error=%v, want live timeout", turn.State, err)

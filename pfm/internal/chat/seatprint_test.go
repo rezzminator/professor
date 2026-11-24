@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,7 +47,26 @@ func newPrintFixture(t *testing.T) *printFixture {
 		Name: "lad-a", ID: "sid-1", Engine: pfmengine.Claude, Path: transcript,
 		Socket: "cc-1-1-1", Pane: "%0", Live: true, PanePID: 41,
 	}
+	fixture.pinTimes()
 	return fixture
+}
+
+// pinTimes stamps every file and directory laid down so far with one instant
+// long past. A directory's modification time can stay within one clock tick of
+// a first read on a coarse filesystem clock, so a change the fingerprint must
+// see is told from that read by the time it leaves, never by the clock having
+// moved on.
+func (fixture *printFixture) pinTimes() {
+	fixture.t.Helper()
+	past := time.Unix(1_000_000_000, 0)
+	if err := filepath.WalkDir(fixture.root, func(path string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, past, past)
+	}); err != nil {
+		fixture.t.Fatal(err)
+	}
 }
 
 func (fixture *printFixture) write(path, content string) {
@@ -129,9 +149,6 @@ func TestSeatPrintHoldsWhileNothingTheRowRestsOnMoves(t *testing.T) {
 			if again, _ := fixture.print(); again != before {
 				t.Fatal("two reads of an unchanged seat differ")
 			}
-			// A directory's modification time can stay within one clock tick
-			// of the first read on a coarse filesystem clock.
-			time.Sleep(10 * time.Millisecond)
 			test.change(fixture)
 			after, ok := fixture.print()
 			if !ok {

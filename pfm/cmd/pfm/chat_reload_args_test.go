@@ -144,7 +144,7 @@ usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or
 }
 
 // The spelling a user actually typed, twice, before the refusal was traced:
-// `/reload --1h on`. Every cache spelling, once normalized, passes validation;
+// `/pfm:reload --1h on`. Every cache spelling, once normalized, passes validation;
 // the normalized words themselves are pinned in internal/reload.
 func TestReloadAcceptsNormalizedCacheSpellings(t *testing.T) {
 	for _, args := range [][]string{

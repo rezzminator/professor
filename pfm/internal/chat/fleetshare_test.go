@@ -15,9 +15,15 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const testShareKey = "test-key"
+
+// shareEpoch is the instant every test share's clocks stand at: the poll
+// clock stamps and judges snapshots there, and a test that makes a share wait
+// on a held lock hands it an elapsed clock of its own to move.
+var shareEpoch = time.Unix(1_700_000_000, 0)
 
 func newTestShare(t *testing.T, path string) *ScanShare {
 	t.Helper()
@@ -25,9 +31,71 @@ func newTestShare(t *testing.T, path string) *ScanShare {
 		path:    path,
 		lock:    path + ".lock",
 		key:     testShareKey,
-		clock:   clock.Real,
-		elapsed: clock.Real,
+		clock:   clock.NewFake(shareEpoch),
+		elapsed: clock.NewFake(shareEpoch),
 		noted:   map[string]bool{},
+	}
+}
+
+// sharePoll is one Scan on a goroutine of its own, waiting on a held lock on
+// the elapsed clock the test moves.
+type sharePoll struct {
+	elapsed *clock.Fake
+	done    chan sharePollResult
+}
+
+type sharePollResult struct {
+	scan FleetScan
+	err  error
+}
+
+func startSharePoll(
+	t *testing.T,
+	share *ScanShare,
+	since time.Time,
+	scan func(context.Context) (FleetScan, error),
+) *sharePoll {
+	t.Helper()
+	elapsed := clock.NewFake(shareEpoch)
+	share.elapsed = elapsed
+	poll := &sharePoll{elapsed: elapsed, done: make(chan sharePollResult, 1)}
+	ctx := testwait.Context(t)
+	go func() {
+		got, err := share.Scan(ctx, since, scan)
+		poll.done <- sharePollResult{got, err}
+	}()
+	return poll
+}
+
+// parked waits until the poll sleeps between two looks at the lock, or has
+// returned.
+func (poll *sharePoll) parked(t *testing.T) (sharePollResult, bool) {
+	t.Helper()
+	var result sharePollResult
+	returned := false
+	testwait.Until(t, "Scan to sleep on the held lock or return", func() (bool, string) {
+		select {
+		case result = <-poll.done:
+			returned = true
+			return true, ""
+		default:
+		}
+		return poll.elapsed.Pending() > 0, poll.elapsed.String()
+	})
+	return result, returned
+}
+
+// result moves the elapsed clock one sharePollEvery at a time until Scan
+// returns, and gives back what it returned and how long it waited.
+func (poll *sharePoll) result(t *testing.T) (sharePollResult, time.Duration) {
+	t.Helper()
+	var waited time.Duration
+	for {
+		if result, returned := poll.parked(t); returned {
+			return result, waited
+		}
+		poll.elapsed.Advance(sharePollEvery)
+		waited += sharePollEvery
 	}
 }
 
@@ -91,17 +159,20 @@ func TestSnapshotRoundTripsEveryRowField(t *testing.T) {
 	}
 }
 
-// countingScan is a scan that records how often it ran.
+// countingScan is a scan that records how often it ran; one with a gate
+// stays mid-scan until the test closes it.
 type countingScan struct {
 	calls  atomic.Int32
 	result FleetScan
 	err    error
-	delay  time.Duration
+	gate   chan struct{}
 }
 
 func (scan *countingScan) run(context.Context) (FleetScan, error) {
 	scan.calls.Add(1)
-	time.Sleep(scan.delay)
+	if scan.gate != nil {
+		<-scan.gate
+	}
 	return scan.result, scan.err
 }
 
@@ -109,7 +180,7 @@ func (scan *countingScan) run(context.Context) (FleetScan, error) {
 // reads the first one's scan instead of scanning.
 func TestScanShareServesOneScanPerTick(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "watch-snapshot.json")
-	tick := time.Now()
+	tick := shareEpoch
 	scan := &countingScan{result: sampleScan(t, "first")}
 	first, err := newTestShare(t, path).Scan(context.Background(), tick, scan.run)
 	if err != nil {
@@ -131,7 +202,7 @@ func TestScanShareServesOneScanPerTick(t *testing.T) {
 // current scan of this key is passed over, the poll scans for itself, and its
 // scan replaces the file.
 func TestScanShareNeverReadsAnUnfitSnapshot(t *testing.T) {
-	now := time.Now()
+	now := shareEpoch
 	since := now.Add(-time.Second)
 	stale := sampleScan(t, "stale")
 	valid := func(key string, start time.Time) []byte {
@@ -238,47 +309,39 @@ func holdLock(t *testing.T, path string, started time.Time) func() {
 }
 
 // TestScanShareALockedSnapshotNeverStallsAWatch: a holder that never
-// publishes delays a poll by at most ShareLockWait, and one already scanning
-// for longer than that (stopped mid-scan) delays it not at all. The stamps
-// sit on the watch's poll clock, here one that never moves; the wait is real.
+// publishes delays a poll by ShareLockWait, and one already scanning for
+// longer than that (stopped mid-scan) delays it not at all. The stamps sit on
+// the watch's poll clock, which never moves; the wait runs on the elapsed
+// clock, moved one poll at a time until Scan gives up and scans for itself.
 func TestScanShareALockedSnapshotNeverStallsAWatch(t *testing.T) {
-	poll := clock.NewFake(time.Unix(1_700_000_000, 0))
 	for _, test := range []struct {
 		name      string
 		started   time.Duration // the holder's stamp, relative to now
-		atLeast   time.Duration
-		atMost    time.Duration
+		waited    time.Duration
 		unstamped bool
 	}{
-		{name: "a holder just begun", started: 0, atLeast: ShareLockWait - 100*time.Millisecond, atMost: 2 * ShareLockWait},
-		{name: "a holder stuck mid-scan", started: -10 * ShareLockWait, atMost: ShareLockWait / 2},
-		{name: "a holder with no stamp", unstamped: true, atLeast: ShareLockWait - 100*time.Millisecond, atMost: 2 * ShareLockWait},
+		{name: "a holder just begun", started: 0, waited: ShareLockWait},
+		{name: "a holder stuck mid-scan", started: -10 * ShareLockWait, waited: 0},
+		{name: "a holder with no stamp", unstamped: true, waited: ShareLockWait},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "watch-snapshot.json")
-			holdLock(t, path, poll.Now().Add(test.started))
+			holdLock(t, path, shareEpoch.Add(test.started))
 			if test.unstamped {
 				if err := os.Truncate(path+".lock", 0); err != nil {
 					t.Fatal(err)
 				}
 			}
 			scan := &countingScan{result: sampleScan(t, "own")}
-			share := newTestShare(t, path)
-			share.clock = poll
-			// The bound only ends a wait that hangs; took judges it.
-			ctx, cancel := context.WithTimeout(context.Background(), 10*ShareLockWait)
-			defer cancel()
-			began := time.Now()
-			got, err := share.Scan(ctx, poll.Now(), scan.run)
-			took := time.Since(began)
-			if err != nil {
-				t.Fatal(err)
+			got, waited := startSharePoll(t, newTestShare(t, path), shareEpoch, scan.run).result(t)
+			if got.err != nil {
+				t.Fatal(got.err)
 			}
-			if scan.calls.Load() != 1 || !reflect.DeepEqual(got, scan.result) {
-				t.Fatalf("Scan = %+v after %d scans, want the poll's own scan", got, scan.calls.Load())
+			if scan.calls.Load() != 1 || !reflect.DeepEqual(got.scan, scan.result) {
+				t.Fatalf("Scan = %+v after %d scans, want the poll's own scan", got.scan, scan.calls.Load())
 			}
-			if took < test.atLeast || took > test.atMost {
-				t.Fatalf("Scan took %s, want between %s and %s", took, test.atLeast, test.atMost)
+			if waited != test.waited {
+				t.Fatalf("Scan waited %s on the held lock, want %s", waited, test.waited)
 			}
 		})
 	}
@@ -288,24 +351,25 @@ func TestScanShareALockedSnapshotNeverStallsAWatch(t *testing.T) {
 // held waits for the holder's snapshot and reads it instead of scanning.
 func TestScanShareAWaiterReadsTheHoldersSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "watch-snapshot.json")
-	since := time.Now()
+	since := shareEpoch
 	release := holdLock(t, path, since)
 	holder := newTestShare(t, path)
 	published := sampleScan(t, "holder")
-	go func() {
-		time.Sleep(200 * time.Millisecond)
-		if err := holder.publish(time.Now(), published); err != nil {
-			t.Error(err)
-		}
-		release()
-	}()
 	scan := &countingScan{result: sampleScan(t, "never")}
-	got, err := newTestShare(t, path).Scan(context.Background(), since, scan.run)
-	if err != nil {
+	poll := startSharePoll(t, newTestShare(t, path), since, scan.run)
+	if result, returned := poll.parked(t); returned {
+		t.Fatalf("Scan returned %+v, %v before the holder published", result.scan, result.err)
+	}
+	if err := holder.publish(since, published); err != nil {
 		t.Fatal(err)
 	}
-	if scan.calls.Load() != 0 || !reflect.DeepEqual(got, published) {
-		t.Fatalf("Scan = %+v after %d scans, want the holder's snapshot", got, scan.calls.Load())
+	release()
+	got, _ := poll.result(t)
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if scan.calls.Load() != 0 || !reflect.DeepEqual(got.scan, published) {
+		t.Fatalf("Scan = %+v after %d scans, want the holder's snapshot", got.scan, scan.calls.Load())
 	}
 }
 
@@ -313,16 +377,36 @@ func TestScanShareAWaiterReadsTheHoldersSnapshot(t *testing.T) {
 // once pay one scan between them, and every one of them gets it.
 func TestScanShareConcurrentWatchesPayOneScan(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "watch-snapshot.json")
-	since := time.Now()
-	scan := &countingScan{result: sampleScan(t, "shared"), delay: 150 * time.Millisecond}
+	since := shareEpoch
+	scan := &countingScan{result: sampleScan(t, "shared"), gate: make(chan struct{})}
 	const watches = 8
 	results := make([]FleetScan, watches)
 	errs := make([]error, watches)
+	elapsed := clock.NewFake(shareEpoch)
+	ctx := testwait.Context(t)
+	var returned atomic.Int32
 	var group sync.WaitGroup
 	for index := range watches {
 		group.Go(func() {
-			results[index], errs[index] = newTestShare(t, path).Scan(context.Background(), since, scan.run)
+			share := newTestShare(t, path)
+			share.elapsed = elapsed
+			results[index], errs[index] = share.Scan(ctx, since, scan.run)
+			returned.Add(1)
 		})
+	}
+	testwait.Until(t, "one watch scanning and the rest asleep on its lock", func() (bool, string) {
+		return scan.calls.Load() == 1 && elapsed.Pending() == watches-1,
+			"scans " + strconv.Itoa(int(scan.calls.Load())) + ", " + elapsed.String()
+	})
+	close(scan.gate)
+	for returned.Load() < watches {
+		testwait.Until(t, "every watch asleep on the lock or returned", func() (bool, string) {
+			return elapsed.Pending()+int(returned.Load()) == watches,
+				"returned " + strconv.Itoa(int(returned.Load())) + ", " + elapsed.String()
+		})
+		if returned.Load() < watches {
+			elapsed.Advance(sharePollEvery)
+		}
 	}
 	group.Wait()
 	for index := range watches {
@@ -339,7 +423,7 @@ func TestScanShareConcurrentWatchesPayOneScan(t *testing.T) {
 // publishes nothing, so the next watch scans for itself.
 func TestScanShareAFailedScanIsNeverShared(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "watch-snapshot.json")
-	since := time.Now()
+	since := shareEpoch
 	failing := &countingScan{err: errors.New("tmux: no server")}
 	if _, err := newTestShare(t, path).Scan(context.Background(), since, failing.run); !errors.Is(err, failing.err) {
 		t.Fatalf("Scan error = %v, want the scan's own", err)
@@ -370,12 +454,15 @@ func TestScanSharePublishingSweepsADeadWritersScratch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	old := time.Now().Add(-2 * shareScratchAge)
+	old := shareEpoch.Add(-2 * shareScratchAge)
 	if err := os.Chtimes(dead, old, old); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chtimes(live, shareEpoch, shareEpoch); err != nil {
+		t.Fatal(err)
+	}
 	scan := &countingScan{result: sampleScan(t, "fresh")}
-	if _, err := newTestShare(t, path).Scan(context.Background(), time.Now(), scan.run); err != nil {
+	if _, err := newTestShare(t, path).Scan(context.Background(), shareEpoch, scan.run); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(dead); !errors.Is(err, os.ErrNotExist) {

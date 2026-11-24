@@ -16,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const proxyRecoveryUninitialized = `{"jsonrpc":"2.0","id":2,"error":{"code":0,"message":"method \"tools/call\" is invalid during session initialization"}}`
@@ -46,11 +48,23 @@ func proxyTestSessionLost() *http.Response {
 	}
 }
 
+// admittingClock lets a request's admission window pass at once and parks
+// every other timer, a retry delay included, on the fake a test advances.
+type admittingClock struct{ *clock.Fake }
+
+func (c admittingClock) NewTimer(delay time.Duration) clock.Timer {
+	if delay == proxyRequestAdmissionWindow {
+		return c.Fake.NewTimer(0)
+	}
+	return c.Fake.NewTimer(delay)
+}
+
 func (daemon *proxyRecoveryDaemon) proxy() *stdioProxy {
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
 	proxy.endpoint = "http://proxy.test/mcp/chat"
 	proxy.retryDelay = time.Millisecond
+	proxyTestStepping(proxy)
 	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
 		var frame proxyFrame
 		if err := json.NewDecoder(request.Body).Decode(&frame); err != nil {
@@ -121,8 +135,7 @@ func TestStdioProxyDiscoverProbeKeepsSessionPastRetryWindow(t *testing.T) {
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
-	proxy.retryWindow = 150 * time.Millisecond
-	proxy.retryDelay = 5 * time.Millisecond
+	fake := proxyTestStepping(proxy)
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, `{"jsonrpc":"2.0","id":"server-discover-probe-1","method":"server/discover","params":{}}`)
 	if code, message := proxyRecoveryError(t, harness.read(t)); code != -32601 {
@@ -162,7 +175,7 @@ func TestStdioProxyDiscoverProbeKeepsSessionPastRetryWindow(t *testing.T) {
 	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "daemon" {
 		t.Fatalf("call inside the retry window = %v, want daemon", got)
 	}
-	<-time.After(3 * proxy.retryWindow)
+	fake.Advance(proxyRetryWindow)
 	harness.write(t, proxyTestToolCall(3, "new", `{"name":"past-window"}`))
 	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "daemon" {
 		t.Fatalf("call past the retry window = %v, want daemon", got)
@@ -195,11 +208,13 @@ func TestStdioProxyReturnsDaemonRejectionAndKeepsSession(t *testing.T) {
 				return proxyRecoveryJSON(http.StatusOK, `{"jsonrpc":"2.0","id":3,"result":{}}`)
 			}}
 			proxy := daemon.proxy()
+			// A rejection is answered at once: a retry would park on the retry
+			// delay of this clock, which never advances, and the read would hang.
+			proxy.clock = admittingClock{clock.NewFake(time.Unix(0, 0))}
 			harness := startProxyTestHarness(t, proxy)
 			harness.write(t, proxyTestInitialize)
 			_ = harness.read(t)
 			harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-			started := time.Now()
 			harness.write(t, `{"jsonrpc":"2.0","id":2,"method":"tools/other","params":{}}`)
 			code, message := proxyRecoveryError(t, harness.read(t))
 			if code != test.code {
@@ -212,9 +227,6 @@ func TestStdioProxyReturnsDaemonRejectionAndKeepsSession(t *testing.T) {
 			}
 			if strings.Contains(message, "unreachable") {
 				t.Errorf("rejection %q claims the daemon was unreachable", message)
-			}
-			if elapsed := time.Since(started); elapsed > time.Second {
-				t.Fatalf("rejection took %v, want an immediate answer", elapsed)
 			}
 			harness.write(t, proxyTestToolCall(3, "status", `{"target":"seat"}`))
 			if _, failed := harness.read(t)["error"]; failed {
@@ -307,6 +319,7 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 	returned := proxyTestDaemon(proxyTestService("returned", nil, &returnedCalls))
 	var mutex sync.RWMutex
 	current := initial
+	var handshakePosts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		mutex.RLock()
 		handler := current
@@ -314,6 +327,9 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 		if handler == nil {
 			http.Error(writer, "daemon restarting", http.StatusServiceUnavailable)
 			return
+		}
+		if request.Method == http.MethodPost && request.URL.Path != "/status" {
+			handshakePosts.Add(1)
 		}
 		handler.ServeHTTP(writer, request)
 	}))
@@ -332,28 +348,34 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 	})}
 	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
 	proxy.identify = func(context.Context) (resolve.Identity, error) { return resolve.Identity{}, resolve.ErrNotInChat }
-	proxy.retryWindow = 500 * time.Millisecond
-	proxy.retryDelay = 10 * time.Millisecond
+	fakeClock := clock.NewFake(time.Unix(0, 0))
+	proxy.clock = admittingClock{fakeClock}
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
 	_ = harness.read(t)
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	// The daemon goes down only once both handshake frames have reached it,
+	// so the call below is the request that meets the restart.
+	testwait.Until(t, "the initialize and initialized frames to reach the daemon", func() (bool, string) {
+		return handshakePosts.Load() >= 2, fmt.Sprintf("%d handshake posts", handshakePosts.Load())
+	})
 	mutex.Lock()
 	current = nil
 	mutex.Unlock()
-	restored := make(chan struct{})
-	go func() {
-		<-time.After(50 * time.Millisecond)
-		mutex.Lock()
-		current = returned
-		mutex.Unlock()
-		close(restored)
-	}()
 	harness.write(t, proxyTestToolCall(8, "new", `{"name":"after-restart"}`))
+	// sendWithRetry arms its retry window on the same fake before the first post, so a parked wait alone
+	// is not the retry delay: wait for the delay's own timer, the next one due.
+	testwait.Until(t, "the proxy to wait out its retry delay after the refused connection", func() (bool, string) {
+		due, ok := fakeClock.NextDue()
+		return ok && due == proxy.retryDelay, fmt.Sprintf("next wait due in %s (armed %v), %s", due, ok, fakeClock)
+	})
+	mutex.Lock()
+	current = returned
+	mutex.Unlock()
+	fakeClock.Advance(proxy.retryDelay)
 	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "returned" {
 		t.Fatalf("call after retry-window recovery = %v, want returned", got)
 	}
-	<-restored
 }
 
 func TestStdioProxyRetriesOnlyConnectPhaseFailures(t *testing.T) {
@@ -375,12 +397,11 @@ func TestStdioProxyRetriesOnlyConnectPhaseFailures(t *testing.T) {
 			t.Parallel()
 			var calls atomic.Int32
 			proxy := newStdioProxy(context.Background(), "127.0.0.1:1", io.Discard)
+			proxyTestStepping(proxy)
 			proxy.client = &http.Client{Transport: proxyTestTransport(func(*http.Request) (*http.Response, error) {
 				calls.Add(1)
 				return nil, &net.OpError{Op: test.op, Net: "tcp", Err: test.err}
 			})}
-			proxy.retryWindow = 60 * time.Millisecond
-			proxy.retryDelay = 5 * time.Millisecond
 
 			_, err := proxy.sendWithRetry(
 				context.Background(),
@@ -396,7 +417,7 @@ func TestStdioProxyRetriesOnlyConnectPhaseFailures(t *testing.T) {
 				}
 				if !strings.HasPrefix(
 					err.Error(),
-					"pfm MCP daemon 127.0.0.1:1 stayed unreachable for 60ms; start it with `pfm mcp serve` and retry:",
+					"pfm MCP daemon 127.0.0.1:1 stayed unreachable for 45s; start it with `pfm mcp serve` and retry:",
 				) {
 					t.Errorf("retry error = %q, want the unreachable-daemon verdict", err)
 				}

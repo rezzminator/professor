@@ -12,7 +12,7 @@
 
 ## API
 
-`Severity` is a string; `Block` renders `BLOCK` and `Warn` renders `WARN`. `Row` holds `Severity`, stable `Check`, absolute `Path`, `Problem` and `Fix`. `Row.Line()` renders `{severity} {check} {path} — {problem}`.
+`Severity` is a string; `Block` renders `BLOCK`, `Warn` renders `WARN` and `Skipped` renders `SKIPPED`: a check that did not look because where pfm runs it cannot see its subject (the login-shell check inside a Claude Code chat), counted as neither a warning nor a block. `Row` holds `Severity`, stable `Check`, absolute `Path`, `Problem` and `Fix`. `Row.Line()` renders `{severity} {check} {path} — {problem}`.
 
 `Env` holds `Home`, `Store`, `ConfigPath`, `StateDB`, `CacheDB`, `Accounts`, `AcceptedMCP`, `Now`, `Environ`, `TmuxDir`, `Tmux`, `ProcRoot`, `Retired` and `RetiredErr`. `EnvFor(runtime config.Runtime, now time.Time) Env` derives it from the loaded runtime: the store through `installer.ClaudeStore`, the retired lists through `retired.LoadLists`.
 
@@ -157,7 +157,7 @@ Fix: `run pfm install; it removes the link, and Claude writes this account's own
 
 **Severity:** WARN
 
-Looks at top-level names in `{store}` and every `{acct}` on neither list, not ignored (Claude Code's runtime entries `debug`, `daemon.lock`, `daemon.status.json`, `.claude.json.lock` and `tmp` included), not matched by the two leftover checks, not a regular `*.md` file at `{store}`'s top level (the user's own instruction material, shared by construction; an `{acct}` one still reports), and not named after a plugin `{store}/plugins/installed_plugins.json` lists (the `{name}` of each `{name}@{marketplace}` key: a plugin's own dir, its logs). A registry that exists but cannot be read or parsed, in a readable store, adds `WARN unclassified {registry} — UNREADABLE plugin registry: {cause} — a dir named after a plugin reports unclassified` with fix `make {registry} readable JSON, then rerun pfm doctor`, and those dirs report unclassified.
+Looks at top-level names in `{store}` and every `{acct}` on neither list, not ignored (Claude Code's runtime entries `debug`, `daemon.lock`, `daemon.status.json`, `.claude.json.lock`, `.oauth_refresh.lock`, `.oauth_refresh.lock.owner` and `tmp` included), not matched by the two leftover checks, not a regular `*.md` file at `{store}`'s top level (the user's own instruction material, shared by construction; an `{acct}` one still reports), and not named after a plugin `{store}/plugins/installed_plugins.json` lists (the `{name}` of each `{name}@{marketplace}` key: a plugin's own dir, its logs). A registry that exists but cannot be read or parsed, in a readable store, adds `WARN unclassified {registry} — UNREADABLE plugin registry: {cause} — a dir named after a plugin reports unclassified` with fix `make {registry} readable JSON, then rerun pfm doctor`, and those dirs report unclassified.
 
 Problem: `UNCLASSIFIED — on neither the shared nor the per-account list`.
 

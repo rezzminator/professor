@@ -26,7 +26,15 @@ func TestBashCategoryNamesRunsNotMentions(t *testing.T) {
 			t.Errorf("bashCategory(%q) = %s, want %s", command, categories[got], categories[want])
 		}
 	}
-	for command, want := range map[string]bool{"sleep 300": true, "ls; sleep 5": true, "tail -f log": true, "make sleepy": false} {
+	raw, err := os.ReadFile("testdata/poll-commands.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var polls map[string]bool
+	if err := json.Unmarshal(raw, &polls); err != nil {
+		t.Fatalf("testdata/poll-commands.json: %v", err)
+	}
+	for command, want := range polls {
 		if got := bashPoll.MatchString(command); got != want {
 			t.Errorf("bashPoll(%q) = %v, want %v", command, got, want)
 		}

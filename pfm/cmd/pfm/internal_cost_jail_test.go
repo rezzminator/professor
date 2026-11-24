@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/costledger"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const costSession = "00000000-0000-4000-8000-0000000000a1"
@@ -50,33 +50,33 @@ func startCostLaunch(t *testing.T, extraEnv ...string) *costLaunch {
 	)
 	launch.cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "PFM_HOME=" + home}, extraEnv...)
 	launch.cmd.Stderr = launch.stderr
+	stdin, release, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch.cmd.Stdin, launch.release = stdin, release
 	if err := launch.cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_ = os.WriteFile(filepath.Join(out, "stop"), nil, 0o600)
-		_ = launch.cmd.Process.Kill()
-		_, _ = launch.cmd.Process.Wait()
-	})
-	waitFor(t, "the launched chat to start", func() bool { return exists(filepath.Join(out, "ready")) })
-	return launch
-}
-
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func waitFor(t *testing.T, what string, done func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if done() {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("timed out waiting for %s", what)
+	launch.exited = make(chan struct{})
+	go func() {
+		launch.exitErr = launch.cmd.Wait()
+		close(launch.exited)
+	}()
+	t.Cleanup(func() {
+		_ = release.Close()
+		_ = launch.cmd.Process.Kill()
+		testwait.Receive(t, "the launched chat to be reaped", launch.exited)
+	})
+	ready := filepath.Join(out, "ready")
+	testwait.Until(t, "the launched chat to start", func() (bool, string) {
+		_, err := os.Stat(ready)
+		return err == nil, fmt.Sprintf("stat %s: %v", ready, err)
+	})
+	return launch
 }
 
 func envEntry(env, name string) string {
@@ -133,8 +133,10 @@ func TestCostLaunchArmsASinkKeepsThePidAndHandsClaudeOnlyTheEnvironment(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the sink to log that it serves this pid", func() bool {
-		return strings.Contains(launch.sinkLog(), fmt.Sprintf("for pid %d (start time %d)", pid, start.StartTime))
+	testwait.Until(t, "the sink to log that it serves this pid", func() (bool, string) {
+		log := launch.sinkLog()
+		serving := fmt.Sprintf("for pid %d (start time %d)", pid, start.StartTime)
+		return strings.Contains(log, serving), "sink log:\n" + log
 	})
 
 	post := func(path, body string) {
@@ -154,9 +156,9 @@ func TestCostLaunchArmsASinkKeepsThePidAndHandsClaudeOnlyTheEnvironment(t *testi
 	post("/v1/logs", costBody("logs", "req_011CFixture00000099", "", 2118))
 	post("/v1/traces", costBody("traces", "req_011CFixture00000099", "a0000000000000001", 0))
 	ledgerDir := filepath.Join(launch.home, ".local", "state", "pfm", "cost-ledger")
-	waitFor(t, "the joined row in the ledger", func() bool {
-		ledger, _ := costledger.ForSession(ledgerDir, costSession)
-		return len(ledger.Rows) == 1
+	testwait.Until(t, "the joined row in the ledger", func() (bool, string) {
+		ledger, err := costledger.ForSession(ledgerDir, costSession)
+		return len(ledger.Rows) == 1, fmt.Sprintf("%s rows %+v, %v", ledgerDir, ledger.Rows, err)
 	})
 	ledger, err := costledger.ForSession(ledgerDir, costSession)
 	if err != nil {
@@ -167,9 +169,10 @@ func TestCostLaunchArmsASinkKeepsThePidAndHandsClaudeOnlyTheEnvironment(t *testi
 		t.Fatalf("row = %+v", row)
 	}
 	launch.stop(t)
-	waitFor(t, "the sink to see the chat gone and stop", func() bool {
+	testwait.Until(t, "the sink to see the chat gone and stop", func() (bool, string) {
 		log := launch.sinkLog()
-		return strings.Contains(log, fmt.Sprintf("pid %d is gone", pid)) && strings.Contains(log, "stopped")
+		gone := strings.Contains(log, fmt.Sprintf("pid %d is gone", pid)) && strings.Contains(log, "stopped")
+		return gone, "sink log:\n" + log
 	})
 }
 

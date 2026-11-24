@@ -40,7 +40,7 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
-sid="fake-$$-$(date +%s)"
+sid="fake-$$-$RANDOM$RANDOM"
 proj=$CLAUDE_CONFIG_DIR/projects/-fake-work
 transcript=$proj/$sid.jsonl
 if [ "$mode" != late-projects ]; then mkdir -p "$proj"; : > "$transcript"; fi
@@ -101,8 +101,8 @@ while IFS= read -r line; do
     printf '> '; continue ;;
   esac
   hook UserPromptSubmit "{$(base UserPromptSubmit),\"prompt\":$(jq -Rn --arg l "$line" '$l')}"
-  if [ ! -d "$proj" ]; then sleep 1; mkdir -p "$proj"; fi
-  if [ "$mode" = early-stop ]; then stop; sleep 1; fi
+  if [ ! -d "$proj" ]; then mkdir -p "$proj"; fi
+  if [ "$mode" = early-stop ]; then stop; fi
   ctx=10
   case "$line" in *COMPACT*) ctx=91200 ;; esac
   jq -nc --arg l "$line" --arg s "$sid" '{type:"user",sessionId:$s,message:{role:"user",content:$l}}' >> "$transcript"
@@ -112,7 +112,8 @@ while IFS= read -r line; do
     printf '{"type":"system","subtype":"compact_boundary","sessionId":"%s","compactMetadata":{"trigger":"auto","preTokens":93000}}\n' "$sid" >> "$transcript"
     [ "$mode" = boundary-without-row ] || printf '{"event":"compact","party":"main","decision":"pass","tokens":91200}\n' >> "$PLUGIN_LOG_DIR/$name/decisions/$sid.jsonl" ;;
   esac
-  [ "$mode" = slow ] && sleep "${FAKE_SLOW_S:-30}"
+  # slow: the turn never ends; blocked on a FIFO no one writes until the lab kills the process
+  if [ "$mode" = slow ]; then mkfifo "$out/slow.hold" 2>/dev/null; read -r _ < "$out/slow.hold"; fi
   stop
   printf 'READY\n> '
 done

@@ -100,6 +100,7 @@ type herdrDeps struct {
 	sidDir    string
 	codexHome string
 	seatPaths *paths.Values
+	clock     clock.Clock // the lock's retries and the hook's deadline; nil is clock.Real
 }
 
 func realHerdrDeps() herdrDeps {
@@ -622,7 +623,7 @@ func (reporter *herdrReporter) lock(ctx context.Context, session string) (func()
 				fmt.Errorf("lock session %s: %s still held at the deadline: %w", session, path, ctx.Err()),
 				file.Close(),
 			))
-		case <-clock.Real.After(herdrLockPoll):
+		case <-reporter.clock().After(herdrLockPoll):
 		}
 	}
 }

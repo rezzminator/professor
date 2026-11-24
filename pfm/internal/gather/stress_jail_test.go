@@ -3,7 +3,6 @@
 package gather
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestGatherStress(t *testing.T) {
@@ -23,12 +25,9 @@ func TestGatherStress(t *testing.T) {
 	t.Run("procfs_scale", stressProcFSScale)
 }
 
-func stressCrumbFlood(t *testing.T) {
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
-	root := t.TempDir()
-	setGatherTestEnv(t, root, filepath.Join(root, "tmux"))
-	sidDir := filepath.Join(root, "sid")
-
+// writeCrumbFlood fills sidDir with 5,000 valid crumbs and 5,000 malformed ones.
+func writeCrumbFlood(tb testing.TB, sidDir string) {
+	tb.Helper()
 	for index := 0; index < 5000; index++ {
 		name := fmt.Sprintf("cc-%d-1-1", index+1)
 		if err := os.WriteFile(
@@ -36,7 +35,7 @@ func stressCrumbFlood(t *testing.T) {
 			[]byte("/transcripts/"+name+".jsonl"),
 			0o600,
 		); err != nil {
-			t.Fatalf("write valid crumb %d: %v", index, err)
+			tb.Fatalf("write valid crumb %d: %v", index, err)
 		}
 	}
 	for index := 0; index < 5000; index++ {
@@ -56,9 +55,16 @@ func stressCrumbFlood(t *testing.T) {
 			[]byte("/transcripts/ignored.jsonl"),
 			0o600,
 		); err != nil {
-			t.Fatalf("write malformed crumb %d: %v", index, err)
+			tb.Fatalf("write malformed crumb %d: %v", index, err)
 		}
 	}
+}
+
+func stressCrumbFlood(t *testing.T) {
+	root := t.TempDir()
+	setGatherTestEnv(t, root, filepath.Join(root, "tmux"))
+	sidDir := filepath.Join(root, "sid")
+	writeCrumbFlood(t, sidDir)
 	for _, name := range []string{
 		"../cc-1-2-3",
 		strings.Repeat("x", 1024),
@@ -68,9 +74,7 @@ func stressCrumbFlood(t *testing.T) {
 		}
 	}
 
-	started := time.Now()
 	probe, err := ReadCrumbs(sidDir, nil)
-	elapsed := time.Since(started)
 	if err != nil {
 		t.Fatalf("ReadCrumbs(10k) error = %v", err)
 	}
@@ -80,23 +84,22 @@ func stressCrumbFlood(t *testing.T) {
 		len(probe.Crumbs) != 5000 {
 		t.Fatalf("ReadCrumbs(10k) counters = %+v", probe)
 	}
-	limit := time.Minute
-	if strict {
-		limit = 5 * time.Second
+}
+
+// BenchmarkReadCrumbsFlood measures what the crumb flood test no longer judges: ReadCrumbs over
+// 10,000 files, half of them malformed.
+func BenchmarkReadCrumbsFlood(b *testing.B) {
+	sidDir := filepath.Join(b.TempDir(), "sid")
+	if err := os.MkdirAll(sidDir, 0o700); err != nil {
+		b.Fatal(err)
 	}
-	if elapsed > limit {
-		t.Fatalf(
-			"ReadCrumbs(10k) took %s, want under %s (strict=%t)",
-			elapsed,
-			limit,
-			strict,
-		)
+	writeCrumbFlood(b, sidDir)
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := ReadCrumbs(sidDir, nil); err != nil {
+			b.Fatalf("ReadCrumbs(10k) error = %v", err)
+		}
 	}
-	t.Logf(
-		"stress crumb flood: 10,000 files (5,000 accepted, 5,000 rejected) in %s (strict=%t)",
-		elapsed.Round(time.Microsecond),
-		strict,
-	)
 }
 
 func stressSocketStorm(t *testing.T) {
@@ -104,12 +107,8 @@ func stressSocketStorm(t *testing.T) {
 		t.Skip("tmux binary is not installed")
 	}
 
+	testjail.TmuxServer(t)
 	jail := newTmuxJail(t)
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
-	timeout := 2 * time.Minute
-	if strict {
-		timeout = 15 * time.Second
-	}
 	sockets := make([]string, 30)
 	for index := range sockets {
 		sockets[index] = fmt.Sprintf("cc-%d-2000-%d", 1000+index, index)
@@ -123,11 +122,7 @@ func stressSocketStorm(t *testing.T) {
 	}
 	client := TmuxProbe{Binary: "tmux", TmuxTmpDir: jail.root}
 
-	firstContext, cancelFirst := context.WithTimeout(context.Background(), timeout)
-	defer cancelFirst()
-	started := time.Now()
-	firstProbe, err := ProbeTmux(firstContext, jail.tmuxDir, client, time.Now())
-	firstElapsed := time.Since(started)
+	firstProbe, err := ProbeTmux(testwait.Context(t), jail.tmuxDir, client, time.Now())
 	if err != nil {
 		t.Fatalf("first 30-server ProbeTmux() error = %v", err)
 	}
@@ -151,9 +146,7 @@ func stressSocketStorm(t *testing.T) {
 		err   error
 	}
 	resultChannel := make(chan probeResult, 1)
-	secondContext, cancelSecond := context.WithTimeout(context.Background(), timeout)
-	defer cancelSecond()
-	secondStarted := time.Now()
+	secondContext := testwait.Context(t)
 	go func() {
 		probe, probeErr := ProbeTmux(
 			secondContext,
@@ -186,7 +179,6 @@ func stressSocketStorm(t *testing.T) {
 	case <-secondContext.Done():
 		t.Fatalf("second socket storm hung: %v", secondContext.Err())
 	}
-	secondElapsed := time.Since(secondStarted)
 	if secondResult.err != nil {
 		t.Fatalf("second ProbeTmux() escalated dead sockets: %v", secondResult.err)
 	}
@@ -198,30 +190,22 @@ func stressSocketStorm(t *testing.T) {
 			len(secondResult.probe.ProbeWarnings),
 		)
 	}
-	if secondElapsed > timeout {
-		t.Fatalf(
-			"second socket storm took %s, want under %s (strict=%t)",
-			secondElapsed,
-			timeout,
-			strict,
-		)
-	}
-	t.Logf(
-		"stress socket storm: 30 live servers in %s; 15 mid-probe kills in %s (strict=%t)",
-		firstElapsed.Round(time.Microsecond),
-		secondElapsed.Round(time.Microsecond),
-		strict,
-	)
 }
 
-func stressProcFSScale(t *testing.T) {
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
+const (
+	procFSScaleProcesses = 5000
+	procFSScaleCodex     = 200
+	procFSScaleFDs       = 100
+)
+
+// procFSScaleFixture is 5,000 processes, 200 of them Codex, each holding 100 descriptors.
+func procFSScaleFixture() (proc *fakeProcFS, codexHome string, panes []ProbePane) {
 	const (
-		processCount = 5000
-		codexCount   = 200
-		fdCount      = 100
+		processCount = procFSScaleProcesses
+		codexCount   = procFSScaleCodex
+		fdCount      = procFSScaleFDs
 	)
-	codexHome := "/fixture/codex"
+	codexHome = "/fixture/codex"
 	processes := make(map[int]fakeProcess, processCount)
 	for pid := 1; pid <= processCount; pid++ {
 		processes[pid] = fakeProcess{
@@ -230,7 +214,7 @@ func stressProcFSScale(t *testing.T) {
 		}
 	}
 
-	panes := make([]ProbePane, 0, codexCount)
+	panes = make([]ProbePane, 0, codexCount)
 	for index := 0; index < codexCount; index++ {
 		codexPID := index + 1
 		panePID := 1001 + index
@@ -259,32 +243,28 @@ func stressProcFSScale(t *testing.T) {
 			PID:    panePID,
 		})
 	}
-	proc := &fakeProcFS{processes: processes}
+	return &fakeProcFS{processes: processes}, codexHome, panes
+}
 
-	started := time.Now()
+func stressProcFSScale(t *testing.T) {
+	proc, codexHome, panes := procFSScaleFixture()
 	live, err := DetectCodex(proc, codexHome, panes)
-	elapsed := time.Since(started)
 	if err != nil {
 		t.Fatalf("DetectCodex(5k/20k fds) error = %v", err)
 	}
-	if len(live) != codexCount {
-		t.Fatalf("DetectCodex(5k/20k fds) found %d, want %d", len(live), codexCount)
+	if len(live) != procFSScaleCodex {
+		t.Fatalf("DetectCodex(5k/20k fds) found %d, want %d", len(live), procFSScaleCodex)
 	}
-	limit := time.Minute
-	if strict {
-		limit = 5 * time.Second
+}
+
+// BenchmarkDetectCodexScale measures what the ProcFS scale test no longer judges: DetectCodex
+// over 5,000 processes and 20,000 descriptors.
+func BenchmarkDetectCodexScale(b *testing.B) {
+	proc, codexHome, panes := procFSScaleFixture()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := DetectCodex(proc, codexHome, panes); err != nil {
+			b.Fatalf("DetectCodex(5k/20k fds) error = %v", err)
+		}
 	}
-	if elapsed > limit {
-		t.Fatalf(
-			"DetectCodex(5k/20k fds) took %s, want under %s (strict=%t)",
-			elapsed,
-			limit,
-			strict,
-		)
-	}
-	t.Logf(
-		"stress ProcFS scale: 5,000 processes, 200 Codex processes, 20,000 fds in %s (strict=%t)",
-		elapsed.Round(time.Microsecond),
-		strict,
-	)
 }

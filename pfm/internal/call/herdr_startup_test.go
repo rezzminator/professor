@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,7 +67,7 @@ func TestHerdrCallWaitsForNativeBirthReadiness(t *testing.T) {
 			}
 			engine := nativeEngine(t, target)
 			engine.options.ComposerWait, engine.options.Poll = 20*time.Millisecond, time.Millisecond
-			engine.options.Clock = &birthPublishClock{Clock: clock.Real, now: clock.Real.Now()}
+			engine.options.Clock = newBirthPublishClock()
 			result, err := engine.Call(context.Background(), Request{Target: "new-chat", Message: "birth brief"})
 			switch stage {
 			case "stuck":
@@ -144,7 +145,7 @@ func TestHerdrCallWaitsForPanePublication(t *testing.T) {
 			target.Pane = ""
 			engine.names = nativeNames{target: target}
 			engine.options.ComposerWait, engine.options.Poll = 3*time.Millisecond, time.Millisecond
-			clk := &birthPublishClock{Clock: clock.Real, now: clock.Real.Now()}
+			clk := newBirthPublishClock()
 			clk.publish = func() {
 				if publish {
 					if err := db.PutSeat(context.Background(), published); err != nil {
@@ -165,18 +166,39 @@ func TestHerdrCallWaitsForPanePublication(t *testing.T) {
 	}
 }
 
+// newBirthPublishClock starts a stepping clock on a fixed epoch.
+func newBirthPublishClock() *birthPublishClock {
+	epoch := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	return &birthPublishClock{Clock: clock.NewFake(epoch), now: epoch}
+}
+
+// birthPublishClock is a stepping clock: Now stands still until a Sleep, or
+// a fixture's advance, moves it, so a wait counts the calls made, never the
+// host's speed. Its mutex lets a fixture serving another goroutine advance it.
 type birthPublishClock struct {
 	clock.Clock
+	mu      sync.Mutex
 	now     time.Time
 	publish func()
 }
 
-func (c *birthPublishClock) Now() time.Time { return c.now }
+func (c *birthPublishClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *birthPublishClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
 func (c *birthPublishClock) Sleep(ctx context.Context, d time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	c.now = c.now.Add(d)
+	c.advance(d)
 	if c.publish != nil {
 		publish := c.publish
 		c.publish = nil
@@ -209,7 +231,7 @@ func TestHerdrStartupGoneFailsFast(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			clk := &birthPublishClock{Clock: clock.Real, now: clock.Real.Now()}
+			clk := newBirthPublishClock()
 			engine.options.Clock = clk
 			engine.options.ComposerWait, engine.options.Poll = 20*time.Millisecond, time.Millisecond
 			if stage == "pane" {

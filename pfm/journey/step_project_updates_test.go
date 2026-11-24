@@ -14,7 +14,7 @@ import (
 // with the clone's commit and the upstream diff, and every other count is zero.
 func projectUpdates(c *harness.Ctx, s State) State {
 	term := c.Terminal("adopter")
-	if code := shellRun(term, "report", "pfm doctor --project-updates", stepBound); code != 1 {
+	if code := shellRun(term, "report", "pfm doctor --project-updates"); code != 1 {
 		c.Failf("pfm doctor --project-updates exited %d, want 1 (review required):\n%s", code, term.Screen())
 	}
 	const terminal = "REVIEW REQUIRED — 1 items; nothing was written."

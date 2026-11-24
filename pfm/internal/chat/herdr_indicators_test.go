@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -183,20 +184,51 @@ func TestHerdrTabProviderReadFailureIsVisible(t *testing.T) {
 	}
 }
 
+// A startup failure is named on stderr and persisted once, in the log of the
+// component that met it: the chat side's tab-status log, or the indicator
+// painter's own indicators log, never both.
 func TestHerdrTabStartupFailureIsVisible(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "pfm.config.json")
-	if err := os.WriteFile(path, []byte(`{"version":2,"chat":{"herdrTabStatus":"invalid"}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PFM_CONFIG", path)
-	warnings := &bytes.Buffer{}
-	err := PaintHerdrIndicators(context.Background(), "endpoint", t.TempDir(), warnings)
-	if got, want := strings.ReplaceAll(
-		fmt.Sprintf("%v\n%s", err, warnings),
-		path,
-		"{config}",
-	), "load tab indicator runtime: config {config}: chat.herdrTabStatus must be emoji, text or off\nload tab indicator runtime: config {config}: chat.herdrTabStatus must be emoji, text or off\n"; got != want {
-		t.Fatalf("startup failure = %q, want %q", got, want)
+	const badConfig = "load tab indicator runtime: config {config}: chat.herdrTabStatus must be emoji, text or off"
+	const noSocket = "herdr indicators: no Herdr socket: HERDR_SOCKET_PATH is not set"
+	for _, tc := range []struct {
+		name, config, socket string
+		want                 string   // the returned error, then stderr
+		rows                 []string // every persisted error row, as session: message
+	}{
+		{
+			name: "unreadable configuration", config: `{"version":2,"chat":{"herdrTabStatus":"invalid"}}`,
+			socket: "endpoint", want: badConfig + "\n" + badConfig + "\n", rows: []string{"tab-status: " + badConfig},
+		},
+		{
+			name: "no Herdr socket", config: `{"version":2}`,
+			want: noSocket + "\n" + noSocket + "\n", rows: []string{"indicators: " + noSocket},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			path := filepath.Join(t.TempDir(), "pfm.config.json")
+			if err := os.WriteFile(path, []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PFM_CONFIG", path)
+			warnings := &bytes.Buffer{}
+			lockDir := t.TempDir()
+			err := PaintHerdrIndicators(context.Background(), tc.socket, lockDir, warnings)
+			if got := strings.ReplaceAll(fmt.Sprintf("%v\n%s", err, warnings), path, "{config}"); got != tc.want {
+				t.Fatalf("startup failure = %q, want %q", got, tc.want)
+			}
+			records, err := herdr.RecentErrors(lockDir, time.Time{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rows []string
+			for _, record := range records {
+				rows = append(rows, record.Session+": "+strings.ReplaceAll(record.Message, path, "{config}"))
+			}
+			if !reflect.DeepEqual(rows, tc.rows) {
+				t.Fatalf("persisted error rows = %q, want %q", rows, tc.rows)
+			}
+		})
 	}
 }
 
@@ -390,24 +422,37 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 		proof         error
 		views         int
 		state         string
+		lifecycle     string // the INFO row an expected lifecycle outcome persists
 	}{
-		{"proved owner, engine in foreground", true, true, nil, nil, 1, ""},
+		{"proved owner, engine in foreground", true, true, nil, nil, 1, "", ""},
 		// A supervisor outlives an abruptly dead engine until it retires the seat.
-		{"proved owner, engine gone", true, false, nil, nil, 1, "dead"},
-		{"proved supervisor death", false, true, nil, nil, 1, "dead"},
-		{"proved owner, foreground unavailable", true, false, errors.New("foreground evidence unavailable"), nil, 1, "unknown"},
-		{"ownership unproved", false, true, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
+		{"proved owner, engine gone", true, false, nil, nil, 1, "dead", ""},
+		{"proved supervisor death", false, true, nil, nil, 1, "dead", ""},
+		{"proved owner, foreground unavailable", true, false, errors.New("foreground evidence unavailable"), nil, 1, "unknown", ""},
+		{"ownership unproved", false, true, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, "", ""},
 		// The engine gone from its pane never outranks an unproved supervisor
 		// (forecast C02): nothing is painted, never dead.
-		{"ownership unproved, engine gone", false, false, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, ""},
+		{"ownership unproved, engine gone", false, false, nil, errors.New("seat seat1 supervisor ownership unproved"), 0, "", ""},
+		// The seat's pane closed: the tab is left untouched, and that is no fault.
+		{
+			"pane closed", false, true, nil, fmt.Errorf("seat seat1 ownership unproved: %w", gather.ErrHerdrPaneAbsent), 0, "",
+			"Herdr tab of s1 left untouched: seat seat1 ownership unproved: seat seat1 ownership unproved: terminal not present in pane.list",
+		},
+		// A pane a restarted server restored, its restored launch not started yet: no fault either.
+		{
+			"restored launch not started", false, true, nil, fmt.Errorf("seat seat1 %w", herdr.ErrSeatUnbound), 0, "",
+			"Herdr tab of s1 left untouched: seat seat1 ownership unproved: seat seat1 supervisor ownership unproved",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			warnings := &bytes.Buffer{}
+			dir := t.TempDir()
 			proof := tc.proof
 			engineErr := tc.engineErr
 			reader := tabViewReader{
-				runtime: &config.Runtime{Paths: values},
-				warn:    warnings,
+				runtime:   &config.Runtime{Paths: values},
+				warn:      warnings,
+				lifecycle: tabIndicatorWarnings{dir: dir, info: true},
 				prove: func(_ context.Context, seat fleetdb.Seat, _ paths.Values) (fleetdb.Seat, bool, error) {
 					return seat, tc.owned, proof
 				},
@@ -418,8 +463,15 @@ func TestHerdrTabNativeOwnershipProof(t *testing.T) {
 				t.Fatalf("views=%+v err=%v warnings=%q", got, err, warnings)
 			}
 			if tc.proof != nil {
-				if !strings.Contains(warnings.String(), tc.proof.Error()) {
-					t.Fatalf("unproved owner diagnostic=%q", warnings)
+				path := filepath.Join(dir, "tab-status"+herdr.ErrorLogSuffix)
+				logged, readErr := os.ReadFile(path)
+				_, row, _ := strings.Cut(string(logged), "\t")
+				if tc.lifecycle == "" && (!strings.Contains(warnings.String(), tc.proof.Error()) || len(logged) != 0) {
+					t.Fatalf("unproved owner diagnostic=%q, %s=%q", warnings, path, logged)
+				}
+				if tc.lifecycle != "" && (warnings.Len() != 0 || readErr != nil || row != "INFO\t"+tc.lifecycle+"\n") {
+					t.Fatalf("lifecycle diagnostic: warnings=%q %s row=%q (%v), want %q",
+						warnings, path, row, readErr, "INFO\t"+tc.lifecycle+"\n")
 				}
 				return
 			}

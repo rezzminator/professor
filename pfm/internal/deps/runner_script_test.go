@@ -5,7 +5,8 @@ import (
 	"errors"
 	"strconv"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestFakeRunnerScriptsByLongestPrefixMatch(t *testing.T) {
@@ -93,10 +94,8 @@ func TestFakeRunnerHandleAnswersAtCallTime(t *testing.T) {
 		return RunResult{Stdout: []byte(call.Argv[3] + "=" + strconv.Itoa(count))}, nil
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
 	if _, err := fake.Run(
-		ctx,
+		testwait.Expired(),
 		[]string{"tmux", "-S", "/s/hung", "list-panes", "-a"},
 		RunOptions{},
 	); !errors.Is(

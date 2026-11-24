@@ -197,40 +197,6 @@ func ReconcileHerdr(ctx context.Context, values paths.Values, socket string, fle
 	return moveMisplacedHerdr(ctx, values, socket, fleet, skip)
 }
 
-// PlaceHerdrChat is ReconcileHerdr for the one live native chat id on socket,
-// the chat that just recorded a space: it goes where placementOf says, every
-// other chat stays where it sits, and the place it was filed under comes back
-// (the zero Place, nothing moved, for a chat filed under no place, as
-// moveMisplacedHerdr skips one). A chat that is no such seat is an error, never a quiet success.
-func PlaceHerdrChat(ctx context.Context, values paths.Values, socket string, fleet place.Fleet, id string) (
-	target place.Place, returnErr error,
-) {
-	unlock, err := lockHerdrPlaces(ctx, values, socket)
-	if err != nil {
-		return place.Place{}, err
-	}
-	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
-	listed, err := listHerdrWorkspaces(ctx, socket)
-	if err != nil {
-		return place.Place{}, err
-	}
-	for position := range fleet.Rows {
-		row := fleet.Rows[position]
-		if row.ID == id && row.Backend == BackendHerdr && row.Kind.IsLiveSeat() && row.Socket == socket &&
-			row.SeatID != "" {
-			if target = fleet.Of(row.CWD, id); target.Root == "" {
-				return target, nil // filed under no place: no workspace of its own to move into
-			}
-			err = placeHerdrSeat(ctx, values, socket, "", fleet, row, target, &listed)
-			if errors.Is(err, errHerdrSeatUnplaced) {
-				err = fmt.Errorf("chat %s: %w", id, err)
-			}
-			return target, err
-		}
-	}
-	return place.Place{}, fmt.Errorf("chat %s is not a live native Herdr chat on %s", id, socket)
-}
-
 // moveMisplacedHerdr is ReconcileHerdr under a placement lock already held.
 func moveMisplacedHerdr(ctx context.Context, values paths.Values, socket string, fleet place.Fleet, skip string) error {
 	var listed herdrWorkspaces
@@ -258,7 +224,7 @@ func moveMisplacedHerdr(ctx context.Context, values paths.Values, socket string,
 		if row.HerdrWorkspace != "" && listed.byLabel[target.Label] == row.HerdrWorkspace {
 			continue
 		}
-		if err := placeHerdrSeat(ctx, values, socket, skip, fleet, *row, target, &listed); err != nil &&
+		if _, err := placeHerdrSeat(ctx, values, socket, skip, false, fleet, *row, target, &listed); err != nil &&
 			!errors.Is(err, errHerdrSeatUnplaced) {
 			failures = append(
 				failures,
@@ -281,57 +247,71 @@ var errHerdrSeatUnplaced = errors.New("the seat ended, or does not prove to be t
 // seat. A seat that ended since the scan, already sits right, or proves to be
 // the pane skip names stays. The workspace is created only once the seat
 // proved movable, so a place gets one only for a chat it holds. A seat it
-// leaves alone for ending or failing its proof is errHerdrSeatUnplaced.
+// leaves alone for ending or failing its proof is errHerdrSeatUnplaced. With
+// follow, a seat whose pane is the one Herdr has focused moves focused, so the
+// view (Herdr's focus is the server's, every attached client shows it) goes
+// with it to the target workspace; followed reports that Herdr focused the
+// moved pane. Without follow, or for an unfocused pane, the move leaves the
+// view where it is.
 func placeHerdrSeat(
 	ctx context.Context,
 	values paths.Values,
 	socket, skip string,
+	follow bool,
 	fleet place.Fleet,
 	row compose.Row,
 	target place.Place,
 	listed *herdrWorkspaces,
-) (returnErr error) {
+) (followed bool, returnErr error) {
 	seatID := row.SeatID
 	state := fleetdb.OpenSharedState(ctx, values)
 	defer func() { returnErr = errors.Join(returnErr, state.Close()) }()
 	seat, found, err := state.Seat(ctx, seatID)
 	if err != nil {
-		return fmt.Errorf("read seat %s: %w", seatID, err)
+		return false, fmt.Errorf("read seat %s: %w", seatID, err)
 	}
 	if !found || seat.Backend != BackendHerdr || seat.State != seatLiveState {
-		return errHerdrSeatUnplaced
+		return false, errHerdrSeatUnplaced
 	}
 	lockCtx, cancel := context.WithTimeout(ctx, herdrSeatLockWait)
 	unlock, err := fleetdb.LockSeat(lockCtx, values, fleetdb.ConversationIdentity(seat.SessionID, seat.SeatID))
 	cancel()
 	if err != nil {
-		return fmt.Errorf("lock seat %s: %w", seatID, err)
+		return false, fmt.Errorf("lock seat %s: %w", seatID, err)
 	}
 	defer func() { returnErr = errors.Join(returnErr, unlock()) }()
 	proved, owned, err := gather.ProveHerdrSeat(ctx, state, gather.NewProcFS(values.ProcRoot), seat)
 	if err != nil {
-		return fmt.Errorf("prove seat %s: %w", seatID, err)
+		return false, fmt.Errorf("prove seat %s: %w", seatID, err)
 	}
 	if !owned || skip != "" && proved.HerdrPane == skip {
-		return errHerdrSeatUnplaced
+		return false, errHerdrSeatUnplaced
 	}
 	placement, err := listed.placementOf(ctx, socket, fleet, target, proved.HerdrWorkspace, proved.HerdrPane)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if placement.rename != "" {
-		return listed.rename(ctx, socket, placement.rename, target.Label)
+		return false, listed.rename(ctx, socket, placement.rename, target.Label)
 	}
 	if !placement.move {
-		return nil
+		return false, nil
 	}
 	if proved.HerdrTerminalID == "" || proved.SeatHostPID <= 0 {
-		return fmt.Errorf("seat %s has no proved terminal and supervisor", seatID)
+		return false, fmt.Errorf("seat %s has no proved terminal and supervisor", seatID)
+	}
+	// Focus is read before a workspace is created, so a failed read leaves no
+	// empty workspace behind.
+	focus := false
+	if follow {
+		if focus, err = herdrPaneFocused(ctx, proved.HerdrSocket, proved.HerdrPane); err != nil {
+			return false, err
+		}
 	}
 	workspace, starting := placement.into, ""
 	if workspace == "" {
 		if workspace, starting, err = listed.workspaceFor(ctx, socket, target); err != nil {
-			return err
+			return false, err
 		}
 	}
 	// The new tab is named as a born tab is: Herdr labels it with the move.
@@ -340,10 +320,10 @@ func placeHerdrSeat(
 		"destination": map[string]any{
 			"type": "new_tab", "workspace_id": workspace, "label": BirthTabLabel(row.Name, row.CWD),
 		},
-		herdrFocusKey: false,
+		herdrFocusKey: focus,
 	})
 	if err != nil {
-		return fmt.Errorf("herdr pane.move %s: %w", proved.HerdrPane, err)
+		return false, fmt.Errorf("herdr pane.move %s: %w", proved.HerdrPane, err)
 	}
 	var reply struct {
 		Type string `json:"type"`
@@ -351,7 +331,9 @@ func placeHerdrSeat(
 			Previous string `json:"previous_pane_id"`
 			// Closed is the workspace the move emptied, which Herdr closed.
 			Closed string `json:"closed_workspace_id"`
-			Pane   struct {
+			// Focused is the pane Herdr focused, the moved one on a focused move.
+			Focused string `json:"focused_pane_id"`
+			Pane    struct {
 				ID        string `json:"pane_id"`
 				Workspace string `json:"workspace_id"`
 				Terminal  string `json:"terminal_id"`
@@ -359,12 +341,17 @@ func placeHerdrSeat(
 		} `json:"move_result"`
 	}
 	if err := json.Unmarshal(body, &reply); err != nil {
-		return fmt.Errorf("herdr pane.move %s may have moved: decode reply: %w", proved.HerdrPane, err)
+		return false, fmt.Errorf("herdr pane.move %s may have moved: decode reply: %w", proved.HerdrPane, err)
 	}
 	moved := reply.Move.Pane
 	if reply.Type != "pane_move" || reply.Move.Previous != proved.HerdrPane || moved.Workspace != workspace ||
 		moved.Terminal != proved.HerdrTerminalID || !strings.HasPrefix(moved.ID, workspace+":") {
-		return fmt.Errorf("herdr pane.move %s may have moved: unexpected reply %s", proved.HerdrPane, body)
+		return false, fmt.Errorf("herdr pane.move %s may have moved: unexpected reply %s", proved.HerdrPane, body)
+	}
+	followed = focus && reply.Move.Focused == moved.ID
+	if focus && !followed {
+		obs.Logger(ctx).WarnContext(ctx, "chat.herdr_unfollowed", "seat", seatID, "pane", moved.ID,
+			"focused", reply.Move.Focused)
 	}
 	listed.moved(proved.HerdrWorkspace, proved.HerdrPane, reply.Move.Closed, herdr.Pane{
 		PaneID: moved.ID, WorkspaceID: workspace, TerminalID: moved.Terminal, CWD: row.CWD,
@@ -379,13 +366,14 @@ func placeHerdrSeat(
 		// A proof that ran meanwhile already learned the new address.
 		current, found, readErr := state.Seat(ctx, seatID)
 		if readErr == nil && found && current.HerdrPane == next.HerdrPane && current.HerdrWorkspace == workspace {
-			return nil
+			return followed, nil
 		}
-		return fmt.Errorf("pane %s moved to %s; rewrite seat %s: %w", proved.HerdrPane, moved.ID, seatID,
+		return false, fmt.Errorf("pane %s moved to %s; rewrite seat %s: %w", proved.HerdrPane, moved.ID, seatID,
 			errors.Join(err, readErr))
 	}
-	obs.Logger(ctx).InfoContext(ctx, "chat.herdr_moved", "seat", seatID, "from", proved.HerdrPane, "to", moved.ID)
-	return nil
+	obs.Logger(ctx).InfoContext(ctx, "chat.herdr_moved", "seat", seatID, "from", proved.HerdrPane, "to", moved.ID,
+		"followed", followed)
+	return followed, nil
 }
 
 // placeHerdrBirth is the workspace a new tab of request's chat is born in: its

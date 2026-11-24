@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -35,7 +34,7 @@ type Mesh struct {
 func herdrMesh(c *harness.Ctx, s State) State {
 	owner := c.Terminal("mesh-enable")
 	owner.WaitFor(prompt)
-	if code := shellRun(owner, "mcp-enable", "pfm mcp chat enable", stepBound); code != 0 {
+	if code := shellRun(owner, "mcp-enable", "pfm mcp chat enable"); code != 0 {
 		c.Failf("pfm mcp chat enable exited %d:\n%s", code, owner.Screen())
 	}
 	c.Cleanup(func() {
@@ -89,7 +88,7 @@ func meshHost(c *harness.Ctx, s State) State {
 			"attach line", s.Mesh.PeerName, code, out, errs)
 	}
 	s.Mesh.PeerSock = f[2]
-	c.Poll("one live Claude chat named "+s.Mesh.PeerName+" on "+s.Mesh.PeerSock, stepBound, func() (bool, string) {
+	c.Poll("one live Claude chat named "+s.Mesh.PeerName+" on "+s.Mesh.PeerSock, func() (bool, string) {
 		rows := namedChats(c, s.Mesh.PeerSock)
 		for session, row := range rows {
 			s.Mesh.Peer = Chat{Session: session, Name: s.Mesh.PeerName}
@@ -116,7 +115,7 @@ func meshStarted(c *harness.Ctx, s State) State {
 func chatTab(c *harness.Ctx, s State) *harness.Terminal {
 	term := c.Terminal(s.Term)
 	term.Press(harness.Ctrl('b'), harness.Key("n"))
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	return term
 }
 
@@ -127,9 +126,9 @@ func statsRows(c *harness.Ctx, names ...string) {
 	owner := c.Terminal(meshOwner)
 	owner.WaitFor(prompt)
 	owner.Type("pfm\r")
-	owner.WaitFor("New chat", 20*time.Second)
+	owner.WaitFor("New chat")
 	owner.Press(harness.Tab)
-	owner.WaitScreen("a Stats row of its own with a memory reading for each of "+strings.Join(names, ", "), stepBound,
+	owner.WaitScreen("a Stats row of its own with a memory reading for each of "+strings.Join(names, ", "),
 		func(screen string) bool {
 			for _, name := range names {
 				row := regexp.MustCompile(
@@ -155,10 +154,10 @@ func meshUnnamed(c *harness.Ctx, s State) State {
 	s = herdrSession(c, s)
 	term, sock := c.Terminal(s.Term), herdrSocket(s)
 	term.Press(harness.Esc)
-	term.WaitFor(prompt, 20*time.Second)
+	term.WaitFor(prompt)
 	s.Project = s.Home + "/work/demo"
 	term.Type("cd " + s.Project + " && claude\r")
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	s.Chat = oneLiveChat(c, s, "live-claude")
 	s.Chat.Engine = engineOf(c, s)
 	handle := "seat:" + s.Chat.Seat
@@ -205,7 +204,7 @@ func meshUnnamed(c *harness.Ctx, s State) State {
 		c.Failf("herdr pane move --new-workspace %s exited %d: %s%s", s.Pane, r.Code, r.Stderr, r.Stdout)
 	}
 	moved := s.Pane
-	c.Poll(handle+"'s seat on a pane of another workspace", stepBound, func() (bool, string) {
+	c.Poll(handle+"'s seat on a pane of another workspace", func() (bool, string) {
 		seat := liveSeats(c, sock)[s.Chat.Session]
 		moved = seat[1]
 		return strings.Split(moved, ":")[0] != strings.Split(s.Pane, ":")[0], fmt.Sprintf("seat %v", seat)
@@ -226,7 +225,7 @@ func meshUnnamed(c *harness.Ctx, s State) State {
 			"pfm chat call --allow-unsigned "+handle+" "+shellQuote(turn)); code != 0 {
 			c.Failf("pfm chat call %s after its move exited %d: %s", handle, code, errs)
 		}
-		c.Poll(handle+"'s reply "+reply, stepBound, func() (bool, string) {
+		c.Poll(handle+"'s reply "+reply, func() (bool, string) {
 			r := c.Read("pfm", "chat", "last", s.Chat.Session)
 			return r.Stdout == reply+"\n", r.Stdout + r.Stderr
 		})
@@ -243,7 +242,7 @@ func meshUnnamed(c *harness.Ctx, s State) State {
 				answers[index].Text, problem)
 		}
 	}
-	c.Poll(handle+" exited, no live seat left on "+sock, stepBound, func() (bool, string) {
+	c.Poll(handle+" exited, no live seat left on "+sock, func() (bool, string) {
 		seats := liveSeats(c, sock)
 		return len(seats) == 0, fmt.Sprintf("seats %v", seats)
 	})

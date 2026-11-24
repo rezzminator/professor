@@ -217,7 +217,9 @@ func newTestPainter(
 	at time.Time,
 ) (*indicatorPainter, *steppingClock, *bytes.Buffer) {
 	t.Helper()
-	stepping := &steppingClock{now: at}
+	// The embedded fake carries the timers (a restore's budget), which only a
+	// test advances.
+	stepping := &steppingClock{Clock: clock.NewFake(at), now: at}
 	stderr := &bytes.Buffer{}
 	return &indicatorPainter{
 		socket: "/fake/herdr.sock", lockDir: filepath.Join(t.TempDir(), "locks"), stderr: stderr,

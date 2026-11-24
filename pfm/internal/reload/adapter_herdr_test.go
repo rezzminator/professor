@@ -15,11 +15,13 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestNativeReloadAdapterTarget(t *testing.T) {
@@ -84,9 +86,6 @@ func TestNativeReloadAdapterTarget(t *testing.T) {
 }
 
 func TestNotifyWorkerFailureDelivery(t *testing.T) {
-	previousDelays := notifyRetryDelays
-	notifyRetryDelays = []time.Duration{0, 0, 0}
-	t.Cleanup(func() { notifyRetryDelays = previousDelays })
 	const shown = `{"type":"notification_show","shown":true,"reason":"shown"}`
 	const rateLimited = `{"type":"notification_show","shown":false,"reason":"rate_limited"}`
 	for _, tc := range []struct {
@@ -132,15 +131,14 @@ func TestNotifyWorkerFailureDelivery(t *testing.T) {
 			var mu sync.Mutex
 			accepted := 0
 			serve := func(conn net.Conn, reply string) {
+				// A request that never arrives is a hang the test's end cuts.
+				stop := context.AfterFunc(testwait.Context(t), func() { _ = conn.Close() })
+				defer stop()
 				defer func() {
-					if err := conn.Close(); err != nil {
+					if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 						t.Error(err)
 					}
 				}()
-				if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-					t.Error(err)
-					return
-				}
 				var request struct {
 					ID     any    `json:"id"`
 					Method string `json:"method"`
@@ -194,7 +192,13 @@ func TestNotifyWorkerFailureDelivery(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			handled, err := NotifyWorkerFailure(t.Context(), values, socket, "w6:p3", "worker failed", true)
+			// The rate-limit retries wait their real 1 s, 2 s and 4 s on a fake clock.
+			fake := clock.NewFake(time.Now())
+			testwait.ProcessClock(t, fake)
+			var handled bool
+			testwait.Drive(t, "NotifyWorkerFailure to return", fake, func() {
+				handled, err = NotifyWorkerFailure(t.Context(), values, socket, "w6:p3", "worker failed", true)
+			})
 			if !handled || (tc.want == "" && err != nil) ||
 				(tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want))) {
 				t.Fatalf("handled=%v err=%v, want %q", handled, err, tc.want)
@@ -217,9 +221,6 @@ func TestNotifyWorkerFailureDelivery(t *testing.T) {
 // followed or blocked on, and a record another scheduler holds is refused
 // after a bounded wait.
 func TestLockWorkerScheduleOpensOnlyPrivateFilesAndBoundsTheWait(t *testing.T) {
-	previous := scheduleLockWait
-	scheduleLockWait = 50 * time.Millisecond
-	t.Cleanup(func() { scheduleLockWait = previous })
 	const socket, pane = "/fixture/herdr.sock", "w6:p3"
 	for _, tc := range []struct {
 		name, want string
@@ -252,7 +253,7 @@ func TestLockWorkerScheduleOpensOnlyPrivateFilesAndBoundsTheWait(t *testing.T) {
 			},
 		},
 		{
-			name: "record held by another scheduler", want: "another /reload is scheduling this chat right now",
+			name: "record held by another scheduler", want: "another /pfm:reload is scheduling this chat right now",
 			plant: func(t *testing.T, _, record, _ string) {
 				held, err := os.OpenFile(record, os.O_CREATE|os.O_RDWR, 0o600)
 				if err != nil {
@@ -300,17 +301,15 @@ func TestLockWorkerScheduleOpensOnlyPrivateFilesAndBoundsTheWait(t *testing.T) {
 				schedule *NativeSchedule
 				err      error
 			}
-			done := make(chan locked, 1)
-			go func() {
-				log, schedule, err := LockWorkerSchedule(t.Context(), values, socket, &fleetdb.Seat{SeatID: "lock"})
-				done <- locked{log, schedule, err}
-			}()
+			// The held record's wait runs out on a fake clock: the hold never
+			// lifts, so each 20 ms poll fails until the 2 s bound is spent.
+			fake := clock.NewFake(time.Now())
+			testwait.ProcessClock(t, fake)
 			var got locked
-			select {
-			case got = <-done:
-			case <-time.After(3 * time.Second):
-				t.Fatal("LockWorkerSchedule still waiting after 3s: the wait is unbounded")
-			}
+			testwait.Drive(t, "LockWorkerSchedule to return", fake, func() {
+				log, schedule, err := LockWorkerSchedule(t.Context(), values, socket, &fleetdb.Seat{SeatID: "lock"})
+				got = locked{log, schedule, err}
+			})
 			if got.log != wantLog {
 				t.Fatalf("log = %q, want %q", got.log, wantLog)
 			}

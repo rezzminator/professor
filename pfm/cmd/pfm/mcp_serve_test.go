@@ -11,48 +11,57 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
-type deadlineScalingListener struct {
+// expiredDeadlineListener hands out connections whose read or write deadline, once
+// the server arms one, is already in the past: the deadline path runs at once, with
+// no wait for a real deadline to lapse.
+type expiredDeadlineListener struct {
 	net.Listener
-	readDuration  time.Duration
-	writeDuration time.Duration
+	readExpired  bool
+	writeExpired bool
 }
 
-func (listener deadlineScalingListener) Accept() (net.Conn, error) {
+func (listener expiredDeadlineListener) Accept() (net.Conn, error) {
 	connection, err := listener.Listener.Accept()
 	if err != nil {
 		return nil, err
 	}
-	return deadlineScalingConn{
-		Conn: connection, readDuration: listener.readDuration, writeDuration: listener.writeDuration,
+	return expiredDeadlineConn{
+		Conn: connection, readExpired: listener.readExpired, writeExpired: listener.writeExpired,
 	}, nil
 }
 
-type deadlineScalingConn struct {
+type expiredDeadlineConn struct {
 	net.Conn
-	readDuration  time.Duration
-	writeDuration time.Duration
+	readExpired  bool
+	writeExpired bool
 }
 
-func (connection deadlineScalingConn) SetReadDeadline(deadline time.Time) error {
-	if !deadline.IsZero() && connection.readDuration > 0 {
-		deadline = time.Now().Add(connection.readDuration)
+// longAgo is a deadline that has already passed.
+var longAgo = time.Unix(1, 0)
+
+func (connection expiredDeadlineConn) SetReadDeadline(deadline time.Time) error {
+	if !deadline.IsZero() && connection.readExpired {
+		deadline = longAgo
 	}
 	return connection.Conn.SetReadDeadline(deadline)
 }
 
-func (connection deadlineScalingConn) SetWriteDeadline(deadline time.Time) error {
-	if !deadline.IsZero() && connection.writeDuration > 0 {
-		deadline = time.Now().Add(connection.writeDuration)
+func (connection expiredDeadlineConn) SetWriteDeadline(deadline time.Time) error {
+	if !deadline.IsZero() && connection.writeExpired {
+		deadline = longAgo
 	}
 	return connection.Conn.SetWriteDeadline(deadline)
 }
@@ -63,16 +72,13 @@ func TestLoopbackMCPServerDeliversResponseAfterOldWriteDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := newLoopbackMCPServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		time.Sleep(100 * time.Millisecond)
 		if _, writeErr := writer.Write([]byte("complete")); writeErr != nil {
 			t.Errorf("write delayed response: %v", writeErr)
 		}
 	}))
 	serveErr := make(chan error, 1)
 	go func() {
-		serveErr <- server.Serve(deadlineScalingListener{
-			Listener: listener, writeDuration: 25 * time.Millisecond,
-		})
+		serveErr <- server.Serve(expiredDeadlineListener{Listener: listener, writeExpired: true})
 	}()
 	t.Cleanup(func() {
 		if closeErr := server.Close(); closeErr != nil {
@@ -141,24 +147,13 @@ func TestLoopbackMCPServerPropagatesClientCancellation(t *testing.T) {
 		}
 		responseErr <- requestErr
 	}()
-	select {
-	case <-handlerStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("request handler did not start")
-	}
+	testwait.Receive(t, "the request handler to start", handlerStarted)
 	cancel()
-	select {
-	case <-handlerCancelled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("client cancellation did not cancel the request context")
-	}
-	select {
-	case requestErr := <-responseErr:
-		if !errors.Is(requestErr, context.Canceled) {
-			t.Fatalf("cancelled request error = %v, want context.Canceled", requestErr)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("client request did not return after cancellation")
+	testwait.Receive(t, "the client cancellation to cancel the request context", handlerCancelled)
+	if requestErr, _ := testwait.Receive(t, "the client request to return after cancellation", responseErr); !errors.Is(
+		requestErr, context.Canceled,
+	) {
+		t.Fatalf("cancelled request error = %v, want context.Canceled", requestErr)
 	}
 }
 
@@ -182,9 +177,7 @@ func TestLoopbackMCPServerRetainsSlowHeaderBound(t *testing.T) {
 	}
 	serveErr := make(chan error, 1)
 	go func() {
-		serveErr <- server.Serve(deadlineScalingListener{
-			Listener: listener, readDuration: 25 * time.Millisecond,
-		})
+		serveErr <- server.Serve(expiredDeadlineListener{Listener: listener, readExpired: true})
 	}()
 	t.Cleanup(func() {
 		if closeErr := server.Close(); closeErr != nil {
@@ -204,9 +197,9 @@ func TestLoopbackMCPServerRetainsSlowHeaderBound(t *testing.T) {
 			t.Errorf("close slow-header connection: %v", closeErr)
 		}
 	}()
-	if err := connection.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
+	// A server that never cuts the slow headers leaves this read blocked until the
+	// test's hung limit closes the connection under it.
+	defer context.AfterFunc(testwait.Context(t), func() { _ = connection.Close() })()
 	if _, err := io.WriteString(connection, "GET / HTTP/1.1\r\nHost: loopback"); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +209,9 @@ func TestLoopbackMCPServerRetainsSlowHeaderBound(t *testing.T) {
 		if networkErr, ok := err.(net.Error); ok && networkErr.Timeout() {
 			t.Fatalf("slow headers remained open until the client deadline: %v", err)
 		}
-		if !errors.Is(err, io.EOF) {
+		// The server cuts the connection: a clean close, or a reset when the
+		// cut lands before it read the bytes this test wrote.
+		if !errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET) {
 			t.Fatalf("read slow-header refusal: %v", err)
 		}
 	}
@@ -470,7 +465,18 @@ func TestMCPServeChatDisabledRefusesBeforeBindingPort(t *testing.T) {
 	t.Fatal("both-disabled serve did not leave a freshly probed port bindable after 5 attempts")
 }
 
+// mcpServeProbeClock puts the daemon probe's deadline, read from the process
+// clock, on the fake it returns: an answering port never waits on it, and a
+// silent one is fired by advancing it.
+func mcpServeProbeClock(t *testing.T) *clock.Fake {
+	t.Helper()
+	fake := clock.NewFake(time.Unix(0, 0))
+	testwait.ProcessClock(t, fake)
+	return fake
+}
+
 func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
+	mcpServeProbeClock(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -503,15 +509,8 @@ func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
 	}
 }
 
-func shortenMCPServeDaemonProbeTimeout(t *testing.T) {
-	t.Helper()
-	previous := mcpserv.DaemonProbeTimeoutOverride
-	mcpserv.DaemonProbeTimeoutOverride = 100 * time.Millisecond
-	t.Cleanup(func() { mcpserv.DaemonProbeTimeoutOverride = previous })
-}
-
 func TestMCPServeRefusesAPortHeldByASilentListener(t *testing.T) {
-	shortenMCPServeDaemonProbeTimeout(t)
+	fake := mcpServeProbeClock(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -526,7 +525,11 @@ func TestMCPServeRefusesAPortHeldByASilentListener(t *testing.T) {
 	runtime.Config.MCP.HTTP.Port = port
 	runtime.Config.MCPServers["chat"] = config.MCPServer{Enabled: true}
 	var stdout, stderr bytes.Buffer
-	if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
+	var code int
+	testwait.Drive(t, "serve's probe of a silent listener to end at its deadline", fake, func() {
+		code = runMCPServe(&stdout, &stderr, runtime, nil)
+	})
+	if code != 1 {
 		t.Fatalf("silent-listener serve code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	line := stderr.String()
@@ -549,18 +552,18 @@ func TestMCPServeRefusesAPortHeldByASilentListener(t *testing.T) {
 // Before the fix the probe reported that case exactly as it reported "nothing
 // is listening", so serve walked on to bind a port it could not have.
 func TestMCPServeRefusesAPortHeldByAForeignService(t *testing.T) {
+	mcpServeProbeClock(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	foreign := &http.Server{
+	foreign := &http.Server{ //nolint:gosec // loopback test server
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 			writer.Header().Set("Content-Type", "text/html")
 			if _, err := writer.Write([]byte("<html>not pfm</html>")); err != nil {
 				t.Errorf("write foreign body: %v", err)
 			}
 		}),
-		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- foreign.Serve(listener) }()
@@ -627,7 +630,7 @@ func TestMCPStdioStartsWhenTheSoleFamilyFails(t *testing.T) {
 	if want := "pfm mcp serve --stdio: configure chat: configure chat MCP backend: tmux directory is empty\n"; stderr.String() != want {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := professor.Server(config.MCPServerChat).Connect(ctx, serverTransport, nil)

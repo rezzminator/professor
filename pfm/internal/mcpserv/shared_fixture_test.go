@@ -12,7 +12,7 @@ import (
 // newFixtureService is the package's protocol-test service over the real
 // verb layer: chat.Verbs on the default runtime, which reads the jailed paths
 // and opens the cache database setupBackendPaths names.
-func newFixtureService(t *testing.T) *Service {
+func newFixtureService(t testing.TB) *Service {
 	t.Helper()
 	resolved, err := paths.Resolve()
 	if err != nil {

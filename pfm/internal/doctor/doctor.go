@@ -2,6 +2,7 @@
 // engines, MCP, the index, crumbs, hooks, the harness prompt, and the
 // external plugin runtime, with healthy, broken, and could-not-look kept distinct.
 //
+// project_open_clock.go: the clock seam of the open-project ledger deadline.
 // herdr_claude.go: the herdr-integration row of each Claude settings store.
 // host_overlay.go: the host_overlay rows, one per contracted overlay symlink.
 // claude_plugin_source.go: the claude_plugins source row, where Professor's plugins install from and what set it.
@@ -292,6 +293,10 @@ func Run(
 		installer.ClaudePluginEnvironment(dependencies.Env, claudeEnv),
 		pluginBuild,
 		retiredLists.ClaudePlugins,
+		tally,
+	)
+	printRetiredClaudePluginsDoctor(
+		stdout, resolved.Home, runtime.Config.ClaudeConfigDirs(), retiredLists.ClaudePluginsRemoved, pluginBuild,
 		tally,
 	)
 	printEngineSyncHookDoctor(stdout, pluginBuild.Plugins, tally)

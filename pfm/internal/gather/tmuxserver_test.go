@@ -5,7 +5,8 @@ import (
 	"errors"
 	"os/exec"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestTmuxReadClassifiesAFailureAsEveryProbeDoes: a read of a socket with no
@@ -13,8 +14,7 @@ import (
 // and every other failure keeps tmux's reason and is neither.
 func TestTmuxReadClassifiesAFailureAsEveryProbeDoes(t *testing.T) {
 	live := context.Background()
-	expired, cancel := context.WithDeadline(live, time.Unix(0, 0))
-	defer cancel()
+	expired := testwait.Expired()
 	read := []string{"show-options", "-qv", "-t", "cc-1", "@pfm_herdr"}
 	const lead = "tmux show-options -qv -t cc-1 @pfm_herdr: "
 	for _, tc := range []struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -28,7 +29,7 @@ func TestChatRuntimeIdentityCanonicalInputs(t *testing.T) {
 	equivalent.Paths.Roots = map[pfmengine.ID][]string{
 		pfmengine.Claude: {"/a", "/b"}, pfmengine.Codex: {"/c"},
 	}
-	equivalent.Clock = clock.Real
+	equivalent.Clock = clock.NewFake(time.Unix(0, 0))
 	equivalent.DaemonAddress = "127.0.0.1:9999"
 	equivalent.AllowAmbientIdentity = true
 	equivalent.Dispatch = func(context.Context, []string, io.Writer, io.Writer) int { return 0 }

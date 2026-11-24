@@ -143,6 +143,10 @@ type indicatorPainter struct {
 	// serverStart reads the Herdr server's start identity (its socket file's
 	// mtime), the key of the unproved-pane memo; nil reads the socket file.
 	serverStart func() (int64, error)
+	// socketAtStart says the socket file was there when the painter started
+	// (ownerIdentity read): a dial that later finds it gone is its server ended
+	// under the painter (failed), never a socket that was never there.
+	socketAtStart bool
 	// server is the start identity the memo was last read under; persisted
 	// says whether it was read, so the memo is kept in lockDir. A socket file
 	// that cannot be read keeps the memo in this process alone: a pane is
@@ -180,14 +184,9 @@ func PaintIndicators(ctx context.Context, socket, lockDir string, stderr io.Writ
 	return painter.run(ctx)
 }
 
+// logf names a reporter error on stderr and in the indicators log.
 func (painter *indicatorPainter) logf(format string, args ...any) {
-	message := fmt.Sprintf(format, args...)
-	_, _ = fmt.Fprintln(painter.stderr, message)
-	if painter.lockDir != "" {
-		if err := AppendError(painter.lockDir, "indicators", painter.clock.Now(), message); err != nil {
-			_, _ = fmt.Fprintf(painter.stderr, "persist indicator diagnostic: %v\n", err)
-		}
-	}
+	painter.persist(AppendError, fmt.Sprintf(format, args...))
 }
 
 func (painter *indicatorPainter) nextSeq() uint64 {
@@ -216,6 +215,8 @@ func (painter *indicatorPainter) run(ctx context.Context) error {
 		painter.logf("%v", err)
 		return err
 	}
+	_, err := painter.ownerIdentity()
+	painter.socketAtStart = err == nil
 	if err := painter.record(ctx); errors.Is(err, errThemeOff) {
 		// Not a failure: pfm's Herdr theme is off, and its stop marker stands.
 		_, _ = fmt.Fprintf(painter.stderr, "%v: socket %s left as theme off found it\n", err, painter.socket)
@@ -428,7 +429,7 @@ func (painter *indicatorPainter) list(ctx context.Context) ([]indicatorTarget, e
 
 // report writes patch to target; a nil patch writes nothing. accepted says
 // whether Herdr took it: only the matching resource-not-found refusal (the
-// target closed since the list) is logged and skipped. Other refusals fail.
+// target closed since the list) is logged as INFO and skipped. Other refusals fail.
 // Painting classifies even a pane needing no patch, so a shell's stale status
 // cannot keep the blinker alive. Clearing proves only panes holding our tokens.
 func (painter *indicatorPainter) report(
@@ -465,6 +466,9 @@ func (painter *indicatorPainter) report(
 				painter.storeUnproved()
 			}
 			return false, err
+		}
+		if errors.Is(err, ErrSeatUnbound) { // a seat-host not started yet: skipped, neither named nor remembered
+			return false, fmt.Errorf("%w: pane %s: %w", errIndicatorOwnership, target.id, err)
 		}
 		if err != nil {
 			if last, named := painter.unproved[target.id]; !named || last.Status != target.status {
@@ -504,7 +508,7 @@ func (painter *indicatorPainter) report(
 		var refusal *Refusal
 		if errors.As(err, &refusal) && (target.kind == targetPane && refusal.Code == "pane_not_found" ||
 			target.kind == targetWorkspace && refusal.Code == "workspace_not_found") {
-			painter.logf("herdr indicators: socket %s: %s %s: %v", painter.socket, target.kind, target.id, err)
+			painter.infof("herdr indicators: socket %s: %s %s: %v", painter.socket, target.kind, target.id, err)
 			return false, nil
 		}
 		return false, fmt.Errorf("herdr indicators: paint %s %s: %w", target.kind, target.id, err)
@@ -539,13 +543,7 @@ func (painter *indicatorPainter) loadUnproved() {
 	}
 	read := painter.serverStart
 	if read == nil {
-		read = func() (int64, error) {
-			info, err := os.Stat(painter.socket)
-			if err != nil {
-				return 0, fmt.Errorf("stat Herdr socket %s: %w", painter.socket, err)
-			}
-			return info.ModTime().UnixNano(), nil
-		}
+		read = func() (int64, error) { return ServerStart(painter.socket) }
 	}
 	server, err := read()
 	if err != nil {

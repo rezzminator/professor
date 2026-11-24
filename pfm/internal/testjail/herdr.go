@@ -23,7 +23,7 @@ const installedHerdrKeys = "# >>> pfm herdr keys >>>\n[keys]\nnext_workspace = \
 
 // StageHerdrShell supplies the config and wrapper of an installed Herdr host:
 // pfm's shell and keys blocks.
-func StageHerdrShell(t *testing.T, home string) string {
+func StageHerdrShell(t testing.TB, home string) string {
 	t.Helper()
 	path := filepath.Join(home, ".config", "herdr", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

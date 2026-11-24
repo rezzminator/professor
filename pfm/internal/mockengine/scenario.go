@@ -4,13 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 // Environment the mock reads. MOCK_ENGINE_* is the only namespace it owns:
@@ -18,7 +14,7 @@ import (
 // foreign prefixes C19 forbids.
 const (
 	// EnvScenario names the JSON scenario file. Unset means the defaults: every
-	// prompt is answered with one word after DefaultBusyMS.
+	// prompt is answered with one word at once.
 	EnvScenario = "MOCK_ENGINE_SCENARIO"
 	// EnvEngine picks the engine when argv[0]'s basename is not one — the
 	// launcher execs Claude by its versions/<v> path, whose basename is a
@@ -38,7 +34,7 @@ const (
 // Defaults when the scenario leaves a field empty.
 const (
 	DefaultReply        = "ok"
-	DefaultBusyMS       = 200
+	DefaultBusyMS       = 0
 	DefaultClaudeModel  = "claude-sonnet-4-5"
 	DefaultCodexModel   = "codex-fixture-model"
 	DefaultOpenCodeMode = "opencode-fixture-model"
@@ -112,6 +108,10 @@ type Scenario struct {
 	// answers, MCP tool lists — for a test to read. It is evidence of what the
 	// mock saw, never the judge of what pfm read.
 	RecordDir string `json:"record_dir,omitempty"`
+	// Control names the FIFO a test moves the mock's clock through (control.go, internal/mockengine/control);
+	// control.PIDToken in it stands for the reading process's id. Every timed act waits on that clock, which
+	// only the test moves: a scenario declaring one (timedAct) and naming no control is refused at load.
+	Control string `json:"control,omitempty"`
 }
 
 // LoadScenario reads the file EnvScenario names. An empty path is the default
@@ -136,6 +136,9 @@ func LoadScenario(path, engine string) (Scenario, error) {
 		if err := scenario.Steps[index].validate(); err != nil {
 			return Scenario{}, fmt.Errorf("scenario %s step %d: %w", path, index, err)
 		}
+	}
+	if act := scenario.timedAct(); act != "" && scenario.Control == "" {
+		return Scenario{}, fmt.Errorf("scenario %s %s: %w", path, act, errUncontrolled)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.NewDecoder(strings.NewReader(string(content))).Decode(&fields); err != nil {
@@ -165,65 +168,29 @@ func LoadScenario(path, engine string) (Scenario, error) {
 	return scenario, nil
 }
 
-// An inline directive may end with pfm's same-line delivery footer.
-const inlineMarker = "mock-engine: "
+// errUncontrolled refuses a timed act in a scenario that names no control FIFO: nothing could ever end it.
+var errUncontrolled = errors.New("is a timed act, and the scenario names no control FIFO to move its clock")
 
-func parseInlineSteps(prompt string) ([]Step, error) {
-	_, directive, found := strings.Cut(prompt, inlineMarker)
-	if !found {
-		return nil, nil
+// timedAct names the first act of the scenario that waits on the mock's clock: a busy stretch, a hold, a
+// gated agent, a crash, a compact or a launch crash; "" when it has none.
+func (scenario Scenario) timedAct() string {
+	if scenario.BusyMS != nil && *scenario.BusyMS > 0 {
+		return fmt.Sprintf("busy_ms %d", *scenario.BusyMS)
 	}
-	directive, _, _ = strings.Cut(directive, "\n")
-	directive = strings.TrimSpace(directive)
-	decoder := json.NewDecoder(strings.NewReader(directive))
-	decoder.DisallowUnknownFields()
-	steps := []Step{}
-	switch {
-	case strings.HasPrefix(directive, "{"):
-		var step Step
-		if err := decoder.Decode(&step); err != nil {
-			return nil, fmt.Errorf("decode step: %w", err)
-		}
-		steps = append(steps, step)
-	case strings.HasPrefix(directive, "["):
-		if err := decoder.Decode(&steps); err != nil {
-			return nil, fmt.Errorf("decode steps: %w", err)
-		}
-	default:
-		return nil, errors.New("expected a step object or array")
+	if scenario.LaunchCrash != "" {
+		return "launch_crash"
 	}
-	if !strings.HasPrefix(strings.TrimLeft(directive[decoder.InputOffset():], " "), "— ") {
-		var trailing any
-		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-			if err != nil {
-				return nil, fmt.Errorf("decode trailing input: %w", err)
-			}
-			return nil, errors.New("unexpected JSON after inline steps")
-		}
-	}
+	return timedStep(scenario.Steps)
+}
+
+// timedStep names the first step that waits on the mock's clock, "step {index} ({type})"; "" when none does.
+func timedStep(steps []Step) string {
 	for index := range steps {
-		if err := steps[index].validate(); err != nil {
-			return nil, fmt.Errorf("step %d: %w", index, err)
+		if steps[index].timed() {
+			return fmt.Sprintf("step %d (%s)", index, steps[index].Type)
 		}
 	}
-	return steps, nil
-}
-
-func (running *script) forPrompt(prompt string) *script {
-	steps, err := parseInlineSteps(prompt)
-	if err != nil {
-		steps = []Step{{Type: StepTurn, Reply: "mock-engine: inline steps refused — " + err.Error()}}
-	} else if steps == nil {
-		return running
-	}
-	return running.only(steps)
-}
-
-// only is the script with steps in place of its own, from their start, remembering no cursor.
-func (running *script) only(steps []Step) *script {
-	local := *running
-	local.Steps, local.position, local.cursor = steps, 0, ""
-	return &local
+	return ""
 }
 
 // Write serialises the scenario for a test to hand to a mock process.
@@ -239,127 +206,4 @@ func (scenario Scenario) Write(path string) error {
 		return fmt.Errorf("write scenario %s: %w", path, err)
 	}
 	return nil
-}
-
-// cursorSuffix names the file beside a scenario that remembers how many
-// steps earlier processes consumed, so one script spans a resume, a headless
-// call and its follow-up: the ordered list is the session's, not one
-// process's.
-const cursorSuffix = ".cursor"
-
-// script is a scenario with its defaults resolved and a cursor over its steps.
-type script struct {
-	Scenario
-	engine   string
-	position int
-	cursor   string
-}
-
-// newScript resolves defaults; cursor is the scenario path ("" keeps the
-// position in memory only).
-func newScript(scenario Scenario, engine string) *script {
-	resolved := &script{Scenario: scenario, engine: engine}
-	if resolved.Reply == "" {
-		resolved.Reply = DefaultReply
-	}
-	if resolved.BusyMS == nil {
-		busy := DefaultBusyMS
-		resolved.BusyMS = &busy
-	}
-	if resolved.Model == "" {
-		switch engine {
-		case engineClaude:
-			resolved.Model = DefaultClaudeModel
-		case engineCodex:
-			resolved.Model = DefaultCodexModel
-		default:
-			resolved.Model = DefaultOpenCodeMode
-		}
-	}
-	if resolved.Version == "" {
-		switch engine {
-		case engineClaude:
-			resolved.Version = DefaultClaudeVersion
-		case engineCodex:
-			resolved.Version = DefaultCodexVersion
-		default:
-			resolved.Version = DefaultOpenCodeVersion
-		}
-	}
-	if resolved.Tokens.Input == 0 && resolved.Tokens.Output == 0 {
-		resolved.Tokens = Tokens{Input: 12, Output: 3, CacheRead: 1000, CacheCreation: 40, ContextWindow: 200000}
-	}
-	return resolved
-}
-
-// resume attaches the cursor file and reads the position earlier processes
-// left. A cursor that does not parse is an error: a stale count would replay
-// or skip steps silently.
-func (running *script) resume(scenarioPath string) error {
-	if scenarioPath == "" {
-		return nil
-	}
-	running.cursor = scenarioPath + cursorSuffix
-	content, err := os.ReadFile(running.cursor)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read scenario cursor: %w", err)
-	}
-	position, err := strconv.Atoi(strings.TrimSpace(string(content)))
-	if err != nil || position < 0 {
-		return fmt.Errorf(
-			"scenario cursor %s holds %q, not a step count",
-			running.cursor,
-			strings.TrimSpace(string(content)),
-		)
-	}
-	running.position = position
-	return nil
-}
-
-// next pops the next step, or a default turn once the list is exhausted.
-func (running *script) next() Step {
-	if running.position >= len(running.Steps) {
-		return Step{Type: StepTurn}
-	}
-	step := running.Steps[running.position]
-	running.advance(1)
-	return step
-}
-
-// advance moves the cursor and persists it when the script has a file.
-func (running *script) advance(count int) {
-	running.position += count
-	if running.cursor == "" {
-		return
-	}
-	if err := atomicfile.Write(running.cursor, []byte(strconv.Itoa(running.position)), 0o600); err != nil {
-		// The next process would replay this step; the error is loud on the
-		// next read rather than swallowed here.
-		if writeErr := os.WriteFile(running.cursor, []byte("unwritable: "+err.Error()), 0o600); writeErr != nil {
-			fmt.Fprintf(
-				os.Stderr,
-				"mock-engine: cursor %s unwritable (%v) and the fallback write also failed: %v\n",
-				running.cursor, err, writeErr,
-			)
-		}
-	}
-}
-
-// turnReply resolves a turn step's reply, busy time and usage against the
-// scenario defaults.
-func (running *script) turnReply(step Step) (reply string, busyMS int, usage Tokens) {
-	reply, busyMS, usage = running.Reply, *running.BusyMS, running.Tokens
-	if step.Reply != "" {
-		reply = step.Reply
-	}
-	if step.BusyMS != 0 {
-		busyMS = step.BusyMS
-	}
-	if step.Tokens != nil {
-		usage = *step.Tokens
-	}
-	return reply, busyMS, usage
 }

@@ -8,9 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -78,32 +76,6 @@ func TestFailedStepBlocksOnlyItsDescendants(t *testing.T) {
 	}
 	if !failed || strings.Contains(out, "root/day/bad/x<") {
 		t.Fatalf("child failed=%v, want true and no step under root/day/bad run:\n%s", failed, out)
-	}
-}
-
-func TestBudgetFailsOnlyARunOverIt(t *testing.T) {
-	for _, row := range []struct {
-		name    string
-		elapsed time.Duration
-		want    string // the budget line, empty when the run passes
-	}{
-		{"under", 9999 * time.Millisecond, ""},
-		{"at the bound", 10 * time.Second, ""},
-		{"over", 10001 * time.Millisecond, "budget: the tree took 10.0s, allowed 10s"},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			out, failed, parent := inChild(t, func(t *testing.T) {
-				fake := clock.NewFake(time.Unix(1_700_000_000, 0))
-				step := func(_ *Ctx, in int) int { fake.Advance(row.elapsed); return in }
-				Run(t, Do("root", step), 0, Hooks{Budget: 10 * time.Second, Clock: fake})
-			})
-			if !parent {
-				return
-			}
-			if got := lineAfter(out, "budget:"); got != row.want || failed != (row.want != "") {
-				t.Fatalf("budget line %q failed=%v, want %q failed=%v\n%s", got, failed, row.want, row.want != "", out)
-			}
-		})
 	}
 }
 

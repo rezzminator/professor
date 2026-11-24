@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -158,7 +160,10 @@ func TestReapTeammatesRetainsFailedChildren(t *testing.T) {
 				serverErr, paneErr = errors.New("no server running on /x"), errors.New("can't find pane: %7")
 			}
 			tmux := &reapTmux{fakeTmux: &fakeTmux{killPaneErr: paneErr}, serverErr: serverErr}
-			finisher, err := NewFinisher(database, Dependencies{Paths: jail.resolved(), Tmux: tmux, Screen: tmux})
+			finisher, err := NewFinisher(
+				database,
+				Dependencies{Clock: newFinisherStepClock(), Paths: jail.resolved(), Tmux: tmux, Screen: tmux},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -220,7 +225,10 @@ func TestReapTeammatesReadsTheFlatFileWhenTheTableIsUnreadable(t *testing.T) {
 	database := jail.open(t)
 	ctx := context.Background()
 	tmux := &fakeTmux{}
-	finisher, err := NewFinisher(database, Dependencies{Paths: jail.resolved(), Tmux: tmux, Screen: tmux})
+	finisher, err := NewFinisher(
+		database,
+		Dependencies{Clock: newFinisherStepClock(), Paths: jail.resolved(), Tmux: tmux, Screen: tmux},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,6 +477,7 @@ func TestFinisherTypesExitOnlyAfterTheTurnAndConfirmsTheExitDialog(t *testing.T)
 			database := jail.open(t)
 			var log bytes.Buffer
 			finisher, err := NewFinisher(database, Dependencies{
+				Clock:        newFinisherStepClock(),
 				Paths:        jail.resolved(),
 				Log:          &log,
 				Tmux:         test.tmux,
@@ -561,4 +570,36 @@ func TestIndexRefresherWarnsOnAPartialIndexAndRefreshes(t *testing.T) {
 	if warned != want {
 		t.Fatalf("warned error = %v, want %q", warned, want)
 	}
+}
+
+// finisherStepClock is the clock of a finisher or ConfirmExit whose panes are
+// fakes that change only when read: Now stands still and Sleep moves it on by
+// the duration and returns, so a delay or a poll bound runs out after so many
+// polls, never after so much host time. The embedded fake carries the timers no
+// kill wait arms.
+type finisherStepClock struct {
+	clock.Clock
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFinisherStepClock() *finisherStepClock {
+	start := time.Unix(1_786_838_400, 0)
+	return &finisherStepClock{Clock: clock.NewFake(start), now: start}
+}
+
+func (step *finisherStepClock) Now() time.Time {
+	step.mu.Lock()
+	defer step.mu.Unlock()
+	return step.now
+}
+
+func (step *finisherStepClock) Sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	step.mu.Lock()
+	defer step.mu.Unlock()
+	step.now = step.now.Add(d)
+	return nil
 }

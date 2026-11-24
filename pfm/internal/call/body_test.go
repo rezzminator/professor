@@ -14,7 +14,7 @@ import (
 func TestPersistBodyPrunesExpiredMarkdownByAge(t *testing.T) {
 	engine := newTestEngine(t, "cc-body-prune", &fakeTmux{capture: "❯ "})
 	now := time.Date(2031, 2, 3, 4, 5, 6, 7, time.UTC)
-	engine.options.Clock = fixedClock{Clock: clock.Real, now: now}
+	engine.options.Clock = fixedClock{Clock: clock.NewFake(now), now: now}
 	engine.options.BodyMaxAge = 24 * time.Hour
 	if err := os.MkdirAll(engine.options.BodyRoot, 0o700); err != nil {
 		t.Fatal(err)

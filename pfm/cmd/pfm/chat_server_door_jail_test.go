@@ -111,7 +111,7 @@ func TestChatServerBirthsANativeCodexSeatForAHerdrCaller(t *testing.T) {
 	name := "cx-1800000060-1-1"
 	var stdout, stderr bytes.Buffer
 	code := runInternal(
-		[]string{"chat-server", name, jail.root, "sleep 1", "fix the bug"},
+		[]string{"chat-server", name, jail.root, "true", "fix the bug"},
 		&stdout, &stderr, runtime,
 	)
 
@@ -174,7 +174,7 @@ func TestChatServerRefusesArgumentsANativeSeatCannotCarry(t *testing.T) {
 	for _, args := range [][]string{{"--model", "o9"}, {"resume"}, {"exec", "hi"}, {"one", "two"}} {
 		var stdout, stderr bytes.Buffer
 		code := runInternal(
-			append([]string{"chat-server", "cx-1800000061-1-1", jail.root, "sleep 1"}, args...),
+			append([]string{"chat-server", "cx-1800000061-1-1", jail.root, "true"}, args...),
 			&stdout, &stderr, runtime,
 		)
 		if code != 1 || !strings.Contains(stderr.String(), "pfm chat new") || stdout.Len() != 0 {

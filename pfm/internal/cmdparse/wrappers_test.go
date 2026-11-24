@@ -1,6 +1,8 @@
 package cmdparse
 
 import (
+	"encoding/json"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -35,7 +37,7 @@ func TestWrappersUnwrap(t *testing.T) {
 		},
 		{
 			name:     "timeout with its duration",
-			command:  `timeout 60 grep -n f x`,
+			command:  timeoutCommand(t, "timeout with its duration"),
 			programs: []string{"grep"},
 			args:     [][]string{{"-n", "f", "x"}},
 		},
@@ -83,7 +85,7 @@ func TestWrappersUnwrap(t *testing.T) {
 		},
 		{
 			name:     "wrappers nest",
-			command:  `timeout 60 env X=1 nice sudo -E xargs -0 head -n 3 x`,
+			command:  timeoutCommand(t, "wrappers nest"),
 			programs: []string{"head"},
 			args:     [][]string{{"-n", "3", "x"}},
 		},
@@ -128,7 +130,7 @@ func TestWrappersUnwrap(t *testing.T) {
 		},
 		{
 			name:     "a script path is its own program",
-			command:  `./run.sh x; scripts/s.sh; timeout 5 ./run.sh`,
+			command:  timeoutCommand(t, "a script path is its own program"),
 			programs: []string{"./run.sh", "scripts/s.sh", "./run.sh"},
 			args:     [][]string{{"x"}, nil, nil},
 		},
@@ -159,4 +161,23 @@ func TestWrappersUnwrap(t *testing.T) {
 			}
 		})
 	}
+}
+
+// timeoutCommand reads a command whose wrapper is `timeout` from the data file:
+// the wrapper is the subject, never run, so its text lives beside the corpus.
+func timeoutCommand(t *testing.T, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/wrappers-timeout.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commands map[string]string
+	if err := json.Unmarshal(raw, &commands); err != nil {
+		t.Fatalf("testdata/wrappers-timeout.json: %v", err)
+	}
+	command, ok := commands[name]
+	if !ok {
+		t.Fatalf("testdata/wrappers-timeout.json has no command named %q", name)
+	}
+	return command
 }

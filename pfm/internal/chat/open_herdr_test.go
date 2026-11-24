@@ -12,12 +12,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -28,6 +27,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -390,7 +390,7 @@ func TestOpenNativeOutsideReportsLocationWhenAttachFails(t *testing.T) {
 }
 
 // plantNativeReloadFiles writes seatID's reload schedule record and log into
-// sidDir, as a native /reload leaves them, and returns their paths.
+// sidDir, as a native /pfm:reload leaves them, and returns their paths.
 func plantNativeReloadFiles(t *testing.T, sidDir, seatID string) []string {
 	t.Helper()
 	if err := os.MkdirAll(sidDir, 0o700); err != nil {
@@ -508,6 +508,10 @@ func TestDetachedNativeRereadsAfterConversationLock(t *testing.T) {
 	for _, state := range []string{"starting", "retrying"} {
 		t.Run(state, func(t *testing.T) {
 			testjail.Fleet(t)
+			// The open's wait for the conversation lock sleeps on the process clock; the
+			// lock is freed and the rows are in place before the clock is driven.
+			fake := clock.NewFake(clock.Wall())
+			testwait.ProcessClock(t, fake)
 			socket := nativeChatSocket(t, func(req nativeChatRequest) (any, string) {
 				value, code, _ := nativeChatProof(req, "w9:p2")
 				return value, code
@@ -518,14 +522,10 @@ func TestDetachedNativeRereadsAfterConversationLock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var wg sync.WaitGroup
-			wg.Add(2)
 			results := make(chan error, 2)
+			ctx := testwait.Context(t)
 			for range 2 {
 				go func() {
-					defer wg.Done()
-					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-					defer cancel()
 					result, err := detachedNative(ctx, seat, io.Discard, runtime)
 					if err == nil && result.State != "live" {
 						err = fmt.Errorf("result=%+v", result)
@@ -547,13 +547,13 @@ func TestDetachedNativeRereadsAfterConversationLock(t *testing.T) {
 			if err := unlock(); err != nil {
 				t.Fatal(err)
 			}
-			wg.Wait()
-			close(results)
-			for err := range results {
-				if err != nil {
-					t.Fatalf("serialized open did not reread current supervisor: %v", err)
+			testwait.Drive(t, "the serialized opens to reread the current supervisor", fake, func() {
+				for range 2 {
+					if err, _ := testwait.Receive(t, "a serialized open to return", results); err != nil {
+						t.Errorf("serialized open did not reread current supervisor: %v", err)
+					}
 				}
-			}
+			})
 		})
 	}
 }

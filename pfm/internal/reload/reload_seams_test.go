@@ -3,6 +3,7 @@ package reload
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -18,7 +19,7 @@ import (
 // parallel test in the same body.
 func TestRunRefusesWithNoTmuxClientOnAHostWithoutTmux(t *testing.T) {
 	base := hostfixture.NoTmux(t)
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		Request{
 			Engine:     pfmengine.Claude,
@@ -27,7 +28,7 @@ func TestRunRefusesWithNoTmuxClientOnAHostWithoutTmux(t *testing.T) {
 			Account:    1,
 			AccountIDs: []int{1},
 		},
-		Options{SIDDir: base.Values.SIDDir, Delay: -1, Poll: -1, Clock: clock.Real},
+		Options{SIDDir: base.Values.SIDDir, Delay: -1, Poll: -1, Clock: clock.NewFake(time.Unix(0, 0))},
 		nil,
 		nil,
 		nil,

@@ -66,6 +66,13 @@
       "match": "exact"
     },
     {
+      "name": "/reload",
+      "kind": "command",
+      "successor": "/pfm:reload",
+      "match": "exact",
+      "route": true
+    },
+    {
       "name": "/rules:use",
       "kind": "command",
       "successor": "/law:rules",
@@ -212,6 +219,10 @@
     {
       "name": "exit-close",
       "subcommand": "internal exit-close"
+    },
+    {
+      "name": "reload-intercept",
+      "subcommand": "internal reload-intercept"
     }
   ],
   "hookBinaries": [],
@@ -219,6 +230,13 @@
   "claudePlugins": {
     "cache-live-control": [
       "cache-keepwarm@professor"
+    ],
+    "(none)": [
+      "buddy@professor",
+      "buddy@inline",
+      "effort-live-control@professor",
+      "sub-agent-compact@professor",
+      "flapboard@flapboard"
     ]
   },
   "globalAgents": [
@@ -236,7 +254,12 @@
     "tracer"
   ],
   "units": [],
-  "configFiles": [],
+  "configFiles": [
+    {
+      "path": "commands/reload.md",
+      "reason": "retired /reload command link; successor /pfm:reload"
+    }
+  ],
   "commands": {
     "homeBin": [],
     "accountBin": []

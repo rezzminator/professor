@@ -7,6 +7,7 @@
 # shtest_probe_trap_guard <path> proves the EXIT trap's PID guard, <path> standing in for a shtest_clean_also path.
 # shtest_as_root <script> [args...] re-runs a root-only suite as root through passwordless sudo.
 # shtest_isolate_host points HOME at $T/home and git at no host config or inherited repository, so a fixture commit never reads the host's.
+# shtest_wait_until, shtest_wait_gone, shtest_wait_line and shtest_hold, the one wait door, come from scripts/shtest-wait.sh.
 # BROKEN STATE: an unset SHTEST_TAG or a failed mktemp exits 2 with a named
 # line before any assertion runs — a suite never reports "0 failed" from a
 # harness that did not start.
@@ -23,6 +24,8 @@ shtest_clean_also() { # shtest_clean_also <path>...: adds to the paths of every 
   trap 'if [ "${BASHPID:-$$}" = "$SHTEST_PID" ]; then rm -rf -- "$T"'"$SHTEST_CLEAN_EXTRA"'; fi' EXIT
 }
 shtest_clean_also
+# shellcheck source=scripts/shtest-wait.sh
+. "${BASH_SOURCE[0]%/*}/shtest-wait.sh" || { echo "shtest: the wait door scripts/shtest-wait.sh did not load for $SHTEST_TAG" >&2; exit 2; }
 PASS=0
 FAIL=0
 ok() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -79,7 +82,10 @@ shtest_as_root() {
   echo "$SHTEST_TAG: FAILED — this suite needs root (the fence's user); not root and no passwordless sudo" >&2
   exit 1
 }
-shtest_end() { printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; }
+shtest_end() { # a hung wait of this shell is a failure, whether or not the test read its status
+  [ "$SHTEST_WAITS_HUNG" -eq 0 ] || { printf 'FAIL  %d waits hung (each WAIT HUNG line above)\n' "$SHTEST_WAITS_HUNG" >&2; FAIL=$((FAIL + SHTEST_WAITS_HUNG)); }
+  printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
+}
 # shtest_probe_trap_guard <path>: the suite's EXIT trap, run by a forked shell, must leave $T and <path> alone.
 # <path> is baked into the trap by shtest_clean_also, so the probe swaps it for a sacrificial directory: a
 # regressed guard deletes only probe paths, never the live suite's. An empty trap FAILs the probe, never PASSes it.

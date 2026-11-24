@@ -1,17 +1,22 @@
-// Package hookentry holds the body of every pfm internal <entry>: the harness hooks (store-guard, pcm-guard, epic-inject, reload-intercept, exit-intercept, resume-unkill, prompt block) and the entries the installer wires as units and shim calls (launch, then, chat-server, claude-version, clear-kill, agent-open, codex-launch, launcher-repair, update-check). Argv and stdin in, exit code out — the harness's own contract.
+// Package hookentry holds the body of every pfm internal <entry>: the harness hooks (store-guard, pcm-guard, epic-inject, command-intercept, exit-intercept, resume-unkill, prompt block) and the entries the installer wires as units and shim calls (launch, then, chat-server, claude-version, clear-kill, agent-open, codex-launch, launcher-repair, update-check). Argv and stdin in, exit code out — the harness's own contract.
 //
+// epic_inject_manifest.go finds the epic manifest a chat's window names and records it injected once per session.
+// epic_inject_then.go hands epic-inject the --then message a native reload stored and could not type.
 // herdr_activity_record.go keeps each Claude session's Herdr activity record and hands the
 // native Claude panes an older build reported under herdr:claude back to Herdr (pfm install's cutover).
 // herdr_shell_resume.go answers the shim's auto-open whether Herdr resumes the pane's agent itself.
 // herdr_settle_process.go is the detached settle process: the mode a hook hands it and its
 // bounded, backing-off retry of a Herdr state the host's load left undelivered.
+// herdr_state_clock.go gives a Herdr reporter its clock and the deadline context its hook runs under.
 // herdr_tmux_seat.go binds and ends a tmux chat's seat on its engine's session start and end.
 // install_ping.go sends pfm install's install ping and the daily one, printing nothing.
 // pcm_guard_inline.go reads the inline code an interpreter call carries (python -c, node -e,
 // --eval) by the paths it names, for pcm-guard.
 // seathost_close.go decides what an ended engine does to its seat: restart the reload it awaits, or close it.
 // seathost_engine.go builds and runs a seat's foreground engine from its recipe and the current pane.
+// seathost_exit.go logs an engine's non-zero exit with the pane's last lines, and judges a resumed start that died.
 // seathost_image.go re-execs a seat-host from the installed pfm when an install replaced its binary,
 // an ended engine's close resuming there.
+// seathost_recipe.go is a seat's recorded recipe as each engine start runs it: config reread, MCP file rewritten.
 // seathost_retry.go asks the pane, after a failed engine start, whether to retry or close.
 package hookentry

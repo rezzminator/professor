@@ -127,3 +127,32 @@ func TestPaintWritesAFrameOnlyWhenItChanged(t *testing.T) {
 			got, errs.String(), want)
 	}
 }
+
+// A native reload's reborn --then wait counts a Claude composer row only inside
+// Claude's input box (pfmcall.ComposerBoxed): the mock Claude's frame is boxed,
+// its last frame after /exit draws no row, and the shell line a fullscreen
+// Claude's exit uncovers is a composer row to LastComposerLine but no box.
+func TestPaneClaudeComposerIsBoxedAndAShellLineIsNot(t *testing.T) {
+	screen := &pane{glyph: "❯", rule: claudeComposerRule}
+	screen.say("> hello")
+	frame := screen.render()
+	if !pfmcall.ComposerBoxed(frame) || pfmcall.LastComposerLine(frame) != "❯ \r" {
+		t.Fatalf("Claude frame: boxed=%t row=%q, want boxed row %q:\n%s",
+			pfmcall.ComposerBoxed(frame), pfmcall.LastComposerLine(frame), "❯ \r", frame)
+	}
+	screen.left = true
+	if left := screen.render(); pfmcall.LastComposerLine(left) != "" || pfmcall.ComposerBoxed(left) {
+		t.Fatalf("ended engine's last frame draws a composer:\n%s", left)
+	}
+	const shell = "~/work on develop\r\n❯ claude --resume 02c1b522-4536-4346-9d9f-c435bd370bca\r\n"
+	if pfmcall.LastComposerLine(shell) != "❯ claude --resume 02c1b522-4536-4346-9d9f-c435bd370bca\r" ||
+		pfmcall.ComposerBoxed(shell) {
+		t.Fatalf("shell line: row=%q boxed=%t, want the row read and no box",
+			pfmcall.LastComposerLine(shell), pfmcall.ComposerBoxed(shell))
+	}
+	codex := (&pane{glyph: "›"}).render()
+	if pfmcall.LastComposerLine(codex) != "› \r" || pfmcall.ComposerBoxed(codex) {
+		t.Fatalf("Codex frame: row=%q boxed=%t, want its row and no box (Codex draws none):\n%s",
+			pfmcall.LastComposerLine(codex), pfmcall.ComposerBoxed(codex), codex)
+	}
+}

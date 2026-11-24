@@ -1,11 +1,13 @@
 package retired
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -21,6 +23,57 @@ func TestShippedListsLoad(t *testing.T) {
 	}
 }
 
+// TestShippedListsLoadInThePreviousRelease: the previous release's binary
+// still loads this clone's lists — `pfm update` run by it reads them for its
+// own post-update project report — so the shipped file carries only the
+// top-level keys its strict decoder knows and passes its claudePlugins check.
+func TestShippedListsLoadInThePreviousRelease(t *testing.T) {
+	// v0.90.0's top-level keys: its Lists struct, decoded with DisallowUnknownFields.
+	previous := []string{
+		"names", "storeEntries", "stateDirs", "hookCommands", "hookBinaries", "hookShimHints",
+		"claudePlugins", "globalAgents", "units", "configFiles", "commands",
+	}
+	repo, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(repo, filepath.FromSlash(FileRel))
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("parse %s: %v", file, err)
+	}
+	var unknown []string
+	for key := range document {
+		if !slices.Contains(previous, key) {
+			unknown = append(unknown, key)
+		}
+	}
+	slices.Sort(unknown)
+	if !slices.Equal(unknown, []string(nil)) {
+		t.Fatalf("%s holds top-level keys %q; v0.90.0 refuses the whole file for them, want only %q",
+			file, unknown, previous)
+	}
+	// v0.90.0's claudePlugins check: a successor key, at least one id, each carrying @.
+	var plugins map[string][]string
+	if err := json.Unmarshal(document["claudePlugins"], &plugins); err != nil {
+		t.Fatalf("%s claudePlugins: %v", file, err)
+	}
+	for successor, ids := range plugins {
+		if successor == "" || len(ids) == 0 {
+			t.Fatalf("%s claudePlugins[%q] = %q; v0.90.0 wants a successor and at least one id", file, successor, ids)
+		}
+		for _, id := range ids {
+			if !strings.Contains(id, "@") {
+				t.Fatalf("%s claudePlugins[%q] holds %q; v0.90.0 wants name@marketplace", file, successor, id)
+			}
+		}
+	}
+}
+
 func TestParse(t *testing.T) {
 	full := `{
   "names": [{"name": "/old", "kind": "command", "successor": "/new", "match": "family", "route": true},
@@ -30,7 +83,7 @@ func TestParse(t *testing.T) {
   "hookCommands": [{"name": "bb", "subcommand": "chat bb"}],
   "hookBinaries": ["cc-fleet"],
   "hookShimHints": [{"name": "bb", "hint": "bb-hook.sh"}],
-  "claudePlugins": {"new-effort": ["old-effort@professor"]},
+  "claudePlugins": {"new-effort": ["old-effort@professor"], "(none)": ["old-pet@professor", "old-pet@inline"]},
   "globalAgents": ["frr"],
   "units": ["cc-name-sync.timer"],
   "configFiles": [{"path": "bin/cx-recover.sh.pre-professor-*", "reason": "retired recovery artifact"}],
@@ -41,16 +94,19 @@ func TestParse(t *testing.T) {
 			{Name: "/old", Kind: KindCommand, Successor: "/new", Match: MatchFamily, Route: true},
 			{Name: "x agent", Kind: KindAgent, Match: MatchExact, Probe: ".claude/agents/x.md"},
 		},
-		StoreEntries:  []string{"stats-cache.json"},
-		StateDirs:     []StateDir{{Name: "call-cap", What: "retired tallies"}},
-		HookCommands:  []HookCommand{{Name: "bb", Subcommand: "chat bb"}},
-		HookBinaries:  []string{"cc-fleet"},
-		HookShimHints: []HookShimHint{{Name: "bb", Hint: "bb-hook.sh"}},
-		ClaudePlugins: map[string][]string{"new-effort": {"old-effort@professor"}},
-		GlobalAgents:  []string{"frr"},
-		Units:         []string{"cc-name-sync.timer"},
-		ConfigFiles:   []ConfigFile{{Path: "bin/cx-recover.sh.pre-professor-*", Reason: "retired recovery artifact"}},
-		Commands:      Commands{HomeBin: []string{"cc-ls"}, AccountBin: []string{"cc-launch.sh"}},
+		StoreEntries:         []string{"stats-cache.json"},
+		StateDirs:            []StateDir{{Name: "call-cap", What: "retired tallies"}},
+		HookCommands:         []HookCommand{{Name: "bb", Subcommand: "chat bb"}},
+		HookBinaries:         []string{"cc-fleet"},
+		HookShimHints:        []HookShimHint{{Name: "bb", Hint: "bb-hook.sh"}},
+		ClaudePlugins:        map[string][]string{"new-effort": {"old-effort@professor"}},
+		ClaudePluginsRemoved: []string{"old-pet@professor", "old-pet@inline"},
+		GlobalAgents:         []string{"frr"},
+		Units:                []string{"cc-name-sync.timer"},
+		ConfigFiles: []ConfigFile{
+			{Path: "bin/cx-recover.sh.pre-professor-*", Reason: "retired recovery artifact"},
+		},
+		Commands: Commands{HomeBin: []string{"cc-ls"}, AccountBin: []string{"cc-launch.sh"}},
 	}
 	got, err := ParseLists([]byte(full))
 	if err != nil || !reflect.DeepEqual(got, want) {
@@ -86,6 +142,39 @@ func TestParse(t *testing.T) {
 		{
 			"plugin id without a marketplace", `{"claudePlugins": {"new-effort": ["old-effort"]}}`,
 			`claudePlugins["new-effort"][0]: want a name@marketplace id, got "old-effort"`,
+		},
+		{
+			"removed plugin without a marketplace", `{"claudePlugins": {"(none)": ["old-pet"]}}`,
+			`claudePlugins["(none)"][0]: want a name@marketplace id, got "old-pet"`,
+		},
+		{
+			"removed plugin with an empty marketplace", `{"claudePlugins": {"(none)": ["old-pet@"]}}`,
+			`claudePlugins["(none)"][0]: want a name@marketplace id, got "old-pet@"`,
+		},
+		{
+			"removed plugin with a path", `{"claudePlugins": {"(none)": ["../old-pet@professor"]}}`,
+			`claudePlugins["(none)"][0]: want a name@marketplace id, got "../old-pet@professor"`,
+		},
+		{
+			"removed plugin with two marketplaces", `{"claudePlugins": {"(none)": ["old-pet@a@b"]}}`,
+			`claudePlugins["(none)"][0]: want a name@marketplace id, got "old-pet@a@b"`,
+		},
+		{
+			"removed plugin listed twice", `{"claudePlugins": {"(none)": ["old-pet@professor", "old-pet@professor"]}}`,
+			`claudePlugins["(none)"][1]: "old-pet@professor" is listed twice`,
+		},
+		{
+			"removed plugin a successor also retires",
+			`{"claudePlugins": {"new-pet": ["old-pet@professor"], "(none)": ["old-pet@professor"]}}`,
+			`claudePlugins["(none)"]: "old-pet@professor" is also retired by claudePlugins["new-pet"]; keep one`,
+		},
+		{
+			"removed plugins under their former key", `{"claudePluginsRemoved": ["old-pet@professor"]}`,
+			`decode: json: unknown field "claudePluginsRemoved"`,
+		},
+		{
+			"removed plugins with no id", `{"claudePlugins": {"(none)": []}}`,
+			`claudePlugins["(none)"]: want a successor name and at least one retired id`,
 		},
 		{"agent with a path", `{"globalAgents": ["../frr"]}`, `globalAgents[0]: "../frr" is not one agent name`},
 		{"unit with a path", `{"units": ["x/y.timer"]}`, `units[0]: "x/y.timer" is not one unit name`},

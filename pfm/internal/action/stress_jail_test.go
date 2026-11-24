@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 )
@@ -19,7 +18,6 @@ func TestActionStress(t *testing.T) {
 	previous := newSessionID
 	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
 	t.Cleanup(func() { newSessionID = previous })
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 	requests := stressRequests(t.TempDir())
 	expected := make([]Plan, len(requests))
 	for index, request := range requests {
@@ -29,7 +27,6 @@ func TestActionStress(t *testing.T) {
 		}
 		expected[index] = plan
 	}
-	started := time.Now()
 	const syntheses = 10_000
 	for index := 0; index < syntheses; index++ {
 		requestIndex := index % len(requests)
@@ -42,28 +39,23 @@ func TestActionStress(t *testing.T) {
 			t.Fatalf("nondeterministic synthesis at %d", index)
 		}
 	}
-	elapsed := time.Since(started)
-	limit := 10 * time.Second
-	if strict {
-		limit = time.Second
-	}
-	if elapsed >= limit {
-		t.Fatalf(
-			"10k deterministic syntheses took %s, want <%s (strict=%t)",
-			elapsed,
-			limit,
-			strict,
-		)
-	}
-	t.Logf(
-		"STRESS syntheses=%d combinations=%d deterministic=true elapsed=%s strict=%t",
-		syntheses,
-		len(requests),
-		elapsed,
-		strict,
-	)
+	t.Logf("STRESS syntheses=%d combinations=%d deterministic=true", syntheses, len(requests))
 
 	stressHostileProjectDirectories(t)
+}
+
+// BenchmarkActionSynthesize measures what TestActionStress no longer times:
+// one synthesis over the stress combinations, by testing.B's own timer.
+func BenchmarkActionSynthesize(b *testing.B) {
+	previous := newSessionID
+	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
+	b.Cleanup(func() { newSessionID = previous })
+	requests := stressRequests(b.TempDir())
+	for index := 0; b.Loop(); index++ {
+		if _, err := Synthesize(requests[index%len(requests)]); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func stressHostileProjectDirectories(t *testing.T) {

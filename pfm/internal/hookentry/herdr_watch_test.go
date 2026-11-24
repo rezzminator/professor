@@ -17,7 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The entries Claude Code 2.1.301 writes when the user answers a permission
@@ -83,12 +85,18 @@ type watchRig struct {
 	transcript string
 	spawned    [][]string
 	engineGone atomic.Bool
+	// fake is the process clock of the rig's watches: they sleep their poll on clock.Real.
+	fake *clock.Fake
 }
 
 func newWatchRig(t *testing.T) *watchRig {
 	t.Helper()
 	rig := &watchRig{chatRig: newChatRig(t), transcript: filepath.Join(t.TempDir(), "s1.jsonl")}
 	rig.clock = watchRigClock
+	rig.fake = clock.NewFake(time.Now())
+	testwait.ProcessClock(t, rig.fake)
+	// The reporters' lock retries and deadlines sit on the jail's own clock (newHerdrJail): the
+	// watch's poll clock is advanced while a report is still on the wire.
 	rig.seed(rig.registered("working", map[string]herdrClient{"4242": rig.client("w1:p1", "term_1")}))
 	if err := os.WriteFile(rig.transcript, []byte(watchToolUseEntry+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -165,57 +173,6 @@ func (rig *watchRig) watchDeps() herdrDeps {
 		return procInfo(pid)
 	}
 	return deps
-}
-
-// runningWatch is one watch process played in a goroutine with its own clock.
-type runningWatch struct {
-	done   chan struct{}
-	rc     int
-	stderr bytes.Buffer
-	ended  time.Time
-}
-
-// start plays the spawned argv the way the detached child runs it.
-func (rig *watchRig) start(argv []string, poll time.Duration) *runningWatch {
-	rig.t.Helper()
-	if len(argv) < 3 || !slices.Equal(argv[:3], []string{"internal", "herdr-state", herdrWatchVerb}) {
-		rig.t.Fatalf("spawned argv = %q, want internal herdr-state watch …", argv)
-	}
-	deps := rig.watchDeps()
-	watch := &runningWatch{done: make(chan struct{})}
-	go func() {
-		defer close(watch.done)
-		watch.rc = watchForHerdr(argv[3:], &watch.stderr, deps, poll)
-		watch.ended = time.Now()
-	}()
-	return watch
-}
-
-func (watch *runningWatch) wait(t *testing.T, within time.Duration) {
-	t.Helper()
-	select {
-	case <-watch.done:
-	case <-time.After(within):
-		t.Fatalf("the watch still runs after %s", within)
-	}
-}
-
-// waitClaimed waits for the started watch to claim its record with its own
-// pid and command (the rig's pid 100, pfm).
-func (rig *watchRig) waitClaimed(argv []string) {
-	rig.t.Helper()
-	claimed := flagValue(rig.t, argv, "--seq") + " 100 pfm"
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		data, err := os.ReadFile(rig.record())
-		if err == nil && strings.TrimSpace(string(data)) == claimed {
-			return
-		}
-		if time.Now().After(deadline) {
-			rig.t.Fatalf("watch record = %q (%v), want claimed as %q", data, err, claimed)
-		}
-		<-time.After(fastPoll)
-	}
 }
 
 func flagValue(t *testing.T, argv []string, name string) string {
@@ -305,12 +262,14 @@ func TestHerdrWatchReportsIdleOnTheInterruptEntry(t *testing.T) {
 			tc.after(rig)
 			sent := len(rig.herdr.calls())
 			watch := rig.start(argv, herdrWatchPoll)
-			time.Sleep(2 * herdrWatchPoll) // the watch is polling when the entries land
-			appended := time.Now()
+			watch.polls(t, 2) // the watch is polling when the entries land
 			rig.appendEntries(tc.entries...)
-			watch.wait(t, 5*time.Second)
-			if took := watch.ended.Sub(appended); took > 2*time.Second {
-				t.Fatalf("idle reported %s after the interrupt entry, want within 2s", took)
+			if polled := watch.pollsToEnd(t); polled != 1 {
+				t.Fatalf(
+					"idle reported after %d polls of %s, want the first after the interrupt entry",
+					polled,
+					herdrWatchPoll,
+				)
 			}
 			if watch.rc != 0 || watch.stderr.String() != "" {
 				t.Fatalf("watch rc=%d stderr=%q, want a quiet exit 0", watch.rc, watch.stderr.String())
@@ -367,15 +326,14 @@ func TestHerdrWatchStops(t *testing.T) {
 			rig := newWatchRig(t)
 			argv := rig.block("Bash")
 			watch := rig.start(argv, fastPoll)
-			time.Sleep(5 * fastPoll)
+			watch.polls(t, 5)
 			tc.stop(rig)
-			watch.wait(t, 3*time.Second)
+			watch.wait(t)
 			if watch.rc != 0 || watch.stderr.String() != "" {
 				t.Fatalf("watch rc=%d stderr=%q, want a quiet exit 0", watch.rc, watch.stderr.String())
 			}
 			before, sent := rig.tmux.stored, len(rig.herdr.calls())
 			rig.appendEntries(watchRejectionEntry, watchInterruptEntry)
-			time.Sleep(5 * fastPoll)
 			if got := rig.herdr.calls()[sent:]; len(got) != 0 || rig.tmux.stored != before {
 				t.Fatalf(
 					"after the stopped watch: requests %q, stored %q, want none and %q",
@@ -408,7 +366,7 @@ func TestHerdrWatchStops(t *testing.T) {
 		}
 		watch := rig.start(argv, fastPoll)
 		rig.appendEntries(watchModelInterruptEntry)
-		watch.wait(t, 3*time.Second)
+		watch.wait(t)
 		if state := rig.tmux.storedState(t); state.State != "idle" || state.Seq != watchModelInterruptAt {
 			t.Fatalf("stored = %q, want idle at seq %d", rig.tmux.stored, uint64(watchModelInterruptAt))
 		}
@@ -419,7 +377,7 @@ func TestHerdrWatchStops(t *testing.T) {
 		rig := newWatchRig(t)
 		watch := rig.start(rig.block("Bash"), fastPoll)
 		rig.engineGone.Store(true)
-		watch.wait(t, 3*time.Second)
+		watch.wait(t)
 		if _, err := os.Stat(rig.record()); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("watch record after its engine exited: %v, want it gone", err)
 		}
@@ -455,7 +413,7 @@ func TestHerdrWatchStops(t *testing.T) {
 		); got != want {
 			t.Fatalf("replacing watch --seq = %s, want the working event's %s", got, want)
 		}
-		watch.wait(t, 3*time.Second) // the record names the replacement now
+		watch.wait(t) // the record names the replacement now
 	})
 }
 
@@ -482,7 +440,7 @@ func TestHerdrWatchNeverReportsOverANewerState(t *testing.T) {
 			}
 			before, sent := rig.tmux.stored, len(rig.herdr.calls())
 			watch := rig.start(argv, fastPoll)
-			time.Sleep(5 * fastPoll)
+			watch.polls(t, 5)
 			if got := rig.herdr.calls()[sent:]; len(got) != 0 || rig.tmux.stored != before {
 				t.Fatalf("requests %q, stored %q, want none and the newer %q", got, rig.tmux.stored, before)
 			}
@@ -490,7 +448,7 @@ func TestHerdrWatchNeverReportsOverANewerState(t *testing.T) {
 				t.Fatalf("stored = %q, want the newer %s", rig.tmux.stored, newer.state)
 			}
 			rig.appendEntries(stampedInterrupt("2026-10-16T08:57:43.146Z"))
-			watch.wait(t, 3*time.Second)
+			watch.wait(t)
 			if state := rig.tmux.storedState(t); state.State != "idle" || state.Seq != 1792141063146000000 {
 				t.Fatalf("stored = %q, want the later interrupt's idle at seq 1792141063146000000", rig.tmux.stored)
 			}
@@ -551,7 +509,7 @@ func TestHerdrWatchIdleOutranksAHookSpawnedBeforeTheInterrupt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newWatchRig(t)
 			watch := rig.start(tc.turn(rig), fastPoll)
-			watch.wait(t, 3*time.Second)
+			watch.wait(t)
 			tc.then(rig)
 			state := rig.tmux.storedState(t)
 			if state.State != "idle" || state.MainSeq != watchModelInterruptAt {
@@ -635,16 +593,20 @@ func TestHerdrWatchRetriesAnIdleItCouldNotDeliver(t *testing.T) {
 		t.Fatal(err)
 	}
 	rig.appendEntries(watchModelInterruptEntry)
-	deadline := time.Now().Add(2 * herdrDeadline)
-	for !strings.Contains(rig.jail.logged("cc-1"), "still held at the deadline") {
-		if time.Now().After(deadline) {
-			unlock()
-			t.Fatalf("error log = %q, want the held lock named", rig.jail.logged("cc-1"))
-		}
-		<-time.After(fastPoll)
-	}
+	watch.parked(t)
+	watch.fake.Advance(watch.poll) // the poll that finds the entry and meets the held lock
+	locks := rig.jail.clock.(*clock.Fake)
+	testwait.Until(t, "the watch to park on its retry of the held lock", func() (bool, string) {
+		next, ok := locks.NextDue()
+		return ok && next <= herdrLockPoll, locks.String()
+	})
+	locks.Advance(herdrDeadline)
+	testwait.Until(t, "the watch to log the activity lock held at the deadline", func() (bool, string) {
+		log := rig.jail.logged("cc-1")
+		return strings.Contains(log, "still held at the deadline"), "error log = " + log
+	})
 	unlock()
-	watch.wait(t, 3*time.Second)
+	watch.wait(t)
 	if state := rig.tmux.storedState(t); state.State != "idle" || state.Seq != watchModelInterruptAt {
 		t.Fatalf("stored = %q, want idle at the interrupt's seq %d", rig.tmux.stored, uint64(watchModelInterruptAt))
 	}
@@ -789,9 +751,9 @@ func TestHerdrWatchIsFailOpen(t *testing.T) {
 			argv := rig.block("Bash")
 			before, sent := rig.tmux.stored, len(rig.herdr.calls())
 			watch := rig.start(argv, fastPoll)
-			time.Sleep(5 * fastPoll)
+			watch.polls(t, 5)
 			tc.breakIt(rig)
-			watch.wait(t, 3*time.Second)
+			watch.wait(t)
 			if watch.rc != 0 {
 				t.Fatalf("watch rc=%d, want 0", watch.rc)
 			}
@@ -814,7 +776,7 @@ func TestHerdrWatchIsFailOpen(t *testing.T) {
 		rig.jail.procFails = map[int]error{50: syscall.EACCES}
 		watch := rig.start(argv, fastPoll)
 		rig.appendEntries(watchRejectionEntry, watchInterruptEntry)
-		watch.wait(t, 3*time.Second)
+		watch.wait(t)
 		if state := rig.tmux.storedState(t); state.State != "idle" || state.Seq != watchInterruptAt {
 			t.Fatalf("stored = %q, want idle at the interrupt's seq %d", rig.tmux.stored, uint64(watchInterruptAt))
 		}

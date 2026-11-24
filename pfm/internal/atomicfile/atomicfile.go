@@ -1,7 +1,8 @@
 // Package atomicfile is the one atomic file writer: every file pfm replaces
 // whole — config, caches, crumbs, receipts, staged assets — goes through Write,
 // so a reader sees the old content or the new, never a torn write, and a
-// failure leaves the old file and no scratch behind.
+// failure leaves the old file and no scratch behind. ReadRegular is its
+// reader side for a file an operator may have replaced with a FIFO or a folder.
 package atomicfile
 
 import (
@@ -11,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // removeScratch deletes an unpublished scratch file; a variable so a test can
@@ -202,4 +204,32 @@ func Symlink(target, source string) (err error) {
 		return fmt.Errorf("replace global link %s -> %s: %w", target, source, err)
 	}
 	return nil
+}
+
+// ReadRegular reads path through any symlink, opening it without waiting on a
+// FIFO and checking the opened descriptor rather than a racy pathname stat: a
+// FIFO, a socket or a device is a *PathError "not a regular file", a folder
+// one wrapping EISDIR, each naming path. A missing path wraps fs.ErrNotExist.
+func ReadRegular(path string) (raw []byte, info fs.FileInfo, result error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer func() { result = errors.Join(result, file.Close()) }()
+	info, err = file.Stat()
+	if err != nil {
+		return nil, nil, fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		cause := errors.New("not a regular file")
+		if info.IsDir() {
+			cause = syscall.EISDIR
+		}
+		return nil, nil, &os.PathError{Op: "read", Path: path, Err: cause}
+	}
+	raw, err = io.ReadAll(file)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return raw, info, nil
 }

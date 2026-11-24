@@ -3,11 +3,15 @@
 package journey
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
@@ -29,7 +33,7 @@ func plainPfm(c *harness.Ctx, s State) State {
 		" TMUX=/tmp/inherited,1,0 TMUX_PANE=%9 zsh -i\r")
 	cleared := "pfm: cleared a chat environment (CLAUDECODE=1) this terminal inherited from its app" +
 		" — relaunch the app outside any chat to stop it"
-	term.WaitFor("New chat → "+project, stepBound)
+	term.WaitFor("New chat → " + project)
 	term.Press(harness.Esc)
 	promptBack(term, "the inherited shell's prompt under the closed picker")
 	if screen := term.Screen(); !strings.Contains(screen, cleared) {
@@ -52,7 +56,7 @@ func plainPfm(c *harness.Ctx, s State) State {
 
 // promptBack waits for the shell's prompt alone on the terminal's last row.
 func promptBack(term *harness.Terminal, what string) {
-	term.WaitScreen(what, stepBound, func(screen string) bool {
+	term.WaitScreen(what, func(screen string) bool {
 		lines := strings.Split(screen, "\n")
 		return strings.TrimSpace(lines[len(lines)-1]) == prompt
 	})
@@ -86,14 +90,14 @@ func pickerChat(c *harness.Ctx, s State) State {
 			" stderr %q; want exit 0, stdout %q", code, out, errs, want)
 	}
 	term.Type("clear && mkdir -p ~/work/" + project + " && cd ~/work/" + project + " && pfm\r")
-	term.WaitFor("New chat → "+project, 20*time.Second)
+	term.WaitFor("New chat → " + project)
 	newChatSelected(term)
 	term.Press(harness.Enter)
 	pickEngine(term, "Claude")
 	term.Press(harness.Enter)
 	term.WaitFor("choose the cache")
 	term.Press(harness.Enter)
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	s = plainClaudeLive(c, s, attached(c, term))
 	s.Name = lsName(c, s)
 	server := seatServer(c, s)
@@ -113,9 +117,23 @@ func pickerChat(c *harness.Ctx, s State) State {
 	if want := "named " + s.Chat.Session + " -> " + long + "\n"; named != want {
 		c.Failf("pfm chat name %s %s printed %q, want %q", s.Chat.Session, long, named, want)
 	}
+	// The statusline's own render rewrites the window name: each read after the first waits for a render of
+	// this chat that finished after the read before it, so the name is shown to survive that writer.
+	// The fake Claude re-runs its statusline on its refresh tick, which moves on a signal: each look that
+	// finds no newer render fires the next tick.
+	rendered, engine := statuslineRendered(c, s.Chat.Session), engineControl(sessionEngine(c, s.Chat.Session))
 	for n := range 3 {
 		if n > 0 {
-			time.Sleep(2 * time.Second) // the statusline's own window writer runs every 2 s: watch it run
+			before := rendered
+			c.Poll(fmt.Sprintf("a statusline render of chat %s finishing after read %d", s.Chat.Session, n),
+				func() (bool, string) {
+					rendered = statuslineRendered(c, s.Chat.Session)
+					if !rendered.After(before) {
+						tickEngine(c, engine)
+					}
+					return rendered.After(before), fmt.Sprintf("the newest render finished at %s, read %d at %s",
+						rendered.Format(time.RFC3339Nano), n, before.Format(time.RFC3339Nano))
+				})
 		}
 		got := tmuxAt(c, server, "display", "-p", "#{window_name}")
 		title := tmuxAt(c, server, "display", "-p", "#{T:set-titles-string}")
@@ -134,7 +152,7 @@ func pickerChat(c *harness.Ctx, s State) State {
 		c.Failf("terminal %s's shell %d is missing from the process table before /exit", term.Name(), term.Pid())
 	}
 	term.Type("/exit\r")
-	term.WaitGone("❯", 20*time.Second)
+	term.WaitGone("❯")
 	plainGone(c, s, term, socket)
 	return s
 }
@@ -192,8 +210,8 @@ func tmuxAt(c *harness.Ctx, server string, args ...string) string {
 }
 
 // chatEnded waits for no live row, live seat or engine of session to be left.
-func chatEnded(c *harness.Ctx, session string, within time.Duration) {
-	c.Poll("chat "+session+" gone", within, func() (bool, string) {
+func chatEnded(c *harness.Ctx, session string) {
+	c.Poll("chat "+session+" gone", func() (bool, string) {
 		rows, _ := liveChats(c, "")
 		seats := seatsWhere(c, "state = 'live' and session_id = '"+session+"'")
 		var left []int
@@ -206,4 +224,42 @@ func chatEnded(c *harness.Ctx, session string, within time.Duration) {
 		return !listed && len(seats) == 0 && len(left) == 0,
 			fmt.Sprintf("listed %t, seats %v, engines %v", listed, seats, left)
 	})
+}
+
+// statuslineRendered is when the newest paced statusline render of the chat finished: the latest finished_at
+// among the {key}.out.json files of the pacer's directory whose {key}.input names the session; zero before
+// the first.
+func statuslineRendered(c *harness.Ctx, session string) time.Time {
+	dir := filepath.Join(paths.TempRoot(), "cc-sl-paced-"+strconv.Itoa(os.Getuid()))
+	inputs, err := filepath.Glob(filepath.Join(dir, "*.input"))
+	if err != nil {
+		c.Failf("list the statusline pacer's inputs in %s: %v", dir, err)
+	}
+	var newest time.Time
+	for _, input := range inputs {
+		raw, err := os.ReadFile(input)
+		if err != nil {
+			continue // a worker replaces its input by rename: a vanished file is the next tick's
+		}
+		var chat struct {
+			SessionID string `json:"session_id"`
+		}
+		if json.Unmarshal(raw, &chat) != nil || chat.SessionID != session {
+			continue
+		}
+		raw, err = os.ReadFile(strings.TrimSuffix(input, ".input") + ".out.json")
+		if err != nil {
+			continue // no render finished yet
+		}
+		var line struct {
+			FinishedAt int64 `json:"finished_at"`
+		}
+		if json.Unmarshal(raw, &line) != nil {
+			continue // a render is replacing the line
+		}
+		if at := time.Unix(0, line.FinishedAt); at.After(newest) {
+			newest = at
+		}
+	}
+	return newest
 }

@@ -14,13 +14,13 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // Exercise the supervisor itself: old saved recipes can restart without ever
@@ -41,9 +41,13 @@ func runRemoteControlSeatHost(t *testing.T, enabled, corrupt bool) {
 	testjail.DatabaseFiles(t, root)
 	binary := filepath.Join(root, "fixture-engine")
 	argsFile := filepath.Join(root, "engine-args")
+	// The recorded launch MCP file is long pruned: the engine must still find one.
+	home := filepath.Join(root, "home")
+	mcpFile := filepath.Join(paths.ClaudeMCPConfigDir(home), "claude-mcp-0a1b2c3d.json")
+	mcpCopy := filepath.Join(root, "engine-mcp")
 	if err := testjail.WriteExecutable(
 		binary,
-		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > '"+argsFile+"'\nexit 129\n"),
+		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > '"+argsFile+"'\ncat '"+mcpFile+"' > '"+mcpCopy+"'\nexit 129\n"),
 		0o700,
 	); err != nil {
 		t.Fatal(err)
@@ -53,7 +57,8 @@ func runRemoteControlSeatHost(t *testing.T, enabled, corrupt bool) {
 		configPath,
 		[]byte(
 			fmt.Sprintf(
-				`{"version":%d,"accounts":[],"claude":{"remoteControl":%t,"costLedger":false}}`,
+				`{"version":%d,"accounts":[],"claude":{"remoteControl":%t,"costLedger":false},`+
+					`"mcp":{"servers":{"chat":{"enabled":true}}}}`,
 				config.Version,
 				enabled,
 			),
@@ -86,7 +91,7 @@ func runRemoteControlSeatHost(t *testing.T, enabled, corrupt bool) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"--resume", "old-session"}
+	args := []string{"--resume", "old-session", "--mcp-config", mcpFile}
 	if !enabled {
 		args = append(args, "--remote-control", "stale name")
 	}
@@ -102,8 +107,7 @@ func runRemoteControlSeatHost(t *testing.T, enabled, corrupt bool) {
 		t.Fatal(err)
 	}
 	defer func() { _ = slave.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	host := filepath.Join(root, "pfm")
 	if err := os.Symlink(os.Args[0], host); err != nil {
 		t.Fatal(err)
@@ -138,6 +142,15 @@ func runRemoteControlSeatHost(t *testing.T, enabled, corrupt bool) {
 	}
 	if corrupt && (!strings.Contains(output.String(), "WARN") || !strings.Contains(output.String(), "desk")) {
 		t.Fatalf("missing visible policy warning: %s", output.String())
+	}
+	mcp, err := os.ReadFile(mcpCopy)
+	if err != nil {
+		t.Fatalf("read the MCP file the engine saw (%s): %v; supervisor output: %s", mcpCopy, err, output.String())
+	}
+	wantMCP := `{"mcpServers":{"chat-professor":{"args":["mcp","serve","--stdio","--family","chat"],"command":"` +
+		filepath.Join(home, ".local", "bin", "pfm") + `","type":"stdio"}}}`
+	if string(mcp) != wantMCP {
+		t.Fatalf("engine MCP file %s =\n%s\nwant\n%s", mcpFile, mcp, wantMCP)
 	}
 	args = strings.Split(strings.TrimSpace(string(body)), "\n")
 	at := slices.Index(args, "--remote-control")

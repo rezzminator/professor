@@ -17,7 +17,7 @@ import (
 // of the caller's environment reaches a test.
 func TestUnitNetEnvironmentIsTheGoldenList(t *testing.T) {
 	optional := []string{
-		"PFM_PROFILE_FIXTURE", "PFM_PROFILE_FIXTURE_SLOW_S", "PFM_STRESS", "PFM_STRESS_STRICT",
+		"PFM_PROFILE_FIXTURE", "PFM_PROFILE_FIXTURE_RELEASE", "PFM_STRESS",
 		"PFM_TEST_ARTIFACT_DIR", "PFM_TEST_DEADLINE_EPOCH", "PFM_TEST_PROFILE", "PFM_TEST_PROFILE_PARENT",
 	}
 	want := []string{

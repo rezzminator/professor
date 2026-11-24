@@ -1,9 +1,11 @@
 package action
 
 import (
+	"cmp"
 	"context"
 	"io"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -184,20 +186,6 @@ type ProcessTable interface {
 	Terminate(target gather.Target) (gather.Outcome, error)
 }
 
-// Gate asks on /dev/tty whether a mismatched live Claude chat should reboot.
-type Gate interface {
-	Confirm(ctx context.Context, request GateRequest) (bool, error)
-}
-
-// GateRequest is the live birth environment versus this picker invocation.
-type GateRequest struct {
-	Name           string
-	BirthAccount   int
-	PrimaryAccount int
-	BirthCache1H   bool
-	WantCache1H    bool
-}
-
 // CommandRunner invokes the unchanged satellite argv contracts.
 type CommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) error
@@ -215,6 +203,9 @@ type Dependencies struct {
 	Runner           CommandRunner
 	Stderr           io.Writer
 	EngineSyncRunner deps.Runner // runs PersonaMirror's engine-sync child; nil is the real one
+	// Clock runs the launch watch's polls and their deadlines; nil is
+	// clock.Real, read at each call.
+	Clock clock.Clock
 	// Heal repairs a Codex thread's history projection before it is resumed,
 	// reporting in one line what it repaired and nothing when there was nothing
 	// to repair. It is injected, not imported: the repair reads Codex's own
@@ -237,4 +228,9 @@ type Executor struct {
 	sidDir     string
 	heal       HealFunc
 	engineSync deps.Runner
+	clock      clock.Clock // nil is clock.Real, read at each launch-watch call
 }
+
+// launchClock is the launch watch's clock: clock.Real, read at the call, unless
+// Dependencies.Clock set one.
+func (executor *Executor) launchClock() clock.Clock { return cmp.Or(executor.clock, clock.Real) }

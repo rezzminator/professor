@@ -13,11 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // processDir is the one directory <label>.<pid> under artifacts.
@@ -99,13 +101,14 @@ func TestProfileStepDeadlineFiresBeforeTheTestTimeout(t *testing.T) {
 		t.Fatalf("start child: %v", err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	waitFor(t, 30*time.Second, "the deadline watchdog's summary", func() bool {
+	testwait.Until(t, "the deadline watchdog's summary", func() (bool, string) {
 		found, _ := filepath.Glob(filepath.Join(artifacts, profileLabel+".*", "summary.json"))
 		if len(found) != 1 {
-			return false
+			return false, fmt.Sprintf("summaries: %q", found)
 		}
 		data, err := os.ReadFile(found[0])
-		return err == nil && strings.Contains(string(data), `"event": "deadline-imminent"`)
+		imminent := err == nil && strings.Contains(string(data), `"event": "deadline-imminent"`)
+		return imminent, fmt.Sprintf("%s: %v %s", found[0], err, data)
 	})
 	dir := processDir(t, artifacts, profileLabel)
 	summary := readSummary(t, dir)
@@ -217,7 +220,9 @@ func TestProfileKilledChildLeavesTheStartSummary(t *testing.T) {
 		t.Fatalf("start child: %v", err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	waitFor(t, 30*time.Second, "the child's test to be running", func() bool { return fileExists(c.homeFile) })
+	testwait.Until(t, "the child's test to be running", func() (bool, string) {
+		return fileExists(c.homeFile), "no " + c.homeFile
+	})
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("kill child: %v", err)
 	}
@@ -435,7 +440,7 @@ func TestProfileLabelHoldsWhereverTheBinaryRuns(t *testing.T) {
 }
 
 // TestProfileFixture runs the deliberately broken fixture package as the
-// profiler's own end-to-end proof: a red exit, and the slow mode's duration knob.
+// profiler's own end-to-end proof: a red exit, and the slow mode held until its driver releases it.
 func TestProfileFixture(t *testing.T) {
 	moduleDir, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -459,20 +464,6 @@ func TestProfileFixture(t *testing.T) {
 			env: append([]string{"PFM_PROFILE_FIXTURE=" + mode}, extra...),
 		}
 	}
-	passed := regexp.MustCompile(`--- PASS: TestFixture \((\d+\.\d+)s\)`)
-	slept := func(t *testing.T, res childResult) float64 {
-		t.Helper()
-		found := passed.FindStringSubmatch(res.stdout)
-		if res.code != 0 || found == nil {
-			t.Fatalf("slow fixture exit %d, want a pass with its duration: %s%s", res.code, res.stdout, res.stderr)
-		}
-		seconds, err := strconv.ParseFloat(found[1], 64)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return seconds
-	}
-
 	t.Run("a red exit names the failing test, its state and file:line", func(t *testing.T) {
 		t.Parallel()
 		c := fixture("fail")
@@ -509,23 +500,49 @@ func TestProfileFixture(t *testing.T) {
 			t.Fatalf("stderr does not point at the bundle: %q", res.stderr)
 		}
 	})
-	t.Run("slow sleeps PFM_PROFILE_FIXTURE_SLOW_S=1 whole seconds, not the three-second default", func(t *testing.T) {
+	t.Run("slow blocks until its driver releases it", func(t *testing.T) {
 		t.Parallel()
-		if got := slept(t, fixture("slow", "PFM_PROFILE_FIXTURE_SLOW_S=1").run(t)); got < 1 || got >= 3 {
-			t.Fatalf("slow with PFM_PROFILE_FIXTURE_SLOW_S=1 slept %.2fs, want at least 1 and below 3", got)
+		release := filepath.Join(t.TempDir(), "release")
+		if err := syscall.Mkfifo(release, 0o600); err != nil {
+			t.Fatalf("make the release FIFO %s: %v", release, err)
 		}
-	})
-	t.Run("slow sleeps three seconds by default", func(t *testing.T) {
-		t.Parallel()
-		if got := slept(t, fixture("slow").run(t)); got < 3 || got >= 5 {
-			t.Fatalf("slow by default slept %.2fs, want 3 up to 5", got)
+		cmd, stdout, stderr := fixture("slow", "PFM_PROFILE_FIXTURE_RELEASE="+release).command(t)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start the slow fixture: %v", err)
 		}
-	})
-	t.Run("slow refuses a duration that is not whole seconds", func(t *testing.T) {
-		t.Parallel()
-		res := fixture("slow", "PFM_PROFILE_FIXTURE_SLOW_S=soon").run(t)
-		if res.code != 1 || !strings.Contains(res.stdout, `PFM_PROFILE_FIXTURE_SLOW_S="soon"`) {
-			t.Fatalf("fixture exit %d, want a failure naming the value: %s%s", res.code, res.stdout, res.stderr)
+		exited := make(chan error, 1)
+		go func() { exited <- cmd.Wait() }()
+		opened := make(chan *os.File, 1)
+		go func() {
+			// The open returns once the fixture holds the FIFO's read end, parked in slow mode.
+			writer, err := os.OpenFile(release, os.O_WRONLY, 0)
+			if err != nil {
+				t.Errorf("open the release FIFO %s: %v", release, err)
+			}
+			opened <- writer
+		}()
+		var writer *os.File
+		select {
+		case writer = <-opened:
+		case err := <-exited:
+			t.Fatalf("slow fixture exited (%v) before it opened its release FIFO: %s%s", err, stdout, stderr)
+		}
+		if writer == nil {
+			return
+		}
+		select {
+		case err := <-exited:
+			t.Fatalf("slow fixture exited (%v) while its release FIFO was still open: %s%s", err, stdout, stderr)
+		default:
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close the release FIFO %s: %v", release, err)
+		}
+		if err := <-exited; err != nil {
+			t.Fatalf("slow fixture after its release: %v, want a pass: %s%s", err, stdout, stderr)
+		}
+		if !regexp.MustCompile(`(?m)^--- PASS: TestFixture \(\d+\.\d+s\)$`).MatchString(stdout.String()) {
+			t.Fatalf("slow fixture output has no `--- PASS: TestFixture` line: %s%s", stdout, stderr)
 		}
 	})
 }

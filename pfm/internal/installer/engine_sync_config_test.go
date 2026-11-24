@@ -274,7 +274,7 @@ func TestEngineSyncPreviewIsSkippedByNameWhenTheInstallChangesTheConfig(t *testi
 			testCase.setup(t, installer, home)
 			record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 			installer.options.EngineSyncRunner = engineSync
-			if err := installer.wireEngineSyncGlobal(nil); err != nil {
+			if err := installer.wireEngineSyncGlobal(); err != nil {
 				t.Fatal(err)
 			}
 			want := strings.NewReplacer("{file}", enginesync.GlobalConfigPath(home),
@@ -323,7 +323,7 @@ func TestEngineSyncPreviewWithoutAChangeUsesTheRealHome(t *testing.T) {
 			}
 			record, engineSync := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 			installer.options.EngineSyncRunner = engineSync
-			if err := installer.wireEngineSyncGlobal(nil); err != nil {
+			if err := installer.wireEngineSyncGlobal(); err != nil {
 				t.Fatalf("%v\n%s", err, output.String())
 			}
 			calls := testjail.EngineSyncCalls(t, record)

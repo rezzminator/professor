@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -57,45 +58,96 @@ func OpenSharedStateMemory(ctx context.Context) *Store {
 	return store
 }
 
-// initDatabase brings an open shared database to this binary's schema; a
-// failure closes db.
-func initDatabase(ctx context.Context, db *sql.DB, path string, existed bool) (*sql.DB, error) {
-	schema := obs.SQL(ctx, kind, schemaDDL)
-	_, err := db.ExecContext(ctx, schemaDDL)
-	schema.End(-1, err)
+// schemasBrought holds the schemaFingerprint of every shared database this
+// process brought to schema, read after its steps and holding no retired
+// issues table. The steps of
+// bringToSchema decide by user_version and the schema alone, so a database
+// whose fingerprint is held here needs none of them; the one write skipped
+// with them is schemaDDL's meta row, present since the database was created.
+var schemasBrought sync.Map
+
+// schemaFingerprintQuery reads user_version and every schema object as one
+// text, each field quoted and the fields and rows separated, so two different
+// schemas never read alike; in the same read, whether the retired issues table
+// is there.
+const schemaFingerprintQuery = `SELECT (SELECT user_version FROM pragma_user_version)||
+ COALESCE((SELECT group_concat(quote(type)||','||quote(name)||','||quote(tbl_name)||','||quote(sql),';') FROM sqlite_master),''),
+ EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='issues')`
+
+// schemaFingerprint reads the database's fingerprint and whether it still
+// holds the retired issues table, from one snapshot.
+func schemaFingerprint(ctx context.Context, db *sql.DB) (fingerprint string, retiredIssues bool, err error) {
+	op := obs.SQL(ctx, kind, schemaFingerprintQuery)
+	err = db.QueryRowContext(ctx, schemaFingerprintQuery).Scan(&fingerprint, &retiredIssues)
+	op.End(-1, err)
 	if err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("initialize shared state schema: %w", err)
+		return "", false, fmt.Errorf("read shared database schema: %w", err)
 	}
-	if err := migrate(ctx, db, path, existed); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate shared state database: %w", err)
+	return fingerprint, retiredIssues, nil
+}
+
+// initDatabase brings an open shared database to this binary's schema, once
+// per process for each schema it meets: a later open of a database already
+// brought here reads its fingerprint and runs no schema step. A failure
+// closes db.
+func initDatabase(ctx context.Context, db *sql.DB, path string, existed bool) (*sql.DB, error) {
+	fingerprint, _, err := schemaFingerprint(ctx, db)
+	if err != nil {
+		// No match: the steps below meet the same database and name its failure.
+		obs.Logger(ctx).Warn("fleet.schema.unread", "path", path, obs.FieldErr, err.Error())
 	}
-	if err := addHiddenRevision(ctx, db, path); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate shared state database: %w", err)
+	if _, brought := schemasBrought.Load(fingerprint); err != nil || !brought {
+		if err := bringToSchema(ctx, db, path, existed); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		// Read again, the fingerprint describes the schema the steps left. One
+		// still holding the issues table is never noted: its drop failed, or an
+		// older pfm's schema script made the table again since, and the drop
+		// retries at the next open.
+		if fingerprint, retiredIssues, err := schemaFingerprint(ctx, db); err != nil {
+			obs.Logger(ctx).Warn("fleet.schema.unread", "path", path, obs.FieldErr, err.Error())
+		} else if !retiredIssues {
+			schemasBrought.Store(fingerprint, struct{}{})
+		}
 	}
-	if err := renameRemindersTable(ctx, db, path); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate shared state database: %w", err)
-	}
-	// The two cleanups below keep their rows when they fail and retry at the
-	// next open: retired or stale rows never cost the store.
-	if err := dropRetiredIssuesTable(ctx, db, path); err != nil {
-		obs.Logger(ctx).Warn("fleet.issues.kept", "path", path, obs.FieldErr, err.Error())
-	}
-	if err := addScheduleOnce(ctx, db, path); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate shared state database: %w", err)
-	}
-	if err := addSeatOwnership(ctx, db, path); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate seat ownership: %w", err)
-	}
+	// The repair is of rows, not schema: every open runs it. It keeps its rows
+	// when it fails and retries at the next open; stale rows never cost the store.
 	if err := retireMovedTmuxSeats(ctx, db, path); err != nil {
 		obs.Logger(ctx).Warn("fleet.seats.repair_deferred", "path", path, obs.FieldErr, err.Error())
 	}
 	return db, nil
+}
+
+// bringToSchema runs every step that takes a shared database to this binary's
+// schema. The retired issues table's drop keeps its rows when it fails and
+// retries at the next open, never costing the store.
+func bringToSchema(ctx context.Context, db *sql.DB, path string, existed bool) error {
+	schema := obs.SQL(ctx, kind, schemaDDL)
+	_, err := db.ExecContext(ctx, schemaDDL)
+	schema.End(-1, err)
+	if err != nil {
+		return fmt.Errorf("initialize shared state schema: %w", err)
+	}
+	if err := migrate(ctx, db, path, existed); err != nil {
+		return fmt.Errorf("migrate shared state database: %w", err)
+	}
+	if err := addHiddenRevision(ctx, db, path); err != nil {
+		return fmt.Errorf("migrate shared state database: %w", err)
+	}
+	if err := renameRemindersTable(ctx, db, path); err != nil {
+		return fmt.Errorf("migrate shared state database: %w", err)
+	}
+	if err := dropRetiredIssuesTable(ctx, db, path); err != nil {
+		obs.Logger(ctx).Warn("fleet.issues.kept", "path", path, obs.FieldErr, err.Error())
+	}
+	if err := addScheduleOnce(ctx, db, path); err != nil {
+		return fmt.Errorf("migrate shared state database: %w", err)
+	}
+	if err := addSeatOwnership(ctx, db, path); err != nil {
+		return fmt.Errorf("migrate seat ownership: %w", err)
+	}
+	return nil
 }
 
 // UserVersion reports the shared database's PRAGMA user_version, the schema

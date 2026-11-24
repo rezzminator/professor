@@ -7,6 +7,7 @@ import (
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // blindExitTmux never shows the typed /exit rendered — no context deadline
@@ -38,7 +39,7 @@ func TestRunClearsTypedExitWhenItNeverRenders(t *testing.T) {
 	fakeClock := clock.NewFake(time.Unix(0, 0))
 	sidDir := t.TempDir()
 	var err error
-	driveFakeClock(t, fakeClock, func() {
+	testwait.Drive(t, "reload to run through its waits", fakeClock, func() {
 		_, err = Run(
 			context.Background(),
 			reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-blind-render"),

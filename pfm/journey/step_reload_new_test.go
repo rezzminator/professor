@@ -5,7 +5,6 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -24,12 +23,12 @@ func reloadNew(c *harness.Ctx, s State) State {
 	reply := c.Unique("new-pong")
 	command := "pfm chat reload --new --sock " + herdrSocket(s) + " --pane " + s.Pane +
 		" --then '" + directive(turnStep(reply)) + "'"
-	if code := shellRun(cli, "reload-new", command, 30*time.Second); code != 0 {
+	if code := shellRun(cli, "reload-new", command); code != 0 {
 		c.Failf("%s exited %d, want 0", command, code)
 	}
-	c.Terminal(s.Term).WaitFor("⏺ "+reply, 20*time.Second)
+	c.Terminal(s.Term).WaitFor("⏺ " + reply)
 	sock := herdrSocket(s)
-	c.Poll("one live seat on "+s.Pane+" under a session after "+before.Session, 20*time.Second, func() (bool, string) {
+	c.Poll("one live seat on "+s.Pane+" under a session after "+before.Session, func() (bool, string) {
 		seats := liveSeats(c, sock)
 		for session, seat := range seats {
 			if session != before.Session && seat[1] == s.Pane && len(seats) == 1 {
@@ -39,7 +38,7 @@ func reloadNew(c *harness.Ctx, s State) State {
 		}
 		return false, fmt.Sprintf("live seats %v", seats)
 	})
-	c.Poll("the new session named "+name+", the one it left named for --new", stepBound, func() (bool, string) {
+	c.Poll("the new session named "+name+", the one it left named for --new", func() (bool, string) {
 		got := [2]string{rowName(c, s.Chat.Session), rowName(c, before.Session)}
 		return got == [2]string{name, name + " (before --new)"}, fmt.Sprintf("names (new, left) = %q", got)
 	})

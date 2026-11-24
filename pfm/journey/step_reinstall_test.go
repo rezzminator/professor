@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -29,8 +28,7 @@ func reinstall(c *harness.Ctx, s State) State {
 	term.WaitFor(prompt)
 	swapBinary(c, s)
 	out := filepath.Join(s.Home, "reinstall.out")
-	code := shellRun(term, "reinstall", "clear && (cd ~/.professor && pfm install --yes) > ~/reinstall.out 2>&1",
-		150*time.Second)
+	code := shellRun(term, "reinstall", "clear && (cd ~/.professor && pfm install --yes) > ~/reinstall.out 2>&1")
 	text := read(c, "cat", out)
 	changes, failed, summary := installPlan(text)
 	refreshed := slices.ContainsFunc(changes, painterRefresh.MatchString)
@@ -41,7 +39,7 @@ func reinstall(c *harness.Ctx, s State) State {
 			code, failed, changes, summary, out)
 	}
 	gone := "the painters of the replaced binary gone and a new one painting from /"
-	c.Poll(gone, 10*time.Second, func() (bool, string) {
+	c.Poll(gone, func() (bool, string) {
 		after := painters(c)
 		for pid := range after {
 			if before[pid] {

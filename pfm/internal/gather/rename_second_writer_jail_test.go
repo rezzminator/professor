@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A window name that does not stick has exactly one interesting question
@@ -27,7 +28,7 @@ func startRenameProbeServer(t *testing.T, name string) (socket, windowID, tty st
 	socket = fmt.Sprintf("probe-pfm-rename-%s-%d", name, os.Getpid())
 	start := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "sleep 120",
+		"new-session", "-d", "-s", socket, "-n", "before", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR=/tmp")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -81,16 +82,37 @@ func windowNameSettles(t *testing.T, socket, tty, title string) string {
 		title = "PFM-ESCAPE-PROCESSED"
 		writePaneEscape(t, tty, "\033]2;"+title+"\007")
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
+	testwait.Until(t, "tmux to process the pane title "+title, func() (bool, string) {
 		got := renameProbeTmux(t, socket, "display-message", "-p", "#{pane_title}")
-		if got == title {
-			return renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}")
+		return got == title, "pane_title = " + got
+	})
+	return renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}")
+}
+
+// automaticRenamePassed proves tmux's own automatic-rename interval (names.c:
+// a window is renamed at most once per NAME_INTERVAL after its last rename,
+// and every server loop checks every window) has passed since this call. A
+// control window opened now, automatic-rename on and its pane written to, is
+// renamed at once (a new window has no last rename), which stamps its
+// interval no earlier than now; a second change of its name format must then
+// wait out a whole interval. Once tmux shows the second name, any rename tmux
+// had queued for a window before this call has had its turn.
+func automaticRenamePassed(t *testing.T, socket string) {
+	t.Helper()
+	control := renameProbeTmux(
+		t, socket, "new-window", "-d", "-P", "-F", "#{window_id}", "-n", "CONTROL", testwait.Hold,
+	)
+	renameProbeTmux(t, socket, "set-window-option", "-t", control, "automatic-rename", "on")
+	tty := renameProbeTmux(t, socket, "display-message", "-p", "-t", control, "#{pane_tty}")
+	for _, name := range []string{"tail", "CONTROL-SECOND"} {
+		if name != "tail" {
+			renameProbeTmux(t, socket, "set-window-option", "-t", control, "automatic-rename-format", name)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("pane_title = %q; processed signal %q not seen within 2s", got, title)
-		}
-		time.Sleep(10 * time.Millisecond)
+		writePaneEscape(t, tty, "control output\r\n")
+		testwait.Until(t, "tmux's automatic-rename to name the control window "+name, func() (bool, string) {
+			got := renameProbeTmux(t, socket, "display-message", "-p", "-t", control, "#{window_name}")
+			return got == name, "control window_name = " + got
+		})
 	}
 }
 
@@ -116,9 +138,7 @@ func TestAutomaticRenameIsNotTheSecondWriter(t *testing.T) {
 	); got != "automatic-rename off" {
 		t.Fatalf("automatic-rename after rename-window = %q, want it disabled for this window", got)
 	}
-	// tmux 3.4 tmux.h NAME_INTERVAL is 500000 us (names.c checks once per
-	// interval); one automatic-rename check is enough for this negative case.
-	time.Sleep(500 * time.Millisecond)
+	automaticRenamePassed(t, socket)
 	if got := renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}"); got != "WANTED" {
 		t.Fatalf("window name = %q, want WANTED — automatic-rename took it back", got)
 	}
@@ -216,15 +236,10 @@ func TestRenameWindowSetsTheExactChatNameInTheSameCommand(t *testing.T) {
 	if got := renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}"); got != WindowNameFor(exact) {
 		t.Fatalf("window name = %q, want the clipped %q", got, WindowNameFor(exact))
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if logged, _ := os.ReadFile(hookLog); strings.TrimSpace(string(logged)) == exact {
-			break
-		} else if time.Now().After(deadline) {
-			t.Fatalf("window-renamed hook saw @pfm_chat_name %q, want %q set before the rename", logged, exact)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	testwait.Until(t, "the window-renamed hook to log @pfm_chat_name "+exact, func() (bool, string) {
+		logged, _ := os.ReadFile(hookLog)
+		return strings.TrimSpace(string(logged)) == exact, "hook log " + strconv.Quote(string(logged))
+	})
 
 	// An unnamed writer sets nothing and does not clear a name already stored.
 	if err := probe.RenameWindow(context.Background(), WindowRename{

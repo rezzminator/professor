@@ -48,6 +48,7 @@ func TestClaudeGatedAgentsEndWithTheirOwnTurn(t *testing.T) {
 	if err := os.Remove(gateA); err != nil {
 		t.Fatal(err)
 	}
+	fix.nudge()
 	frame = session.waitFrame("agent a's row gone under the open question", func(frame string) bool {
 		return !strings.Contains(frame, "● a  running") && strings.Contains(frame, "● b  running")
 	})
@@ -62,6 +63,7 @@ func TestClaudeGatedAgentsEndWithTheirOwnTurn(t *testing.T) {
 	if err := os.Remove(gateB); err != nil {
 		t.Fatal(err)
 	}
+	fix.nudge()
 	frame = session.waitFrame("agent b's result", func(frame string) bool {
 		return strings.Contains(frame, `⏺ Agent "b" finished`)
 	})

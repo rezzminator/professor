@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -446,12 +445,13 @@ func TestLockNamespaceMatchesChatShell(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	key := "/tmp/tmux-1000/cc-1-2-3:%5"
+	clk := newSteppingClock()
 	want := "_tmp_tmux-1000_cc-1-2-3_%5.lock"
 	if got := lockDirName(key); got != want {
 		t.Fatalf("lockDirName(%q) = %q, want %q", key, got, want)
 	}
 	ctx := context.Background()
-	lock, err := acquireTargetLock(ctx, clock.Real, root, key, time.Second, time.Millisecond, time.Minute)
+	lock, err := acquireTargetLock(ctx, clk, root, key, time.Second, time.Millisecond, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func TestLockNamespaceMatchesChatShell(t *testing.T) {
 	}
 	if _, err := acquireTargetLock(
 		ctx,
-		clock.Real,
+		clk,
 		root,
 		key,
 		20*time.Millisecond,
@@ -475,7 +475,7 @@ func TestLockNamespaceMatchesChatShell(t *testing.T) {
 		t.Fatal("second holder acquired a held lock")
 	}
 	lock.release()
-	second, err := acquireTargetLock(ctx, clock.Real, root, key, time.Second, time.Millisecond, time.Minute)
+	second, err := acquireTargetLock(ctx, clk, root, key, time.Second, time.Millisecond, time.Minute)
 	if err != nil {
 		t.Fatalf("lock not released: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestLockNamespaceMatchesChatShell(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	stolen, err := acquireTargetLock(ctx, clock.Real, root, key, time.Second, time.Millisecond, time.Minute)
+	stolen, err := acquireTargetLock(ctx, clk, root, key, time.Second, time.Millisecond, time.Minute)
 	if err != nil {
 		t.Fatalf("stale lock was not stolen: %v", err)
 	}

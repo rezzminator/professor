@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func writeChat(t *testing.T, lines ...string) string {
@@ -54,11 +56,19 @@ func TestStateComesFromTheTranscriptNotAClock(t *testing.T) {
 		lines []string
 		live  bool
 		want  string
+		last  string
 	}{
-		{"answered", []string{userLine("go"), assistantLine("done")}, true, StateIdle},
-		{"mid tool run", []string{userLine("go"), toolLine("Bash")}, true, StateWorking},
-		{"just asked", []string{userLine("go")}, true, StateWorking},
-		{"server gone", []string{userLine("go"), assistantLine("done")}, false, StateDead},
+		{"answered", []string{userLine("go"), assistantLine("done")}, true, StateIdle, "A done"},
+		{"mid tool run", []string{userLine("go"), toolLine("Bash")}, true, StateWorking, "T Bash|{}"},
+		{"just asked", []string{userLine("go")}, true, StateWorking, "U go"},
+		// A launch prompt is recorded only once its UserPromptSubmit hooks return: until then the
+		// transcript holds the session's title alone, a live chat working with no last line.
+		{
+			"first prompt in its hooks",
+			[]string{`{"type":"custom-title","customTitle":"child","sessionId":"s"}`},
+			true, StateWorking, "",
+		},
+		{"server gone", []string{userLine("go"), assistantLine("done")}, false, StateDead, "A done"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			chat := Chat{
@@ -71,8 +81,9 @@ func TestStateComesFromTheTranscriptNotAClock(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Inspect() error = %v", err)
 			}
-			if status.State != testCase.want {
-				t.Fatalf("state = %q, want %q (%#v)", status.State, testCase.want, status)
+			if status.State != testCase.want || status.Last != testCase.last {
+				t.Fatalf("state, last = %q, %q; want %q, %q (%#v)", status.State, status.Last, testCase.want,
+					testCase.last, status)
 			}
 			if status.Alive() != (testCase.want != StateDead) {
 				t.Fatalf("Alive() disagrees with state %q", status.State)
@@ -259,16 +270,23 @@ func TestStreamCheckPreservesExitedTranscript(t *testing.T) {
 			path := writeChat(t, assistantLine("done"))
 			var out bytes.Buffer
 			calls := 0
-			err := Stream(context.Background(), path, "cc", StreamOptions{
-				FromStart: true,
-				Follow:    tc.follow,
-				Poll:      time.Millisecond,
-				Check: func() error {
-					check := tc.checks[min(calls, len(tc.checks)-1)]
-					calls++
-					return check
-				},
-			}, &out)
+			fake := clock.NewFake(clock.Wall())
+			var err error
+			// Every wait on fake is the follow's pause between two looks, and each look's
+			// answer is scripted: the pauses pass as the follow parks on them.
+			testwait.Drive(t, "the stream to end", fake, func() {
+				err = Stream(testwait.Context(t), path, "cc", StreamOptions{
+					FromStart: true,
+					Follow:    tc.follow,
+					Poll:      time.Millisecond,
+					Clock:     fake,
+					Check: func() error {
+						check := tc.checks[min(calls, len(tc.checks)-1)]
+						calls++
+						return check
+					},
+				}, &out)
+			})
 			if !errors.Is(err, tc.want) || out.String() != tc.output {
 				t.Fatalf("Stream() output=%q error=%v, want output=%q error=%v", out.String(), err, tc.output, tc.want)
 			}
@@ -280,11 +298,9 @@ func TestStreamCheckPreservesExitedTranscript(t *testing.T) {
 // answers and then disappears.
 func TestWatchAnnouncesIdleThenExit(t *testing.T) {
 	path := writeChat(t, userLine("go"), assistantLine("done"))
-	// The seat's liveness is written by the goroutine below and read by the
-	// watcher's own, so it is atomic: the fixture models a chat that dies
-	// under its watcher, which is exactly a cross-goroutine change.
-	var live atomic.Bool
-	live.Store(true)
+	// The seat answers its first polls live, then its server goes away: the
+	// fixture counts the watcher's own resolves, so the order is never a pause.
+	var resolves atomic.Int64
 	idleHooks := 0
 	exitHooks := 0
 	watcher := Watcher{
@@ -294,17 +310,12 @@ func TestWatchAnnouncesIdleThenExit(t *testing.T) {
 				Name:   "seat",
 				Engine: "cc",
 				Path:   path,
-				Live:   live.Load(),
+				Live:   resolves.Add(1) <= 3,
 			}, true, nil
 		},
 		Clock: newAutoClock(),
 	}
 	var out bytes.Buffer
-	go func() {
-		// The chat answers, then its server goes away.
-		time.Sleep(20 * time.Millisecond)
-		live.Store(false)
-	}()
 	status, err := watcher.Watch(context.Background(), WatchOptions{
 		Poll:   time.Millisecond,
 		OnIdle: func(Status) error { idleHooks++; return nil },

@@ -20,6 +20,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
@@ -49,7 +50,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		Name:    "stdio-test",
 		Version: "test",
 	}, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	session, err := client.Connect(ctx, &mcp.CommandTransport{
 		Command:           command,
@@ -251,7 +252,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		Name:    "stdio-oversize-test",
 		Version: "test",
 	}, nil)
-	oversizeCtx, oversizeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	oversizeCtx, oversizeCancel := context.WithCancel(testwait.Context(t))
 	defer oversizeCancel()
 	oversizeSession, err := oversizeClient.Connect(oversizeCtx, &mcp.CommandTransport{
 		Command:           oversizeCommand,

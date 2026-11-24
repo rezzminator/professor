@@ -15,6 +15,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The Codex spawn path carries the same tmux.titles policy the Claude one
@@ -39,7 +40,7 @@ func newCodexTitlesProbeServer(t *testing.T, socket, window string, titles *pfmc
 
 	tmux := TmuxExecutor{TmuxDir: tmuxDir}
 	if err := tmux.CreateChatServer(context.Background(), ChatServer{
-		Socket: socket, CWD: root, Window: window, Run: "sleep 120", Titles: titles,
+		Socket: socket, CWD: root, Window: window, Run: testwait.Hold, Titles: titles,
 	}); err != nil {
 		t.Fatalf("create Codex server: %v", err)
 	}

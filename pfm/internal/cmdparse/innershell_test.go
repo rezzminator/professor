@@ -30,7 +30,7 @@ func TestInnerShellAndArrays(t *testing.T) {
 		},
 		{
 			name:    "wrapped bash with a combined -lc flag",
-			command: `timeout 30 bash -lc 'grep -n f x'`,
+			command: timeoutCommand(t, "wrapped bash with a combined -lc flag"),
 			want:    []step{{"bash", []string{"-lc", "grep -n f x"}}, {"grep", []string{"-n", "f", "x"}}},
 		},
 		{

@@ -247,6 +247,7 @@ internal/testjail/recorder_jail_test.go 5
 internal/testjail/testjail_jail_test.go 9
 internal/testjail/tmuxserver_jail_test.go 1
 internal/testjail/xdg_jail_test.go 1
+internal/testwait/hold_jail_test.go 1
 internal/themesync/herdr_glyphs_jail_test.go 1
 internal/themesync/vscode_extension_e2e_jail_test.go 1
 internal/tmux/exec_jail_test.go 3

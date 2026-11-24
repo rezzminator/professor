@@ -1,15 +1,15 @@
 // Package profilefixture is the deliberately broken package that proves
-// testjail's profiler: PFM_PROFILE_FIXTURE=fail|hang|slow picks the failure,
-// and PFM_PROFILE_FIXTURE_SLOW_S the whole seconds slow sleeps (default 3).
+// testjail's profiler: PFM_PROFILE_FIXTURE=fail|hang|slow picks the failure.
+// Slow blocks until its driver releases it, by opening and closing the FIFO
+// PFM_PROFILE_FIXTURE_RELEASE names, or until it is killed.
 // It lives under testdata, so ./... never runs it; name it explicitly.
 package profilefixture
 
 import (
+	"io"
 	"os"
-	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -26,28 +26,35 @@ func TestFixture(t *testing.T) {
 	go blocked(&mu)
 	switch os.Getenv("PFM_PROFILE_FIXTURE") {
 	case "fail":
-		busy(200 * time.Millisecond)
+		busy()
 		t.Fatal("deliberate failure")
 	case "hang":
 		select {}
 	case "slow":
-		seconds := 3
-		if value := os.Getenv("PFM_PROFILE_FIXTURE_SLOW_S"); value != "" {
-			parsed, err := strconv.Atoi(value)
-			if err != nil || parsed < 0 {
-				t.Fatalf("PFM_PROFILE_FIXTURE_SLOW_S=%q: want whole seconds", value)
-			}
-			seconds = parsed
+		release := os.Getenv("PFM_PROFILE_FIXTURE_RELEASE")
+		if release == "" {
+			select {}
 		}
-		time.Sleep(time.Duration(seconds) * time.Second)
+		fifo, err := os.Open(release)
+		if err != nil {
+			t.Fatalf("open the release FIFO %s: %v", release, err)
+		}
+		defer fifo.Close()
+		if _, err := io.Copy(io.Discard, fifo); err != nil {
+			t.Fatalf("read the release FIFO %s to its close: %v", release, err)
+		}
 	}
 }
 
-func busy(d time.Duration) {
-	end := time.Now().Add(d)
-	n := 0
-	for time.Now().Before(end) {
-		n++
+// busy is CPU work for the profile to sample: a fixed count of steps, never a
+// stretch of wall time.
+func busy() {
+	sum := uint64(0)
+	for n := range uint64(200_000_000) {
+		sum = sum*31 + n
 	}
-	_ = n
+	busySink = sum
 }
+
+// busySink keeps busy's loop from being optimised away.
+var busySink uint64

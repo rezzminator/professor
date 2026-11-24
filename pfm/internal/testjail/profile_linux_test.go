@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // pressureDir writes a pressure directory in the kernel's format: cpu has a
@@ -85,7 +87,14 @@ func TestReadPSIUnreadableIsAnErrorNeverZero(t *testing.T) {
 func TestSummaryPSIUnreadableIsNullWithItsReasonOnLinux(t *testing.T) {
 	missingDir := filepath.Join(t.TempDir(), "pressure")
 	psi0, psiErr := readPSI(missingDir)
-	p := &profiler{pkg: "x", start: time.Now(), bundles: []string{}, psi0: psi0, psiErr: psiErr}
+	p := &profiler{
+		pkg:     "x",
+		start:   time.Now(),
+		wall:    testwait.Stopwatch(),
+		bundles: []string{},
+		psi0:    psi0,
+		psiErr:  psiErr,
+	}
 	p.mu.Lock()
 	summary := p.summary(0, "exit")
 	p.mu.Unlock()

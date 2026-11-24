@@ -192,7 +192,7 @@ func TestWarnRecoverQuietTransition(t *testing.T) {
 		t.Fatalf("rewarn=%q err=%v", rewarn, err)
 	}
 	// REGRESSION (2026-09-10, observed live): fable at 95% printed "This window is nearly
-	// exhausted: finish the in-flight step, then /reload" on every prompt while the 5-hour
+	// exhausted: finish the in-flight step, then /pfm:reload" on every prompt while the 5-hour
 	// window was 1% used. Severity by max() is correct; asserting it about the LIVE window was
 	// not. A model-scoped cap must name the model and report the real 5-hour headroom.
 	seedNamed := func(five, seven int, fable, fableReset string) {
@@ -286,7 +286,7 @@ func TestEvaluateKeepsItsNoticeWhenTheWarnedFlagFails(t *testing.T) {
 				}
 			},
 			wantMessage: "⚠ usage limit approaching — account 1: 5h 85% (resets 05:00) · 7d 12% (resets Mon 05:00). " +
-				"Plan around it: wrap up soon or /reload to another account before the cap hits.\n",
+				"Plan around it: wrap up soon or /pfm:reload to another account before the cap hits.\n",
 			wantLog: "record warned flag {flag}: ",
 		},
 		{
@@ -682,16 +682,19 @@ func TestEvaluateAgesTheCacheByFetchedAtNotFileMtime(t *testing.T) {
 				}
 			}
 			// WriteCacheRecord leaves mtime at "now" — exactly the state a
-			// backoff-only write produces.
+			// backoff-only write produces; the test pins it to its own now.
 			if err := WriteCacheRecord(cachePath, record); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(cachePath, now, now); err != nil {
 				t.Fatal(err)
 			}
 			info, err := os.Stat(cachePath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if age := time.Since(info.ModTime()); age > time.Minute {
-				t.Fatalf("fixture mtime age=%s, want a just-written file", age)
+			if !info.ModTime().Equal(now) {
+				t.Fatalf("fixture mtime = %s, want the just-written stamp %s", info.ModTime(), now)
 			}
 			hits := 0
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

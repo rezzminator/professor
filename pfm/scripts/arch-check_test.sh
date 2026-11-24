@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C13, C23, C25, C26, C27, C28, C29, C30, C31, C32, C33 and C35 ratchets, the C34 jail tag and
+# Self-test for scripts/arch-check.sh's C1, C5, C10, C12, C13, C23, C25, C26, C27, C28, C29, C30, C31, C32, C33 and C35 ratchets, the C36 clock door (its --clock mode), the C37 real-wait listing (its --real-wait mode), the C34 jail tag and
 # how it folds its concurrent checks: print order, exit status, and a check job
 # that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
 # never against this repo, and asserts on the relevant CHECK line rather than the
@@ -952,6 +952,138 @@ else
   bad "C35: could not build the git fixture"
 fi
 
+# ---- C36: every real-clock spelling in a judged file FAILs; no baseline, no exception
+
+# clock_run <repo> [path...]: arch-check's --clock output over the fixture.
+clock_run() {
+  local repo=$1; shift
+  env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$repo" bash "$SUT" --clock "$@" </dev/null 2>&1
+}
+
+REPO_C36="$T/clock-door"
+CLOCK_DATA="$ROOT/scripts/testdata/arch-check"
+if fixture "$REPO_C36"; then
+  printf 'module pfm\n' > "$REPO_C36/go.mod"
+  mkdir -p "$REPO_C36/internal/mockengine" "$REPO_C36/internal/testwait" "$REPO_C36/internal/loud/testdata"
+  printf 'package loud\n\nimport (\n\t"testing"\n)\n\nfunc TestQuiet(t *testing.T) { _ = t }\n' > "$REPO_C36/internal/loud/quiet_test.go"
+  printf 'package loud\n' > "$REPO_C36/internal/loud/rest_test.go"
+  git -C "$REPO_C36" add -A
+  expect_line "C36: judged files without a real-clock spelling PASS, counting the files read" \
+    "$(clock_run "$REPO_C36")" C36-clock-door PASS "2 files, 0 real-clock sites"
+  # the planted sources hold the spellings as their subject: data files beside this test, never shell text
+  cp "$CLOCK_DATA/clock-door-wait_test.go.txt" "$REPO_C36/internal/loud/wait_test.go"
+  printf 'package mockengine\n\nimport "time"\n\nfunc tick() { time.NewTicker(1) }\n' > "$REPO_C36/internal/mockengine/tick.go"
+  printf 'package loud\n\nimport "time"\n\nfunc Nap() { time.Sleep(1) }\n' > "$REPO_C36/internal/loud/nap.go"
+  printf 'package testwait\n\nimport "time"\n\nfunc Until() { time.Sleep(1) }\n' > "$REPO_C36/internal/testwait/testwait.go"
+  { printf '#!/bin/sh\n'; cat "$CLOCK_DATA/clock-door-engine.txt"; } > "$REPO_C36/internal/loud/testdata/engine"
+  cp "$CLOCK_DATA/clock-door-corpus.json.txt" "$REPO_C36/internal/loud/testdata/corpus.json"
+  cp "$CLOCK_DATA/clock-door-fixture.py.txt" "$REPO_C36/internal/loud/testdata/ui.py"
+  git -C "$REPO_C36" add -A
+  want_all=$(printf '%s\n' \
+    'internal/loud/testdata/engine:3 door 11 sleep' \
+    'internal/loud/testdata/ui.py:3 door 11 select.select(' \
+    'internal/loud/wait_test.go:12 door 1 time.Sleep' \
+    'internal/loud/wait_test.go:13 door 2 time.After' \
+    'internal/loud/wait_test.go:14 door 4 context.WithTimeout' \
+    'internal/loud/wait_test.go:15 door 5 time.Now().Before' \
+    'internal/loud/wait_test.go:16 door 6 time.Since' \
+    'internal/loud/wait_test.go:17 door 7 clock.Real' \
+    'internal/loud/wait_test.go:18 door 11 sleep' \
+    'internal/mockengine/tick.go:5 door 3 time.NewTicker'
+    printf 'CHECK %-22s %-7s %s' C36-clock-door FAIL "10 real-clock sites in 4 of 7 files")
+  want=$want_all
+  got=$(clock_run "$REPO_C36")
+  if [ "$got" = "$want" ]; then
+    ok "C36: every door FAILs by line, an aliased import too; comments, data files, non-support sources and the door pass"
+  else
+    bad "C36: expected one line per real-clock site, then FAIL" "want: $want" "got:  $got"
+  fi
+  want=$(printf '%s\n' 'internal/mockengine/tick.go:5 door 3 time.NewTicker'
+    printf 'CHECK %-22s %-7s %s' C36-clock-door FAIL "1 real-clock sites in 1 of 2 files")
+  got=$(clock_run "$REPO_C36" pfm/internal/mockengine/ internal/loud/quiet_test.go)
+  if [ "$got" = "$want" ]; then
+    ok "C36: named paths, a directory and a file, judge only the files under them"
+  else
+    bad "C36: expected only the named paths judged" "want: $want" "got:  $got"
+  fi
+  want=$want_all
+  got=$(clock_run "$REPO_C36" .)
+  if [ "$got" = "$want" ]; then
+    ok "C36: the path . judges the whole tree"
+  else
+    bad "C36: expected . to judge every judged file" "want: $want" "got:  $got"
+  fi
+  expect_line "C36: a named path holding no judged file is an ERROR, never a pass" \
+    "$(clock_run "$REPO_C36" internal/loud/nap.go)" C36-clock-door ERROR "no judged file under: internal/loud/nap.go"
+  printf 'package loud\nfunc {\n' > "$REPO_C36/internal/loud/rest_test.go"
+  expect_line "C36: a judged file that does not parse is an ERROR, never a pass" \
+    "$(clock_run "$REPO_C36" internal/loud/rest_test.go)" C36-clock-door ERROR \
+    "testclock could not look: testclock: internal/loud/rest_test.go:2:6: expected 'IDENT', found '{'"
+else
+  bad "C36: could not build the git fixture"
+fi
+
+# ---- C37: the real-wait listing reads every package's tripwire report; a package that left none is an ERROR
+
+# wait_run <repo> [package...]: arch-check's --real-wait output over the fixture.
+wait_run() {
+  local repo=$1; shift
+  env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$repo" bash "$SUT" --real-wait "$@" </dev/null 2>&1
+}
+
+# wait_report <repo> <package> <rows>: a test package whose TestMain writes the tripwire's report the way
+# testjail.Run does, the given rows and its closing checked line, into PFM_TEST_REAL_WAIT.
+wait_report() {
+  local label=${2//\//_}; mkdir -p "$1/$2"
+  printf '%s\n' 'package p' '' 'import (' '	"os"' '	"testing"' ')' '' \
+    'func TestMain(m *testing.M) {' '	code := m.Run()' \
+    "	text := \"$3checked $2\\n\"" \
+    "	if err := os.WriteFile(os.Getenv(\"PFM_TEST_REAL_WAIT\")+\"/$label.txt\", []byte(text), 0o644); err != nil {" \
+    '		panic(err)' '	}' '	os.Exit(code)' '}' '' 'func TestRuns(t *testing.T) { _ = t }' > "$1/$2/main_test.go"
+}
+
+REPO_C37="$T/real-wait"
+if fixture "$REPO_C37"; then
+  printf 'module pfm\n' > "$REPO_C37/go.mod"
+  wait_report "$REPO_C37" internal/calm ''
+  wait_report "$REPO_C37" internal/noisy 'internal/noisy TestRuns internal/noisy/wait.go:7\n'
+  mkdir -p "$REPO_C37/internal/mute" "$REPO_C37/internal/bare" "$REPO_C37/internal/clock"
+  printf 'package clock\n\nvar Real int\n' > "$REPO_C37/internal/clock/clock.go"
+  printf 'package p\n\nimport "pfm/internal/clock"\n\nvar held = clock.Real\n\nfunc read() int { return clock.Real }\n' \
+    > "$REPO_C37/internal/noisy/noisy.go"
+  printf 'package mute\n\nimport "testing"\n\nfunc TestRuns(t *testing.T) { _ = t }\n' > "$REPO_C37/internal/mute/mute_test.go"
+  printf 'package bare\n' > "$REPO_C37/internal/bare/bare.go"
+  mkdir -p "$REPO_C37/internal/broken"
+  printf 'package broken\n\nimport "testing"\n\nfunc TestRuns(t *testing.T) { t.Fatal("boom") }\n' \
+    > "$REPO_C37/internal/broken/broken_test.go"
+  git -C "$REPO_C37" add -A
+  expect_line "C37: packages whose reports hold no wait PASS, counting the packages" \
+    "$(wait_run "$REPO_C37" internal/calm)" C37-real-wait PASS "1 packages, 0 real waits"
+  want=$(printf '%s\n' 'internal/noisy (init-copy) internal/noisy/noisy.go:5' 'internal/noisy TestRuns internal/noisy/wait.go:7'
+    printf 'CHECK %-22s %-7s %s' C37-real-wait FAIL "2 real waits in 1 of 2 packages")
+  got=$(wait_run "$REPO_C37" pfm/internal/calm ./internal/noisy/)
+  if [ "$got" = "$want" ]; then
+    ok "C37: each recorded wait and each start-up copy of clock.Real prints as its package, test and site, then FAIL"
+  else
+    bad "C37: expected one row per recorded wait, then FAIL" "want: $want" "got:  $got"
+  fi
+  expect_line "C37: a package with tests that left no report is an ERROR naming it, never a pass" \
+    "$(wait_run "$REPO_C37" internal/calm internal/mute)" C37-real-wait ERROR \
+    "1 of 2 packages could not be looked at (no report): internal/mute"
+  want=$(printf '%s\n' 'internal/broken broken_test.go:5: boom'
+    printf 'CHECK %-22s %-7s %s' C37-real-wait ERROR "1 of 2 packages could not be looked at (no report): internal/broken")
+  got=$(wait_run "$REPO_C37" internal/calm internal/broken)
+  if [ "$got" = "$want" ]; then
+    ok "C37: a package whose tests failed before its report prints its first error line above the ERROR"
+  else
+    bad "C37: expected the failed package's first error line, then ERROR" "want: $want" "got:  $got"
+  fi
+  expect_line "C37: packages holding no test are an ERROR, never a pass" \
+    "$(wait_run "$REPO_C37" internal/bare)" C37-real-wait ERROR "no package with tests under: ./internal/bare"
+else
+  bad "C37: could not build the git fixture"
+fi
+
 # ---- C13: a source whose tests are all real mirrors to its jail file -------
 
 REPO_C13="$T/test-mirror"
@@ -971,7 +1103,7 @@ fi
 
 # ---- the concurrent checks: order, exit status, a job that dies ------------
 
-# green_fixture <dir>: a tree on which all 34 checks PASS — the fixture plus what
+# green_fixture <dir>: a tree on which all 35 checks PASS — the fixture plus what
 # C12, C14 and C15 parse, an internal/mcpserv package for C10, a deps registry
 # for C29, a jailed test file for C21 and C25, a module with one test for C33, and the C24 script arch-check.sh
 # runs from $PFM/scripts (which C30 reads, so <dir> is <root>/pfm), with every
@@ -1025,18 +1157,18 @@ run_all() {
   out=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE "$@" PFM="$dir" bash "$SUT" </dev/null 2>/dev/null); rc=$?
 }
 
-# Today's order: C1 … C8, C10 … C23, then C25 … C34, then C24 (its own script, last).
-EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-jail-tests C34-jail-tag C35-substring-tests C24-unwrapped-door"
+# Today's order: C1 … C8, C10 … C23, then C25 … C36, then C24 (its own script, last).
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-jail-tests C34-jail-tag C35-substring-tests C36-clock-door C24-unwrapped-door"
 
 REPO_GREEN="$T/green/pfm"
 if green_fixture "$REPO_GREEN"; then
   run_all "$REPO_GREEN"
   order=$(printf '%s\n' "$out" | awk '$1 == "CHECK" {printf "%s ", $2}' | sed 's/ $//')
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
-  if [ "$rc" -eq 0 ] && [ "$passes" -eq 34 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
-    ok "exit: a tree where all 34 checks PASS exits 0, one line per check in today's order"
+  if [ "$rc" -eq 0 ] && [ "$passes" -eq 35 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
+    ok "exit: a tree where all 35 checks PASS exits 0, one line per check in today's order"
   else
-    bad "exit: expected rc 0, 34 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
+    bad "exit: expected rc 0, 35 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
   fi
 else
   bad "exit: could not build the green fixture"
@@ -1047,7 +1179,7 @@ if green_fixture "$REPO_FAIL"; then
   printf 'func Again() { log.Fatalf("bye") }\n' >> "$REPO_FAIL/internal/loud/loud.go"
   run_all "$REPO_FAIL"
   others=$(printf '%s\n' "$out" | grep '^CHECK ' | grep -vc 'C23-bare-log .*FAIL ')
-  if [ "$rc" -eq 1 ] && [ "$others" -eq 33 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
+  if [ "$rc" -eq 1 ] && [ "$others" -eq 34 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
     ok "exit: one FAIL and no ERROR exits 1"
   else
     bad "exit: expected rc 1 with only C23 failing" "rc=$rc others=$others" "$out"
@@ -1080,8 +1212,8 @@ if green_fixture "$REPO_KILL"; then
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
   lines=$(printf '%s\n' "$out" | grep -c '^CHECK ')
   line=$(printf '%s\n' "$out" | grep '^CHECK C1-ceiling-src ' || true)
-  if [ "$rc" -eq 2 ] && [ "$lines" -eq 34 ] && [ "$passes" -eq 33 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
-    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 33 checks PASS"
+  if [ "$rc" -eq 2 ] && [ "$lines" -eq 35 ] && [ "$passes" -eq 34 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
+    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 34 checks PASS"
   else
     bad "a killed check job must print ERROR for that check and exit 2" "rc=$rc lines=$lines passes=$passes" "$line"
   fi

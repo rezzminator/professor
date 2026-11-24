@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestHerdrDoorsRequireDurableOwnership(t *testing.T) {
@@ -40,7 +41,7 @@ func TestHerdrDoorsRequireDurableOwnership(t *testing.T) {
 			})
 			engine := newTestEngine(t, "cc-1-2-3", &fakeTmux{})
 			target := Target{Backend: "herdr", SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			ctx, cancel := context.WithCancel(testwait.Context(t))
 			defer cancel()
 			var err error
 			switch door {
@@ -156,6 +157,60 @@ func TestHerdrPaneOwnerIgnoresARetiredSeat(t *testing.T) {
 			_, err = ProveHerdrTarget(context.Background(), Target{SocketPath: socket, Pane: "w1:p2"})
 			if got := strings.ReplaceAll(fmt.Sprint(err), socket, "{socket}"); got != tc.want {
 				t.Fatalf("proof = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHerdrPaneOwnerAwaitingRestoredLaunch(t *testing.T) {
+	socket := testjail.Place("/fixture/herdr.sock")
+	for _, tc := range []struct {
+		name          string
+		serverStarted time.Duration // how long before now the Herdr server started
+		want          string
+	}{
+		{
+			name: "restored pane inside the birth window", serverStarted: 10 * time.Second,
+			want: "herdr seat native-fixture ownership unproved: awaiting its restored launch: supervisor ownership unproved",
+		},
+		{
+			name: "restored pane past the birth window", serverStarted: 3 * time.Minute,
+			want: "herdr seat native-fixture ownership unproved: supervisor retired or unbound pane absent",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seedNativeOwner(t, Target{SocketPath: socket, Engine: "cc"})
+			if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(socket, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			started := time.Now().Add(-tc.serverStarted)
+			if err := os.Chtimes(socket, started, started); err != nil {
+				t.Fatal(err)
+			}
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			db := fleetdb.OpenSharedState(context.Background(), values)
+			before, found, err := db.Seat(context.Background(), "native-fixture")
+			if err != nil || !found {
+				t.Fatalf("seeded seat found=%t err=%v", found, err)
+			}
+			// The old server's seat-host exited with it: pid 77 is no process.
+			after := before
+			after.SeatHostPID, after.UpdatedAt = 77, started.Add(-time.Hour).Unix()
+			if err := db.UpdateSeat(context.Background(), before, after); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_, err = ProveHerdrTarget(context.Background(), Target{SocketPath: socket, Pane: "w1:p2"})
+			if got := fmt.Sprint(err); got != tc.want {
+				t.Fatalf("proof = %q, want %q (socket %s)", got, tc.want, socket)
 			}
 		})
 	}

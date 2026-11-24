@@ -11,19 +11,20 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // promptLintCall is one answer of the fake pfm the Prompt Lint command runs: stdout,
-// stderr, exit code, and sleepSeconds to stay running (cancel, timeout).
+// stderr, exit code, and hold to stay running until killed (cancel, timeout).
 type promptLintCall struct {
-	stdout       string
-	stderr       string
-	exit         int
-	sleepSeconds int
+	stdout string
+	stderr string
+	exit   int
+	hold   bool
 }
 
 // promptLintScenario is the editor the Prompt Lint command runs in and what its fake
@@ -36,10 +37,11 @@ type promptLintScenario struct {
 	window         chooseWindow
 	noPfm          bool
 	// driver knobs, passed through PROFESSOR_PROMPT_LINT_SCENARIO
-	runs, cancelAfterMs, cancelLensAfterMs, editBeforeFix int
-	secondClick, editDuringRun, lensClick                 bool
-	globsAfter                                            []string
-	settings                                              map[string]any
+	runs, editBeforeFix                   int
+	cancelOnStart, cancelLensOnStart      bool // cancel once the held pfm run has started
+	secondClick, editDuringRun, lensClick bool
+	globsAfter                            []string
+	settings                              map[string]any
 }
 
 type promptLintDiagnostic struct {
@@ -124,7 +126,7 @@ func runVSCodePromptLint(t *testing.T, scenario promptLintScenario) (promptLintR
 		n := index + 1
 		files := map[string]string{
 			fmt.Sprintf("out.%d", n): call.stdout, fmt.Sprintf("err.%d", n): call.stderr,
-			fmt.Sprintf("exit.%d", n): fmt.Sprint(call.exit), fmt.Sprintf("sleep.%d", n): fmt.Sprint(call.sleepSeconds),
+			fmt.Sprintf("exit.%d", n): fmt.Sprint(call.exit), fmt.Sprintf("hold.%d", n): fmt.Sprint(call.hold),
 		}
 		for name, content := range files {
 			if err := os.WriteFile(filepath.Join(data, name), []byte(content), 0o600); err != nil {
@@ -132,8 +134,14 @@ func runVSCodePromptLint(t *testing.T, scenario promptLintScenario) (promptLintR
 			}
 		}
 	}
-	// Each run logs its argv one argument per line and its stdin, then answers; a sleeping
-	// run execs sleep, so a kill of pfm's pid ends it (no orphan holding stdout open).
+	// Each run logs its argv one argument per line and its stdin, then answers; a held
+	// run tells the driver it has started through the started FIFO, then execs tail on
+	// /dev/null, so a kill of pfm's pid ends it (no orphan holding stdout open).
+	if scenario.cancelOnStart || scenario.cancelLensOnStart {
+		if err := syscall.Mkfifo(filepath.Join(data, "started"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	script := `#!/bin/sh
 d="$HOME/fake-pfm"
 n=$(( $(cat "$d/count" 2>/dev/null || echo 0) + 1 ))
@@ -142,7 +150,10 @@ for arg in "$@"; do printf '%s\n' "$arg"; done > "$d/args.$n"
 cat > "$d/stdin.$n"
 cat "$d/out.$n" 2>/dev/null
 cat "$d/err.$n" >&2 2>/dev/null
-if [ "$(cat "$d/sleep.$n" 2>/dev/null || echo 0)" != 0 ]; then exec sleep "$(cat "$d/sleep.$n")"; fi
+if [ "$(cat "$d/hold.$n" 2>/dev/null || echo false)" = true ]; then
+  [ -p "$d/started" ] && echo started > "$d/started"
+  ` + testwait.Hold + `
+fi
 exit "$(cat "$d/exit.$n" 2>/dev/null || echo 64)"
 `
 	if !scenario.noPfm {
@@ -153,9 +164,9 @@ exit "$(cat "$d/exit.$n" 2>/dev/null || echo 64)"
 	raw, err := json.Marshal(map[string]any{
 		"remoteName": scenario.window.remoteName, "extensionKind": scenario.window.kind,
 		"file": scenario.file, "text": scenario.text, "settings": scenario.settings,
-		"runs": scenario.runs, "cancelAfterMs": scenario.cancelAfterMs, "editBeforeFix": scenario.editBeforeFix,
+		"runs": scenario.runs, "cancelOnStart": scenario.cancelOnStart, "editBeforeFix": scenario.editBeforeFix,
 		"secondClick": scenario.secondClick, "editDuringRun": scenario.editDuringRun, "lensClick": scenario.lensClick,
-		"cancelLensAfterMs": scenario.cancelLensAfterMs, "globsAfter": scenario.globsAfter,
+		"cancelLensOnStart": scenario.cancelLensOnStart, "globsAfter": scenario.globsAfter,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -567,13 +578,9 @@ func TestVSCodePromptLintRefusals(t *testing.T) {
 // running pfm at once and says the analysis was cancelled.
 func TestVSCodePromptLintCancelKillsPfm(t *testing.T) {
 	t.Parallel()
-	start := time.Now()
 	run, runs, _ := runVSCodePromptLint(t, promptLintScenario{
-		file: "p/SKILL.md", text: promptLintSkill, calls: []promptLintCall{{sleepSeconds: 60}}, cancelAfterMs: 300,
+		file: "p/SKILL.md", text: promptLintSkill, calls: []promptLintCall{{hold: true}}, cancelOnStart: true,
 	})
-	if elapsed := time.Since(start); elapsed > 30*time.Second {
-		t.Errorf("cancel took %s: pfm was not killed", elapsed)
-	}
 	if len(runs) != 1 {
 		t.Fatalf("pfm ran %d times, want 1", len(runs))
 	}
@@ -656,13 +663,9 @@ func TestVSCodePromptLintLens(t *testing.T) {
 // timeout; the lens is idle again afterwards.
 func TestVSCodePromptLintLensCancel(t *testing.T) {
 	t.Parallel()
-	start := time.Now()
 	run, runs, home := runVSCodePromptLint(t, promptLintScenario{
-		file: "p/SKILL.md", text: promptLintSkill, calls: []promptLintCall{{sleepSeconds: 60}}, cancelLensAfterMs: 1500,
+		file: "p/SKILL.md", text: promptLintSkill, calls: []promptLintCall{{hold: true}}, cancelLensOnStart: true,
 	})
-	if elapsed := time.Since(start); elapsed > 30*time.Second {
-		t.Errorf("cancel took %s: pfm was not killed", elapsed)
-	}
 	if len(runs) != 1 {
 		t.Fatalf("pfm ran %d times, want 1", len(runs))
 	}
@@ -683,8 +686,8 @@ func TestVSCodePromptLintLensCancel(t *testing.T) {
 	if len(run.LensAfter) != 1 || run.LensAfter[0].Command != "professor.promptLint" {
 		t.Errorf("lens after the run = %+v, want the idle Prompt Lint lens", run.LensAfter)
 	}
-	// run start, the one-second tick, run end.
-	if run.LensFires < 3 {
-		t.Errorf("lens announced %d changes, want at least 3 (start, tick, end)", run.LensFires)
+	// run start, the one-second tick fired by the driver, run end.
+	if run.LensFires != 3 {
+		t.Errorf("lens announced %d changes, want 3 (start, tick, end)", run.LensFires)
 	}
 }

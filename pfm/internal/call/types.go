@@ -46,7 +46,7 @@ const (
 	// ClaudeInlineMax and CodexInlineMax are configured boundaries, 10% below
 	// the composer edge each engine's boundary input names: Claude's smaller
 	// bracketed-paste edge is 801 characters; Codex's inline and paste edge is
-	// 1001. TESTPLAN.md § Composer transport boundaries records both
+	// 1001. README.md records both
 	// transports and the engine-side probe procedure, which is UNPLAYED.
 	//
 	// On the LIVE delivery path (engine.go's transport ladder) this is the
@@ -59,7 +59,7 @@ const (
 	// into, it is still the inline-vs-file-pointer boundary it always was.
 	// Renamed from ClaudeAutoFileMax/CodexAutoFileMax when the live meaning
 	// changed — do not raise these numbers on a guess; only the engine-side
-	// probe TESTPLAN.md's edge table describes re-measures them, and the
+	// probe README.md's edge table describes re-measures them, and the
 	// fake engine does not play it.
 	ClaudeInlineMax = 720
 	CodexInlineMax  = 900

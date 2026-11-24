@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestHungTmuxRunnerAnswersOnlyKillServer: list-panes waits out its caller's
@@ -14,10 +14,8 @@ import (
 // fails loudly.
 func TestHungTmuxRunnerAnswersOnlyKillServer(t *testing.T) {
 	fake := HungTmuxRunner(3)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
 	if _, err := fake.Run(
-		ctx,
+		testwait.Expired(),
 		[]string{"tmux", "-S", "/nowhere", "list-panes", "-a"},
 		deps.RunOptions{},
 	); !errors.Is(

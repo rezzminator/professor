@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A chat is a terminal the user LIVES in, so its tmux server has to load their
@@ -53,7 +54,7 @@ func TestChatServerLoadsTheConfigItIsGiven(t *testing.T) {
 		CWD:     root,
 		Width:   180,
 		Height:  45,
-		Run:     "sleep 120",
+		Run:     testwait.Hold,
 	}); err != nil {
 		t.Fatalf("create chat server: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestChatServerCreatesMissingSocketDirectoryOnFreshMachine(t *testing.T) {
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Codex", CWD: root,
-		Width: 180, Height: 45, Run: "sleep 120",
+		Width: 180, Height: 45, Run: testwait.Hold,
 	}); err != nil {
 		t.Fatalf("fresh-machine chat launch: %v", err)
 	}

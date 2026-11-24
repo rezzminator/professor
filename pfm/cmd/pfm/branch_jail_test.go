@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -23,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller is the hard
@@ -57,7 +57,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 		"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_TEST_BRANCH_ARGS\"\n"+
 			// the fork's SID crumb, so the session-id wait resolves at once
 			"printf '/fork/f1000000-0000-4000-8000-000000000001.jsonl\\n' > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n"+
-			"exec sleep 120\n",
+			testwait.Hold+"\n",
 	), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	callerPath := filepath.Join(tmuxDir, callerSocket)
 	start := exec.Command(
 		"tmux", "-f", "/dev/null", "-S", callerPath,
-		"new-session", "-d", "-s", callerSocket, "-n", "Parent seat", "sleep 120",
+		"new-session", "-d", "-s", callerSocket, "-n", "Parent seat", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -143,13 +143,13 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	t.Setenv("TMUX_PANE", "%0")
 
 	before := branchCallerShape(t, callerPath)
-	started := time.Now()
 	var stdout, stderr bytes.Buffer
-	if code := runChatBranch(nil, &stdout, &stderr, nil, nil); code != 0 {
+	// The forked engine lives until the cleanup kills its server, so a branch that
+	// waited on it would never return: the receive is the detached proof.
+	branched := make(chan int, 1)
+	go func() { branched <- runChatBranch(nil, &stdout, &stderr, nil, nil) }()
+	if code, _ := testwait.Receive(t, "detached chat branch to return while its engine lives", branched); code != 0 {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	if elapsed := time.Since(started); elapsed > 3*time.Second {
-		t.Fatalf("detached branch blocked for %s", elapsed)
 	}
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -189,10 +189,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	// the engine. A single read passes on a fast host and fails on a slow exec,
 	// which is a flake, not a platform difference — wait for the write instead
 	// of assuming it already happened.
-	arguments, err := waitForFile(t, argsPath, 10*time.Second)
-	if err != nil {
-		t.Fatalf("read claude argv: %v", err)
-	}
+	arguments := waitForFile(t, argsPath)
 	joined := strings.Join(strings.Fields(string(arguments)), " ")
 	for _, want := range []string{
 		"--resume " + parentID, "--fork-session", "--model opus[1m]", "--name Parent seat-branch",
@@ -226,26 +223,20 @@ func branchTmuxOutput(t *testing.T, socketPath string, arguments ...string) stri
 	return strings.TrimSpace(string(output))
 }
 
-// waitForFile polls until path has content or the deadline passes, returning
-// the last error so a timeout reports why the file was unreadable.
-func waitForFile(t *testing.T, path string, within time.Duration) ([]byte, error) {
+// waitForFile polls until path has content, and fails naming the last error
+// so a hang reports why the file was unreadable.
+func waitForFile(t *testing.T, path string) []byte {
 	t.Helper()
-	deadline := time.Now().Add(within)
-	var err error
-	for {
-		var content []byte
+	var content []byte
+	testwait.Until(t, "content in "+path, func() (bool, string) {
+		var err error
 		content, err = os.ReadFile(path)
-		if err == nil && len(content) > 0 {
-			return content, nil
+		if err != nil {
+			return false, err.Error()
 		}
-		if time.Now().After(deadline) {
-			if err == nil {
-				err = errors.New("file stayed empty")
-			}
-			return nil, err
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return len(content) > 0, "file stayed empty"
+	})
+	return content
 }
 
 // With no Herdr server running a fork is born detached on its own tmux

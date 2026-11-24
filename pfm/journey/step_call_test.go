@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -34,7 +33,7 @@ func call(c *harness.Ctx, s State) State {
 	term, owner := c.Terminal(s.Term), c.Terminal(meshOwner)
 	child := s.Mesh.ChildName
 	term.Press(harness.Ctrl('b'), harness.Key("n"))
-	term.WaitScreen("the child's tab", 20*time.Second, func(screen string) bool {
+	term.WaitScreen("the child's tab", func(screen string) bool {
 		return strings.Contains(screen, "until_gone") && !strings.Contains(screen, "spawn a child")
 	})
 	before := entries(c, child)
@@ -50,7 +49,7 @@ func call(c *harness.Ctx, s State) State {
 			child, code, out, errs, delivered, unsignedFromOwner)
 	}
 	c.Logf("pfm chat call %s: %s", child, strings.TrimSpace(out))
-	term.WaitFor("⏺ "+pong, 20*time.Second)
+	term.WaitFor("⏺ " + pong)
 	after := entries(c, child)
 	grown := append(slices.Clone(before), entry{"user", message + unsignedFooter}, entry{"assistant", pong})
 	if !slices.Equal(after, grown) {
@@ -59,7 +58,7 @@ func call(c *harness.Ctx, s State) State {
 
 	// Herdr marks the turn over once its hook lands, later than the paint on a loaded machine; a call
 	// meeting a working agent takes Herdr's raw path, whose refusal words it differently.
-	c.Poll("Herdr status idle for "+s.Mesh.ChildPane, 20*time.Second, func() (bool, string) {
+	c.Poll("Herdr status idle for "+s.Mesh.ChildPane, func() (bool, string) {
 		got := herdrStatus(c, s, s.Mesh.ChildPane)
 		return got == "idle", "status " + got
 	})
@@ -83,7 +82,7 @@ func call(c *harness.Ctx, s State) State {
 	for range draft {
 		term.Press(harness.Backspace)
 	}
-	term.WaitScreen("the child's composer empty", stepBound, func(screen string) bool {
+	term.WaitScreen("the child's composer empty", func(screen string) bool {
 		return composerLine(screen) == "❯"
 	})
 	return s
@@ -120,8 +119,17 @@ func entries(c *harness.Ctx, name string) []entry {
 // typedRun types command at term's prompt with its output sent to files under the owner's home, and
 // returns its stdout, stderr and exit code.
 func typedRun(c *harness.Ctx, term *harness.Terminal, label, command string) (stdout, stderr string, code int) {
+	return typedRunWhile(c, term, label, command, func() {})
+}
+
+// typedRunWhile is typedRun, calling while once the command is typed and before its exit is awaited.
+func typedRunWhile(
+	c *harness.Ctx, term *harness.Terminal, label, command string, while func(),
+) (stdout, stderr string, code int) {
 	base := ownerHome + "/" + c.Unique(label)
-	code = shellRun(term, label, "{ "+command+"; } >"+base+".out 2>"+base+".err", stepBound)
+	term.Type("{ " + command + "; } >" + base + ".out 2>" + base + ".err" + `; echo "` + label + ` exit=$?"` + "\r")
+	while()
+	code = shellExit(term, label)
 	stdout, stderr = read(c, "cat", base+".out"), read(c, "cat", base+".err")
 	if r := c.Read("rm", base+".out", base+".err"); r.Code != 0 {
 		c.Logf("rm %s.{out,err} exited %d: %s", base, r.Code, r.Stderr)

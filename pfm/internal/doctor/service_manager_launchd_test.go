@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func launchdPrintArgv(label string) []string {
@@ -125,10 +125,7 @@ func TestProbeServiceManagerLaunchdTimeoutCouldNotAsk(t *testing.T) {
 	fake := &deps.FakeRunner{}
 	fake.ScriptLookPath("launchctl", "/bin/launchctl", nil)
 	fake.Script(launchdPrintArgv("com.professor.pfm.mcp"), deps.RunResult{ExitCode: -1}, nil)
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancel()
-
-	report := launchdServiceManager.service(ctx, fake)
+	report := launchdServiceManager.service(testwait.Expired(), fake)
 	if report.Unit.Err == nil {
 		t.Fatalf("an expired probe must be could-not-ask, got %+v", report.Unit)
 	}

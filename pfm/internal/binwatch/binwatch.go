@@ -214,7 +214,7 @@ func serveUntilReplaced(
 			stderr,
 			"pfm mcp serve: own executable was replaced by a new build; exiting so the service manager restarts the daemon on it",
 		)
-		go drainThenEndStreams(requests, &inFlight, bounds.drain, stderr, endRequests, endStreams)
+		go drainThenEndStreams(requests, &inFlight, bounds, stderr, endRequests, endStreams)
 		ctx, cancel := context.WithTimeout(context.Background(), bounds.shutdown)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
@@ -242,6 +242,8 @@ func serveUntilReplaced(
 type restartBounds struct {
 	drain    time.Duration
 	shutdown time.Duration
+	// clock times the drain and its re-count; nil is clock.Real.
+	clock clock.Clock
 }
 
 var restartDefaults = restartBounds{drain: drainGrace, shutdown: shutdownGrace}
@@ -283,13 +285,18 @@ const drainPoll = 10 * time.Millisecond
 func drainThenEndStreams(
 	lifetime context.Context,
 	inFlight *atomic.Int64,
-	bound time.Duration,
+	bounds restartBounds,
 	stderr io.Writer,
 	endRequests, endStreams context.CancelFunc,
 ) {
-	deadline := clock.Real.NewTimer(bound)
+	clk := bounds.clock
+	if clk == nil {
+		clk = clock.Real
+	}
+	bound := bounds.drain
+	deadline := clk.NewTimer(bound)
 	defer deadline.Stop()
-	poll := clock.Real.NewTicker(drainPoll)
+	poll := clk.NewTicker(drainPoll)
 	defer poll.Stop()
 	for inFlight.Load() > 0 {
 		select {

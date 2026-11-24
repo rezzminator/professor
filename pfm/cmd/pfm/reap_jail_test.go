@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The reaper KILLS things, so its fixtures run against real tmux servers on
@@ -112,19 +113,17 @@ func runInPane(t *testing.T, root, socket, line, wantCommand string) {
 	if output, err := send.CombinedOutput(); err != nil {
 		t.Fatalf("send %q: %v: %s", line, err, output)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	testwait.Until(t, "pane to run "+wantCommand, func() (bool, string) {
 		list := exec.Command(
 			"tmux", "-S", path, "list-panes", "-a", "-F", "#{pane_current_command}",
 		)
 		list.Env = append(os.Environ(), "TMUX=")
 		output, err := list.Output()
-		if err == nil && strings.Contains(string(output), wantCommand) {
-			return
+		if err != nil {
+			return false, err.Error()
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("pane never started %q", wantCommand)
+		return strings.Contains(string(output), wantCommand), string(output)
+	})
 }
 
 func reapServerAlive(root, socket string) bool {
@@ -208,7 +207,9 @@ func TestReapNeverKillsASocketHostingNonChatWork(t *testing.T) {
 	const orphan = "cc-1800000002-42-2"
 	startShellPane(t, root, hosting)
 	startShellPane(t, root, orphan)
-	runInPane(t, root, hosting, "sleep 600", "sleep")
+	// The hold runs as a job of the pane's shell, never in its place: the
+	// socket's shape is a shell hosting typed work.
+	runInPane(t, root, hosting, "sh -c '"+testwait.Hold+"'", "tail")
 
 	// Both sockets carry a breadcrumb: without one a claude socket is
 	// busy-unknown and skipped, which would kill the difference under a rule

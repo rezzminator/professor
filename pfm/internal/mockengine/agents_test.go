@@ -97,6 +97,7 @@ func TestClaudeAgentsPanelHoldsTheKeyboard(t *testing.T) {
 	if err := os.Remove(gate); err != nil {
 		t.Fatal(err)
 	}
+	fix.nudge()
 	session.waitFrame(
 		"the agent's result",
 		func(frame string) bool { return strings.Contains(frame, `⏺ Agent "scout" finished`) },

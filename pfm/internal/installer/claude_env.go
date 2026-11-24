@@ -242,7 +242,7 @@ func (installer *engine) ensureClaudeEnv(uninstall bool) (result error) {
 		if installer.options.ClaudePluginsFromCheckout {
 			logDir := want[PluginLogDirEnv]
 			if logDir == "" {
-				logDir = filepath.Join(installer.options.Home, ".local", "state", "pfm", "plugin-logs")
+				logDir = pluginLogDirDefault(installer.options.Home)
 			}
 			pluginLogDir = logDir
 			if err := installer.ensurePluginLogDir(logDir); err != nil {

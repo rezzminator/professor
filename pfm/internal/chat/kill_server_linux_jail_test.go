@@ -12,7 +12,6 @@ import (
 	"slices"
 	"syscall"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestNativeSelfEndWorkerSurvivesPTYSessionDeath(t *testing.T) {
@@ -103,35 +103,27 @@ func TestNativeSelfEndWorkerSurvivesPTYSessionDeath(t *testing.T) {
 			case <-killed:
 			case err := <-done:
 				t.Fatalf("caller exited before close: %v %s", err, &output)
-			case <-time.After(15 * time.Second):
+			case <-testwait.Context(t).Done():
 				t.Fatal("pane close never arrived")
 			}
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				t.Fatal("initiating PTY did not die")
-			}
-			deadline := time.Now().Add(5 * time.Second)
-			for {
+			_, _ = testwait.Receive(t, "the initiating PTY to die", done)
+			testwait.Until(t, "the independent end worker to retire the killed caller's seat", func() (bool, string) {
 				_, found, err := db.Seat(context.Background(), seat.SeatID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !found {
-					if _, err := os.Stat(
-						filepath.Join(filepath.Dir(runtime.Paths.StateDB), "seats", seat.SeatID+".json"),
-					); !os.IsNotExist(
-						err,
-					) {
-						t.Fatalf("recipe err=%v", err)
-					}
-					break
+				if found {
+					return false, "seat " + seat.SeatID + " still stored; caller output: " + output.String()
 				}
-				if time.Now().After(deadline) {
-					t.Fatalf("independent end worker did not retire the killed caller's seat: %s", &output)
+				if _, err := os.Stat(
+					filepath.Join(filepath.Dir(runtime.Paths.StateDB), "seats", seat.SeatID+".json"),
+				); !os.IsNotExist(
+					err,
+				) {
+					t.Fatalf("recipe err=%v", err)
 				}
-				time.Sleep(10 * time.Millisecond)
-			}
+				return true, ""
+			})
 		})
 	}
 }

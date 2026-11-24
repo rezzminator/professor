@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestRealRunnerRunCapturesStdoutStderrAndExitCode(t *testing.T) {
@@ -173,7 +175,7 @@ func TestRealRunnerStartDetachReleasesAndWaitNamesIt(t *testing.T) {
 	defer func() { _ = extra.Close() }()
 	process, err := RealRunner{}.Start(
 		context.Background(),
-		[]string{"/bin/sh", "-c", "echo on-fd-3 >&3; exec sleep 30"},
+		[]string{"/bin/sh", "-c", "echo on-fd-3 >&3; " + testwait.Hold},
 		StartOptions{Detach: true, ExtraFiles: []*os.File{extra}},
 	)
 	if err != nil {
@@ -194,29 +196,19 @@ func TestRealRunnerStartDetachReleasesAndWaitNamesIt(t *testing.T) {
 	if err := process.Release(); err != nil {
 		t.Fatalf("Release() error = %v", err)
 	}
-	deadline := time.Now().Add(6 * time.Second)
-	for {
+	testwait.Until(t, "the child's fd 3 line "+strconv.Quote("on-fd-3\n")+" in "+extra.Name(), func() (bool, string) {
 		body, err := os.ReadFile(extra.Name())
-		if err == nil && string(body) == "on-fd-3\n" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s = %q, %v; want the child's fd 3 line %q", extra.Name(), body, err, "on-fd-3\n")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return err == nil && string(body) == "on-fd-3\n", fmt.Sprintf("%s = %q, %v", extra.Name(), body, err)
+	})
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatalf("stop detached pid %d: %v", pid, err)
 	}
 	// A long-lived caller (the paced statusline worker) must not collect a
 	// zombie per detached child: once the child exits, its pid is reaped.
-	deadline = time.Now().Add(6 * time.Second)
-	for syscall.Kill(pid, 0) == nil {
-		if time.Now().After(deadline) {
-			t.Fatalf("detached pid %d still in the process table 6s after it exited: never reaped (zombie)", pid)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	testwait.Until(t, fmt.Sprintf("detached pid %d to be reaped once it exited", pid), func() (bool, string) {
+		err := syscall.Kill(pid, 0)
+		return err != nil, fmt.Sprintf("still in the process table: never reaped (zombie), kill(%d, 0) = %v", pid, err)
+	})
 }
 
 // SignalGroup reaches a live group with the signal asked for, answers nil
@@ -225,17 +217,18 @@ func TestRealRunnerSignalGroup(t *testing.T) {
 	t.Parallel()
 	live, err := RealRunner{}.Start(
 		context.Background(),
-		[]string{"sh", "-c", "sleep 30"},
+		[]string{"sh", "-c", testwait.Hold},
 		StartOptions{ProcessGroup: true},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = live.KillGroup() })
 	if err := live.SignalGroup(syscall.SIGTERM); err != nil {
 		t.Fatalf("SignalGroup(SIGTERM) on a live group = %v, want nil", err)
 	}
 	var exitErr *exec.ExitError
-	if err := live.Wait(); !errors.As(err, &exitErr) ||
+	if err := waitProcess(t, live, "the group's child to end once signalled"); !errors.As(err, &exitErr) ||
 		exitErr.Sys().(syscall.WaitStatus).Signal() != syscall.SIGTERM {
 		t.Fatalf("Wait() after SignalGroup(SIGTERM) = %v, want the child terminated by SIGTERM", err)
 	}
@@ -313,18 +306,16 @@ func TestRealRunnerStartWaitDelayClosesInheritedPipe(t *testing.T) {
 	var stdout bytes.Buffer
 	process, err := (RealRunner{}).Start(
 		context.Background(),
-		[]string{"sh", "-c", "sleep 30 & exit 0"},
+		[]string{"sh", "-c", testwait.Hold + " & exit 0"},
 		StartOptions{Stdout: &stdout, WaitDelay: 25 * time.Millisecond, ProcessGroup: true},
 	)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	t.Cleanup(func() { _ = process.KillGroup() })
-	started := time.Now()
-	err = process.Wait()
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("Wait() took %s, want WaitDelay to close inherited pipe", elapsed)
-	}
+	// The background child never exits on its own: Wait returns only because
+	// WaitDelay closes the pipe it holds, so a Wait that does return is the proof.
+	err = waitProcess(t, process, "Wait to return once WaitDelay closed the inherited pipe")
 	if err == nil {
 		t.Fatal("Wait() returned nil after WaitDelay closed an inherited pipe")
 	}
@@ -335,25 +326,30 @@ func TestRealRunnerStartWaitDelayClosesInheritedPipe(t *testing.T) {
 func TestRealRunnerRunWaitDelayClosesInheritedPipe(t *testing.T) {
 	t.Parallel()
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
-	script := fmt.Sprintf("sleep 30 & echo $! > %s; exit 0", shellQuote(pidFile))
-	started := time.Now()
-	_, err := (RealRunner{}).Run(
-		context.Background(),
-		[]string{"sh", "-c", script},
-		RunOptions{WaitDelay: 25 * time.Millisecond},
-	)
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("Run() took %s, want WaitDelay to close inherited pipe", elapsed)
-	}
-	if err == nil {
-		t.Fatal("Run() returned nil after WaitDelay closed an inherited pipe")
-	}
-	if raw, readErr := os.ReadFile(pidFile); readErr == nil {
-		if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw))); parseErr == nil {
-			if child, findErr := os.FindProcess(pid); findErr == nil {
-				_ = child.Kill()
+	script := fmt.Sprintf(testwait.Hold+" & echo $! > %s; exit 0", shellQuote(pidFile))
+	t.Cleanup(func() {
+		if raw, readErr := os.ReadFile(pidFile); readErr == nil {
+			if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw))); parseErr == nil {
+				if child, findErr := os.FindProcess(pid); findErr == nil {
+					_ = child.Kill()
+				}
 			}
 		}
+	})
+	// The background child never exits on its own: Run returns only because
+	// WaitDelay closes the pipe it holds, so a Run that does return is the proof.
+	ran := make(chan error, 1)
+	go func() {
+		_, err := (RealRunner{}).Run(
+			context.Background(),
+			[]string{"sh", "-c", script},
+			RunOptions{WaitDelay: 25 * time.Millisecond},
+		)
+		ran <- err
+	}()
+	err, _ := testwait.Receive(t, "Run to return once WaitDelay closed the inherited pipe", ran)
+	if err == nil {
+		t.Fatal("Run() returned nil after WaitDelay closed an inherited pipe")
 	}
 }
 
@@ -365,16 +361,17 @@ func TestRealRunnerKillGroupStopsDescendants(t *testing.T) {
 	t.Parallel()
 	process, err := (RealRunner{}).Start(
 		context.Background(),
-		[]string{"sh", "-c", "sleep 30"},
+		[]string{"sh", "-c", testwait.Hold},
 		StartOptions{ProcessGroup: true},
 	)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
+	t.Cleanup(func() { _ = process.KillGroup() })
 	if err := process.KillGroup(); err != nil {
 		t.Fatalf("KillGroup() error = %v", err)
 	}
-	if err := process.Wait(); err == nil {
+	if err := waitProcess(t, process, "the group's child to end once killed"); err == nil {
 		t.Fatal("Wait() after KillGroup() returned nil, want signal status")
 	}
 }
@@ -396,19 +393,23 @@ func TestRealRunnerRunReportsZeroExitCodeOnSuccess(t *testing.T) {
 	}
 }
 
-// pidGone polls up to five seconds for pid to disappear. The fence container
-// runs with an init that reaps orphans, so a killed process leaves no zombie.
-func pidGone(pid int) bool {
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+// waitProcess waits for process to end, failing as a hang when it never does.
+func waitProcess(t *testing.T, process Process, what string) error {
+	t.Helper()
+	waited := make(chan error, 1)
+	go func() { waited <- process.Wait() }()
+	err, _ := testwait.Receive(t, what, waited)
+	return err
+}
+
+// waitPidGone waits for pid to disappear. The fence container runs with an
+// init that reaps orphans, so a killed process leaves no zombie.
+func waitPidGone(t *testing.T, what string, pid int) {
+	t.Helper()
+	testwait.Until(t, fmt.Sprintf("%s %d to leave the process table", what, pid), func() (bool, string) {
+		err := syscall.Kill(pid, 0)
+		return errors.Is(err, syscall.ESRCH), fmt.Sprintf("kill(%d, 0) = %v", pid, err)
+	})
 }
 
 func TestRealRunnerProcessGroupDeadlineKillsBackgroundedDescendants(t *testing.T) {
@@ -420,24 +421,38 @@ func TestRealRunnerProcessGroupDeadlineKillsBackgroundedDescendants(t *testing.T
 			}
 		}
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
+	ctx, expire := testwait.Deadline(t)
 	finished := make(chan error, 1)
 	go func() {
 		_, err := RealRunner{}.Run(
 			ctx,
-			[]string{"sh", "-c", `sleep 300 & echo $! > "$1"; exec sleep 300`, "sh", pidFile},
+			// The descendant's stdout is /dev/null: a tail whose stdout pipe closes ends on its own,
+			// and this one must outlive a kill of the leader alone. It keeps stderr, so Run still waits on it.
+			[]string{
+				"sh",
+				"-c",
+				testwait.Hold + ` >/dev/null & echo $! > "$1"; ` + testwait.Hold,
+				"sh",
+				pidFile,
+			},
 			// WaitDelay only bounds a broken run: with the group killed, nothing
-			// holds the pipes and Run returns at the deadline.
+			// holds the pipes and Run returns as the context ends.
 			RunOptions{ProcessGroup: true, WaitDelay: 3 * time.Second},
 		)
 		finished <- err
 	}()
-	select {
-	case <-finished:
-	case <-time.After(15 * time.Second):
-		t.Fatal("Run did not return within 15s of its 500ms deadline")
-	}
+	// The context ends once both children are up and the child has recorded its
+	// pid: the deadline then passes, and the group is killed.
+	testwait.Until(t, "the backgrounded child to record its pid in "+pidFile, func() (bool, string) {
+		raw, err := os.ReadFile(pidFile)
+		if err != nil {
+			return false, err.Error()
+		}
+		_, convErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		return convErr == nil, fmt.Sprintf("pid file holds %q", raw)
+	})
+	expire()
+	_, _ = testwait.Receive(t, "Run to return once its context ended", finished)
 	raw, err := os.ReadFile(pidFile)
 	if err != nil {
 		t.Fatalf("the backgrounded child never recorded its pid: %v", err)
@@ -446,9 +461,7 @@ func TestRealRunnerProcessGroupDeadlineKillsBackgroundedDescendants(t *testing.T
 	if err != nil {
 		t.Fatalf("parse recorded pid %q: %v", raw, err)
 	}
-	if !pidGone(pid) {
-		t.Fatalf("backgrounded descendant %d survived the deadline", pid)
-	}
+	waitPidGone(t, "the backgrounded descendant", pid)
 }
 
 func TestRealRunnerStartCanonicalArgvAndForeground(t *testing.T) {

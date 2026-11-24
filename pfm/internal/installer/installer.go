@@ -2,7 +2,11 @@
 // wiring. Its assets are embedded so one pfm binary is a complete installer.
 //
 // herdr_claude.go: Herdr's own Claude integration, once per Claude settings store.
+// claude_plugins_command.go: one `claude plugin` command: its environment, its process group and its deadline.
 // claude_plugins_unwire.go: uninstall takes back what install wrote into the Claude settings and plugin records.
+// claude_plugins_take.go: the take-back of plugin keys and copies from one Claude config dir, uninstall's and retirement's.
+// claude_plugins_retire.go: install removes every trace of a plugin retired with no successor; doctor names one left.
+// claude_plugins_retire_logs.go: the plugin log folder of a plugin retired with no successor, and whether it is still held.
 // log_root.go: install moves the logs pfm wrote before the log root into it, once.
 // claude_registry_defaults.go: install sets the launch defaults' registry values in each account's .claude.json.
 // claude_user_settings.go: install adds the launch defaults' user settings to each account's settings.json.
@@ -34,6 +38,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudeplugin"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/globallink"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -59,6 +64,12 @@ type engine struct {
 	// engineSyncDeadline is the test seam of the deadline of `engine-sync
 	// global`; zero is engineSyncGlobalTimeout.
 	engineSyncDeadline time.Duration
+	// engineSyncTimer is the test seam of the clock that deadline runs on; nil is
+	// the real clock.
+	engineSyncTimer clock.Clock
+	// claudePluginTimer is the test seam of the clock every `claude plugin`
+	// command's deadline runs on; nil is the real context timeout.
+	claudePluginTimer clock.Clock
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).
@@ -125,20 +136,26 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		}
 	}
 
-	// Every retirement step reads the clone's retired lists and runs on empty
-	// lists without them: a clone without the file is a skip, like every other
-	// absent clone source; a file that cannot be read or parsed fails the run.
-	if _, listsErr := installer.retiredLists(); errors.Is(listsErr, fs.ErrNotExist) {
-		installer.skip("every retirement step: " + listsErr.Error())
-	} else if listsErr != nil {
-		installer.deferFailure(installer.fail(listsErr))
-	}
+	installer.deferRetiredListsFailure()
 	if options.Mode == ModeUninstall {
 		err = installer.uninstall(ctx)
 	} else {
 		err = installer.install(ctx)
 	}
 	return installer.finish(err)
+}
+
+// deferRetiredListsFailure reads the clone's retired lists once for the run.
+// Every retirement step runs on empty lists without them: a clone without the
+// file is a skip, like every other absent clone source; a file that cannot be
+// read or parsed fails the run. Run and Generate call it before any step, so a
+// step reading the lists may ignore their error.
+func (installer *engine) deferRetiredListsFailure() {
+	if _, listsErr := installer.retiredLists(); errors.Is(listsErr, fs.ErrNotExist) {
+		installer.skip("every retirement step: " + listsErr.Error())
+	} else if listsErr != nil {
+		installer.deferFailure(installer.fail(listsErr))
+	}
 }
 
 // finish joins the run's error with every plan error and deferred step
@@ -259,11 +276,6 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.retireStoreEntries())
 	installer.deferFailure(installer.retirePredecessors())
 	installer.deferFailure(installer.retireRenamedGlobalAgents())
-	if err == nil {
-		installer.deferFailure(installer.wireCommands(assets))
-	} else {
-		installer.skip("managed command wiring deferred: embedded assets failed staging")
-	}
 	installer.deferFailure(installer.wireGlobalCommands())
 	installer.deferFailure(installer.wireGlobalRules())
 	installer.deferFailure(installer.retireDeadRegistryLinks())
@@ -278,6 +290,7 @@ func (installer *engine) install(ctx context.Context) error {
 	// after every later step has landed. It runs before engine-sync global,
 	// which builds the plugin agents' Codex and OpenCode twins from the plugin
 	// copies this step refreshes.
+	installer.deferFailure(installer.retireClaudePlugins())
 	installer.deferFailure(installer.ensureClaudePlugins(ctx))
 	// The global file first: engine-sync global unions its targets'
 	// capabilities with the flags, so a stale list would keep an opted-out
@@ -285,7 +298,7 @@ func (installer *engine) install(ctx context.Context) error {
 	// old config files.
 	installer.deferFailure(installer.wireEngineSyncConfig())
 	installer.deferFailure(installer.wireEngineSyncPathLink())
-	installer.deferFailure(installer.wireEngineSyncGlobal(assets))
+	installer.deferFailure(installer.wireEngineSyncGlobal())
 	if len(installer.codexHomes()) != 0 {
 		installer.deferFailure(installer.wireCodexDefaults())
 	}
@@ -307,6 +320,7 @@ func (installer *engine) install(ctx context.Context) error {
 	installer.deferFailure(installer.wireHerdrKeys(false))
 	installer.deferFailure(installer.wireHerdrSettings())
 	installer.deferFailure(installer.wireHerdrClaudeIntegration(ctx))
+	installer.deferFailure(installer.retireHerdrShieldPlugin(ctx))
 	installer.deferFailure(installer.convergeHerdrIndicators(ctx))
 	installer.deferFailure(installer.wireVSCode())
 	installer.deferFailure(errors.Join(installer.writeUpdateMetadata(), installer.moveLogsToRoot()))
@@ -412,7 +426,7 @@ func (installer *engine) wireGlobalLink(source, target, sourceRepoRoot string, i
 	})
 }
 
-func (installer *engine) futureCommandSource(assets []assetFile) (string, func() error, error) {
+func (installer *engine) futureCommandSource() (string, func() error, error) {
 	temporary, err := paths.MkdirTemp("install-command-plan", "plan-")
 	if err != nil {
 		return "", func() error { return nil }, fmt.Errorf("create Codex command plan root: %w", err)
@@ -438,21 +452,23 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 	if err := installer.stageGlobalCommandPlan(target); err != nil {
 		return fail(err)
 	}
-	for _, asset := range assets {
-		commandTarget, found := installer.commandTarget(asset.path)
-		if !found {
+	// A command the retired lists' configFiles name is gone before engine-sync
+	// applies (retirePredecessors); a failed read is deferred once by Run and
+	// Generate (deferRetiredListsFailure).
+	lists, _ := installer.retiredLists()
+	for _, file := range lists.ConfigFiles {
+		name, isCommand := strings.CutPrefix(file.Path, "commands/")
+		if !isCommand {
 			continue
 		}
-		relative, err := filepath.Rel(filepath.Join(installer.options.ConfigDir, "commands"), commandTarget)
+		matches, err := filepath.Glob(filepath.Join(target, filepath.FromSlash(name)))
 		if err != nil {
-			return fail(fmt.Errorf("map planned command %s: %w", commandTarget, err))
+			return fail(fmt.Errorf("match retired command %s in the command preview: %w", file.Path, err))
 		}
-		content, err := readAsset(asset.path)
-		if err != nil {
-			return fail(fmt.Errorf("read planned command asset %s: %w", asset.path, err))
-		}
-		if err := atomicfile.Write(filepath.Join(target, relative), content, asset.mode); err != nil {
-			return fail(fmt.Errorf("stage planned command %s: %w", relative, err))
+		for _, match := range matches {
+			if err := os.RemoveAll(match); err != nil {
+				return fail(fmt.Errorf("retire %s from command preview: %w", match, err))
+			}
 		}
 	}
 	if err := os.RemoveAll(filepath.Join(target, "swap.md")); err != nil {
@@ -463,8 +479,6 @@ func (installer *engine) futureCommandSource(assets []assetFile) (string, func()
 
 // stageGlobalCommandPlan snapshots the clone entries wireGlobalCommands would
 // link, preserving the registry entries that its shared classifier refuses.
-// Embedded commands are overlaid afterwards: their managed links precede the
-// global step during apply, so they remain conflicts rather than clone links.
 func (installer *engine) stageGlobalCommandPlan(target string) error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
@@ -604,10 +618,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.unwireHostOverlays(); err != nil {
 		return err
 	}
-	if err := installer.unwireCommands(assets); err != nil {
-		return err
-	}
-	if err := installer.retireHandoffSkill(); err != nil {
+	if err := installer.retireEmbeddedAssets(); err != nil {
 		return err
 	}
 	// Before engine-sync retires the Codex mirror: unwiring the Claude registries first means no
@@ -620,7 +631,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	// Deferred, as install defers them: a failing engine-sync step must not
 	// leave the launch agent loaded and the machine targets wired.
-	installer.deferFailure(installer.wireEngineSyncGlobal(nil))
+	installer.deferFailure(installer.wireEngineSyncGlobal())
 	installer.deferFailure(installer.retireEngineSyncFile())
 	installer.deferFailure(installer.unwireEngineSyncPathLink())
 	if err := installer.options.jobScheduler().unwireAgents(ctx, installer); err != nil {
@@ -758,8 +769,6 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			return false, fmt.Errorf("read embedded asset %s: %w", asset.path, err)
 		}
 		switch {
-		case asset.path == "reload.command.md":
-			content, err = renderReloadCommandAsset(content)
 		case asset.path == vscodeExtensionSource+"/package.json":
 			content, err = renderVSCodeExtensionManifest(content, installer.vscodeThemes)
 		case asset.path == "systemd/"+nameSyncTimerUnit:
@@ -930,19 +939,6 @@ func (installer *engine) retire(path, reason string) error {
 	})
 }
 
-func (installer *engine) retireGlob(pattern, reason string) error {
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		return err
-	}
-	for _, match := range matches {
-		if err := installer.retire(match, reason); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // hostOverlayScripts names the assets/bin/* scripts pfm install owns end to
 // end as HOST overlays — materialized like every other embedded asset by
 // stageAssets, then symlinked at their contracted ~/.local/bin/NAME so a
@@ -1036,53 +1032,6 @@ func (installer *engine) unwireHostOverlays() error {
 	}
 	installer.say("")
 	return nil
-}
-
-// wireCommands links pfm commands into the store commands registry.
-func (installer *engine) wireCommands(assets []assetFile) error {
-	config := installer.options.ConfigDir
-	installer.say("commands -> %s", filepath.Join(config, "commands"))
-	for _, asset := range assets {
-		target, found := commandTargetIn(config, asset.path)
-		if !found {
-			continue
-		}
-		source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
-		if _, err := installer.ensureLink(source, target); err != nil {
-			return err
-		}
-	}
-
-	installer.say("")
-	return nil
-}
-
-func (installer *engine) unwireCommands(assets []assetFile) error {
-	config := installer.options.ConfigDir
-	installer.say("commands -> %s", filepath.Join(config, "commands"))
-	for _, asset := range assets {
-		target, found := commandTargetIn(config, asset.path)
-		if !found {
-			continue
-		}
-		if err := installer.unlinkOne(target); err != nil {
-			return err
-		}
-	}
-	installer.say("")
-	return nil
-}
-
-func (installer *engine) commandTarget(asset string) (string, bool) {
-	return commandTargetIn(installer.options.ConfigDir, asset)
-}
-
-func commandTargetIn(config, asset string) (string, bool) {
-	commands := filepath.Join(config, "commands")
-	if asset == "reload.command.md" {
-		return filepath.Join(commands, "reload.md"), true
-	}
-	return "", false
 }
 
 func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {

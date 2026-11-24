@@ -260,7 +260,7 @@ mkprof "$R" templates.err exit 0 "$(ep 1)" "$(ep 9)" 9.000000 3.000 2 0.000000 0
 printf 'ERR rc=1 %s /x/foo.sh:12 do_thing: false\n  at /x/foo.sh:40 main\nERR rc=2 %s /x/bar.sh:3 other: exit 2\n' "$(ep 5)" "$(ep 6)" > "$R/steps/templates.err.xtrace"
 mkprof "$R" templates.d exit 0 "$(ep 5)" "$(ep 10)" 8.000000 2.000 0 0.000000 0.000000 0.000000
 printf 'this is not a prof file\n' > "$R/steps/templates.e.prof.tsv"
-mkprof "$R" slow.step timeout 124 "$(ep 2)" "$(ep 12)" 120.000000 9.000 0 0.000000 0.000000 0.000000
+mkprof "$R" slow.step 'timeout' 124 "$(ep 2)" "$(ep 12)" 120.000000 9.000 0 0.000000 0.000000 0.000000
 mkdir -p "$R/steps/slow.step.hang"
 echo "tree" > "$R/steps/slow.step.hang/tree.txt"
 printf 'cg_swap_mb\tmemory.swap.current unreadable\n' > "$R/resources.err"
@@ -467,7 +467,7 @@ R5=$T/timing/run.CORNERS
 mkres "$R5/resources.tsv" 30 30
 mkgate "$R5" FAIL - pfm.unit PASS 70.0 hang.step FAIL 60.0 long.err FAIL 3.0 lost.err FAIL 2.0 cpu.step PASS 1.0 gone.step TIMEOUT 9.0
 mkprof "$R5" pfm.unit exit 0 "$(ep 1)" "$(ep 9)" 70.000000 1.000 0 0.000000 0.000000 0.000000
-mkprof "$R5" hang.step timeout 124 "$(ep 1)" "$(ep 9)" 60.000000 1.000 0 0.000000 0.000000 0.000000
+mkprof "$R5" hang.step 'timeout' 124 "$(ep 1)" "$(ep 9)" 60.000000 1.000 0 0.000000 0.000000 0.000000
 mkprof "$R5" long.err exit 1 "$(ep 1)" "$(ep 9)" 3.000000 1.000 1 0.000000 0.000000 0.000000
 printf 'ERR rc=1 %s %s\n' "$(ep 2)" "$(printf 'x%.0s' $(seq 1 300))" > "$R5/steps/long.err.xtrace"
 mkprof "$R5" lost.err exit 1 "$(ep 1)" "$(ep 9)" 2.000000 1.000 3 0.000000 0.000000 0.000000

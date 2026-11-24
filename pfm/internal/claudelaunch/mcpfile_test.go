@@ -153,3 +153,80 @@ func TestWriteMCPFileRefusesASymlinkedDirectory(t *testing.T) {
 		t.Fatalf("symlink target holds %d entries (err %v), want none", len(entries), err)
 	}
 }
+
+// TestRefreshMCPFilesRewritesRecordedLaunchFiles pins the restore door: every
+// launch MCP file a recorded recipe names in pfm's directory holds the current
+// rendering at its recorded path, whether pruned or stale; a path pfm did not
+// name stays as it is. A path recorded under another spelling of the same
+// home (a symlink to it) is pfm's too.
+func TestRefreshMCPFilesRewritesRecordedLaunchFiles(t *testing.T) {
+	home, machine := renderMachine(t)
+	alias := filepath.Join(t.TempDir(), "home-link")
+	if err := os.Symlink(home, alias); err != nil {
+		t.Fatal(err)
+	}
+	machine.MCPServers[pfmconfig.MCPServerChat] = pfmconfig.MCPServer{Enabled: true}
+	dir := paths.ClaudeMCPConfigDir(home)
+	rendered := `{"mcpServers":{"chat-professor":{"args":["mcp","serve","--stdio","--family","chat"],"command":"` +
+		filepath.Join(home, ".local", "bin", "pfm") + `","type":"stdio"}}}`
+	for _, tc := range []struct {
+		name   string
+		path   string
+		before string // "" is a file that does not exist
+		args   func(path string) []string
+		want   string // "" is a file that still does not exist
+	}{
+		{
+			"pruned file", filepath.Join(dir, "claude-mcp-11.json"), "",
+			func(p string) []string { return []string{"--resume", "s", "--mcp-config", p} }, rendered,
+		},
+		{
+			"inline flag", filepath.Join(dir, "claude-mcp-12.json"), "",
+			func(p string) []string { return []string{"--mcp-config=" + p} }, rendered,
+		},
+		{
+			"stale rendering", filepath.Join(dir, "claude-mcp-13.json"), `{"mcpServers":{}}`,
+			func(p string) []string { return []string{"--mcp-config", p} }, rendered,
+		},
+		{
+			"recorded under a linked home", filepath.Join(paths.ClaudeMCPConfigDir(alias), "claude-mcp-16.json"), "",
+			func(p string) []string { return []string{"--mcp-config", p} }, rendered,
+		},
+		{
+			"caller file outside", filepath.Join(home, "mine", "claude-mcp-14.json"), "",
+			func(p string) []string { return []string{"--mcp-config", p} }, "",
+		},
+		{
+			"caller name inside", filepath.Join(dir, "operator.json"), `{"mine":1}`,
+			func(p string) []string { return []string{"--mcp-config", p} }, `{"mine":1}`,
+		},
+		{
+			"after double dash", filepath.Join(dir, "claude-mcp-15.json"), "",
+			func(p string) []string { return []string{"--", "--mcp-config", p} }, "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.before != "" {
+				if err := os.MkdirAll(filepath.Dir(tc.path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(tc.path, []byte(tc.before), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := RefreshMCPFiles(tc.args(tc.path), home, machine); err != nil {
+				t.Fatal(err)
+			}
+			body, err := os.ReadFile(tc.path)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("%s was written: %s", tc.path, body)
+				}
+				return
+			}
+			if err != nil || string(body) != tc.want {
+				t.Fatalf("%s = %q (%v), want %q", tc.path, body, err, tc.want)
+			}
+		})
+	}
+}

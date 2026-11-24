@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // holdBridge takes the host-wide Herdr bridge lock the way another chat's
@@ -61,11 +63,15 @@ func runSpawned(t *testing.T, spawned [][]string, deps herdrDeps) {
 // Herdr lists no Claude in front so pfm reports its state, whose hooks name its transcript
 // and keep their detached processes in spawned.
 type nativeActivityRig struct {
+	t          *testing.T
 	server     *fakeHerdr
 	deps       herdrDeps
 	lockDir    string
 	transcript string
 	spawned    [][]string
+	// clock times the rig's reporters: a hook that meets a lock held past its
+	// deadline polls it on this fake until the deadline passes on it.
+	clock *clock.Fake
 }
 
 func newNativeActivityRig(t *testing.T) *nativeActivityRig {
@@ -90,12 +96,14 @@ func newNativeActivityRig(t *testing.T) *nativeActivityRig {
 		t.Fatal(err)
 	}
 	rig := &nativeActivityRig{
-		server: server, deps: realHerdrDeps(), lockDir: paths.HerdrLockDir(root),
+		t: t, server: server, deps: testHerdrDeps(), lockDir: paths.HerdrLockDir(root),
 		transcript: filepath.Join(root, "activity-session.jsonl"),
 	}
 	if err := os.WriteFile(rig.transcript, []byte(watchToolUseEntry+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	rig.clock = clock.NewFake(time.Now())
+	rig.deps.clock = rig.clock
 	now := time.Unix(1000, 0)
 	rig.deps.now = func() time.Time { now = now.Add(time.Millisecond); return now }
 	rig.deps.spawn = func(argv []string) error { rig.spawned = append(rig.spawned, argv); return nil }
@@ -116,7 +124,10 @@ func (rig *nativeActivityRig) event(step string) herdrRun {
 	}
 	payload := fmt.Sprintf(`{"session_id":"activity-session","transcript_path":%q%s}`, rig.transcript, fields)
 	var stderr bytes.Buffer
-	rc := reportToHerdr([]string{event}, strings.NewReader(payload), &stderr, rig.deps)
+	var rc int
+	expireHeldWait(rig.t, rig.clock, herdrLockPoll, herdrDeadline, func() {
+		rc = reportToHerdr([]string{event}, strings.NewReader(payload), &stderr, rig.deps)
+	})
 	return herdrRun{rc: rc, stderr: stderr.String()}
 }
 
@@ -361,7 +372,15 @@ func TestHerdrTmuxStopDroppedBeforeTheEngineProofIsSettled(t *testing.T) {
 			rig.tmux.mu.Lock()
 			rig.tmux.hangOn = "display-message"
 			rig.tmux.mu.Unlock()
-			got := fire("idle", "")
+			// The session read hangs until the hook's deadline, which the jail's clock passes
+			// once the read is unanswered.
+			ran := make(chan herdrRun, 1)
+			go func() { ran <- fire("idle", "") }()
+			testwait.Until(t, "the tmux session read to go unanswered", func() (bool, string) {
+				return rig.tmux.hung.Load() > 0, "hung reads = 0"
+			})
+			rig.jail.clock.(*clock.Fake).Advance(herdrDeadline)
+			got, _ := testwait.Receive(t, "the idle hook to end at its deadline", ran)
 			rig.tmux.mu.Lock()
 			rig.tmux.hangOn = ""
 			rig.tmux.mu.Unlock()

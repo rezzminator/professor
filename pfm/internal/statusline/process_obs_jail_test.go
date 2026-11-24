@@ -6,8 +6,6 @@ package statusline
 
 import (
 	"context"
-	"os"
-	"os/exec"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -19,9 +17,7 @@ import (
 // JSON-RPC payload never reaches the file.
 func TestReadCodexRateLimitsCommandRecordsTheAppServerProcess(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	command := exec.CommandContext(ctx, os.Args[0], "-test.run=TestCodexAppServerFixture", "--", "app-server")
-	command.Env = append(os.Environ(), appServerFixtureEnv+"=1")
-	if _, err := readCodexRateLimitsCommand(ctx, command); err != nil {
+	if _, err := readFromAppServerFixture(t, ctx); err != nil {
 		t.Fatal(err)
 	}
 	records := recorder.Records()

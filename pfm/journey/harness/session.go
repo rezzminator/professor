@@ -9,14 +9,15 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // session is one open terminal: the PTY's controller end, the login shell leading its session, and
@@ -26,7 +27,6 @@ type session struct {
 	master *os.File
 	cmd    *exec.Cmd
 	emu    *vt.SafeEmulator
-	clock  clock.Clock
 	done   chan struct{} // closed once the shell has exited and been reaped
 
 	mu  sync.Mutex
@@ -36,7 +36,7 @@ type session struct {
 // openSession starts shell as the leader of a new session on a fresh PTY, with env as its whole
 // environment plus TERM, in env's HOME. creack/pty needs an *exec.Cmd and a session leader with a
 // controlling terminal, which deps.RealRunner.Start cannot express (arch exception C22).
-func openSession(name string, shell, env []string, clk clock.Clock) (*session, error) {
+func openSession(name string, shell, env []string) (*session, error) {
 	if len(shell) == 0 {
 		return nil, errors.New("no login shell: Hooks.Shell is empty")
 	}
@@ -56,7 +56,7 @@ func openSession(name string, shell, env []string, clk clock.Clock) (*session, e
 	if master, err = pollable(master); err != nil {
 		return nil, errors.Join(err, cmd.Process.Kill(), cmd.Wait())
 	}
-	s := &session{name: name, master: master, cmd: cmd, emu: vt.NewSafeEmulator(Cols, Rows), clock: clk}
+	s := &session{name: name, master: master, cmd: cmd, emu: vt.NewSafeEmulator(Cols, Rows)}
 	s.done = make(chan struct{})
 	go s.pumpOut()
 	go func() { _, _ = io.Copy(master, s.emu) }() // the emulator's replies: device attributes, cursor reports
@@ -104,34 +104,34 @@ func (s *session) pumpOut() {
 	}
 }
 
-// close hangs the PTY up, gives the session closeGrace to end, then kills its process group.
-func (s *session) close() error {
+// close hangs the PTY up and waits on the wait door for the session to end; a session still running
+// once the door gives up at its hung-only limit under c's deadline (a foreground job ignoring the
+// hang-up) has its process group killed, then is awaited again under the runner's own deadline. No
+// pause decides the kill: a slow shell on a loaded machine is waited for, never killed for its pace.
+func (s *session) close(c *Ctx) error {
 	hangup := s.master.Close()
-	if s.ended(closeGrace) {
+	if s.ended(c, c.deadline) {
 		return errors.Join(hangup, s.emu.Close())
 	}
 	err := syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
 	if err != nil && !deps.GroupGone(s.cmd.Process.Pid, err) {
 		return fmt.Errorf("kill the session of %s: %w", s.name, err)
 	}
-	if !s.ended(closeGrace) {
+	if !s.ended(c, c.t.Deadline) {
 		return fmt.Errorf(
-			"terminal %s: its shell (pid %d) outlived SIGKILL by %s",
+			"terminal %s: its shell (pid %d) outlived SIGKILL past the hung-only limit",
 			s.name,
 			s.cmd.Process.Pid,
-			closeGrace,
 		)
 	}
 	return errors.Join(hangup, s.emu.Close())
 }
 
-func (s *session) ended(within time.Duration) bool {
-	select {
-	case <-s.done:
-		return true
-	case <-s.clock.After(within):
-		return false
-	}
+// ended reports whether the session's shell exited and was reaped before the wait door gave up under deadline.
+func (s *session) ended(c *Ctx, deadline func() (time.Time, bool)) bool {
+	return c.door(deadline, func(t testing.TB) {
+		testwait.Receive(t, "terminal "+s.name+"'s shell to exit", s.done)
+	})
 }
 
 func (s *session) screen() string {

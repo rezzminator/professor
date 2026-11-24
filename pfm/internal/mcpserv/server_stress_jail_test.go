@@ -10,7 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
@@ -77,30 +78,26 @@ func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
 		}
 		lineChannel <- lines
 	}()
-	select {
-	case lines := <-lineChannel:
-		if len(lines) != 2 {
-			t.Fatalf("malformed frame responses = %q", lines)
+	lines, _ := testwait.Receive(t, "the server to answer the malformed frames", lineChannel)
+	if len(lines) != 2 {
+		t.Fatalf("malformed frame responses = %q", lines)
+	}
+	for index, line := range lines {
+		var response struct {
+			JSONRPC string `json:"jsonrpc"`
+			Error   any    `json:"error"`
 		}
-		for index, line := range lines {
-			var response struct {
-				JSONRPC string `json:"jsonrpc"`
-				Error   any    `json:"error"`
-			}
-			if err := json.Unmarshal([]byte(line), &response); err != nil ||
-				response.JSONRPC != "2.0" ||
-				response.Error == nil {
-				t.Fatalf(
-					"malformed frame response[%d] = %q parsed=%+v err=%v stderr=%s",
-					index,
-					line,
-					response,
-					err,
-					stderr.String(),
-				)
-			}
+		if err := json.Unmarshal([]byte(line), &response); err != nil ||
+			response.JSONRPC != "2.0" ||
+			response.Error == nil {
+			t.Fatalf(
+				"malformed frame response[%d] = %q parsed=%+v err=%v stderr=%s",
+				index,
+				line,
+				response,
+				err,
+				stderr.String(),
+			)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatalf("server did not answer malformed frame; stderr=%s", stderr.String())
 	}
 }

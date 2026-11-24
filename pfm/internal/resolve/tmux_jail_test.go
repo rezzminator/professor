@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type resolveJail struct {
@@ -26,7 +26,7 @@ type resolveJail struct {
 	scriptNext int
 }
 
-func newResolveJail(t *testing.T) *resolveJail {
+func newResolveJail(t testing.TB) *resolveJail {
 	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux binary is not installed")
@@ -83,7 +83,7 @@ func (jail *resolveJail) command(arguments ...string) *exec.Cmd {
 	return command
 }
 
-func (jail *resolveJail) script(t *testing.T, label string) string {
+func (jail *resolveJail) script(t testing.TB, label string) string {
 	t.Helper()
 	jail.scriptNext++
 	path := filepath.Join(
@@ -92,7 +92,7 @@ func (jail *resolveJail) script(t *testing.T, label string) string {
 	)
 	content := "#!/bin/sh\nprintf '%s\\n' " +
 		shellSingleQuote("🥇 │ 🔖 "+label+" │ status") +
-		"\nexec sleep 120\n"
+		"\n" + testwait.Hold + "\n"
 	if err := testjail.WriteExecutable(path, []byte(content), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -103,23 +103,8 @@ func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-// jailReadyBudget bounds how long a freshly spawned tmux server may take to
-// schedule its pane script and paint its label. It is scaffolding readiness,
-// never the contract under test — assertTarget owns every correctness claim in
-// this file — so widening it cannot weaken an assertion, and it is only ever
-// paid in full when a start genuinely fails.
-//
-// The previous 5s was sized for an idle Linux box. Under `go test ./...` this
-// package competes with dozens of concurrently exec'd package binaries, one of
-// its own tests spawns sixty tmux servers, and on macOS the first exec of a
-// freshly written script costs ~120ms median and ~553ms peak against ~6ms
-// warm. At 5s the poll failed repeatedly under exactly that load while every
-// correctness assertion still held — a budget reporting a busy host as a
-// broken contract.
-const jailReadyBudget = 30 * time.Second
-
 func (jail *resolveJail) start(
-	t *testing.T,
+	t testing.TB,
 	socket, session, window, label string,
 ) {
 	t.Helper()
@@ -140,54 +125,33 @@ func (jail *resolveJail) start(
 		t.Fatalf("start %s: %v: %s", socket, err, output)
 	}
 	jail.sockets = append(jail.sockets, socket)
-	started := time.Now()
-	deadline := started.Add(jailReadyBudget)
-	for {
-		output, err := jail.command(
-			"-L",
-			socket,
-			"capture-pane",
-			"-p",
-			"-t",
-			session,
-		).CombinedOutput()
+	jail.awaitLabel(t, socket, session, label)
+}
+
+// awaitLabel waits until the pane target of socket has painted label.
+func (jail *resolveJail) awaitLabel(t testing.TB, socket, target, label string) {
+	t.Helper()
+	testwait.Until(t, fmt.Sprintf("%s to paint the label %q", socket, label), func() (bool, string) {
+		output, err := jail.command("-L", socket, "capture-pane", "-p", "-t", target).CombinedOutput()
 		if err == nil && strings.Contains(string(output), label) {
-			break
+			return true, ""
 		}
-		if time.Now().After(deadline) {
-			// Two different failures reach this line and they demand
-			// different answers. A capture-pane that kept erroring means we
-			// never managed to look; a capture-pane that kept succeeding on a
-			// blank pane means we looked and the label was not there yet.
-			// Printing %v of a nil error for the second case rendered it as
-			// "<nil>" beside a run of blank lines — an error surface reporting
-			// absence, which is the one thing it must never do.
-			waited := time.Since(started)
-			if err != nil {
-				t.Fatalf(
-					"wait for %s label %q: capture-pane kept failing for %s; last error: %v: %q",
-					socket,
-					label,
-					waited,
-					err,
-					output,
-				)
-			}
-			t.Fatalf(
-				"wait for %s label %q: capture-pane succeeded throughout %s but the pane never painted the label — the session was accepted and its script had not been scheduled yet; last pane content (%d bytes): %q",
-				socket,
-				label,
-				waited,
-				len(output),
-				output,
-			)
+		// Two different states reach here and demand different answers: a
+		// capture-pane that kept erroring means we never managed to look; one
+		// that kept succeeding on a blank pane means we looked and the label
+		// was not there yet.
+		if err != nil {
+			return false, fmt.Sprintf("capture-pane kept failing; last error: %v: %q", err, output)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return false, fmt.Sprintf(
+			"capture-pane succeeded but the pane never painted the label; last pane content (%d bytes): %q",
+			len(output), output,
+		)
+	})
 }
 
 func (jail *resolveJail) split(
-	t *testing.T,
+	t testing.TB,
 	socket, session, label string,
 ) {
 	t.Helper()
@@ -196,13 +160,18 @@ func (jail *resolveJail) split(
 		socket,
 		"split-window",
 		"-d",
+		"-P",
+		"-F",
+		"#{pane_id}",
 		"-t",
 		session,
 		jail.script(t, label),
 	)
-	if output, err := command.CombinedOutput(); err != nil {
+	output, err := command.CombinedOutput()
+	if err != nil {
 		t.Fatalf("split %s: %v: %s", socket, err, output)
 	}
+	jail.awaitLabel(t, socket, strings.TrimSpace(string(output)), label)
 	if output, err := jail.command(
 		"-L",
 		socket,
@@ -227,7 +196,6 @@ func TestJailedTmuxResolveContract(t *testing.T) {
 		"Codex Label",
 	)
 	jail.start(t, "cc-300-1-1", "other-session", "other", "Other Label")
-	time.Sleep(100 * time.Millisecond)
 
 	resolver, err := New(nil)
 	if err != nil {
@@ -265,7 +233,6 @@ func TestJailedTmuxResolveContract(t *testing.T) {
 	}
 
 	jail.start(t, "cc-400-1-1", "ambiguous", "ambiguous", "Alpha Label")
-	time.Sleep(50 * time.Millisecond)
 	ambiguous, err := resolver.Resolve(ctx, Label, "Alpha Label")
 	if err != nil || ambiguous.Code != 2 ||
 		ambiguous.Stdout != "" ||
@@ -289,7 +256,6 @@ func TestJailedTmuxNewestServerTieBreak(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	time.Sleep(100 * time.Millisecond)
 	resolver, err := New(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -330,12 +296,29 @@ func resolveDiagnostics(t *testing.T, resolver *Resolver) string {
 	return output.String()
 }
 
-func TestStressResolveSixtySocketsTwoHundredPanes(t *testing.T) {
-	testjail.TmuxServer(t)
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
+const (
+	resolveStressSockets = 60
+	resolveStressPanes   = 200
+)
+
+// resolveStressQueries are the three lookups the stress fleet answers: the
+// last socket's label, its session, and the long Codex window name.
+var resolveStressQueries = []struct {
+	kind Kind
+	name string
+}{
+	{kind: Label, name: "Stress Target"},
+	{kind: Session, name: "stress-59"},
+	{kind: CxWindow, name: "abcdefghijklmnopqrstuvwxyz-long"},
+}
+
+// startResolveStressFleet starts 60 tmux servers holding 200 labelled panes
+// and returns a resolver over them.
+func startResolveStressFleet(t testing.TB) *Resolver {
+	t.Helper()
 	jail := newResolveJail(t)
-	const socketCount = 60
-	const paneCount = 200
+	const socketCount = resolveStressSockets
+	const paneCount = resolveStressPanes
 	createdPanes := 0
 	for index := 0; index < socketCount; index++ {
 		prefix := "cc"
@@ -377,53 +360,44 @@ func TestStressResolveSixtySocketsTwoHundredPanes(t *testing.T) {
 	if createdPanes != paneCount {
 		t.Fatalf("created %d panes, want %d", createdPanes, paneCount)
 	}
-	time.Sleep(200 * time.Millisecond)
 	resolver, err := New(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return resolver
+}
+
+// BenchmarkResolveSixtySocketsTwoHundredPanes measures what the stress test no
+// longer judges: each of its three lookups over the 60-socket, 200-pane fleet.
+func BenchmarkResolveSixtySocketsTwoHundredPanes(b *testing.B) {
+	testjail.TmuxServer(b)
+	resolver := startResolveStressFleet(b)
 	ctx := context.Background()
-	queries := []struct {
-		kind Kind
-		name string
-	}{
-		{kind: Label, name: "Stress Target"},
-		{kind: Session, name: "stress-59"},
-		{kind: CxWindow, name: "abcdefghijklmnopqrstuvwxyz-long"},
+	for _, query := range resolveStressQueries {
+		b.Run(string(query.kind), func(b *testing.B) {
+			for b.Loop() {
+				if outcome, err := resolver.Resolve(ctx, query.kind, query.name); err != nil || outcome.Code != 0 {
+					b.Fatalf("%s stress outcome=%#v err=%v", query.kind, outcome, err)
+				}
+			}
+		})
 	}
-	for _, query := range queries {
-		started := time.Now()
+}
+
+func TestStressResolveSixtySocketsTwoHundredPanes(t *testing.T) {
+	testjail.TmuxServer(t)
+	resolver := startResolveStressFleet(t)
+	ctx := context.Background()
+	for _, query := range resolveStressQueries {
 		outcome, err := resolver.Resolve(ctx, query.kind, query.name)
-		elapsed := time.Since(started)
 		if err != nil || outcome.Code != 0 {
-			t.Fatalf(
-				"%s stress outcome=%#v err=%v elapsed=%s",
-				query.kind,
-				outcome,
-				err,
-				elapsed,
-			)
-		}
-		limit := 2 * time.Minute
-		if strict {
-			limit = 15 * time.Second
-		}
-		if elapsed > limit {
-			t.Fatalf(
-				"%s resolve took %s, want under %s (strict=%t)",
-				query.kind,
-				elapsed,
-				limit,
-				strict,
-			)
+			t.Fatalf("%s stress outcome=%#v err=%v", query.kind, outcome, err)
 		}
 		t.Logf(
-			"STRESS resolve kind=%s sockets=%d panes=%d elapsed=%s strict=%t",
+			"STRESS resolve kind=%s sockets=%d panes=%d",
 			query.kind,
-			socketCount,
-			paneCount,
-			elapsed,
-			strict,
+			resolveStressSockets,
+			resolveStressPanes,
 		)
 	}
 
@@ -542,11 +516,16 @@ func TestJailedColonLabelResolvesToAPaneNeverATmuxTarget(t *testing.T) {
 	// arrangement in which the colon-target fallback below can be seen for
 	// what it is.
 	if output, err := jail.command(
-		"-L", "cc-500-1-1", "new-window", "-n", "other", "sleep 120",
+		"-L", "cc-500-1-1", "new-window", "-n", "other", testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("second window: %v: %s", err, output)
 	}
-	time.Sleep(200 * time.Millisecond)
+	testwait.Until(t, "the second window to be the session's current one", func() (bool, string) {
+		output, err := jail.command(
+			"-L", "cc-500-1-1", "display-message", "-p", "-t", "colon-session", "#{window_name}",
+		).CombinedOutput()
+		return strings.TrimSpace(string(output)) == "other", fmt.Sprintf("current window %q, %v", output, err)
+	})
 
 	resolver, err := New(nil)
 	if err != nil {

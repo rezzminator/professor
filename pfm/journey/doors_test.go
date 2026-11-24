@@ -40,7 +40,7 @@ type answer struct {
 func play(c *harness.Ctx, term *harness.Terminal, s *State, steps ...map[string]any) []answer {
 	return played(c, s, steps, func(turn, reply string) {
 		term.Type(turn + "\r")
-		term.WaitFor("⏺ "+reply, 90*time.Second)
+		term.WaitFor("⏺ " + reply)
 	})
 }
 
@@ -60,7 +60,7 @@ func played(c *harness.Ctx, s *State, steps []map[string]any, deliver func(turn,
 	deliver(directive(append(steps, turnStep(reply))...), reply)
 	s.Mesh.Mark = reply
 	var got []toolResult
-	c.Poll(fmt.Sprintf("%d tool results in %s's transcript", before+calls, name), stepBound, func() (bool, string) {
+	c.Poll(fmt.Sprintf("%d tool results in %s's transcript", before+calls, name), func() (bool, string) {
 		got = toolResults(c, session)
 		return len(got) == before+calls, fmt.Sprintf("%d results", len(got))
 	})

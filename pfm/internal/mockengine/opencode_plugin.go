@@ -188,7 +188,9 @@ func (plugin *openCodePluginSession) report(verb string, fields map[string]strin
 	for _, word := range append(slices.Clone(plugin.entry), verb) {
 		words = append(words, cmdparse.Quote(word))
 	}
-	answer, err := runHookCommand(proc.ctx, strings.Join(words, " "), encoded, proc.cwd, os.Environ(), timeout)
+	answer, err := runHookCommand(
+		proc.ctx, proc.clock(), strings.Join(words, " "), encoded, proc.cwd, os.Environ(), timeout,
+	)
 	if err != nil {
 		warn(proc.stderr, "pfm-herdr: %s report: %v", verb, err)
 		return

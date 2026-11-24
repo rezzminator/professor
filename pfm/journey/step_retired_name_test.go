@@ -38,12 +38,15 @@ func retiredName(c *harness.Ctx, s State) State {
 	}
 	old := list.Names[at]
 	term := c.Terminal("adopter")
-	if code := shellRun(term, "note", "printf '%s\\n' 'Land it with the "+old.Name+" agent.' >"+retiredNote,
-		stepBound); code != 0 {
+	if code := shellRun(
+		term,
+		"note",
+		"printf '%s\\n' 'Land it with the "+old.Name+" agent.' >"+retiredNote,
+	); code != 0 {
 		c.Failf("writing the note exited %d:\n%s", code, term.Screen())
 	}
 	const review = "REVIEW REQUIRED — 1 items; nothing was written."
-	if code := shellRun(term, "retired", "pfm doctor --project-updates", stepBound); code != 1 ||
+	if code := shellRun(term, "retired", "pfm doctor --project-updates"); code != 1 ||
 		!strings.Contains(term.Screen(), review) {
 		c.Failf("pfm doctor --project-updates exited %d, want 1 and %q on the screen:\n%s", code, review, term.Screen())
 	}
@@ -68,11 +71,11 @@ func retiredName(c *harness.Ctx, s State) State {
 		)
 	}
 	if code := shellRun(term, "accept", "pfm update accept "+retiredNote+" --name "+old.Name+
-		" --reason '"+retiredReason+"'", stepBound); code != 0 ||
+		" --reason '"+retiredReason+"'"); code != 0 ||
 		!strings.Contains(term.Screen(), "accepted retired-name hits under 1 path(s)") {
 		c.Failf("pfm update accept exited %d, want 0 and its accepted line:\n%s", code, term.Screen())
 	}
-	if code := shellRun(term, "accepted", "pfm doctor --project-updates", stepBound); code != 0 {
+	if code := shellRun(term, "accepted", "pfm doctor --project-updates"); code != 0 {
 		c.Failf("pfm doctor --project-updates after the accept exited %d, want 0:\n%s", code, term.Screen())
 	}
 	baseline = adopterBaseline(c, s.Project)

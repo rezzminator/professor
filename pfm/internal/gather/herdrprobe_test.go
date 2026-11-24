@@ -415,6 +415,7 @@ func TestProveHerdrSeatReadOnlyUnchangedOwnership(t *testing.T) {
 		name            string
 		moved, metadata bool
 		write, pending  bool
+		deleted         bool // the seat ended during the proof: its row is gone
 	}{
 		{name: "unchanged"},
 		{name: "moved", moved: true},
@@ -422,6 +423,7 @@ func TestProveHerdrSeatReadOnlyUnchangedOwnership(t *testing.T) {
 		{name: "moved-concurrent-metadata", moved: true, metadata: true, write: true},
 		{name: "moved-concurrent-end", moved: true, pending: true, write: true},
 		{name: "unchanged-concurrent-end", pending: true},
+		{name: "moved-concurrent-delete", moved: true, deleted: true, write: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -454,6 +456,11 @@ func TestProveHerdrSeatReadOnlyUnchangedOwnership(t *testing.T) {
 						}
 						next.EndPending = scenario.pending
 						if err := writer.UpdateSeat(ctx, seat, next); err != nil {
+							t.Error(err)
+						}
+					}
+					if scenario.deleted {
+						if err := writer.DeleteSeat(ctx, seat.SeatID); err != nil {
 							t.Error(err)
 						}
 					}
@@ -493,6 +500,14 @@ func TestProveHerdrSeatReadOnlyUnchangedOwnership(t *testing.T) {
 				proofDB = writer
 			}
 			got, owned, err := ProveHerdrSeat(ctx, proofDB, proc, seat)
+			if scenario.deleted {
+				const want = "seat owner ownership changed or disappeared"
+				if err == nil || err.Error() != want || !errors.Is(err, ErrHerdrSeatGone) ||
+					errors.Is(err, ErrHerdrProofPersistence) || owned {
+					t.Fatalf("seat ended during the proof: owned=%t err=%v, want %q", owned, err, want)
+				}
+				return
+			}
 			if scenario.pending {
 				if err == nil || owned {
 					t.Fatalf(

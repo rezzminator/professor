@@ -24,6 +24,7 @@ func TestOpenDetachedResumableSpawnsThroughTheSpawnDoor(t *testing.T) {
 	jailAction(t)
 	tmux := &fakeActionTmux{alive: map[string]bool{}}
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -65,6 +66,7 @@ func TestOpenDetachedLiveSpawnsNothing(t *testing.T) {
 	jailAction(t)
 	tmux := &fakeActionTmux{alive: map[string]bool{"cc-100-1-1": true}}
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -108,6 +110,7 @@ func TestOpenDetachedRecordsItsTrail(t *testing.T) {
 	jailAction(t)
 	ctx, recorder := obs.Test(t)
 	executor, err := New(Dependencies{
+		Clock:     newLaunchStepClock(),
 		Tmux:      &fakeActionTmux{alive: map[string]bool{}},
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
@@ -165,7 +168,7 @@ func TestOpenDetachedCodexRequiresLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	tmux := &fakeActionTmux{alive: map[string]bool{}}
-	executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}})
+	executor, err := New(Dependencies{Clock: newLaunchStepClock(), Tmux: tmux, Processes: &fakeProcesses{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +206,8 @@ func TestOpenWarnsWhenTheFleetPromptCannotReachTheChat(t *testing.T) {
 				}
 				var stderr bytes.Buffer
 				executor, err := New(Dependencies{
-					Tmux: tmux, Processes: &fakeProcesses{}, Gate: fixedGate(false),
+					Clock: newLaunchStepClock(),
+					Tmux:  tmux, Processes: &fakeProcesses{}, Gate: fixedGate(false),
 					Runner: &captureRunner{}, Stderr: &stderr,
 				})
 				if err != nil {
@@ -295,7 +299,8 @@ func TestOpenHoldsForEnterOnlyWhenAWarningIsAboutToBeCovered(t *testing.T) {
 			t.Cleanup(launchnotice.Replace(input, test.terminal))
 			var stderr bytes.Buffer
 			executor, err := New(Dependencies{
-				Tmux: &fakeActionTmux{alive: map[string]bool{}}, Processes: &fakeProcesses{},
+				Clock: newLaunchStepClock(),
+				Tmux:  &fakeActionTmux{alive: map[string]bool{}}, Processes: &fakeProcesses{},
 				Gate: fixedGate(false), Runner: &captureRunner{}, Stderr: &stderr,
 			})
 			if err != nil {
@@ -479,7 +484,8 @@ func TestOpenWatchesTheLaunch(t *testing.T) {
 					launches: map[string]fakeLaunch{socket: test.launch},
 				}
 				executor, err := New(Dependencies{
-					Tmux: tmux, Processes: &fakeProcesses{processes: test.processes},
+					Clock: newLaunchStepClock(),
+					Tmux:  tmux, Processes: &fakeProcesses{processes: test.processes},
 					Gate: fixedGate(false), Runner: &captureRunner{}, Stderr: &stderr,
 				})
 				if err != nil {

@@ -425,7 +425,7 @@ func addProxyIdentity(raw []byte, identity ProxyIdentity) ([]byte, error) {
 // sendWithRetry retries only a connection failure or a lost session, inside
 // the retry window; a daemon rejection is the request's answer at once.
 func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isHandshake bool) ([]byte, error) {
-	retryCtx, cancel := context.WithTimeout(ctx, proxy.retryWindow)
+	retryCtx, cancel := clock.WithTimeout(ctx, proxy.clock, proxy.retryWindow)
 	defer cancel()
 	var lastErr error
 	replayedLostSession := false
@@ -436,7 +436,7 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isHand
 		// its chat runtime is not the one this proxy was selected for; every
 		// other frame replays. The original send goes unprobed.
 		if attempt > 0 && proxy.expectedRuntimeIdentity != "" {
-			status, probeErr := probeDaemonContext(ctx, proxy.address)
+			status, probeErr := probeDaemonOn(ctx, proxy.clock, proxy.address)
 			if probeErr != nil {
 				err = fmt.Errorf("verify daemon runtime before replay: %w", probeErr)
 			} else if (status.ChatRuntimeIdentity == "" ||
@@ -613,7 +613,7 @@ func (proxy *stdioProxy) closeSession() {
 	if session.sessionID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), proxyCloseTimeout)
+	ctx, cancel := clock.WithTimeout(context.Background(), proxy.clock, proxyCloseTimeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodDelete, proxy.endpoint, http.NoBody)
 	if err != nil {

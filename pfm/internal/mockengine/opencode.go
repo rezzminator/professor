@@ -189,7 +189,7 @@ func openCodeRun(proc *process, call openCodeInvocation) (returnErr error) {
 		return fmt.Errorf("crash step: exit %d", step.ExitCode)
 	}
 	reply, busyMS, usage := proc.script.turnReply(step)
-	if !sleepOrCancel(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
+	if !proc.wait(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
 		return errors.New("cancelled")
 	}
 	session := newOpenCodeSession(proc, call)

@@ -1,0 +1,6 @@
+{
+  "timeout with its duration": "timeout 60 grep -n f x",
+  "wrappers nest": "timeout 60 env X=1 nice sudo -E xargs -0 head -n 3 x",
+  "a script path is its own program": "./run.sh x; scripts/s.sh; timeout 5 ./run.sh",
+  "wrapped bash with a combined -lc flag": "timeout 30 bash -lc 'grep -n f x'"
+}

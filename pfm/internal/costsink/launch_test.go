@@ -149,6 +149,44 @@ func TestPrepareReusesTheSinkAlreadyArmedForThisProcess(t *testing.T) {
 	}
 }
 
+func TestKeptTable(t *testing.T) {
+	armed := claudelaunch.CostEnv(40222, 77)
+	host := append([]string{"HOME=/h"}, armed...)
+	parent := append([]string{"HOME=/h", "PATH=/bin"}, claudelaunch.CostEnv(40111, 99)...)
+	kept := append([]string{"HOME=/h", "PATH=/bin"}, armed...)
+	for _, tc := range []struct {
+		name          string
+		environ, host []string
+		want          []string
+	}{
+		{"a parent chat's ledger gives way to the host's", parent, host, kept},
+		{"a recipe with no ledger gains the host's", []string{"HOME=/h", "PATH=/bin"}, host, kept},
+		{
+			"a marker an earlier start left off gives way",
+			[]string{"HOME=/h", "PATH=/bin", "PFM_COST_LEDGER=off"},
+			host,
+			kept,
+		},
+		{"no ledger armed in the host", parent, []string{"HOME=/h"}, parent},
+		{
+			"a ledger armed for another process",
+			parent,
+			append([]string{"HOME=/h"}, claudelaunch.CostEnv(40222, 78)...),
+			parent,
+		},
+		{
+			"the user's own telemetry variable stays, to pre-empt",
+			[]string{"PATH=/bin", "OTEL_SERVICE_NAME=mine"},
+			host,
+			[]string{"PATH=/bin", "OTEL_SERVICE_NAME=mine"},
+		},
+	} {
+		if got := Kept(tc.environ, tc.host, 77); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: kept = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // Off or pre-empted, a chat started from inside a pfm chat must not keep the parent's exports:
 // they point at the parent's sink, which would ledger a launch marked as having none.
 func TestPrepareDropsAParentChatsExportsWhenItArmsNothing(t *testing.T) {

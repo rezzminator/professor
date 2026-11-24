@@ -11,12 +11,13 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
-// countingClock hands back a fresh, later instant on every Now() call while
-// every other Clock method delegates to the embedded clock.Clock — a thin
-// adapter (never a second fake) for the one test that needs "one second
-// elapsed" per poll without a real sleep or a driven Advance.
+// countingClock hands back a fresh, later instant on every Now() call and
+// returns from every Sleep at once — a thin adapter for the one test that
+// needs "one second elapsed" per poll without a real sleep or a driven
+// Advance. The embedded fake is never advanced.
 type countingClock struct {
 	clock.Clock
 	start time.Time
@@ -28,19 +29,20 @@ func (c *countingClock) Now() time.Time {
 	return c.start.Add(time.Duration(c.calls) * time.Second)
 }
 
-// fixedClock hands back the SAME instant from every Now() call while every
-// other Clock method delegates to the embedded clock.Clock — the seam a
-// test reaches for instead of clock.NewFake whenever the code path under
-// test can still block on a real Sleep (acquireTargetLock's lock-settle
-// wait, chiefly): a bare Fake never advances on its own, so a Sleep it was
-// never told to release hangs the test forever, where clock.Real's Sleep
-// just... sleeps, briefly, the way it always has.
+func (c *countingClock) Sleep(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+
+// fixedClock hands back the SAME instant from every Now() call and returns
+// from every Sleep at once, so code that settles and polls on its clock
+// (acquireTargetLock's lock-settle wait, chiefly) runs without a real sleep or
+// a driven Advance. The embedded fake is never advanced.
 type fixedClock struct {
 	clock.Clock
 	now time.Time
 }
 
 func (c fixedClock) Now() time.Time { return c.now }
+
+func (c fixedClock) Sleep(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 
 // paneFrame is one observation of the pane plus the phase it belongs to, so a
 // test can assert WHERE the waiter made its decision and not merely that it
@@ -368,7 +370,7 @@ func TestDeliverThenHoldsForTypistThenDelivers(t *testing.T) {
 
 	start := time.Unix(1_700_000_000, 0)
 	fake.clientActivity = start
-	counting := &countingClock{Clock: clock.Real, start: start}
+	counting := &countingClock{Clock: clock.NewFake(start), start: start}
 	engine.options.Clock = counting
 
 	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
@@ -418,7 +420,7 @@ func TestDeliverThenRefusesWhenTypistNeverClears(t *testing.T) {
 	// The clock always reads "1s after the last keystroke" — quiet never
 	// crosses the 3s TypistQuiet threshold no matter how many times it is
 	// sampled.
-	engine.options.Clock = fixedClock{Clock: clock.Real, now: start.Add(time.Second)}
+	engine.options.Clock = fixedClock{Clock: clock.NewFake(start), now: start.Add(time.Second)}
 
 	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil {
@@ -458,7 +460,7 @@ func TestDeliverThenReportsUndeliveredWhenTmuxUnreadable(t *testing.T) {
 	engine.options.TypistQuiet = 3 * time.Second
 
 	start := time.Unix(1_700_000_000, 0)
-	engine.options.Clock = fixedClock{Clock: clock.Real, now: start}
+	engine.options.Clock = fixedClock{Clock: clock.NewFake(start), now: start}
 
 	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil {
@@ -519,6 +521,9 @@ func TestDeliverThenReturnsPromptlyWhenCtxIsCancelledMidWait(t *testing.T) {
 	engine.options.ThenBusyTries = 3
 	engine.options.ThenIdleTries = 3
 	engine.options.ThenIdleStable = 1
+	// Nothing advances this clock: a wait that dropped the context parks on
+	// its first sleep and the receive below reports it hung.
+	engine.options.Clock = clock.NewFake(time.Unix(1_700_000_000, 0))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -537,23 +542,15 @@ func TestDeliverThenReturnsPromptlyWhenCtxIsCancelledMidWait(t *testing.T) {
 		done <- outcome{result, err}
 	}()
 
-	select {
-	case out := <-done:
-		if out.err != nil {
-			t.Fatalf(
-				"DeliverThen() returned a Go error %v, want the cancellation named on the Result instead",
-				out.err,
-			)
-		}
-		if out.result.Message != "then steer NOT delivered: could not read pane \"%1\" even once for a baseline (last tmux error: capture pane \"%1\" for a settled-turn baseline: context canceled) — the waiter never had a reference frame for this turn; steer kept in the log: \"resume the wave\"" {
-			t.Fatalf("Message = %q, want it to name the cancelled context", out.result.Message)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal(
-			"DeliverThen did not return promptly after its ctx was cancelled — " +
-				"each configured wait step is 2s across a 6-step budget, so an " +
-				"honoured cancellation must land well inside this 3s bound",
+	out, _ := testwait.Receive(t, "DeliverThen to return after its ctx was cancelled", done)
+	if out.err != nil {
+		t.Fatalf(
+			"DeliverThen() returned a Go error %v, want the cancellation named on the Result instead",
+			out.err,
 		)
+	}
+	if out.result.Message != "then steer NOT delivered: could not read pane \"%1\" even once for a baseline (last tmux error: capture pane \"%1\" for a settled-turn baseline: context canceled) — the waiter never had a reference frame for this turn; steer kept in the log: \"resume the wave\"" {
+		t.Fatalf("Message = %q, want it to name the cancelled context", out.result.Message)
 	}
 }
 

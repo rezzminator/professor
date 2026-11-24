@@ -21,13 +21,13 @@ func pinUpdated(c *harness.Ctx, s State) State {
 	pin := adopterBaseline(c, s.Project).Files[movedLocal].PinnedSHA
 	head := cloneHead(c, s)
 	keepUpdated(c, s, term, pin, head)
-	if code := shellRun(term, "port", "printf '%s\\n' '"+movedLine+"' >>"+movedLocal, stepBound); code != 0 {
+	if code := shellRun(term, "port", "printf '%s\\n' '"+movedLine+"' >>"+movedLocal); code != 0 {
 		c.Failf("porting the upstream line exited %d:\n%s", code, term.Screen())
 	}
-	if code := shellRun(term, "unkeep", "pfm update pin "+movedLocal+" --unkeep", stepBound); code != 0 {
+	if code := shellRun(term, "unkeep", "pfm update pin "+movedLocal+" --unkeep"); code != 0 {
 		c.Failf("pfm update pin --unkeep exited %d:\n%s", code, term.Screen())
 	}
-	if code := shellRun(term, "pin", "pfm update pin "+movedLocal, stepBound); code != 0 {
+	if code := shellRun(term, "pin", "pfm update pin "+movedLocal); code != 0 {
 		c.Failf("pfm update pin exited %d:\n%s", code, term.Screen())
 	}
 	if pinned := "pinned 1 file(s) at " + head; !strings.Contains(term.Screen(), pinned) {

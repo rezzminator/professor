@@ -18,8 +18,10 @@
 //   - last.go reads a chat's last answer; read.go its transcript entries; find.go searches transcripts.
 //   - names.go resolves a chat's name; workbench_name.go reserves workbench names.
 //   - open.go, open_herdr.go, restored.go, native_reboot.go and kill_server.go open, exit, kill and reboot chats.
-//   - restored_resume.go rebinds a dead native seat to the Herdr pane whose `claude --resume` resumes it.
+//   - restored_resume.go rebinds a dead native seat to the Herdr pane whose `claude --resume` resumes it,
+//     and resumes a restored pane's own seat when Herdr's saved line names an older conversation.
 //   - restored_recipe.go builds the resume recipe of a chat no seat holds.
+//   - restored_restart.go judges for pfm restart whether a Herdr chat's seat can resume and whether it is live again.
 //   - resume_choice.go opens a gone native seat's chat under the account and cache a picker walk chose.
 //   - end_tmux.go ends a tmux chat's server, only while its pane is the server's sole pane, and clears its handles.
 //   - killoutcome.go words a kill's outcome; keys.go types the keys-send failures.

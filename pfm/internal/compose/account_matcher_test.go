@@ -47,7 +47,7 @@ func TestCodexAttributionUsesThirdAliasAndLongestNestedRoot(t *testing.T) {
 
 // A live agent's seat is the config dir its process runs under, even when
 // every seat shares one transcript store (~/.cc/N/projects → ~/.claude/projects,
-// the layout /reload across seats needs): the transcript path then matches
+// the layout /pfm:reload across seats needs): the transcript path then matches
 // every root and the first seat would otherwise claim every live chat.
 func TestLiveAgentAccountFollowsItsConfigDir(t *testing.T) {
 	root := t.TempDir()

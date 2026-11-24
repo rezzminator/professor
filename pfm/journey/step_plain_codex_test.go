@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -25,9 +24,9 @@ func plainCodex(c *harness.Ctx, s State) State {
 	term.WaitFor(prompt)
 	c.Cleanup(func() { stopPlainChat(c, &s, term) })
 	term.Type("cd $HOME/work/demo && cx\r")
-	term.WaitFor("Ask Codex to do anything", 20*time.Second)
+	term.WaitFor("Ask Codex to do anything")
 	socket := attached(c, term)
-	c.Poll("one live Codex chat on tmux socket "+socket+" with one engine", stepBound, func() (bool, string) {
+	c.Poll("one live Codex chat on tmux socket "+socket+" with one engine", func() (bool, string) {
 		rows, listed := liveChats(c, socket)
 		var pids []int
 		for _, id := range listed {
@@ -48,24 +47,23 @@ func plainCodex(c *harness.Ctx, s State) State {
 	then := "the reborn thread answers this follow-up " + directive(turnStep(reply))
 	cli := c.Terminal(s.Term + "-cli")
 	cli.WaitFor(prompt)
-	if command := "pfm chat reload --sock " + socket + " --then '" + then + "'"; shellRun(cli, "reload", command,
-		20*time.Second) != 0 {
+	if command := "pfm chat reload --sock " + socket + " --then '" + then + "'"; shellRun(cli, "reload", command) != 0 {
 		c.Failf("%s exited non-zero, want 0", command)
 	}
-	c.Poll("a new Codex engine for thread "+s.Chat.Session, 20*time.Second, func() (bool, string) {
+	c.Poll("a new Codex engine for thread "+s.Chat.Session, func() (bool, string) {
 		pid := liveEngine(c, s.Chat.Session)
 		return pid != 0 && pid != s.Chat.Engine, fmt.Sprintf("engine %d, before %d", pid, s.Chat.Engine)
 	})
-	c.Poll("pfm's reload run on "+socket+" done", 20*time.Second, func() (bool, string) {
+	c.Poll("pfm's reload run on "+socket+" done", func() (bool, string) {
 		run := reloadRun(c, socket)
 		return run == "", run
 	})
-	c.Poll("the --then text once among thread "+s.Chat.Session+"'s prompts", 20*time.Second, func() (bool, string) {
+	c.Poll("the --then text once among thread "+s.Chat.Session+"'s prompts", func() (bool, string) {
 		got := codexPrompts(c, s.Chat.Session)
 		n := len(slices.DeleteFunc(slices.Clone(got), func(p string) bool { return p != then }))
 		return n == 1, fmt.Sprintf("prompts %q", got)
 	})
-	term.WaitFor("⏺ "+reply, 20*time.Second)
+	term.WaitFor("⏺ " + reply)
 	s.Chat.Engine = liveEngine(c, s.Chat.Session)
 	return s
 }
@@ -110,7 +108,7 @@ func plainCodexEnd(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	socket := attached(c, term)
 	term.Type("/exit\r")
-	term.WaitGone("Ask Codex to do anything", 20*time.Second)
+	term.WaitGone("Ask Codex to do anything")
 	plainGone(c, s, term, socket)
 	return s
 }

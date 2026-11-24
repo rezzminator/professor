@@ -16,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type failedThenDisplayTmux struct {
@@ -32,7 +33,7 @@ func TestRunMarksFailedThenOnlyWhenPaneWasTold(t *testing.T) {
 	for _, displayErr := range []error{nil, errors.New("display failed")} {
 		dir := t.TempDir()
 		tmux := &failedThenDisplayTmux{displayErr: displayErr}
-		_, err := Run(context.Background(), Request{
+		_, err := runOnFake(t, context.Background(), Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-then", Pane: "%7",
 			SessionID: "11111111-1111-4111-8111-111111111111", Account: 1,
 			AccountIDs: []int{1}, Then: "follow up",
@@ -58,7 +59,7 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 		argv: map[int][]string{801: {"codex"}},
 		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
 	}
-	err := deliverThen(
+	err := deliverThenOnFake(t,
 		context.Background(),
 		Request{
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-codex-then", Pane: "%7",
@@ -81,7 +82,7 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 
 func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
 	tmux := &respawnPIDTmux{oldPID: 700, newPID: 900}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		Request{
 			Engine:     pfmengine.Claude,
@@ -139,7 +140,7 @@ func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
 		argv: map[int][]string{801: {"claude"}},
 		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
 	}
-	err := deliverThen(
+	err := deliverThenOnFake(t,
 		context.Background(),
 		Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-wrapped-then", Pane: "%7",
@@ -266,8 +267,8 @@ func TestDeliverThenPreservesResumedDraft(t *testing.T) {
 				}
 				clk := clock.NewFake(time.Unix(0, 0))
 				var err error
-				driveFakeClock(t, clk, func() {
-					err = deliverThen(context.Background(), Request{
+				testwait.Drive(t, "reload to run through its waits", clk, func() {
+					err = deliverThenOnFake(t, context.Background(), Request{
 						Engine: engine, SocketPath: "/tmp/probe-draft", Pane: "%7", Then: "wake up",
 					}, Options{ThenTries: 2, Clock: clk}, tmux, proc, io.Discard)
 				})

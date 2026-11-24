@@ -94,6 +94,7 @@ type ClaudeRecord struct {
 	Effort           json.RawMessage `json:"effort"`
 	PerTurnEffort    json.RawMessage `json:"perTurnEffort"`
 	Origin           json.RawMessage `json:"origin"`
+	PromptSource     json.RawMessage `json:"promptSource"`
 	IsCompactSummary json.RawMessage `json:"isCompactSummary"`
 	IsMeta           json.RawMessage `json:"isMeta"`
 	Attachment       json.RawMessage `json:"attachment"`

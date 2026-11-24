@@ -27,7 +27,7 @@ func TestRunRespawnsWithConfiguredClaudePolicy(t *testing.T) {
 		Accounts: []pfmconfig.Account{{ID: 42, ConfigDir: configDir}},
 		Sources:  map[string]pfmconfig.Source{"claude.binary": pfmconfig.SourceFile},
 	}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		Request{
 			Engine:     pfmengine.Claude,

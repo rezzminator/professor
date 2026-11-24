@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // countPaneLists wraps the painter's call to count the pane.list requests it
@@ -111,6 +114,10 @@ func TestBlockedTabAnimatesFromTheObservationsAlreadyRead(t *testing.T) {
 // at that tick without further writes or a failure; one whose server refuses
 // connections stops at the first refused repaint.
 func TestBlinkerStopsWhenItsHerdrServerIsGone(t *testing.T) {
+	// The dial of a paint whose Herdr server ended and removed its socket, as the
+	// tab scan wraps it: what `herdr session stop` leaves an in-flight hook.
+	goneSocketErr := fmt.Errorf("herdr tab status: locate tab views of : list Herdr tab panes: %w",
+		Send(context.Background(), filepath.Join(t.TempDir(), "herdr.sock"), []byte("x")))
 	for _, tc := range []struct {
 		name   string
 		owner  func(tick int) (int64, error)
@@ -152,6 +159,13 @@ func TestBlinkerStopsWhenItsHerdrServerIsGone(t *testing.T) {
 			owner:  func(int) (int64, error) { return 1, nil },
 			refuse: &Refusal{Request: "pane.list", Code: "server_unavailable", Message: "server is shutting down"},
 			want:   "herdr indicators: socket /fake/herdr.sock stands down: its Herdr server is shutting down\n",
+			only:   true,
+		},
+		{
+			name:   "socket file gone under a paint",
+			owner:  func(int) (int64, error) { return 1, nil },
+			refuse: goneSocketErr,
+			want:   "herdr indicators: socket /fake/herdr.sock stands down: its socket is gone\n",
 			only:   true,
 		},
 		{
@@ -212,15 +226,18 @@ func boolInt(b bool) int {
 func TestCancelledTabPainterRestoresWithinItsBudget(t *testing.T) {
 	f := newTabStatusFixture()
 	painter, stepping := tabPainterFixture(t, f)
-	painter.cadence.restoreBudget = 50 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
+	budget := clock.NewFake(phaseOn)
+	stepping.Clock = budget
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
+	restoring := make(chan struct{})
 	painter.tabs = func(context.Context, string, bool) ([]TabDecoration, error) {
 		d := tabObservation("blocked")
 		d.Validate = func(validateCtx context.Context) (bool, error) {
 			if ctx.Err() == nil {
 				return true, nil
 			}
+			close(restoring)
 			<-validateCtx.Done() // the restore's owner check hangs until its budget ends
 			return false, validateCtx.Err()
 		}
@@ -232,13 +249,16 @@ func TestCancelledTabPainterRestoresWithinItsBudget(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- painter.run(ctx) }()
+	testwait.Receive(t, "the cancelled painter's restore to hang on its owner check", restoring)
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("run = %v, want the restore given up at its budget", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("a cancelled painter's restore outlived its budget")
+		t.Fatalf("run = %v before its restore budget ran out", err)
+	default:
+	}
+	budget.Advance(restoreBudget)
+	err, _ := testwait.Receive(t, "the cancelled painter's restore gave up at its budget", done)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("run = %v, want the restore given up at its budget", err)
 	}
 }
 

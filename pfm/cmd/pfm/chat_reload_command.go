@@ -308,15 +308,11 @@ func runChatReloadWorkerWithRuntime(
 			}
 		}
 		if hide {
-			fmt.Fprintln(
-				stdout,
-				"pfm chat reload: --new --hide — the reborn chat starts a NEW conversation in this pane; the one left behind is hidden from the picker once the reboot completes",
-			)
+			fmt.Fprintln(stdout, "pfm chat reload: --new --hide — the reborn chat starts a NEW conversation "+
+				"in this pane; the one left behind is hidden from the picker once the reboot completes")
 		} else {
-			fmt.Fprintln(
-				stdout,
-				"pfm chat reload: --new — the reborn chat starts a NEW conversation in this pane (the old one stays resumable)",
-			)
+			fmt.Fprintln(stdout, "pfm chat reload: --new — the reborn chat starts a NEW conversation in this pane "+
+				"(the old one stays resumable)")
 		}
 	}
 	cwd, err := reload.TranscriptCWD(transcript)
@@ -351,7 +347,6 @@ func runChatReloadWorkerWithRuntime(
 	kept := account == ""
 	if kept {
 		account = strconv.Itoa(birthAccount)
-		fmt.Fprintf(stdout, "pfm chat reload: no account given — keeping the chat's current account %s\n", account)
 	}
 	acct, _ := strconv.Atoi(account)
 	selected, err := reload.ValidateAccount(runtime.Config, engine, acct)
@@ -363,16 +358,16 @@ func runChatReloadWorkerWithRuntime(
 	if cacheOverride != "" {
 		cache = cacheOverride == "1h"
 	}
-	fmt.Fprintf(
-		stdout,
-		"pfm chat reload: reloading this chat to account %d IN PLACE — it reboots right here under the new account\n",
-		acct,
-	)
+	reloading := func(account int) { // a kept account waits for Run: a reload queued before this one names it
+		fmt.Fprintf(stdout, "pfm chat reload: reloading this chat to account %d IN PLACE — "+
+			"it reboots right here under the new account\n", account)
+	}
+	if !kept {
+		reloading(acct)
+	}
 	if then != "" {
-		fmt.Fprintln(
-			stdout,
-			"pfm chat reload: --then queued — the follow-up is typed into the reborn chat once it reaches its prompt",
-		)
+		fmt.Fprintln(stdout, "pfm chat reload: --then queued — the follow-up is typed into the reborn chat "+
+			"once it reaches its prompt")
 	}
 
 	result, err := reload.Run(
@@ -412,6 +407,11 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
+	if kept && !result.Ended {
+		fmt.Fprintf(stdout, "pfm chat reload: no account given — keeping the chat's current account %d\n",
+			result.Account)
+		reloading(result.Account)
+	}
 	leftBehind = result.LeftBehind
 	if result.New {
 		if newSeat {
@@ -425,10 +425,8 @@ func runChatReloadWorkerWithRuntime(
 	if newSeat && hide {
 		// Hide the session Run says this pane left behind.
 		if leftBehind == "" {
-			fmt.Fprintln(
-				stdout,
-				"pfm chat reload: --hide — nothing to hide, the conversation left behind had no transcript yet",
-			)
+			fmt.Fprintln(stdout, "pfm chat reload: --hide — nothing to hide, "+
+				"the conversation left behind had no transcript yet")
 			return 0
 		}
 		if engine == pfmengine.Codex {

@@ -17,13 +17,13 @@ func TestRunWritesEachStepsTimesAndEachWait(t *testing.T) {
 	}
 	waits := func(c *Ctx, in int) int {
 		fake.Advance(3 * time.Second)
-		c.Poll("ready", 5*time.Second, func() (bool, string) { fake.Advance(500 * time.Millisecond); return true, "" })
+		c.Poll("ready", func() (bool, string) { fake.Advance(500 * time.Millisecond); return true, "" })
 		return in
 	}
 	// A together node's branch runs as a parallel subtest: its wall ends with its own subtree too.
 	Run(t, Do("root", advance(time.Second), Do("a", waits),
 		Together("b", advance(2*time.Second), Do("c", advance(time.Second)))), 0,
-		Hooks{Artifacts: dir, Clock: fake})
+		Hooks{Artifacts: dir, Clock: fake.Now})
 	for name, want := range map[string]string{
 		"steps.tsv": "path\tverdict\twall_s\town_s\n" +
 			"root/a\tPASS\t3.500\t3.500\nroot/b\tPASS\t3.000\t2.000\nroot\tPASS\t7.500\t1.000\n" +

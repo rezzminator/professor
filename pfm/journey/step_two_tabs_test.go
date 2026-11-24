@@ -5,7 +5,6 @@ package journey
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -23,9 +22,9 @@ func twoTabs(c *harness.Ctx, s State) State {
 	term.Press(harness.Ctrl('b'), harness.Key("c"))
 	term.WaitFor("new tab")
 	term.Press(harness.Enter)
-	term.WaitFor("New chat", 20*time.Second)
+	term.WaitFor("New chat")
 	var pane string
-	c.Poll("a second pane in Herdr session "+s.Session, stepBound, func() (bool, string) {
+	c.Poll("a second pane in Herdr session "+s.Session, func() (bool, string) {
 		panes := herdrPanes(c, s)
 		for p := range panes {
 			if p != first.Pane {
@@ -40,10 +39,10 @@ func twoTabs(c *harness.Ctx, s State) State {
 	term.Press(harness.Enter)
 	term.WaitFor("choose the cache")
 	term.Press(harness.Enter)
-	term.WaitFor("❯", 20*time.Second)
+	term.WaitFor("❯")
 	sock := herdrSocket(s)
 	var second Chat
-	c.Poll("two live Claude chats on "+sock+", the second on "+pane, 20*time.Second, func() (bool, string) {
+	c.Poll("two live Claude chats on "+sock+", the second on "+pane, func() (bool, string) {
 		rows, _ := liveChats(c, sock)
 		seats := liveSeats(c, sock)
 		seen := fmt.Sprintf("chats %v, seats %v", rows, seats)
@@ -69,7 +68,7 @@ func twoTabs(c *harness.Ctx, s State) State {
 		want[chat.Pane] = markedLabel("idle", s.Name)
 		s.Chats[i].Name = s.Name
 	}
-	c.Poll("each tab under its chat's name", stepBound, func() (bool, string) {
+	c.Poll("each tab under its chat's name", func() (bool, string) {
 		got := paneTabs(c, s)
 		return fmt.Sprint(got) == fmt.Sprint(want), fmt.Sprintf("tabs %v, want %v", got, want)
 	})

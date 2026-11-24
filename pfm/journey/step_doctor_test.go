@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
 
@@ -57,7 +57,7 @@ func doctor(c *harness.Ctx, s State) State {
 		}
 	})
 	before := read(c, "sh", "-c", claudeStartState)
-	code := shellRun(term, "doctor", "clear && (cd ~/.professor && pfm doctor) > ~/doctor.out 2>&1", 120*time.Second)
+	code := shellRun(term, "doctor", "clear && (cd ~/.professor && pfm doctor) > ~/doctor.out 2>&1")
 	read(c, "rm", local)
 	// Its Claude probes ran in a throwaway config dir: no start of theirs wrote the owner's.
 	if after := read(c, "sh", "-c", claudeStartState); after != before {
@@ -146,7 +146,7 @@ var codexBindingsClean = regexp.MustCompile(
 // it by SIGTERM, and no tmux process names the socket after.
 func emptyTmuxReaped(c *harness.Ctx, term *harness.Terminal) {
 	socket := "cc-" + c.Unique("empty")
-	if r := c.Read("sh", "-c", `tmux -L "$1" new-session -d -s held 'sleep 600' && `+
+	if r := c.Read("sh", "-c", `tmux -L "$1" new-session -d -s held '`+testwait.Hold+`' && `+
 		`tmux -L "$1" set-option -g exit-empty off && tmux -L "$1" kill-session -t held`, "sh", socket); r.Code != 0 {
 		c.Failf("leaving an empty tmux server on %s exited %d: %s%s", socket, r.Code, r.Stdout, r.Stderr)
 	}

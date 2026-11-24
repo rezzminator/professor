@@ -16,13 +16,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // This runs the installed plugin's exact argv through the compiled CLI. No
@@ -246,7 +246,7 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	if err := atomicfile.Write(config, []byte(`{"version":2,"chat":{"herdrTabStatus":"emoji"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	command := exec.CommandContext(ctx, testPFMBinary, "internal", "herdr-indicators")
 	command.Env = append(os.Environ(), "PFM_CONFIG="+config, "HERDR_SOCKET_PATH="+socket)
@@ -270,10 +270,8 @@ func TestHerdrIndicatorsCompiledCLIShowsAndStopsTabPulse(t *testing.T) {
 	go func() { waited <- command.Wait() }()
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-waited:
-		case <-time.After(2 * time.Second):
-			t.Error("indicator child failed to exit")
+		if err, _ := testwait.Receive(t, "indicator child to exit", waited); err != nil {
+			t.Logf("indicator child after its cancellation: %v\n%s", err, output.String())
 		}
 	})
 	// Working and idle stay still; only the attention states pulse.

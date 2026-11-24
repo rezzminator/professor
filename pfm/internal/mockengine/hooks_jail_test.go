@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,9 +17,12 @@ import (
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
+	"github.com/rezzminator/professor/pfm/internal/mockengine/control/controltest"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -143,7 +147,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 		t.Fatalf("the SessionStart additionalContext counted as a human prompt: %+v", meta)
 	}
 
-	session.typeLine("/reload --model opus")
+	session.typeLine("/pfm:reload --model opus")
 	session.waitFrame(
 		"the block reason",
 		func(frame string) bool { return strings.Contains(frame, "reload scheduled") },
@@ -156,16 +160,17 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 		}
 		return 0
 	}
-	if code := hookentry.ReloadIntercept(
+	if code := hookentry.CommandIntercept(
 		strings.NewReader(reload),
 		&blocked,
 		&blockErr,
 		config.Runtime{},
 		front,
+		nil,
 	); code != 0 ||
 		!strings.Contains(blocked.String(), `"decision":"block"`) {
 		t.Fatalf(
-			"pfm's reload-intercept read the payload as exit=%d out=%q err=%q",
+			"pfm's command-intercept read the payload as exit=%d out=%q err=%q",
 			code,
 			blocked.String(),
 			blockErr.String(),
@@ -250,22 +255,28 @@ func TestClaudeToolHookErrorStopsTheTurnInsteadOfFallingOpen(t *testing.T) {
 }
 
 func TestRunHookCommandTimeoutDoesNotWaitForOrphan(t *testing.T) {
-	start := time.Now()
-	_, err := runHookCommand(
-		context.Background(),
-		"sleep 5; true",
-		nil,
-		t.TempDir(),
-		os.Environ(),
-		200*time.Millisecond,
-	)
-	elapsed := time.Since(start)
+	dir := t.TempDir()
+	fifo := controltest.FIFO(t, filepath.Join(dir, "orphan"))
+	started := filepath.Join(dir, "started")
+	clk := clock.NewFake(time.Unix(0, 0))
+	done := make(chan error, 1)
+	// The subshell writes the marker itself, so the marker proves the process that becomes the orphan cat
+	// exists: a timeout landing right after it kills the hook's sh, never an sh that had not forked yet.
+	command := `( : > "` + started + `"; exec cat "` + fifo + `" ); true`
+	go func() {
+		_, err := runHookCommand(context.Background(), clk, command, nil, dir, os.Environ(), 200*time.Millisecond)
+		done <- err
+	}()
+	testwait.Until(t, "the hook to start and arm its timeout on the mock's clock", func() (bool, string) {
+		_, err := os.Stat(started)
+		return err == nil && clk.Pending() == 1, fmt.Sprintf("marker %v, pending %d", err, clk.Pending())
+	})
+	clk.Advance(200 * time.Millisecond)
+	err, _ := testwait.Receive(t, "runHookCommand to return once its timeout passed", done)
 	if err == nil || err.Error() != "timed out after 200ms" {
 		t.Fatalf("runHookCommand error = %v, want timed out after 200ms", err)
 	}
-	if elapsed >= 2*time.Second {
-		t.Fatalf("runHookCommand returned after %s, want under 2s despite the orphan", elapsed)
-	}
+	controltest.Release(t, fifo) // the orphan cat still blocks on the FIFO: it outlived the hook
 }
 
 // TestHookShellNamesAMissingShell: with no sh on PATH both hook runners report
@@ -273,11 +284,12 @@ func TestRunHookCommandTimeoutDoesNotWaitForOrphan(t *testing.T) {
 func TestHookShellNamesAMissingShell(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	notFound := `sh not found: exec: "sh": executable file not found in $PATH`
-	_, hookErr := runHookCommand(context.Background(), "true", nil, t.TempDir(), os.Environ(), time.Second)
+	clk := clock.NewFake(time.Unix(0, 0))
+	_, hookErr := runHookCommand(context.Background(), clk, "true", nil, t.TempDir(), os.Environ(), time.Second)
 	if hookErr == nil || hookErr.Error() != notFound {
 		t.Fatalf("runHookCommand error = %v, want %q", hookErr, notFound)
 	}
-	_, _, lineErr := invokeStatusLine(context.Background(), "true", map[string]string{}, t.TempDir(), os.Environ(),
+	_, _, lineErr := invokeStatusLine(context.Background(), clk, "true", map[string]string{}, t.TempDir(), os.Environ(),
 		time.Second)
 	if want := "statusline: " + notFound; lineErr == nil || lineErr.Error() != want {
 		t.Fatalf("invokeStatusLine error = %v, want %q", lineErr, want)
@@ -285,19 +297,27 @@ func TestHookShellNamesAMissingShell(t *testing.T) {
 }
 
 func TestRunHookCommandReadsAnswerWithoutWaitingForBackgroundChild(t *testing.T) {
-	command := `printf '%s\n' '{"decision":"block","reason":"orphan"}'; sleep 5 &`
-	start := time.Now()
-	answer, err := runHookCommand(context.Background(), command, nil, t.TempDir(), os.Environ(), 10*time.Second)
-	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatalf("runHookCommand: %v", err)
+	dir := t.TempDir()
+	fifo := controltest.FIFO(t, filepath.Join(dir, "child"))
+	command := `printf '%s\n' '{"decision":"block","reason":"orphan"}'; cat "` + fifo + `" &`
+	type result struct {
+		answer hookAnswer
+		err    error
 	}
-	if answer.Decision != "block" || answer.Reason != "orphan" {
-		t.Fatalf("runHookCommand answer = %+v, want block with reason orphan", answer)
+	done := make(chan result, 1)
+	go func() {
+		answer, err := runHookCommand(context.Background(), clock.NewFake(time.Unix(0, 0)), command, nil, dir,
+			os.Environ(), 10*time.Second)
+		done <- result{answer, err}
+	}()
+	got, _ := testwait.Receive(t, "runHookCommand to return while its background child still runs", done)
+	if got.err != nil {
+		t.Fatalf("runHookCommand: %v", got.err)
 	}
-	if elapsed >= 2*time.Second {
-		t.Fatalf("runHookCommand returned after %s, want under 2s despite the background child", elapsed)
+	if got.answer.Decision != "block" || got.answer.Reason != "orphan" {
+		t.Fatalf("runHookCommand answer = %+v, want block with reason orphan", got.answer)
 	}
+	controltest.Release(t, fifo) // the background cat still blocks on the FIFO: the answer did not wait for it
 }
 
 func TestClaudeSettingsLayersFireAllPlayedEventsInOrder(t *testing.T) {
@@ -441,6 +461,7 @@ func TestClaudeSettingsPathStatusPrecedenceMatchersAndDedup(t *testing.T) {
 	for _, tool := range []string{"Bash", "Write"} {
 		if _, err := set.fire(
 			context.Background(),
+			clock.NewFake(time.Unix(0, 0)),
 			hookPreToolUse,
 			tool,
 			hookPayload{Event: hookPreToolUse},

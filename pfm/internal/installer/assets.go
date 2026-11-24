@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 //go:embed assets
@@ -77,34 +76,6 @@ func schedulerAsset(sched scheduler, relative string) bool {
 
 func mcpSchedulerAsset(relative string) bool {
 	return relative == "systemd/pfm-mcp.service" || relative == "launchd/com.professor.pfm.mcp.plist"
-}
-
-// renderReloadCommandAsset replaces the {{RELOAD_USAGE}} token in the
-// `/reload` command card's frontmatter description with reload.Usage itself
-// — the picker then shows the human EXACTLY the flags `reload.Run` accepts,
-// never a hand-maintained restatement free to drift from them.
-func renderReloadCommandAsset(content []byte) ([]byte, error) {
-	folded := foldReloadUsage(reload.Usage)
-	escaped := strings.ReplaceAll(folded, "'", "''")
-	rendered, err := replaceSingleAssetMarker(string(content), "{{RELOAD_USAGE}}", escaped)
-	if err != nil {
-		return nil, err
-	}
-	return []byte(rendered), nil
-}
-
-// foldReloadUsage collapses reload.Usage's second, indented continuation line
-// into the first. A YAML single-quoted scalar can carry a literal newline,
-// but the picker renders a command's description on one line, so a raw
-// newline there would show as the two literal characters "\n", not a break —
-// folding every newline plus its following indent down to a single space
-// keeps the frontmatter both valid YAML and readable in the picker.
-func foldReloadUsage(usage string) string {
-	lines := strings.Split(usage, "\n")
-	for index, line := range lines {
-		lines[index] = strings.TrimLeft(line, " ")
-	}
-	return strings.Join(lines, " ")
 }
 
 // servicePathMarker is where every pfm service unit — launchd agent or systemd

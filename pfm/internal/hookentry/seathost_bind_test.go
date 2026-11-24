@@ -14,11 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
@@ -200,11 +202,6 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			case "pane-pending", "pane-never":
 				// A new tab's reservation: Herdr names the pane only once layout.apply answers.
 				seat.HerdrPane = ""
-				if mode == "pane-never" {
-					saved := reservedPaneWait
-					reservedPaneWait = 100 * time.Millisecond
-					t.Cleanup(func() { reservedPaneWait = saved })
-				}
 			case "reexec", "reexec-ending":
 				// This very supervisor bound the seat, then exec'd the installed pfm: same pid, same birth.
 				seat.HerdrTerminalID = terminal
@@ -245,22 +242,8 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 			}
 			t.Setenv(herdr.EnvSocket, socket)
 			t.Setenv(herdr.EnvPane, caller)
-			addressed := make(chan error, 1)
-			if mode == "pane-pending" {
-				// The birth records the pane after its supervisor has already started.
-				go func() {
-					<-time.After(50 * time.Millisecond)
-					reserved, _, err := db.Seat(context.Background(), seat.SeatID)
-					if err == nil {
-						next := reserved
-						next.HerdrPane = pane
-						err = db.UpdateSeat(context.Background(), reserved, next)
-					}
-					addressed <- err
-				}()
-			} else {
-				addressed <- nil
-			}
+			fake := clock.NewFake(time.Now())
+			testwait.ProcessClock(t, fake)
 			bindCtx := context.Background()
 			if mode == "reexec" || mode == "reexec-ending" || mode == "cold-lost-held" {
 				// A native reload holds the conversation lock while it awaits the new engine.
@@ -274,13 +257,38 @@ func TestBindNativeHostRequiresKernelRoleAndCanonicalOwnership(t *testing.T) {
 						t.Error(err)
 					}
 				})
-				var cancel context.CancelFunc
-				bindCtx, cancel = context.WithTimeout(bindCtx, time.Second)
-				defer cancel()
+				// A bind that waited on the held lock would meet the deadline at once; one that
+				// proves the standing binding never reaches the lock.
+				bindCtx = testwait.Context(t)
+				if mode == "cold-lost-held" {
+					bindCtx = testwait.Expired()
+				}
 			}
-			got, bindErr := bindNativeHost(bindCtx, db, before, values)
-			if err := <-addressed; err != nil {
-				t.Fatalf("record the reserved pane: %v", err)
+			var got fleetdb.Seat
+			var bindErr error
+			bind := func() { got, bindErr = bindNativeHost(bindCtx, db, before, values) }
+			if mode == "pane-pending" {
+				// The birth records the pane after its supervisor has already started.
+				bound := make(chan struct{})
+				go func() {
+					defer close(bound)
+					bind()
+				}()
+				testwait.Until(t, "the bind to park on its reserved-pane poll", func() (bool, string) {
+					return fake.Pending() > 0, fake.String()
+				})
+				reserved, _, err := db.Seat(context.Background(), seat.SeatID)
+				if err == nil {
+					next := reserved
+					next.HerdrPane = pane
+					err = db.UpdateSeat(context.Background(), reserved, next)
+				}
+				if err != nil {
+					t.Fatalf("record the reserved pane: %v", err)
+				}
+				testwait.Drive(t, "the bind to see the recorded pane", fake, func() { <-bound })
+			} else {
+				testwait.Drive(t, "the bind to return", fake, bind)
 			}
 			if mode == "pane-pending" {
 				before.HerdrPane = pane

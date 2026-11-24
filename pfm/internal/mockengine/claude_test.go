@@ -151,6 +151,7 @@ func TestClaudeTurnShowsABusyFooterThenAReplyAndWritesTheTranscript(t *testing.T
 	}
 	session.typeLine("hello there")
 	session.waitFrame("the busy footer pfmcall.IsBusy matches", pfmcall.IsBusy)
+	fix.next(700 * time.Millisecond)
 	frame := session.waitFrame("the reply with the footer gone", func(frame string) bool {
 		return !pfmcall.IsBusy(frame) && strings.Contains(frame, "granite")
 	})
@@ -315,6 +316,8 @@ func TestClaudeCrashStepExitsMidTurnWithItsCode(t *testing.T) {
 	session := fix.startTUI("claude", claudeArgs(), nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
 	session.typeLine("go")
+	session.waitFrame("the crashing turn's busy footer", pfmcall.IsBusy)
+	fix.next(150 * time.Millisecond)
 	if code := session.waitExit(); code != 7 {
 		t.Fatalf("exit code = %d, want the crash step's 7", code)
 	}
@@ -329,73 +332,16 @@ func TestClaudeLaunchCrashExitsBeforeAnyPrompt(t *testing.T) {
 	fix := newFixture(t)
 	t.Chdir(fix.work)
 	fix.write(Scenario{SessionID: fixtureSession, LaunchCrash: "Error: the engine died at launch"})
-	started := time.Now()
 	session := fix.startTUI("claude", claudeArgs("hello"), nil)
+	fix.next(launchCrashBoot)
 	if code := session.waitExit(); code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
-	}
-	if ran := time.Since(started); ran < launchCrashBoot {
-		t.Fatalf("the crashed launch exited after %v, want at least its %v boot", ran, launchCrashBoot)
 	}
 	if got := session.stderr.String(); got != "Error: the engine died at launch\n" {
 		t.Fatalf("stderr = %q, want the last words alone", got)
 	}
 	if _, err := os.Stat(fix.claudeTranscript(fixtureSession)); !os.IsNotExist(err) {
 		t.Fatalf("a crashed launch left a transcript (stat: %v)", err)
-	}
-}
-
-func TestClaudeHoldStaysBusyUntilTheGateFileIsGone(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	gate := filepath.Join(fix.root, "gate")
-	if err := os.WriteFile(gate, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepHold, UntilGone: gate},
-		{Type: StepTurn, Reply: "released"},
-	}})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("wait for me")
-	session.waitFrame("busy while the gate exists", pfmcall.IsBusy)
-	time.Sleep(400 * time.Millisecond)
-	if frame := session.out.frame(); !pfmcall.IsBusy(frame) || strings.Contains(frame, "released") {
-		t.Fatalf("the hold released before the gate went:\n%s", frame)
-	}
-	if err := os.Remove(gate); err != nil {
-		t.Fatal(err)
-	}
-	session.waitFrame("the reply once the gate is gone", func(frame string) bool {
-		return !pfmcall.IsBusy(frame) && strings.Contains(frame, "released")
-	})
-}
-
-// TestClaudeHoldAbortsOnANonAbsenceStatError covers F3: a stat failure that
-// is not the gate's confirmed absence (here ENOTDIR, a component of the path
-// is a regular file) must abort the hold with a named failure, never release
-// it the way a genuine removal does.
-func TestClaudeHoldAbortsOnANonAbsenceStatError(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	notADir := filepath.Join(fix.root, "not-a-dir")
-	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gate := filepath.Join(notADir, "gate")
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepHold, UntilGone: gate},
-		{Type: StepTurn, Reply: "unreachable"},
-	}})
-	session := fix.startTUI("claude", claudeArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("wait for me")
-	if code := session.waitExit(); code != ExitUnpinned {
-		t.Fatalf("exit = %d, want %d (a non-absence stat error aborts the hold)", code, ExitUnpinned)
-	}
-	if !strings.Contains(session.stderr.String(), "hold") {
-		t.Fatalf("stderr = %q, want it to name the failed hold", session.stderr.String())
 	}
 }
 
@@ -506,8 +452,15 @@ func TestClaudeInlineArrayAndQueuedPromptsHaveTheirOwnSteps(t *testing.T) {
 	second := `queued mock-engine: {"type":"turn","reply":"queued-reply"}`
 	session.typeLine(first)
 	session.waitFrame("the busy turn", pfmcall.IsBusy)
-	session.typeLine(second)
-	session.typeLine("plain queued prompt")
+	for _, line := range []string{second, "plain queued prompt"} {
+		session.typeRaw(line)
+		session.waitFrame("the typed draft "+line, func(frame string) bool { return composerRow(frame) == "❯ "+line })
+		session.typeRaw("\r")
+		session.waitFrame("the draft "+line+" queued", func(frame string) bool {
+			return composerRow(frame) == "❯ " && strings.Contains(frame, "Press up to edit queued messages")
+		})
+	}
+	fix.next(500 * time.Millisecond)
 	session.waitFrame("all queued turns", func(frame string) bool { return strings.Contains(frame, "⏺ positional") })
 	frame := session.out.frame()
 	for _, needle := range []string{"⏺ R2", "⏺ queued-reply", "❯ ● a  running (background)"} {

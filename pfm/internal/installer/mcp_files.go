@@ -18,7 +18,7 @@ import (
 )
 
 func readMCPFile(path string) ([]byte, bool, error) {
-	raw, _, err := readRegularFile(path)
+	raw, _, err := atomicfile.ReadRegular(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 			return nil, false, fmt.Errorf("MCP config is a dangling symlink: %s", path)

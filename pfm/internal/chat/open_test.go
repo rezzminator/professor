@@ -118,6 +118,7 @@ func stubOpenExecutor(t *testing.T, tmux action.TmuxClient) *openStub {
 		}
 		dependencies.Tmux = tmux
 		dependencies.Processes = emptyProcesses{}
+		dependencies.Clock = newSteppedClock()
 		dependencies.Stderr = io.Discard
 		return previous(dependencies)
 	}
@@ -338,6 +339,7 @@ func TestOpenDetachedTargetKeepsAgentRouterSemantics(t *testing.T) {
 	newOpenExecutor = func(dependencies action.Dependencies) (*action.Executor, error) {
 		dependencies.Tmux = tmux
 		dependencies.Processes = processes
+		dependencies.Clock = newSteppedClock()
 		return previous(dependencies)
 	}
 	effective, err := config.RuntimeOrDefault(nil)

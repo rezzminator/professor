@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +13,9 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
@@ -418,6 +420,8 @@ func TestClaudeMCPLockProtectsSlowBackup(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), ".claude.json")
 			lock := path + ".lock"
+			fake := clock.NewFake(time.Now())
+			testwait.ProcessClock(t, fake)
 			writeFixture(t, path, "original")
 			inst := &engine{stamp: "fixture"}
 			err := withClaudeMCPLocks([]string{path}, func(check func() error) error {
@@ -431,25 +435,17 @@ func TestClaudeMCPLockProtectsSlowBackup(t *testing.T) {
 						}
 						switch state {
 						case "refresh":
-							deadline := time.NewTimer(8 * time.Second)
-							defer deadline.Stop()
-							ticker := time.NewTicker(20 * time.Millisecond)
-							defer ticker.Stop()
-						refresh:
-							for {
-								select {
-								case <-deadline.C:
-									return fmt.Errorf("native lock mtime was not refreshed during slow backup")
-								case <-ticker.C:
-									now, err := os.Stat(lock)
-									if err != nil {
-										return err
-									}
-									if now.ModTime().After(before.ModTime()) {
-										break refresh
-									}
+							testwait.Until(t, "the lock refresher armed its ticker", func() (bool, string) {
+								return fake.Pending() > 0, fake.String()
+							})
+							fake.Advance(5 * time.Second)
+							testwait.Until(t, "native lock mtime refreshed during slow backup", func() (bool, string) {
+								now, err := os.Stat(lock)
+								if err != nil {
+									t.Fatal(err)
 								}
-							}
+								return now.ModTime().After(before.ModTime()), "lock mtime " + now.ModTime().String()
+							})
 							if err := os.Mkdir(lock, 0o700); !errors.Is(err, os.ErrExist) {
 								t.Fatalf("native writer acquired refreshed lock: %v", err)
 							}
@@ -469,7 +465,17 @@ func TestClaudeMCPLockProtectsSlowBackup(t *testing.T) {
 								return err
 							}
 							if state == "restored" {
-								<-time.After(6 * time.Second)
+								testwait.Until(t, "the lock refresher armed its ticker", func() (bool, string) {
+									return fake.Pending() > 0, fake.String()
+								})
+								fake.Advance(5 * time.Second)
+								testwait.Until(
+									t,
+									"the refresher met the modified lock and stopped",
+									func() (bool, string) {
+										return fake.Pending() == 0, fake.String()
+									},
+								)
 								if err := os.Chtimes(lock, before.ModTime(), before.ModTime()); err != nil {
 									return err
 								}

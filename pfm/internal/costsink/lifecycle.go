@@ -43,6 +43,9 @@ type Config struct {
 	MaxBody             int64
 	// MaxStatFailures is how many consecutive unreadable process-table reads end the run.
 	MaxStatFailures int
+	// Clock runs the polls, the flushes and the drain window and stamps the posts; nil is
+	// clock.Real, read when Meter starts.
+	Clock clock.Clock
 }
 
 func (c *Config) defaults() {
@@ -60,6 +63,9 @@ func (c *Config) defaults() {
 	if c.MaxStatFailures <= 0 {
 		c.MaxStatFailures = DefaultMaxStatFailures
 	}
+	if c.Clock == nil {
+		c.Clock = clock.Real
+	}
 }
 
 // Meter serves cfg.Listener until the watched process is gone, then drains: it keeps accepting until
@@ -68,8 +74,10 @@ func (c *Config) defaults() {
 // process table stayed unreadable or the server failed; the cause is also in the sink log.
 func Meter(ctx context.Context, cfg Config) error {
 	cfg.defaults()
-	sink := NewSink(SinkOptions{Dir: cfg.LedgerDir, Log: cfg.Log, Wait: cfg.Wait, MaxBody: cfg.MaxBody})
-	if removed, err := costledger.Prune(cfg.LedgerDir, clock.Real.Now(), cfg.PruneAfter); err != nil {
+	sink := NewSink(
+		SinkOptions{Dir: cfg.LedgerDir, Log: cfg.Log, Now: cfg.Clock.Now, Wait: cfg.Wait, MaxBody: cfg.MaxBody},
+	)
+	if removed, err := costledger.Prune(cfg.LedgerDir, cfg.Clock.Now(), cfg.PruneAfter); err != nil {
 		sink.Logf("prune of %s failed after %d removals: %v", cfg.LedgerDir, removed, err)
 	}
 	server := &http.Server{Handler: sink, ReadHeaderTimeout: 10 * time.Second}
@@ -92,7 +100,7 @@ func Meter(ctx context.Context, cfg Config) error {
 // waitForChatExit blocks until the chat process is gone, the context ends, the server fails or the process
 // table stays unreadable; it flushes the join on every flush tick.
 func waitForChatExit(ctx context.Context, cfg Config, sink *Sink, served <-chan error) error {
-	poll, flush := clock.Real.NewTicker(cfg.PollEvery), clock.Real.NewTicker(cfg.FlushEvery)
+	poll, flush := cfg.Clock.NewTicker(cfg.PollEvery), cfg.Clock.NewTicker(cfg.FlushEvery)
 	defer poll.Stop()
 	defer flush.Stop()
 	failures := 0
@@ -133,16 +141,16 @@ func waitForChatExit(ctx context.Context, cfg Config, sink *Sink, served <-chan 
 // drain keeps the server accepting until no POST has arrived for DrainIdle, at most DrainMax: the
 // chat's exporters flush on exit and a late batch must still land.
 func drain(cfg Config, sink *Sink) {
-	started := clock.Real.Now()
-	for clock.Real.Now().Sub(started) < cfg.DrainMax {
+	started := cfg.Clock.Now()
+	for cfg.Clock.Now().Sub(started) < cfg.DrainMax {
 		// The window opens when the chat was found gone, whatever arrived before it.
 		last := sink.LastPost()
 		if last.Before(started) {
 			last = started
 		}
-		if clock.Real.Now().Sub(last) >= cfg.DrainIdle {
+		if cfg.Clock.Now().Sub(last) >= cfg.DrainIdle {
 			return
 		}
-		_ = clock.Real.Sleep(context.Background(), cfg.FlushEvery/4)
+		_ = cfg.Clock.Sleep(context.Background(), cfg.FlushEvery/4)
 	}
 }

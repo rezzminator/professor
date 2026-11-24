@@ -99,6 +99,18 @@ func (step Step) validate() error {
 	return nil
 }
 
+// timed reports whether the step waits on the mock's clock: a busy stretch, a gate file looked at, a crash
+// mid-turn or a compact.
+func (step Step) timed() bool {
+	switch step.Type {
+	case StepHold, StepCrash, StepCompact:
+		return true
+	case StepBackgroundAgent:
+		return step.UntilGone != "" || step.BusyMS > 0
+	}
+	return step.BusyMS > 0
+}
+
 // terminal reports whether the step ends the turn it belongs to.
 func (step Step) terminal() bool {
 	switch step.Type {

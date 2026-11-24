@@ -15,9 +15,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestSharedMigrationFromV1PreservesRowsAndBacksUp(t *testing.T) {
@@ -295,17 +297,30 @@ INSERT INTO comms(id,at_ns,kind,message) VALUES(8,101,'group','group body'),(9,1
 // A reader's snapshot holds the WAL briefly while another opener reads the
 // schema version; the backup waits it out instead of failing the open.
 func TestBackupBeforeMigrationWaitsOutBusyCheckpoint(t *testing.T) {
-	t.Parallel()
 	db, path, release := heldBackupSnapshot(t)
-	released := make(chan error, 1)
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		released <- release()
-	}()
-	backupErr := BackupBeforeMigration(context.Background(), db, path, 7, true)
-	if err := <-released; err != nil {
+	fake := clock.NewFake(time.Unix(1_800_000_000, 0))
+	testwait.ProcessClock(t, fake)
+	done := make(chan error, 1)
+	go func() { done <- BackupBeforeMigration(context.Background(), db, path, 7, true) }()
+	// The reader lets go only once the backup is provably retrying the busy checkpoint.
+	testwait.Until(t, "the backup to retry the busy WAL checkpoint", func() (bool, string) {
+		return testwait.Blocked("clock.(*Fake).Sleep", "fleetdb.checkpointBeforeBackup")
+	})
+	if err := release(); err != nil {
 		t.Fatal(err)
 	}
+	var backupErr error
+	testwait.Until(t, "the backup to finish after the reader let go", func() (bool, string) {
+		select {
+		case backupErr = <-done:
+			return true, ""
+		default:
+		}
+		if blocked, _ := testwait.Blocked("clock.(*Fake).Sleep", "fleetdb.checkpointBeforeBackup"); blocked {
+			fake.Advance(10 * time.Millisecond)
+		}
+		return false, fake.String()
+	})
 	if backupErr != nil {
 		t.Fatalf("backup with a briefly held reader: %v", backupErr)
 	}
@@ -325,25 +340,35 @@ func TestBackupBeforeMigrationWaitsOutBusyCheckpoint(t *testing.T) {
 }
 
 func TestBackupBeforeMigrationBoundsBusyCheckpoint(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
-		name string
-		wait time.Duration
-		want string
+		name    string
+		wait    time.Duration
+		advance time.Duration // how far the fake clock moves once the checkpoint retries
+		want    string
 	}{
-		{name: "retry budget", wait: 6 * time.Second, want: "WAL checkpoint busy after"},
-		{name: "caller deadline", wait: 50 * time.Millisecond, want: "wait for busy WAL checkpoint"},
+		{name: "retry budget", wait: 6 * time.Second, advance: 5 * time.Second, want: "WAL checkpoint busy after"},
+		{
+			name: "caller deadline", wait: 50 * time.Millisecond, advance: 50 * time.Millisecond,
+			want: "wait for busy WAL checkpoint",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
 			db, path, _ := heldBackupSnapshot(t)
 			// A checkpoint must not wait the store's ten seconds on every attempt.
 			if _, err := db.Exec("PRAGMA busy_timeout=10000"); err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), test.wait)
+			fake := clock.NewFake(time.Unix(1_800_000_000, 0))
+			testwait.ProcessClock(t, fake)
+			ctx, cancel := clock.WithTimeout(context.Background(), fake, test.wait)
 			defer cancel()
-			err := BackupBeforeMigration(ctx, db, path, 7, true)
+			done := make(chan error, 1)
+			go func() { done <- BackupBeforeMigration(ctx, db, path, 7, true) }()
+			testwait.Until(t, "the backup to retry the busy WAL checkpoint", func() (bool, string) {
+				return testwait.Blocked("clock.(*Fake).Sleep", "fleetdb.checkpointBeforeBackup")
+			})
+			fake.Advance(test.advance)
+			err, _ := testwait.Receive(t, "the bounded backup to give up", done)
 			if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("backup error=%v, want deadline with %q", err, test.want)
 			}

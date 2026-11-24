@@ -15,7 +15,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/retired"
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -288,38 +287,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 				t.Fatalf("apply report=%#v err=%v\n%s", report, err, applied.String())
 			}
 			managed := filepath.Join(home, ".local", "share", "pfm", "install")
-			assertLink(t, filepath.Join(config, "commands", "reload.md"), filepath.Join(managed, "reload.command.md"))
-			// T3: the staged /reload command's frontmatter description opens with
-			// the USER-ONLY law and then carries reload.Usage itself, folded to one
-			// line — never the unrendered {{RELOAD_USAGE}} token — so the picker
-			// shows the human exactly the flags reload.Run accepts.
-			reloadMD := readFixture(t, filepath.Join(config, "commands", "reload.md"))
-			if strings.Contains(reloadMD, "{{RELOAD_USAGE}}") {
-				t.Fatalf("reload command asset kept its unrendered token:\n%s", reloadMD)
-			}
-			descriptionLine := ""
-			for _, line := range strings.Split(reloadMD, "\n") {
-				if strings.HasPrefix(line, "description: '") {
-					descriptionLine = line
-					break
-				}
-			}
-			if descriptionLine == "" {
-				t.Fatalf("reload command asset has no frontmatter description line:\n%s", reloadMD)
-			}
-			gotDescription := strings.ReplaceAll(
-				strings.TrimSuffix(strings.TrimPrefix(descriptionLine, "description: '"), "'"),
-				"''", "'",
-			)
-			wantDescription := "USER-ONLY — the user types /reload; never run this without the user's permission. " +
-				foldReloadUsage(reload.Usage)
-			if gotDescription != wantDescription {
-				t.Fatalf(
-					"reload description = %q, want the USER-ONLY law plus the folded usage line %q",
-					gotDescription,
-					wantDescription,
-				)
-			}
 			// One job, two schedulers: assert the one this platform actually installs,
 			// and that it did NOT leave the other platform's files behind.
 			if launchd {
@@ -593,10 +560,15 @@ func TestUninstallCodexConflictFailsTheRunAfterEveryUnwireStep(t *testing.T) {
 	_, install := testjail.FakeEngineSyncRunner(t, `{"ok":true,"events":[],"error":""}`, 0)
 	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
 	options.EngineSyncRunner = install
+	writeFixture(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "commands", "audit-fixture.md"),
+		"# audit\n",
+	)
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
-	command := filepath.Join(home, ".claude", "commands", "reload.md")
+	command := filepath.Join(home, ".claude", "commands", "audit-fixture.md")
 	if _, err := os.Lstat(command); err != nil {
 		t.Fatalf("install did not wire command fixture: %v", err)
 	}
@@ -665,6 +637,10 @@ func TestFutureCommandSourceIncludesTemplateGlobalCommands(t *testing.T) {
 			writeFixture(t, filepath.Join(source, entry), content)
 			registry := filepath.Join(home, ".claude", "commands")
 			writeFixture(t, filepath.Join(registry, "local.md"), "# retained local command\n")
+			// A command the retired lists' configFiles retire is gone before
+			// engine-sync applies, so the preview never stages it.
+			symlinkFixture(t, filepath.Join(home, "old-reload.md"), filepath.Join(registry, "reload.md"))
+			writeFixture(t, filepath.Join(home, "old-reload.md"), "# old reload\n")
 			if test.conflict {
 				content = "# local conflict must win\n"
 				external := filepath.Join(home, "custom-command.md")
@@ -673,8 +649,14 @@ func TestFutureCommandSourceIncludesTemplateGlobalCommands(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			installer := &engine{options: Options{Home: home, ConfigDir: filepath.Join(home, ".claude")}}
-			staged, cleanup, err := installer.futureCommandSource(nil)
+			installer := &engine{options: Options{
+				Home:      home,
+				ConfigDir: filepath.Join(home, ".claude"),
+				retired: &retired.Lists{
+					ConfigFiles: []retired.ConfigFile{{Path: "commands/reload.md", Reason: "retired"}},
+				},
+			}}
+			staged, cleanup, err := installer.futureCommandSource()
 			if err != nil {
 				t.Fatalf("futureCommandSource: %v", err)
 			}
@@ -693,6 +675,10 @@ func TestFutureCommandSourceIncludesTemplateGlobalCommands(t *testing.T) {
 				filepath.Join(staged, ".claude", "commands", "local.md"),
 			); got != "# retained local command\n" {
 				t.Fatalf("staged local command = %q", got)
+			}
+			retiredPath := filepath.Join(staged, ".claude", "commands", "reload.md")
+			if _, err := os.Lstat(retiredPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("staged retired command %s: %v, want it absent", retiredPath, err)
 			}
 		})
 	}
@@ -729,9 +715,7 @@ func TestWireGlobalCommandsSkipsAnAbsentOrEmptySource(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, entry := range entries {
-				if entry.Name() != "reload.md" {
-					t.Fatalf("%s global commands source still wrote %s", name, entry.Name())
-				}
+				t.Fatalf("%s global commands source still wrote %s", name, entry.Name())
 			}
 		})
 	}
@@ -1367,8 +1351,8 @@ func TestInstallerChangeWritesAndReports(t *testing.T) {
 
 func TestEnsureLinkRefusesUnpublishedManagedAsset(t *testing.T) {
 	home := t.TempDir()
-	source := filepath.Join(managedRootForHome(home), "reload.command.md")
-	target := filepath.Join(home, "commands", "reload.md")
+	source := filepath.Join(managedRootForHome(home), "example.command.md")
+	target := filepath.Join(home, "commands", "example.md")
 	symlinkFixture(t, "old-owned-source", target)
 	e := &engine{
 		apply:       true,

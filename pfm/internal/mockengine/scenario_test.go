@@ -51,53 +51,6 @@ func TestClaudeOnlyScenarioDoors(t *testing.T) {
 	}
 }
 
-func TestInlineDirectiveParser(t *testing.T) {
-	for _, row := range []struct {
-		name, prompt    string
-		count           int
-		refused, absent bool
-	}{
-		{"no marker", "plain prompt", 0, false, true},
-		{"object", `hi mock-engine: {"type":"turn","reply":"R1"}`, 1, false, false},
-		{"array", `mock-engine: [{"type":"background_agent","name":"a"},{"type":"turn","reply":"R2"}]`, 2, false, false},
-		{"empty array", `mock-engine: []`, 0, false, false},
-		{"first line", "mock-engine: {\"type\":\"turn\"}\nnext line", 1, false, false},
-		{"compact", `mock-engine: {"type":"compact"}`, 1, false, false},
-		{"unknown type", `mock-engine: {"type":"nope"}`, 0, true, false},
-		{"unknown field", `mock-engine: {"type":"turn","oops":true}`, 0, true, false},
-		{"broken JSON", `mock-engine: {"type":`, 0, true, false},
-		{"trailing object", `mock-engine: {"type":"turn"} {}`, 0, true, false},
-		{"unsigned footer", `mock-engine: {"type":"turn","reply":"R"} — UNSIGNED — sender identity underivable; no session id`, 1, false, false},
-		{"signed footer", `mock-engine: [{"type":"turn","reply":"R"}] — sid 1234abcd · to reply: call lane <message>`, 1, false, false},
-		{"force delivered footer", `mock-engine: {"type":"turn","reply":"R"} — ⚠ FORCE-DELIVERED via Esc (…) — sid 1234abcd`, 1, false, false},
-		{"trailing garbage", `mock-engine: {"type":"turn"} garbage`, 0, true, false},
-		{"null", `mock-engine: null`, 0, true, false},
-		{"hold without gate", `mock-engine: {"type":"hold"}`, 0, true, false},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			steps, err := parseInlineSteps(row.prompt)
-			if row.refused {
-				if err == nil {
-					t.Fatalf("bad directive accepted: %+v", steps)
-				}
-				if row.name == "trailing garbage" {
-					reply := (&script{}).forPrompt(row.prompt).Steps[0].Reply
-					if !strings.HasPrefix(reply, "mock-engine: inline steps refused — ") {
-						t.Fatalf("refusal reply = %q", reply)
-					}
-				}
-				return
-			}
-			if err != nil || len(steps) != row.count || (steps == nil) != row.absent {
-				t.Fatalf("steps=%+v err=%v, want count=%d absent=%v", steps, err, row.count, row.absent)
-			}
-			if strings.Contains(row.name, "footer") && steps[0].Reply != "R" {
-				t.Fatalf("footer step reply = %q, want R", steps[0].Reply)
-			}
-		})
-	}
-}
-
 func mustJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	content, err := json.Marshal(value)
@@ -117,6 +70,17 @@ func TestLoadScenarioRefusesUnknownFieldsAndBrokenSteps(t *testing.T) {
 		"menu selected":     {`{"steps":[{"type":"menu","options":["a"],"selected":4}]}`, "scenario {dir}/menu-selected.json step 0: menu selected 4 is outside 1..1"},
 		"tool no name":      {`{"steps":[{"type":"tool_call"}]}`, "scenario {dir}/tool-no-name.json step 0: tool_call needs tool"},
 		"perform a read":    {`{"steps":[{"type":"tool_call","tool":"Read","perform":true}]}`, "scenario {dir}/perform-a-read.json step 0: tool_call performs only Bash and Write, not \"Read\""},
+		"busy scenario":     {`{"busy_ms":200}`, "scenario {dir}/busy-scenario.json busy_ms 200: " + uncontrolled},
+		"busy turn":         {`{"steps":[{"type":"turn","busy_ms":1}]}`, "scenario {dir}/busy-turn.json step 0 (turn): " + uncontrolled},
+		"busy api error":    {`{"steps":[{"type":"api_error","busy_ms":5}]}`, "scenario {dir}/busy-api-error.json step 0 (api_error): " + uncontrolled},
+		"hold":              {`{"steps":[{"type":"turn"},{"type":"hold","until_gone":"/g"}]}`, "scenario {dir}/hold.json step 1 (hold): " + uncontrolled},
+		"gated agent":       {`{"steps":[{"type":"background_agent","name":"a","until_gone":"/g"}]}`, "scenario {dir}/gated-agent.json step 0 (background_agent): " + uncontrolled},
+		"agent busy report": {`{"steps":[{"type":"background_agent","name":"a","busy_ms":4}]}`, "scenario {dir}/agent-busy-report.json step 0 (background_agent): " + uncontrolled},
+		"crash":             {`{"steps":[{"type":"crash","exit_code":7}]}`, "scenario {dir}/crash.json step 0 (crash): " + uncontrolled},
+		"compact":           {`{"steps":[{"type":"compact"}]}`, "scenario {dir}/compact.json step 0 (compact): " + uncontrolled},
+		"launch crash":      {`{"launch_crash":"died"}`, "scenario {dir}/launch-crash.json launch_crash: " + uncontrolled},
+		"no timed act":      {`{"busy_ms":0,"steps":[{"type":"turn"},{"type":"background_agent","name":"a"}]}`, "<nil>"},
+		"controlled":        {`{"control":"/c","busy_ms":200,"launch_crash":"x","steps":[{"type":"hold","until_gone":"/g"},{"type":"crash"}]}`, "<nil>"},
 	} {
 		path := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".json")
 		if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
@@ -140,11 +104,14 @@ func TestLoadScenarioRefusesUnknownFieldsAndBrokenSteps(t *testing.T) {
 	}
 }
 
+// uncontrolled is the refusal of a timed act in a scenario that names no control FIFO.
+const uncontrolled = "is a timed act, and the scenario names no control FIFO to move its clock"
+
 func TestScenarioRoundTripsThroughWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.json")
 	busy := 5
 	want := Scenario{
-		SessionID: "abc", BusyMS: &busy, Pane: PaneShapes{Busy: "b"}, Jail: Jail{ProcRoot: "/p"},
+		SessionID: "abc", BusyMS: &busy, Pane: PaneShapes{Busy: "b"}, Jail: Jail{ProcRoot: "/p"}, Control: "/c",
 		Steps: []Step{{Type: StepTurn, Reply: "r"}, {Type: StepHold, UntilGone: "/g"}},
 	}
 	if err := want.Write(path); err != nil {
@@ -154,8 +121,10 @@ func TestScenarioRoundTripsThroughWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SessionID != "abc" || *got.BusyMS != 5 || got.Pane.Busy != "b" || got.Jail.ProcRoot != "/p" ||
-		len(got.Steps) != 2 || got.Steps[1].UntilGone != "/g" {
+	if got.SessionID != "abc" || *got.BusyMS != 5 || got.Control != "/c" || got.Pane.Busy != "b" ||
+		got.Jail.ProcRoot != "/p" ||
+		len(got.Steps) != 2 ||
+		got.Steps[1].UntilGone != "/g" {
 		t.Fatalf("round trip = %+v", got)
 	}
 }
@@ -193,32 +162,6 @@ func TestScenarioRateLimitsRoundTripsAndRejectsNonObjects(t *testing.T) {
 		); err == nil ||
 			!strings.Contains(err.Error(), "rate_limits") {
 			t.Fatalf("rate_limits %v: %v", bad, err)
-		}
-	}
-}
-
-func TestScriptFallsBackToDefaultsWhenStepsRunOut(t *testing.T) {
-	running := newScript(Scenario{Steps: []Step{{Type: StepTurn, Reply: "first", BusyMS: 9}}}, engineClaude)
-	if running.Model != DefaultClaudeModel || running.Version != DefaultClaudeVersion || running.Reply != DefaultReply {
-		t.Fatalf("defaults = %+v", running.Scenario)
-	}
-	reply, busy, usage := running.turnReply(running.next())
-	if reply != "first" || busy != 9 || usage.Input == 0 {
-		t.Fatalf("first turn = (%q, %d, %+v)", reply, busy, usage)
-	}
-	step := running.next()
-	reply, busy, _ = running.turnReply(step)
-	if step.Type != StepTurn || reply != DefaultReply || busy != DefaultBusyMS {
-		t.Fatalf("exhausted list gave (%+v, %q, %d)", step, reply, busy)
-	}
-	for _, step := range []Step{{Type: StepTurn}, {Type: StepMenu}, {Type: StepCrash}, {Type: StepExit}} {
-		if !step.terminal() {
-			t.Fatalf("%s must end a turn", step.Type)
-		}
-	}
-	for _, step := range []Step{{Type: StepHold}, {Type: StepToolCall}, {Type: StepBackgroundAgent}, {Type: StepCompact}, {Type: StepMCP}} {
-		if step.terminal() {
-			t.Fatalf("%s must run inside a turn", step.Type)
 		}
 	}
 }

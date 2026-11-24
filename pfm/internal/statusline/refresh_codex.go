@@ -24,7 +24,7 @@ type CodexOptions struct {
 	Binary         string
 	ReadRateLimits func(context.Context) ([]byte, error)
 	Now            func() time.Time
-	// Env is the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env)
+	// Env is the host-environment seam (paths.Env)
 	// the default CachePath is resolved through; nil defaults to
 	// paths.OSEnv{}.
 	Env paths.Env

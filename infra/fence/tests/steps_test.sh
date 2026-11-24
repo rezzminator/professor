@@ -74,9 +74,9 @@ if out="$(
 else bad 'shtest_unset_gate_env' "$out"; fi
 
 # a command forked and TERMed before its exec runs this shell's inherited EXIT trap: it must not remove $T
-# (a TERM taken before the exec is lost to the exec'd program, so the forked sleep is short: the wait is bounded)
+# (a TERM taken before the exec is lost to the exec'd program, so the forked program ends on its own: the wait is bounded)
 ( eval "$(trap -p EXIT)"; exit 0 )
-for ((i = 0; i < 20; i++)); do sleep 0.2 & forked=$!; kill -TERM "$forked"; { wait "$forked"; } 2>/dev/null; done
+for ((i = 0; i < 20; i++)); do env true & forked=$!; kill -TERM "$forked"; { wait "$forked"; } 2>/dev/null; done
 if [ -d "$T" ] && [ "$(trap -p EXIT)" ]; then
   ok 'a child that runs the sourcing shell EXIT trap, TERMed at once or not, leaves the suite scratch'
 else bad 'a forked child removed the suite scratch dir'; mkdir -p "$T"; fi
@@ -150,18 +150,37 @@ for f in test-test; do
   else bad "$f.sh probe on an empty EXIT trap" "$(cat "$d/out")"; fi
 done
 
-busy_step() {
-  printf '%s start\n' "$EPOCHREALTIME" >> "$T/events"
-  sleep 0.12
-  printf '%s end\n' "$EPOCHREALTIME" >> "$T/events"
+# Steps that hold until the scheduler waits: before each wait, STEPS_BEFORE_WAIT=steps_before_wait waits
+# until every running step has written its start line, then writes one wait line; a held step ends at the
+# first wait line after its start. Each run's events file ($steps_events) is then the order of the starts
+# and ends, every step launched before a wait started before it, and no step ends on its own early.
+steps_events=""
+steps_started() { local n; for n; do grep -qx "$n start" "$steps_events" 2>/dev/null || return 1; done; } # steps_started <name>…
+steps_before_wait() {
+  shtest_wait_until "the running steps $* write their start" steps_started "$@" && echo '- wait' >> "$steps_events"
 }
+steps_waits() { grep -cx -- '- wait' "$steps_events"; }
+steps_waited_past() { [ "$(steps_waits)" -gt "$1" ]; } # steps_waited_past <waits>: a wait line came after
+held_step() { # held_step <name>: starts, holds until the scheduler next waits, ends
+  local waits
+  waits="$(steps_waits)"
+  printf '%s start\n' "$1" >> "$steps_events"
+  shtest_wait_until "the scheduler waits after $1 starts" steps_waited_past "$waits"
+  printf '%s end\n' "$1" >> "$steps_events"
+}
+steps_most_running() { awk '$2=="start" {n++} $2=="end" {n--} n>max {max=n} END {print max+0}' "$steps_events"; }
+# shellcheck disable=SC2034 # STEPS_BEFORE_WAIT is read by steps_run
+steps_hold() { steps_events="$1"; : > "$steps_events"; STEPS_BEFORE_WAIT=steps_before_wait; } # steps_hold <events file>
+steps_unhold() { unset STEPS_BEFORE_WAIT; }
 steps_reset
-for n in 1 2 3 4 5 6; do steps_add "s$n" busy_step; done
+for n in 1 2 3 4 5 6; do steps_add "s$n" held_step "s$n"; done
 STEPS_JOBS=2
+steps_hold "$T/events"
 if steps_run "$T/concurrent" >"$T/concurrent.out" && [ "$(grep -c ' start$' "$T/events")" -eq 6 ] &&
-  [ "$(sort -n "$T/events" | awk '{n+=($2=="start"?1:-1); if(n>max)max=n} END{print max+0}')" -le 2 ]; then
+  [ "$(steps_most_running)" -le 2 ]; then
   ok 'six steps respect two concurrent jobs'
-else bad 'concurrency bound' "$(cat "$T/concurrent.out")"; fi
+else bad 'concurrency bound' "$(cat "$T/concurrent.out")" "$T/events: $(paste -sd' ' "$T/events")"; fi
+steps_unhold
 
 emits() { echo stdout; echo stderr >&2; }
 steps_reset; steps_add output emits
@@ -271,70 +290,57 @@ if ! steps_add same true 2>"$T/name.err" && grep -q same "$T/name.err" && [ "${#
   ok 'duplicate name refused without registration'
 else bad 'duplicate name'; fi
 
-timed_step() {
-  local name="$1" delay="$2"
-  printf '%s %s start\n' "$EPOCHREALTIME" "$name" >> "$T/timed.events"
-  sleep "$delay"
-  printf '%s %s end\n' "$EPOCHREALTIME" "$name" >> "$T/timed.events"
-}
-await_step() { # await_step <name> <other>: ends once <other> has ended, polled in 0.02 s ticks, bounded at 5 s
-  local name="$1" other="$2" tick
-  printf '%s %s start\n' "$EPOCHREALTIME" "$name" >> "$T/timed.events"
-  for (( tick = 0; tick < 250; tick++ )); do
-    grep -q " $other end\$" "$T/timed.events" 2>/dev/null && break
-    sleep 0.02
-  done
-  printf '%s %s end\n' "$EPOCHREALTIME" "$name" >> "$T/timed.events"
+await_step() { # await_step <name> <other>: ends once <other> has ended
+  printf '%s start\n' "$1" >> "$steps_events"
+  shtest_wait_until "step $2 ends before step $1" grep -qx "$2 end" "$steps_events"
+  printf '%s end\n' "$1" >> "$steps_events"
 }
 steps_reset
 # a ends only after d, registered last, has ended: d must start while a runs, and the table keeps a first.
-steps_add a await_step a d; steps_add b timed_step b 0.01
-steps_add c timed_step c 0.01; steps_add d timed_step d 0.01
+steps_add a await_step a d; steps_add b held_step b
+steps_add c held_step c; steps_add d held_step d
 STEPS_JOBS=4
+steps_hold "$T/timed.events"
 if steps_run "$T/table" >"$T/table.out" &&
   [ "$(cut -f1 "$T/table/gate.tsv" | paste -sd, -)" = 'step,a,b,c,d,STEPS' ] &&
   cmp -s "$T/table/gate.tsv" "$T/table.out" &&
-  awk '$2=="a" && $3=="end" {a=$1} $2=="d" && $3=="end" {d=$1} END {exit !(a>0 && d>0 && d<a)}' "$T/timed.events"; then
+  awk '$1=="a" && $2=="end" {a=NR} $1=="d" && $2=="end" {d=NR} END {exit !(a>0 && d>0 && d<a)}' "$T/timed.events"; then
   ok 'the table keeps registration order whatever order the steps end in'
-else bad 'table order' "$(cat "$T/table.out")"; fi
+else bad 'table order' "$(cat "$T/table.out")" "$T/timed.events: $(paste -sd' ' "$T/timed.events")"; fi
 
-heavy_step() {
-  local name="$1"
-  printf '%s %s start\n' "$EPOCHREALTIME" "$name" >> "$T/heavy.events"
-  sleep 0.12
-  printf '%s %s end\n' "$EPOCHREALTIME" "$name" >> "$T/heavy.events"
-}
 steps_reset
-for n in 1 2 3 4 5 6; do steps_add_heavy "h$n" heavy_step "h$n"; done
+for n in 1 2 3 4 5 6; do steps_add_heavy "h$n" held_step "h$n"; done
 STEPS_JOBS=6; STEPS_HEAVY_JOBS=2
+steps_hold "$T/heavy.events"
 if steps_run "$T/heavy" >"$T/heavy.out" &&
   [ "$(grep -c ' start$' "$T/heavy.events")" -eq 6 ] &&
-  [ "$(sort -n "$T/heavy.events" | awk '{n+=($3=="start"?1:-1); if(n>max)max=n} END{print max+0}')" -le 2 ]; then
+  [ "$(steps_most_running)" -le 2 ]; then
   ok 'six heavy steps respect two heavy slots'
-else bad 'heavy concurrency bound' "$(cat "$T/heavy.out")"; fi
+else bad 'heavy concurrency bound' "$(cat "$T/heavy.out")" "$T/heavy.events: $(paste -sd' ' "$T/heavy.events")"; fi
 
 steps_reset
-steps_add_heavy h1 timed_step h1 0.16
-steps_add_heavy h2 timed_step h2 0.16
-steps_add_heavy h3 timed_step h3 0.01
-steps_add light timed_step light 0.01
+steps_add_heavy h1 held_step h1
+steps_add_heavy h2 held_step h2
+steps_add_heavy h3 held_step h3
+steps_add light held_step light
 STEPS_JOBS=3; STEPS_HEAVY_JOBS=2
-: > "$T/timed.events"
+steps_hold "$T/timed.events"
 if steps_run "$T/overtake" >"$T/overtake.out" &&
-  awk '$2=="light" && $3=="start" {light=$1} $2=="h3" && $3=="start" {h3=$1} END {exit !(light>0 && h3>light)}' "$T/timed.events"; then
+  awk '$1=="light" && $2=="start" {light=NR} $1=="h3" && $2=="start" {h3=NR} END {exit !(light>0 && h3>light)}' "$T/timed.events"; then
   ok 'light step overtakes a heavy step waiting for its slot'
-else bad 'light overtake'; fi
+else bad 'light overtake' "$T/timed.events: $(paste -sd' ' "$T/timed.events")"; fi
 
 steps_reset
-for n in 1 2 3 4; do steps_add_heavy "default$n" heavy_step "default$n"; done
+for n in 1 2 3 4; do steps_add_heavy "default$n" held_step "default$n"; done
 unset STEPS_JOBS STEPS_HEAVY_JOBS
-: > "$T/heavy.events"
+steps_hold "$T/heavy.events"
 printf 'max 100000\n' > "$T/cpu.max.unlimited"
 if STEPS_CPU_MAX_FILE="$T/cpu.max.unlimited" steps_run "$T/heavy-default" >"$T/heavy-default.out" &&
-  [ "$(sort -n "$T/heavy.events" | awk '{n+=($3=="start"?1:-1); if(n>max)max=n} END{print max+0}')" -eq 2 ] &&
+  [ "$(steps_most_running)" -eq 2 ] &&
   [ "$(STEPS_CPU_MAX_FILE="$T/cpu.max.unlimited" steps_jobs)" = "$(nproc)" ]; then
   ok 'default heavy cap is two and default jobs follows CPU count'
-else bad 'default heavy cap or jobs'; fi
+else bad 'default heavy cap or jobs' "$T/heavy.events: $(paste -sd' ' "$T/heavy.events")"; fi
+steps_unhold
 
 # Inside the shared fence the container's CPU quota is the machine: the default jobs follow cgroup
 # cpu.max (quota / period, rounded up); an unreadable file falls back to the CPU count.
@@ -397,7 +403,7 @@ if (
   ok 'a launched step with no prof.tsv is named after the table, its verdict untouched'
 else bad 'PROFILE-MISSING line' "$(cat "$T/profile-missing.out")"; fi
 
-hang_step() { sleep 60; }
+hang_step() { ( shtest_hold hang-step ); } # never ends: the bound kills it
 steps_reset
 steps_add hang hang_step; steps_set_bound 1
 steps_add fine true

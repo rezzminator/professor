@@ -1,15 +1,14 @@
 package mockengine
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // codexHandler is one hooks.json handler a test registers: its event in the document's spelling.
@@ -44,8 +43,7 @@ func writeCodexHooks(t *testing.T, fix *fixture, handlers []codexHandler, trust 
 		return
 	}
 	setScenarioField(t, fix, "rate_limits", json.RawMessage(fixtureRateLimits))
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	if err := codexappendix.RegisterHookTrusts(
 		ctx,
 		filepath.Join(fix.bin, "codex"),

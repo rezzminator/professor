@@ -3,11 +3,6 @@
 	url = https://github.com/rezzminator/tool-visibility-controller.git
 	branch = develop
 	ignore = dirty
-[submodule "buddy"]
-	path = plugins/buddy
-	url = https://github.com/rezzminator/buddy.git
-	branch = develop
-	ignore = dirty
 [submodule "cache-live-control"]
 	path = plugins/cache-live-control
 	url = https://github.com/rezzminator/cache-live-control.git

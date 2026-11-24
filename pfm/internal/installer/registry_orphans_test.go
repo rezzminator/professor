@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestRetireDeadRegistryLinks(t *testing.T) {
@@ -271,13 +272,12 @@ func TestRetireDeadRegistryRootLink(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() { done <- installer.retireDeadRegistryLinks() }()
-			select {
-			case err := <-done:
-				if err != nil {
-					t.Fatal(err)
-				}
-			case <-time.After(10 * time.Second):
-				t.Fatal("retireDeadRegistryLinks never returned on a dead registry root link")
+			if err, _ := testwait.Receive(
+				t,
+				"retireDeadRegistryLinks returned on a dead registry root link",
+				done,
+			); err != nil {
+				t.Fatal(err)
 			}
 			want := "  change  retire " + root + " (dead pfm link -> " + target + ")\n"
 			if output.String() != want {
@@ -382,6 +382,23 @@ func TestRetireDeadRulesLink(t *testing.T) {
 	symlinkFixture(t, live, filepath.Join(store, "rules", "live.md"))
 	dead := filepath.Join(store, "rules", "gone.md")
 	symlinkFixture(t, gone, dead)
+	// The rule files the flights plugin took over: pfm's old links into the clone are dead and go.
+	staleCoding := filepath.Join(store, "rules", "coding.md")
+	symlinkFixture(t, filepath.Join(repo, "templates", "global", "rules", "coding.md"), staleCoding)
+	// The flights plugin's own links, into its cached copy (one dangling) and into the clone's
+	// checkout of it: never pfm's, so install leaves every one.
+	cached := filepath.Join(home, ".claude", "plugins", "cache", "professor", "flights", "2.1.0", "rules")
+	writeFixture(t, filepath.Join(cached, "testing.md"), "testing")
+	checkout := filepath.Join(repo, "plugins", "flights", "plugins", "flights", "rules")
+	writeFixture(t, filepath.Join(checkout, "life-cycle.md"), "life cycle")
+	flights := map[string]string{
+		"flights-testing.md":    filepath.Join(cached, "testing.md"),
+		"flights-coding.md":     filepath.Join(cached, "coding.md"),
+		"flights-life-cycle.md": filepath.Join(checkout, "life-cycle.md"),
+	}
+	for name, target := range flights {
+		symlinkFixture(t, target, filepath.Join(store, "rules", name))
+	}
 	var output bytes.Buffer
 	installer := &engine{
 		options:     Options{Home: home, ConfigDir: store, Stdout: &output},
@@ -391,7 +408,9 @@ func TestRetireDeadRulesLink(t *testing.T) {
 	if err := installer.retireDeadRegistryLinks(); err != nil {
 		t.Fatal(err)
 	}
-	want := "  change  retire " + dead + " (dead pfm link -> " + gone + ")\n"
+	want := "  change  retire " + staleCoding + " (dead pfm link -> " +
+		filepath.Join(repo, "templates", "global", "rules", "coding.md") + ")\n" +
+		"  change  retire " + dead + " (dead pfm link -> " + gone + ")\n"
 	if output.String() != want {
 		t.Fatalf("transcript=%q, want %q", output.String(), want)
 	}
@@ -399,4 +418,10 @@ func TestRetireDeadRulesLink(t *testing.T) {
 		t.Fatalf("dead rules link survived: %v", err)
 	}
 	assertLink(t, filepath.Join(store, "rules", "live.md"), live)
+	if _, err := os.Lstat(staleCoding); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stale coding rule link survived: %v", err)
+	}
+	for name, target := range flights {
+		assertLink(t, filepath.Join(store, "rules", name), target)
+	}
 }

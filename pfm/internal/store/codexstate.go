@@ -158,7 +158,7 @@ func codexStateGeneration(name string) (int, bool) {
 // one unreadable generation must never blank the Codex half of the fleet —
 // but skipping every generation is not the same as there being nothing to
 // read, so each skip is logged and an all-skipped run is an error, never a
-// silent empty list.
+// silent empty list. A cancelled or timed-out read returns its context's error.
 func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error) {
 	threadByID := make(map[string]CodexThread)
 	skipped := 0
@@ -168,6 +168,9 @@ func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error
 		}
 		threads, err := readCodexState(ctx, file)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
 			skipped++
 			fmt.Fprintf(
 				os.Stderr,
@@ -186,10 +189,7 @@ func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error
 		}
 	}
 	if len(files) > 0 && skipped == len(files) {
-		return nil, fmt.Errorf(
-			"read Codex state: all %d generation(s) were unreadable",
-			skipped,
-		)
+		return nil, fmt.Errorf("read Codex state: all %d generation(s) were unreadable", skipped)
 	}
 	threads := make([]CodexThread, 0, len(threadByID))
 	for threadID := range threadByID {
@@ -230,6 +230,11 @@ func NewCodexThreadResolverRoots(
 		threads, err := ReadCodexThreads(ctx, files)
 		if err != nil {
 			// No candidates: a pane matches only by its binding or exported id.
+			// A cancelled or timed-out pass read no store: it is no unreadable one.
+			if ctx.Err() != nil {
+				obs.Logger(ctx).Info("store.codex_threads.cancelled", obs.FieldErr, err.Error())
+				return nil
+			}
 			obs.Logger(ctx).Warn("store.codex_threads.unreadable", obs.FieldErr, err.Error())
 			return nil
 		}

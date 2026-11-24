@@ -5,6 +5,7 @@ package mockengine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +18,6 @@ import (
 func TestClaudeStatuslineInputRendersThroughPfmsOwnDecoder(t *testing.T) {
 	fix := newFixture(t)
 	t.Chdir(fix.work)
-	fix.statusRefresh = 0.05
 	fix.installHooks()
 	// --model on the command line wins over the scenario's model, as on a
 	// real launch; the display name is the family word the statusline shows.
@@ -85,22 +85,18 @@ func TestClaudeStatuslineInputRendersThroughPfmsOwnDecoder(t *testing.T) {
 	// /rename fires no hook: the statusline's next render (refreshInterval)
 	// carries the new session_name, the one signal pfm's Herdr seat follows.
 	session.typeLine("/rename status renamed")
-	deadline := time.Now().Add(8 * time.Second)
-	for {
+	fix.tickUntil(`the statusline input to carry session_name "status renamed"`, func() (bool, string) {
 		lines = fix.recorded("statusline")
 		var renamed struct {
 			SessionName string `json:"session_name"`
 		}
-		if err := json.Unmarshal([]byte(lines[len(lines)-1]), &renamed); err == nil &&
-			renamed.SessionName == "status renamed" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("statusline input after /rename = %s, want session_name %q", lines[len(lines)-1], "status renamed")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		err := json.Unmarshal([]byte(lines[len(lines)-1]), &renamed)
+		return err == nil && renamed.SessionName == "status renamed", "statusline input " + lines[len(lines)-1]
+	})
 	// Nothing happens in the pane from here: refreshInterval alone re-runs
 	// the command, as Claude does, so a line pfm rendered late still lands.
-	fix.waitRecorded("statusline", len(lines)+2)
+	fix.tickUntil("the statusline to run twice more", func() (bool, string) {
+		got := fix.recorded("statusline")
+		return len(got) >= len(lines)+2, fmt.Sprintf("ran %d time(s), want %d", len(got), len(lines)+2)
+	})
 }

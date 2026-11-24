@@ -506,7 +506,7 @@ func (lister CommandPaneOwners) PaneOwners(
 	// join prefix here), and filepath.Join("", full) returns full unchanged.
 	// A stopped server never answers: the probe is bounded, or one frozen server
 	// hangs every caller lookup on the box (claude-launch outside a pane).
-	probeCtx, cancel := context.WithTimeout(ctx, gather.ProbeTimeout)
+	probeCtx, cancel := gather.ProbeContext(ctx)
 	defer cancel()
 	output, err := pfmtmux.Socket{Binary: lister.Binary}.
 		Command(probeCtx, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").

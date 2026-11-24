@@ -4,16 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
-	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // The MCP daemon's supervised names: the launch agent label and the user unit.
@@ -21,13 +16,6 @@ const (
 	mcpLaunchdLabel = "com.professor.pfm.mcp"
 	mcpSystemdUnit  = "pfm-mcp.service"
 )
-
-// Fleet is the chat roster the restart ends: every live chat, the sockets the
-// scan could not read (with why), and the end of one chat, confirmed.
-type Fleet interface {
-	Live(ctx context.Context) (chats []headless.Chat, unreadable map[string]string, err error)
-	End(ctx context.Context, chat headless.Chat) error
-}
 
 // Deps is every host door discovery and the steps it plans go through; a test
 // fills each with a fake.
@@ -64,6 +52,11 @@ type Deps struct {
 	LaunchedFrom chatAddress
 	// DryRun marks a plan only printed: no worker runs it.
 	DryRun bool
+	// NoRestore ends every chat, none brought back; otherwise a chat in a
+	// Herdr pane is left for the Herdr server stop and comes back with
+	// Herdr's restore. ResumeOnRestore reads Herdr's resume_agents_on_restore.
+	NoRestore       bool
+	ResumeOnRestore func() (bool, error)
 	// LogDir holds the logs of the processes the restart starts detached.
 	LogDir string
 	// Env is the environment of every process the restart starts.
@@ -87,6 +80,10 @@ type discoverer struct {
 	deps    Deps
 	plan    Plan
 	claimed map[int]bool
+	herdr   *herdrLook
+	resume  *string
+	// herdrStarted is how the Herdr server start went, read by each chat's start.
+	herdrStarted herdrStarted
 }
 
 func (finder *discoverer) found(family, detail string) {
@@ -102,7 +99,7 @@ func (finder *discoverer) failed(family string, err error) {
 // scan, the process table, the service managers' state, `herdr status`,
 // `docker ps` and `docker inspect`.
 func BuildPlan(ctx context.Context, dependencies Deps) Plan {
-	finder := &discoverer{deps: dependencies, claimed: map[int]bool{}}
+	finder := &discoverer{deps: dependencies, claimed: map[int]bool{}, plan: Plan{Restore: !dependencies.NoRestore}}
 	finder.findChats(ctx)
 	table, tableErr := finder.readTable()
 	if tableErr != nil {
@@ -130,73 +127,6 @@ func BuildPlan(ctx context.Context, dependencies Deps) Plan {
 			") — exits after the start phase, the last pfm process"
 	}
 	return finder.plan
-}
-
-// findChats is the chats family: every live Claude, Codex and OpenCode chat
-// the fleet scan sees, the launching chat last. A socket the scan could not
-// read is a failed find, named.
-func (finder *discoverer) findChats(ctx context.Context) {
-	if finder.deps.Fleet == nil {
-		finder.failed(FamilyChats, fmt.Errorf("no fleet to scan"))
-		return
-	}
-	chats, unreadable, err := finder.deps.Fleet.Live(ctx)
-	if err != nil {
-		finder.failed(FamilyChats, fmt.Errorf("fleet scan: %w", err))
-		return
-	}
-	sort.SliceStable(chats, func(left, right int) bool {
-		return !finder.deps.LaunchedFrom.holds(chats[left]) && finder.deps.LaunchedFrom.holds(chats[right])
-	})
-	finder.found(
-		FamilyChats,
-		fmt.Sprintf("%d live chat(s) — fleet scan of every tmux socket and Herdr seat", len(chats)),
-	)
-	sockets := make([]string, 0, len(unreadable))
-	for socket := range unreadable {
-		sockets = append(sockets, socket)
-	}
-	sort.Strings(sockets)
-	for _, socket := range sockets {
-		finder.failed(FamilyChats, fmt.Errorf("tmux socket %s could not be read, its chats are unknown: %s",
-			socket, unreadable[socket]))
-	}
-	for index := range chats {
-		finder.plan.Units = append(finder.plan.Units, finder.chatUnit(chats[index]))
-	}
-}
-
-func (finder *discoverer) chatUnit(chat headless.Chat) Unit {
-	engine := string(chat.Engine)
-	if descriptor, err := pfmengine.Lookup(chat.Engine); err == nil {
-		engine = descriptor.LongName
-	}
-	name := chat.Name
-	if name == "" {
-		name = "(unnamed)"
-	}
-	found := "fleet scan: tmux socket " + chat.Socket + " pane " + chat.Pane
-	if chat.Backend == spawn.BackendHerdr {
-		found = "fleet scan: Herdr seat " + chat.SeatID
-	}
-	stop := pfmchat.EndHow(chat)
-	if finder.deps.LaunchedFrom.holds(chat) {
-		found += " (the chat that typed pfm restart)"
-	}
-	fleet := finder.deps.Fleet
-	return Unit{
-		Family:  FamilyChats,
-		Name:    fmt.Sprintf("%s %s session %s", engine, name, chat.ID),
-		FoundBy: found,
-		StopHow: stop + "; not brought back",
-		Stop: func(ctx context.Context) (string, error) {
-			if err := fleet.End(ctx, chat); err != nil {
-				return "", err
-			}
-			return "ended", nil
-		},
-		Chat: &EndedChat{Engine: engine, Name: name, SessionID: chat.ID},
-	}
 }
 
 // findServices is the services family: every launch agent or user unit pfm

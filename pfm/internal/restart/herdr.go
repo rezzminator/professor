@@ -1,6 +1,7 @@
 package restart
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -137,31 +138,56 @@ func (server herdrServer) start(ctx context.Context) (string, error) {
 	return fmt.Sprintf("server pid %d up; herdr status reads running", process.Pid()), nil
 }
 
-// findHerdr is the Herdr family: the server the herdr binary reports. One
-// that was not running stays stopped: named, never started.
-func (finder *discoverer) findHerdr(ctx context.Context, table processTable, tableErr error) {
-	name := finder.deps.HerdrBinary
-	if name == "" {
-		name = "herdr"
+// herdrLook is the Herdr server as one plan reads it, once: the binary's name
+// and path ("" when it is not on PATH), its status, or why it could not be read.
+type herdrLook struct {
+	name   string
+	binary string
+	status herdrStatus
+	err    error
+}
+
+// lookHerdr reads the Herdr server once per plan: the chats family and the
+// Herdr family judge the same answer.
+func (finder *discoverer) lookHerdr(ctx context.Context) *herdrLook {
+	if finder.herdr != nil {
+		return finder.herdr
 	}
-	binary, err := finder.deps.Runner.LookPath(name)
+	look := &herdrLook{name: cmp.Or(finder.deps.HerdrBinary, "herdr")}
+	finder.herdr = look
+	binary, err := finder.deps.Runner.LookPath(look.name)
 	if errors.Is(err, exec.ErrNotFound) {
-		finder.found(FamilyHerdr, "herdr is not installed ("+name+" is not on PATH)")
-		return
+		return look
 	}
 	if err != nil {
-		finder.failed(FamilyHerdr, fmt.Errorf("resolve %s: %w", name, err))
-		return
+		look.err = fmt.Errorf("resolve %s: %w", look.name, err)
+		return look
 	}
-	server := herdrServer{
+	look.binary = binary
+	look.status, look.err = finder.herdrServer(binary).status(ctx)
+	return look
+}
+
+func (finder *discoverer) herdrServer(binary string) herdrServer {
+	return herdrServer{
 		serviceTools: serviceTools{runner: finder.deps.Runner, clock: finder.deps.Clock},
 		binary:       binary, logDir: finder.deps.LogDir, env: finder.deps.Env,
 	}
-	status, err := server.status(ctx)
-	if err != nil {
-		finder.failed(FamilyHerdr, err)
+}
+
+// findHerdr is the Herdr family: the server the herdr binary reports. One
+// that was not running stays stopped: named, never started.
+func (finder *discoverer) findHerdr(ctx context.Context, table processTable, tableErr error) {
+	look := finder.lookHerdr(ctx)
+	if look.err != nil {
+		finder.failed(FamilyHerdr, look.err)
 		return
 	}
+	if look.binary == "" {
+		finder.found(FamilyHerdr, "herdr is not installed ("+look.name+" is not on PATH)")
+		return
+	}
+	binary, status, server := look.binary, look.status, finder.herdrServer(look.binary)
 	if !status.Running {
 		finder.found(FamilyHerdr, binary+" status --json: no server running — it stays stopped")
 		name := "herdr server"
@@ -195,7 +221,7 @@ func (finder *discoverer) findHerdr(ctx context.Context, table processTable, tab
 		Stop: func(ctx context.Context) (string, error) {
 			return server.stop(ctx, status.Socket, tree, stopper)
 		},
-		Start: server.start,
+		Start: finder.herdrStarted.track(server.start),
 	})
 }
 

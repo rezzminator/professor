@@ -1,0 +1,20 @@
+package loud
+
+import (
+	"context"
+	tm "time"
+
+	"pfm/internal/clock"
+)
+
+// A comment naming tm.Sleep( is never judged.
+func wait(c context.Context) {
+	tm.Sleep(1)
+	<-tm.After(1)
+	_, _ = context.WithTimeout(c, 1)
+	_ = tm.Now().Before(tm.Now())
+	_ = tm.Since(tm.Now())
+	_ = clock.Real
+	_ = "exec sleep 120"
+	_ = "near timeout 1"
+}

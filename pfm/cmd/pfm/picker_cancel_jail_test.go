@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch reproduces the
@@ -59,19 +59,16 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	// the async gather goroutine finishes. Pressing keys before that settles
 	// risks landing on a frame that has not drawn the row yet
 	// (attach_jail_test.go:proveAttach uses the same wait for the same reason).
-	waitForTmuxPaneText(t, socket, jail.env, "PICKERCANCEL", 5*time.Second)
+	waitForTmuxPaneText(t, socket, jail.env, "PICKERCANCEL")
 	for _, key := range []string{"C-x", "Escape"} {
 		send := exec.Command("tmux", "-L", socket, "send-keys", "-t", "picker", key)
 		send.Env = jail.env
 		if output, err := send.CombinedOutput(); err != nil {
 			t.Fatalf("send-keys %s: %v: %s", key, err, output)
 		}
-		time.Sleep(300 * time.Millisecond)
 	}
 
-	if !waitForAttachFile(marker, 10*time.Second) {
-		t.Fatal("picker did not exit after Esc")
-	}
+	waitForAttachFile(t, marker, "picker to exit after Esc")
 	content, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatal(err)
@@ -98,21 +95,17 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	}
 }
 
-func waitForTmuxPaneText(t *testing.T, socket string, environment []string, want string, timeout time.Duration) {
+func waitForTmuxPaneText(t *testing.T, socket string, environment []string, want string) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var last string
-	for time.Now().Before(deadline) {
+	testwait.Until(t, "tmux pane to paint "+want, func() (bool, string) {
 		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-p")
 		capture.Env = environment
 		output, err := capture.CombinedOutput()
-		last = string(output)
-		if err == nil && strings.Contains(last, want) {
-			return
+		if err != nil {
+			return false, err.Error()
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("tmux pane did not paint %q within %s; last capture=%q", want, timeout, last)
+		return strings.Contains(string(output), want), "last capture=" + string(output)
+	})
 }
 
 type pickerCancelJail struct {

@@ -11,12 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestReloadRespawnLaunchesACommandLongerThanATmuxMessage: respawn-pane
@@ -35,7 +35,7 @@ func TestReloadRespawnLaunchesACommandLongerThanATmuxMessage(t *testing.T) {
 	const socket = "cx-1800000013-1-1"
 	ctx := context.Background()
 	if err := (spawn.TmuxSpawner{TmuxDir: tmuxDir}).NewSession(ctx, spawn.SessionSpec{
-		Socket: socket, Session: socket, Window: "Codex", CWD: root, Width: 180, Height: 45, Run: "sleep 120",
+		Socket: socket, Session: socket, Window: "Codex", CWD: root, Width: 180, Height: 45, Run: testwait.Hold,
 	}); err != nil {
 		t.Fatalf("create chat server: %v", err)
 	}
@@ -57,35 +57,39 @@ func TestReloadRespawnLaunchesACommandLongerThanATmuxMessage(t *testing.T) {
 		}
 	})
 	marker := filepath.Join(root, "respawned")
-	command := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; exec sleep 120' pfm-launch '" +
-		strings.Repeat("x", 64<<10) + "'"
+	command := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; " + testwait.Hold + "' pfm-launch '" +
+		strings.Repeat(
+			"x",
+			64<<10,
+		) + "'"
 	respawner := CommandTmux{LaunchDir: tmuxDir}
 	if err := respawner.Respawn(ctx, socketPath, query("#{pane_id}"), root, command); err != nil {
 		t.Fatalf("respawn with a %d-byte command: %v", len(command), err)
 	}
-	sleep, err := exec.LookPath("sleep")
+	tail, err := exec.LookPath("tail")
 	if err != nil {
-		t.Fatalf("resolve sleep: %v", err)
+		t.Fatalf("resolve tail: %v", err)
 	}
-	want, err := filepath.EvalSymlinks(sleep)
+	want, err := filepath.EvalSymlinks(tail)
 	if err != nil {
-		t.Fatalf("resolve sleep symlinks: %v", err)
+		t.Fatalf("resolve tail symlinks: %v", err)
 	}
-	var detail string
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		entries, err := os.ReadDir(tmuxDir)
-		if err != nil {
-			t.Fatalf("read socket directory: %v", err)
-		}
-		pid := query("#{pane_pid}")
-		exe, exeErr := paneExecutable(pid)
-		_, markErr := os.Stat(marker)
-		detail = "entries=" + strconv.Itoa(len(entries)) + " pane " + pid + " exe=" + exe
-		if markErr == nil && exeErr == nil && exe == want && len(entries) == 1 {
-			return
-		}
-	}
-	t.Fatalf("respawned pane never ran the target from a consumed script (want exe %s): %s", want, detail)
+	testwait.Until(
+		t,
+		"the respawned pane to run the target from a consumed script (exe "+want+")",
+		func() (bool, string) {
+			entries, err := os.ReadDir(tmuxDir)
+			if err != nil {
+				t.Errorf("read socket directory: %v", err)
+				return true, err.Error()
+			}
+			pid := query("#{pane_pid}")
+			exe, exeErr := paneExecutable(pid)
+			_, markErr := os.Stat(marker)
+			detail := "entries=" + strconv.Itoa(len(entries)) + " pane " + pid + " exe=" + exe
+			return markErr == nil && exeErr == nil && exe == want && len(entries) == 1, detail
+		},
+	)
 }
 
 // paneExecutable resolves a pane process's executable through the platform's

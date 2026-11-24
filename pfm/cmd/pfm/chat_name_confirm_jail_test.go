@@ -13,6 +13,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestApplyChatNameReadsAClaudeRenameBack pins the live-rename door of a
@@ -29,7 +30,7 @@ func TestApplyChatNameReadsAClaudeRenameBack(t *testing.T) {
 	session := "probe-nameread"
 	start := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", session, "-n", "before", "sleep", "120",
+		"new-session", "-d", "-s", session, "-n", "before", testwait.Hold,
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)

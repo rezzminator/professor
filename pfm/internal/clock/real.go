@@ -12,6 +12,11 @@ var Real Clock = realClock{}
 
 type realClock struct{}
 
+// Wall reads the host's wall clock even while a test runs the process on a
+// swapped Real: a deadline the kernel enforces (a socket's SetDeadline) is
+// compared against this clock, never a Clock's, so it must be built from it.
+func Wall() time.Time { return time.Now() }
+
 func (realClock) Now() time.Time { return time.Now() }
 
 func (realClock) Sleep(ctx context.Context, d time.Duration) error {

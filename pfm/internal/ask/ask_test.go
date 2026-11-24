@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type fakeAskAdapter interface {
@@ -347,19 +347,19 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	}
 	engine = WithRunner(engine, askChild(deps.StartOutput{}))
 	// The deadline has passed when the child "starts": the fake child plays no time of its own.
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancel()
-	started := time.Now()
-	_, err = engine.Run(ctx, validAskInput(t, "codex"))
+	returned := make(chan error, 1)
+	expiredInput := validAskInput(t, "codex")
+	go func() {
+		_, runErr := engine.Run(testwait.Expired(), expiredInput)
+		returned <- runErr
+	}()
+	err, _ = testwait.Receive(t, "the codex ask to return on its expired deadline", returned)
 	if got, want := strings.ReplaceAll(
 		fmt.Sprint(err),
 		directory,
 		"{dir}",
 	), "codex ask timed out: context deadline exceeded"; got != want {
 		t.Fatalf("timeout error = %q, want %q", got, want)
-	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("timeout returned after %s, want under 1s", elapsed)
 	}
 }
 

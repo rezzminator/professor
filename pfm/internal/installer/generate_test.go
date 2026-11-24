@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,6 +112,39 @@ func TestGenerateRecordsTheCloneAndLinksItsCommands(t *testing.T) {
 	if target != command {
 		t.Fatalf("%s -> %q, want %q", link, target, command)
 	}
+}
+
+// A clone whose retired lists cannot be parsed fails generate, as it fails
+// install: the steps reading the lists ran on empty ones, which is not "none
+// retired".
+func TestGenerateFailsOnUnreadableRetiredLists(t *testing.T) {
+	home, clone, configPath := generateFixture(t)
+	listsFile := filepath.Join(clone, "templates", "global", "retired.json")
+	writeFixture(t, listsFile, "{")
+	_, err := Generate(context.Background(), Options{
+		Mode: ModeApply, Home: home, SourceRepo: clone, MCPConfigPath: configPath,
+		Runner: &fakeRunner{}, Stdout: io.Discard,
+	})
+	want := "retired lists " + listsFile + ": decode: unexpected EOF"
+	if got := joinedLeafTexts(err); !slices.Contains(got, want) {
+		t.Fatalf("Generate error leaves = %q, want one equal to %q", got, want)
+	}
+}
+
+// joinedLeafTexts is the text of each error errors.Join gathered into err.
+func joinedLeafTexts(err error) []string {
+	if err == nil {
+		return nil
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return []string{err.Error()}
+	}
+	var texts []string
+	for _, leaf := range joined.Unwrap() {
+		texts = append(texts, joinedLeafTexts(leaf)...)
+	}
+	return texts
 }
 
 // A mode that is neither apply nor plan is refused, never run as a plan.

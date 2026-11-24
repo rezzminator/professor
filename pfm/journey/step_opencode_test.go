@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -17,7 +16,7 @@ import (
 // OpenCode tab), then the idle mark ahead of it once the chat is at rest.
 func opencodeNew(c *harness.Ctx, s State) State {
 	s = chatNewInPane(c, s, "ox", "live-opencode")
-	c.Poll("OpenCode chat "+s.Chat.Session+" at rest, its tab "+markedLabel("idle", s.Name), stepBound,
+	c.Poll("OpenCode chat "+s.Chat.Session+" at rest, its tab "+markedLabel("idle", s.Name),
 		func() (bool, string) {
 			label := paneTabLabel(c, s)
 			if !namedLabel(label, s.Name) {
@@ -34,7 +33,7 @@ func opencodeNew(c *harness.Ctx, s State) State {
 // owner then retitles the session inside OpenCode (`/rename {name}`, before any turn), and pfm's Herdr
 // plugin's title report names the chat's pfm row, its Herdr tab and its seat at once.
 func opencodeRename(c *harness.Ctx, s State) State {
-	c.Poll("OpenCode chat's seat "+s.Chat.Seat+" bound to an OpenCode session", stepBound, func() (bool, string) {
+	c.Poll("OpenCode chat's seat "+s.Chat.Seat+" bound to an OpenCode session", func() (bool, string) {
 		seats := liveSeats(c, herdrSocket(s))
 		for session, seat := range seats {
 			if len(seats) == 1 && strings.HasPrefix(session, "ses_") && seat == [2]string{s.Chat.Seat, s.Pane} {
@@ -46,7 +45,7 @@ func opencodeRename(c *harness.Ctx, s State) State {
 	})
 	s.Name = c.Unique("retitled")
 	c.Terminal(s.Term).Type("/rename " + s.Name + "\r")
-	c.Poll("OpenCode chat "+s.Chat.Session+": row, tab and seat named "+s.Name, stepBound, func() (bool, string) {
+	c.Poll("OpenCode chat "+s.Chat.Session+": row, tab and seat named "+s.Name, func() (bool, string) {
 		seat := strings.TrimSpace(stateSQL(c,
 			"select coalesce(name, '') from seat where state = 'live' and session_id = '"+s.Chat.Session+"'"))
 		got := [3]string{lsName(c, s), paneTabLabel(c, s), seat}
@@ -60,7 +59,7 @@ func opencodeRename(c *harness.Ctx, s State) State {
 func opencodeEnd(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Type("/exit\r")
-	c.Poll("OpenCode chat "+s.Chat.Session+" gone from the chats, the seats and the engines", 20*time.Second,
+	c.Poll("OpenCode chat "+s.Chat.Session+" gone from the chats, the seats and the engines",
 		func() (bool, string) {
 			ls := c.Read("pfm", "ls", "--tsv")
 			seats := liveSeats(c, herdrSocket(s))

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -148,11 +149,7 @@ func TestPickThenDrainEndsTheStreamBeforeTheClose(t *testing.T) {
 		for range updates {
 		}
 	}()
-	select {
-	case <-streamEnded:
-	case <-time.After(5 * time.Second):
-		t.Fatal("refresh stream still running 5s after the picker returned")
-	}
+	testwait.Receive(t, "the refresh stream to end after the picker returned", streamEnded)
 	if !reflect.DeepEqual(outcome, picked) || !errors.Is(err, pickErr) {
 		t.Fatalf("pickThenDrain = %+v, %v; want %+v, %v", outcome, err, picked, pickErr)
 	}

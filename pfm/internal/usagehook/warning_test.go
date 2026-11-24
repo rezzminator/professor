@@ -20,7 +20,7 @@ func TestEvaluateAnswersAPlanWithoutAWindow(t *testing.T) {
 		warned     bool
 		want       string
 	}{
-		{"7-day only", `{"seven_day":{"utilization":85,"resets_at":"2026-11-15T09:30:00Z"}}`, false, "⚠ usage limit approaching — account 12: 7d 85% (resets Sun 09:30). Plan around it: wrap up soon or /reload to another account before the cap hits.\n | <nil>"},
+		{"7-day only", `{"seven_day":{"utilization":85,"resets_at":"2026-11-15T09:30:00Z"}}`, false, "⚠ usage limit approaching — account 12: 7d 85% (resets Sun 09:30). Plan around it: wrap up soon or /pfm:reload to another account before the cap hits.\n | <nil>"},
 		{"no window at all", `{"five_hour":null,"seven_day":null,"limits":[]}`, true, "✅ usage recovered — account 12 reports no limit window on its plan. Any earlier limit warning in this conversation is STALE — ignore it and work normally.\n | <nil>"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
@@ -49,8 +49,8 @@ func TestCriticalGuidanceWithoutAFiveHourWindow(t *testing.T) {
 		five, seven, opus, fable int
 		want                     string
 	}{
-		{"7-day cap", -1, 96, -1, -1, "The 7-day account cap is nearly reached: /reload to another account."},
-		{"Fable cap", -1, 10, -1, 97, "Only the 7-day fable cap is nearly reached — every other model on this account is unaffected. Keep working; route fable-tier spawns elsewhere or /reload for those."},
+		{"7-day cap", -1, 96, -1, -1, "The 7-day account cap is nearly reached: /pfm:reload to another account."},
+		{"Fable cap", -1, 10, -1, 97, "Only the 7-day fable cap is nearly reached — every other model on this account is unaffected. Keep working; route fable-tier spawns elsewhere or /pfm:reload for those."},
 	} {
 		if got := criticalGuidance(row.five, row.seven, row.opus, row.fable, 95); got != row.want {
 			t.Errorf("%s: guidance = %q, want %q", row.name, got, row.want)

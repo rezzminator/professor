@@ -181,7 +181,7 @@ func bindNativeHost(
 // reservedPaneWait bounds a new tab's supervisor waiting for its pane address:
 // SpawnHerdr reserves the seat before layout.apply and records the pane Herdr
 // names in its answer, and the supervisor that answer started can run first.
-var reservedPaneWait = 5 * time.Second
+const reservedPaneWait = 5 * time.Second
 
 const reservedPanePoll = 20 * time.Millisecond
 

@@ -78,10 +78,21 @@ for f in pfm/scripts/s_test.sh pfm/scripts/s.sh scripts/test-w.sh scripts/w.sh s
   # shellcheck disable=SC2059 # the format is the fixture body
   printf "$REC_BODY" >"$R/$f"
 done
-# A sourced harness brings every tracked test naming it; the iso doors' suite comes with dev.sh.
+# A sourced harness brings every tracked test naming it; the iso doors' suite comes with dev.sh. The wait
+# door also brings each test naming a loader sourcing it: scripts/shtest.sh by its path, a lab's
+# testlib.sh relative to the test's own directory.
 printf '# sources scripts/shtest.sh\n' >>"$R/infra/fence/tests/f_test.sh"
 printf '# sources scripts/shtest.sh\n' >>"$R/scripts/test-w.sh"
-echo '# the harness' >"$R/scripts/shtest.sh"
+# shellcheck disable=SC2016 # literal: the loader lines are fixture text
+printf '# the harness\n. "${BASH_SOURCE[0]%%/*}/shtest-wait.sh"\n' >"$R/scripts/shtest.sh"
+echo '# the wait door' >"$R/scripts/shtest-wait.sh"
+mkdir -p "$R/infra/lab/tests/lib"
+# shellcheck disable=SC2016 # literal: the loader lines are fixture text
+printf 'source "$LAB_DIR/../../scripts/shtest-wait.sh"\n' >"$R/infra/lab/tests/testlib.sh"
+# shellcheck disable=SC2059 # the format is the fixture body
+printf "$REC_BODY" >"$R/infra/lab/tests/lib/l_test.sh"
+# shellcheck disable=SC2016 # literal: the source line is fixture text
+printf 'source "$(dirname "$0")/../testlib.sh"\n' >>"$R/infra/lab/tests/lib/l_test.sh"
 # shellcheck disable=SC2059 # the format is the fixture body
 printf "$REC_BODY" >"$R/infra/fence/tests/iso-housekeeping_test.sh"
 echo 'print(1)' >"$R/scripts/z.py"
@@ -329,8 +340,13 @@ ran_has "dev.sh brings the suite of its iso doors" infra/fence/tests/iso-houseke
 run "$R" scripts/shtest.sh
 ran_has "scripts/shtest.sh brings a fence test that names it" infra/fence/tests/f_test.sh
 ran_has "scripts/shtest.sh brings a scripts test that names it" scripts/test-w.sh
-if grep -q '^ran pfm/scripts/s_test.sh' "$REC"; then bad "scripts/shtest.sh brings no test that does not name it" "$(cat "$REC")"
+if grep -qE '^ran (pfm/scripts/s_test.sh|infra/lab/tests/lib/l_test.sh)' "$REC"; then bad "scripts/shtest.sh brings no test that does not name it" "$(cat "$REC")"
 else ok "scripts/shtest.sh brings no test that does not name it"; fi
+run "$R" scripts/shtest-wait.sh
+ran_has "the wait door brings a test naming its loader scripts/shtest.sh" infra/fence/tests/f_test.sh
+ran_has "the wait door brings a test naming a loader relative to its own directory" infra/lab/tests/lib/l_test.sh
+if grep -q '^ran pfm/scripts/s_test.sh' "$REC"; then bad "the wait door brings no test naming neither it nor a loader" "$(cat "$REC")"
+else ok "the wait door brings no test naming neither it nor a loader"; fi
 reset; rule node '--test' 0 'ok 1 - a case\n# pass 1'; rule python3 'unittest' 0 'Ran 2 tests\n\nOK'; rule python3 'test-z.py' 0 'Ran 1 test\n\nOK'
 run "$R" templates/global/commands/x.mjs
 rec_has "a .mjs file brings its .test.mjs sibling under node --test" node --test --test-reporter=tap templates/global/commands/x.test.mjs

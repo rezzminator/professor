@@ -4,18 +4,18 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
+	"testing"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A terminal opens at the size an owner's window has and keeps this much raw output as evidence.
 const (
-	Cols       = 140
-	Rows       = 40
-	rawKeep    = 256 << 10
-	waitBound  = 10 * time.Second
-	closeGrace = 3 * time.Second
+	Cols    = 140
+	Rows    = 40
+	rawKeep = 256 << 10
 )
 
 // Key is a key's bytes as a terminal sends them.
@@ -76,42 +76,42 @@ func (t *Terminal) Raw() []byte {
 	return append([]byte(nil), t.s.raw...)
 }
 
-// WaitFor waits until text is on the screen; within defaults to 10 s.
-func (t *Terminal) WaitFor(text string, within ...time.Duration) {
+// WaitFor waits until text is on the screen.
+func (t *Terminal) WaitFor(text string) {
 	t.c.t.Helper()
-	t.WaitScreen(fmt.Sprintf("%q on the screen", text), bound(within), func(screen string) bool {
+	t.WaitScreen(fmt.Sprintf("%q on the screen", text), func(screen string) bool {
 		return strings.Contains(screen, text)
 	})
 }
 
-// WaitGone waits until text is no longer on the screen; within defaults to 10 s.
-func (t *Terminal) WaitGone(text string, within ...time.Duration) {
+// WaitGone waits until text is no longer on the screen.
+func (t *Terminal) WaitGone(text string) {
 	t.c.t.Helper()
-	t.WaitScreen(fmt.Sprintf("%q gone from the screen", text), bound(within), func(screen string) bool {
+	t.WaitScreen(fmt.Sprintf("%q gone from the screen", text), func(screen string) bool {
 		return !strings.Contains(screen, text)
 	})
 }
 
-// WaitScreen waits until cond holds for the screen; a miss fails the step with what was awaited, the
-// bound, the terminal's name and the whole screen.
-func (t *Terminal) WaitScreen(what string, within time.Duration, cond func(screen string) bool) {
+// WaitScreen waits on the wait door until cond holds for the screen; one still unmet past the door's
+// hung-only limit fails the step with what was awaited, the terminal's name and the whole screen.
+func (t *Terminal) WaitScreen(what string, cond func(screen string) bool) {
 	t.c.t.Helper()
-	deadline := t.s.clock.Now().Add(within)
-	ticker := t.s.clock.NewTicker(PollTick)
-	defer ticker.Stop()
-	from := t.c.clock.Now()
+	from, screen := t.c.now(), ""
 	label := "terminal " + t.s.name + ": " + what
-	for {
-		screen := t.s.screen()
-		if cond(screen) {
-			t.c.noteWait(label, from, true)
-			return
-		}
-		if !t.s.clock.Now().Before(deadline) {
-			t.c.noteWait(label, from, false)
-			t.c.Failf("terminal %s: waited %s for %s; the screen:\n%s", t.s.name, within, what, framed(screen))
-		}
-		<-ticker.C()
+	met := t.c.door(t.c.deadline, func(tb testing.TB) {
+		testwait.Until(tb, label, func() (bool, string) {
+			screen = t.s.screen()
+			return cond(screen), framed(screen)
+		})
+	})
+	t.c.noteWait(label, from, met)
+	if !met {
+		t.c.Failf(
+			"terminal %s: waited for %s, past the hung-only limit; the screen:\n%s",
+			t.s.name,
+			what,
+			framed(screen),
+		)
 	}
 }
 
@@ -128,13 +128,6 @@ func (t *Terminal) Resize(cols, rows int) {
 	if err != nil {
 		t.c.Failf("resize terminal %s: %v", t.s.name, err)
 	}
-}
-
-func bound(within []time.Duration) time.Duration {
-	if len(within) > 0 {
-		return within[0]
-	}
-	return waitBound
 }
 
 // framed draws the screen between rules so its blank rows stay visible in a test log.

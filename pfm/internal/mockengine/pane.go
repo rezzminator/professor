@@ -1,10 +1,6 @@
 package mockengine
 
 import (
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -65,9 +61,9 @@ func runPane(proc *process, engine paneEngine, launchPrompt string, resumed bool
 	}
 	loop := &paneLoop{proc: proc, engine: engine, screen: &pane{glyph: engine.composerGlyph()}}
 	if every := engine.statusRefresh(); every > 0 {
-		ticker := time.NewTicker(every)
+		ticker := proc.clock().NewTicker(every)
 		defer ticker.Stop()
-		loop.statusDue = ticker.C
+		loop.statusDue = ticker.C()
 	}
 	if codex, ok := engine.(interface{ composerPlaceholder() string }); ok {
 		loop.screen.placeholder = codex.composerPlaceholder()
@@ -337,7 +333,7 @@ func (loop *paneLoop) submit(line string) (int, bool) {
 			proc.script.advance(1)
 		}
 		if codex, ok := loop.engine.(interface{ compactBusyDuration(Step) time.Duration }); ok {
-			proceed, err := loop.busy(time.Now(), codex.compactBusyDuration(step), "")
+			proceed, err := loop.busy(proc.clock().Now(), codex.compactBusyDuration(step), "")
 			if err != nil {
 				warn(proc.stderr, "compact busy footer: %v", err)
 			}
@@ -425,7 +421,7 @@ func (loop *paneLoop) peekStep() *Step {
 // is busy edit the composer; Enter queues the draft; Escape interrupts.
 func (loop *paneLoop) turn(running *script) (int, bool) {
 	proc, screen := loop.proc, loop.screen
-	started := time.Now()
+	started := proc.clock().Now()
 	for {
 		step := running.next()
 		switch step.Type {
@@ -530,61 +526,6 @@ func (loop *paneLoop) interrupted() (int, bool) {
 	loop.screen.say("⎿ Interrupted")
 	loop.paint()
 	return 0, false
-}
-
-// busy paints the working footer until the duration passes (or, with a gate
-// file, until it disappears), pumping keys meanwhile. It returns (false, nil)
-// when Escape interrupted the turn or the context ended, and a non-nil error
-// when the gate file could not be statted for a reason other than its
-// confirmed absence — a permission error or a vanished parent directory must
-// never be read as "the gate is gone, proceed" the same way removal is.
-func (loop *paneLoop) busy(started time.Time, duration time.Duration, gate string) (bool, error) {
-	screen := loop.screen
-	deadline := time.Now().Add(duration)
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		screen.footer = loop.engine.busyLine(time.Since(started), loop.proc.script.Tokens)
-		loop.paintTyped()
-		done := false
-		if gate != "" {
-			_, err := os.Stat(gate)
-			switch {
-			case err == nil:
-				done = false
-			case errors.Is(err, fs.ErrNotExist):
-				done = true
-			default:
-				return false, fmt.Errorf("stat hold gate %s: %w", gate, err)
-			}
-		} else {
-			done = !time.Now().Before(deadline)
-		}
-		if done {
-			return true, nil
-		}
-		select {
-		case <-loop.proc.ctx.Done():
-			return false, nil
-		case event, ok := <-loop.keys:
-			if !ok {
-				return false, nil
-			}
-			switch event.kind {
-			case keyEscape:
-				return false, nil
-			case keyEnter:
-				if line := screen.draft.take(); line != "" {
-					screen.queued = append(screen.queued, line)
-				}
-			default:
-				screen.draft.apply(event)
-			}
-		case <-loop.statusDue:
-			loop.refreshStatus(loop.usage)
-		case <-ticker.C:
-		}
-	}
 }
 
 // exit is the /exit choreography: SessionEnd fires, and with background work

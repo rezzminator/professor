@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A reload whose recorded directory is gone opens in the fleet home and says so.
@@ -64,6 +64,7 @@ func TestChatReloadWorkerMissingCWDOpensInFleetHomeWithNotice(t *testing.T) {
 		t.Fatalf("start probe socket: %v: %s", err, output)
 	}
 	cleanupProbeReloadSocket(t, socket)
+	waitProbePaneText(t, socket, "❯")
 	paneOutput, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_id}").Output()
 	if err != nil {
 		t.Fatalf("read probe pane: %v", err)
@@ -106,18 +107,16 @@ func TestChatReloadWorkerMissingCWDOpensInFleetHomeWithNotice(t *testing.T) {
 	if !strings.Contains(stderr.String(), want) {
 		t.Fatalf("stderr=%q missing notice %q", stderr.String(), want)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
+	var opened string
+	testwait.Until(t, "fixture claude to write "+captured, func() (bool, string) {
 		data, readErr := os.ReadFile(captured)
-		if readErr == nil && len(data) > 0 {
-			if got := strings.TrimSpace(string(data)); got != resolved.Home {
-				t.Fatalf("reload opened in %q, want the fleet home %q", got, resolved.Home)
-			}
-			return
+		if readErr != nil {
+			return false, readErr.Error() + " stderr=" + stderr.String()
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("fixture claude never ran: err=%v stderr=%q", readErr, stderr.String())
-		}
-		time.Sleep(20 * time.Millisecond)
+		opened = strings.TrimSpace(string(data))
+		return len(data) > 0, "empty file"
+	})
+	if opened != resolved.Home {
+		t.Fatalf("reload opened in %q, want the fleet home %q", opened, resolved.Home)
 	}
 }

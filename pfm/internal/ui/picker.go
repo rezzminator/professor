@@ -51,7 +51,7 @@ func (picker BubblePicker) Pick(
 		// frame-by-frame look the sweep exists to remove. 30fps shows every
 		// sweep tick and costs ~0.95% of a core idle against ~0.43% at 10fps
 		// (160x50 deck demo, three alternating 20s windows) — inside the 2%
-		// idle target (TESTPLAN); the way back is 10 here and a 100ms sweepTickInterval.
+		// idle target; the way back is 10 here and a 100ms sweepTickInterval.
 		tea.WithFPS(30),
 	)
 	done := make(chan struct{})

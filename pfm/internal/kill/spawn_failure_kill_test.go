@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // failingSpawner prepares cleanly, then runs spawn as its launch: the seam
@@ -171,7 +172,7 @@ func TestFailedLaunchRollbackPreservesConcurrentSuccessfulKill(t *testing.T) {
 	case <-entered:
 	case err := <-done:
 		t.Fatalf("A did not reach Spawn: %v", err)
-	case <-time.After(5 * time.Second):
+	case <-testwait.Context(t).Done():
 		t.Fatal("A did not reach Spawn")
 	}
 	_, secondErr := second.Kill(ctx, request)

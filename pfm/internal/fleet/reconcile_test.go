@@ -2,10 +2,16 @@ package fleet
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -178,5 +184,40 @@ func TestCodexRetiredThreadsWarnsAnUnreadableKillTable(t *testing.T) {
 	}
 	if !slices.Equal(warnings, want) {
 		t.Fatalf("warnings = %q, want %q", warnings, want)
+	}
+}
+
+// An unreadable Codex state store is warned once, by name; a pass whose
+// context was cancelled (the picker exiting mid-gather) warns nothing, so the
+// shell it leaves never shows a cancellation as unreadable Codex state.
+func TestCodexTitleThreadsWarnsOnlyAnUnreadableStore(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, test := range []struct {
+		name string
+		ctx  context.Context
+		want []string
+	}{
+		{
+			name: "an unreadable store", ctx: context.Background(),
+			want: []string{"codex pane reconcile: read Codex state stores: " +
+				"read Codex state: all 1 generation(s) were unreadable"},
+		},
+		{name: "a cancelled pass", ctx: cancelled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "state_5.sqlite"), []byte("not a database"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runtime := pfmconfig.Runtime{Paths: paths.Values{Roots: map[pfmengine.ID][]string{pfmengine.Codex: {root}}}}
+			var warnings []string
+			titles := CodexTitleThreads(test.ctx, runtime, func(warning string) {
+				warnings = append(warnings, strings.ReplaceAll(warning, root, "{root}"))
+			})
+			if len(titles) != 0 || !slices.Equal(warnings, test.want) {
+				t.Fatalf("titles = %v, warnings = %q; want none, %q", titles, warnings, test.want)
+			}
+		})
 	}
 }

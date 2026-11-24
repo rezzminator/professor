@@ -67,14 +67,14 @@ func runCxServer(t *testing.T, pfmScript, call string) (pfmCalls, tmuxCalls, std
 	return read(pfmLog), read(tmuxLog), errorOutput.String(), runErr != nil
 }
 
-const cxServerCall = "_cx_server cx-probe-shim-sock /tmp 'sleep 1'"
+const cxServerCall = "_cx_server cx-probe-shim-sock /tmp 'tail -f /dev/null'"
 
 func TestShimCreatesTheCodexServerThroughPfmsOneCreator(t *testing.T) {
 	pfmCalls, tmuxCalls, stderr, failed := runCxServer(t, "exit 0\n", cxServerCall)
 	if failed {
 		t.Fatalf("_cx_server failed on a pfm that succeeded: %s", stderr)
 	}
-	if want := "internal chat-server cx-probe-shim-sock /tmp sleep 1\n"; pfmCalls != want {
+	if want := "internal chat-server cx-probe-shim-sock /tmp tail -f /dev/null\n"; pfmCalls != want {
 		t.Fatalf("pfm calls = %q, want %q", pfmCalls, want)
 	}
 	if tmuxCalls != "" {

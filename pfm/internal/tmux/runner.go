@@ -123,8 +123,9 @@ func ExitStderr(err error) (stderr []byte, ok bool) {
 
 // runThrough runs the command on its runner as exec would run it: a context
 // already done never starts it, stdin is read whole, the output reaches the
-// command's own Stdout and Stderr writers when set, and a non-zero exit is
-// an *ExitError carrying the stderr.
+// command's own Stdout and Stderr writers when set — those of a client whose
+// pipe outlived WaitDelay too (exec.ErrWaitDelay, returned for finish) — and a
+// non-zero exit is an *ExitError carrying the stderr.
 func (command *Cmd) runThrough() (deps.RunResult, error) {
 	if err := command.ctx.Err(); err != nil {
 		return deps.RunResult{ExitCode: -1}, err
@@ -140,7 +141,7 @@ func (command *Cmd) runThrough() (deps.RunResult, error) {
 	result, err := command.runner.Run(command.ctx, append([]string(nil), command.Args...), deps.RunOptions{
 		Env: command.Env, Dir: command.Dir, Stdin: stdin, WaitDelay: command.WaitDelay,
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return result, err
 	}
 	for _, out := range []struct {
@@ -152,6 +153,9 @@ func (command *Cmd) runThrough() (deps.RunResult, error) {
 				return result, err
 			}
 		}
+	}
+	if err != nil { // the held pipe, its output delivered
+		return result, err
 	}
 	if result.ExitCode != 0 {
 		return result, &ExitError{Code: result.ExitCode, Stderr: result.Stderr}

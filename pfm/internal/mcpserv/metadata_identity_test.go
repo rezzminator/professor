@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // callToolWithMeta is the protocol-level counterpart of callTool. The
@@ -29,7 +29,7 @@ func callToolWithMeta[T any](
 	arguments any,
 ) T {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Meta:      meta,

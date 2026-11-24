@@ -7,16 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
-
-const hungProbeTimeout = 250 * time.Millisecond
-
-// slowSelfDoctorTimeout bounds the slow-but-healthy self-doctor. The same bound
-// covers its quick `doctor --help`, and the first exec of a freshly written stub
-// costs up to ~553ms on macOS under suite load, so 1s stays above that and
-// still far below the 30 s sleep the summary call must outrun.
-const slowSelfDoctorTimeout = 1 * time.Second
 
 func TestProbePlatformFiltering(t *testing.T) {
 	entries := []Entry{{Name: "ps", Command: "ps", Required: true, Platforms: []string{"darwin"}}}

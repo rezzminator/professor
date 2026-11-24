@@ -161,8 +161,9 @@ func sidScratchFile(name string) bool {
 }
 
 // nativeReloadScheduleFile reports whether name is a native seat's reload
-// schedule file, paths.SIDReloadHerdrPrefix+seat+".pid" (the worker's record)
-// or ".log" (its log). The seat id is whatever reload.LockWorkerSchedule built
+// schedule file, paths.SIDReloadHerdrPrefix+seat+".pid" (the worker's record),
+// ".log" (its log) or ".then" (a --then message kept for the reborn chat's
+// first prompt, reload.ThenBackstopPath). The seat id is whatever reload.LockWorkerSchedule built
 // from the seat row, so any non-empty one is accepted; ending the seat removes
 // the record and keeps the log.
 func nativeReloadScheduleFile(name string) bool {
@@ -170,7 +171,7 @@ func nativeReloadScheduleFile(name string) bool {
 	if !ok {
 		return false
 	}
-	for _, suffix := range []string{".pid", ".log"} {
+	for _, suffix := range []string{".pid", ".log", ".then"} {
 		if seat, ok := strings.CutSuffix(rest, suffix); ok {
 			return seat != "" && seat != "." && seat != ".."
 		}

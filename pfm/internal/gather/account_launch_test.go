@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestAccountGuardSerializesLaunchAndChecksProcessGeneration(t *testing.T) {
@@ -175,13 +177,40 @@ func TestAcquireAccountGuardOutlastsAHeldFileDescription(t *testing.T) {
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	timer := time.AfterFunc(100*time.Millisecond, release)
-	defer timer.Stop()
-	second, err := AcquireAccountGuard(dir, false)
-	if err != nil {
-		t.Fatalf("acquire while a forked child held the description = %v", err)
+	fake := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	testwait.ProcessClock(t, fake)
+	type acquired struct {
+		guard *AccountGuard
+		err   error
 	}
-	if err := second.Close(); err != nil {
+	result := make(chan acquired, 1)
+	go func() {
+		guard, err := AcquireAccountGuard(dir, false)
+		result <- acquired{guard, err}
+	}()
+	// The acquire finds the description held and parks on its retry pause; the
+	// child lets go, then one pause passes.
+	var got acquired
+	var returned bool
+	testwait.Until(t, "the acquire to park on its retry pause", func() (bool, string) {
+		select {
+		case got = <-result:
+			returned = true
+			return true, ""
+		default:
+		}
+		return fake.Pending() > 0, fake.String()
+	})
+	if returned {
+		t.Fatalf("acquire returned (%v) before the forked child let go of the description", got.err)
+	}
+	release()
+	fake.Advance(accountBusyPoll)
+	got, _ = testwait.Receive(t, "the acquire to take the lock once the description was released", result)
+	if got.err != nil {
+		t.Fatalf("acquire while a forked child held the description = %v", got.err)
+	}
+	if err := got.guard.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -199,15 +228,21 @@ func TestAcquireAccountGuardRefusesAnAccountHeldPastTheGrace(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	started := time.Now()
-	competing, err := acquireAccountGuardWithin(dir, false, 60*time.Millisecond)
+	epoch := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fake := clock.NewFake(epoch)
+	testwait.ProcessClock(t, fake)
+	var competing *AccountGuard
+	testwait.Drive(t, "the competing guard to give up past its grace", fake, func() {
+		competing, err = acquireAccountGuardWithin(dir, false, 60*time.Millisecond)
+	})
 	if competing != nil {
 		_ = competing.Close()
 	}
 	if !errors.Is(err, syscall.EWOULDBLOCK) {
 		t.Fatalf("competing guard = %v, want EWOULDBLOCK", err)
 	}
-	if waited := time.Since(started); waited < 60*time.Millisecond {
-		t.Fatalf("refused after %s, before the 60ms grace", waited)
+	// The guard retries every accountBusyPoll and gives up once the 60ms grace is spent.
+	if waited, want := fake.Now().Sub(epoch), 60*time.Millisecond; waited != want {
+		t.Fatalf("refused after %s on the clock, want the %s grace", waited, want)
 	}
 }

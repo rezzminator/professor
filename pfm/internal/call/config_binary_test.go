@@ -44,6 +44,7 @@ func TestCallUsesConfiguredBinaryToDescribeBusyPane(t *testing.T) {
 		ClaudeBinary: "/opt/tools/claude enterprise",
 		CodexBinary:  customCodex,
 		Options: Options{
+			Clock:            newSteppingClock(),
 			Poll:             time.Nanosecond,
 			EnterSettle:      time.Nanosecond,
 			ProofSettle:      time.Nanosecond,

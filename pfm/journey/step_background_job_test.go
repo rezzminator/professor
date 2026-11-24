@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -29,7 +28,7 @@ func backgroundJob(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Type(`send it to the background mock-engine: [{"type":"background_job"},{"type":"turn","reply":"` +
 		reply + `"}]` + "\r")
-	term.WaitFor("⏺ "+reply, 20*time.Second)
+	term.WaitFor("⏺ " + reply)
 	s.Left = s.Chat.Session
 	continued := read(c, "sh", "-c", `cat "$HOME"/.claude/projects/*/"$1".jsonl "$HOME"/.cc/*/projects/*/"$1".jsonl `+
 		`2>/dev/null | grep -m1 '"continued-in"'`, "sh", s.Left)
@@ -40,7 +39,7 @@ func backgroundJob(c *harness.Ctx, s State) State {
 		c.Failf("continued-in record of %s = %q (%v), want one naming its successor", s.Left, continued, err)
 	}
 	s.Chat.Session = record.ContinuedIn
-	c.Poll("a claude bg-spare process recording "+s.Chat.Session, stepBound, func() (bool, string) {
+	c.Poll("a claude bg-spare process recording "+s.Chat.Session, func() (bool, string) {
 		pid, line, records := jobRecord(c, s.Chat.Session)
 		if line == "" {
 			return false, "records:\n" + records
@@ -59,7 +58,7 @@ func backgroundJob(c *harness.Ctx, s State) State {
 // native seat keeps its session as its identity — and its new session is listed nowhere else: not as a second
 // chat, not as the daemon's detached agent, and never offered for resume while the job runs it.
 func jobOneChat(c *harness.Ctx, s State) State {
-	c.Poll("one live row for the seat's "+s.Left+" and none for "+s.Chat.Session, stepBound, func() (bool, string) {
+	c.Poll("one live row for the seat's "+s.Left+" and none for "+s.Chat.Session, func() (bool, string) {
 		seat, successor := listRows(c, s.Left), listRows(c, s.Chat.Session)
 		live := len(seat) == 1 && strings.HasPrefix(seat[0], "live-claude\t") &&
 			strings.HasSuffix(seat[0], herdrSocket(s))
@@ -71,7 +70,7 @@ func jobOneChat(c *harness.Ctx, s State) State {
 // jobScheduleFollows (escape herdr/schedule-in-dead-segment): the schedule armed before the job moved with the
 // chat onto its new session.
 func jobScheduleFollows(c *harness.Ctx, s State) State {
-	c.Poll("schedule "+s.Schedule+" on "+s.Chat.Session, stepBound, func() (bool, string) {
+	c.Poll("schedule "+s.Schedule+" on "+s.Chat.Session, func() (bool, string) {
 		read(c, "pfm", "ls", "--tsv")
 		got := strings.TrimSpace(stateSQL(c, "select session_id from schedules where id = "+s.Schedule))
 		return got == s.Chat.Session, "session_id " + got
@@ -90,7 +89,7 @@ func jobOpenFindsSeat(c *harness.Ctx, s State) State {
 	cli.WaitFor(prompt)
 	cli.Type("pfm chat open " + s.Chat.Session + "\r")
 	want, attach := "herdr agent attach "+s.Pane, 0
-	c.Poll("pfm chat open "+s.Chat.Session+" running `"+want+"`", stepBound, func() (bool, string) {
+	c.Poll("pfm chat open "+s.Chat.Session+" running `"+want+"`", func() (bool, string) {
 		table := processes(c)
 		for _, p := range table {
 			if strings.HasSuffix(p.Args, want) &&
@@ -109,7 +108,7 @@ func jobOpenFindsSeat(c *harness.Ctx, s State) State {
 	if r := c.Read("kill", strconv.Itoa(attach)); r.Code != 0 {
 		c.Failf("end the attach %d: exit %d: %s", attach, r.Code, r.Stderr)
 	}
-	cli.WaitFor(prompt, stepBound)
+	cli.WaitFor(prompt)
 	return s
 }
 

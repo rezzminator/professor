@@ -6,8 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestExplicitConfigFlagWinsOverPFMConfig(t *testing.T) {
@@ -245,6 +248,9 @@ func TestConfigCLIMCPEnableDisableAreIdempotentWithoutStartingStdio(t *testing.T
 }
 
 func TestConfigCLIInitShowValidateAndBrokenDiagnostics(t *testing.T) {
+	// The bound it opens on reads the process clock; a fake one never ends it
+	// early and records no real wait.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	root := jailTest(t)
 	home := filepath.Join(root, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {

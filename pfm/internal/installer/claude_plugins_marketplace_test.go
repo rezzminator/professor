@@ -195,7 +195,7 @@ func bareList(names ...string) []pfmconfig.ClaudePlugin {
 // build with no clone are untouched; a list that cannot be read is an error
 // beside the unchanged build, never an empty list.
 func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
-	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort", "example-plugin"}
+	names := []string{"forward-compaction", "engine-sync", "callmeter", "auto-effort", "example-plugin"}
 	clone := writeMarketplaceClone(t, names, nil)
 	manifest := func(t *testing.T, content string) string {
 		dir := t.TempDir()
@@ -213,14 +213,14 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 	}{
 		{"an unset list plans the default list and the rest unlisted", func(*testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{FromCheckout: true, SourceRepo: clone, Plugins: defaults}
-		}, defaults, []string{"buddy", "example-plugin"}, ""},
+		}, defaults, []string{"callmeter", "example-plugin"}, ""},
 		{"an explicit list stays and the rest are unlisted", func(*testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{FromCheckout: true, SourceRepo: clone, Plugins: []pfmconfig.ClaudePlugin{
 				{ID: "forward-compaction"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
 			}}
 		}, []pfmconfig.ClaudePlugin{
 			{ID: "forward-compaction"}, {ID: "engine-sync@professor"}, {ID: "typesafe@typesafe-ai"},
-		}, []string{"buddy", "auto-effort", "example-plugin"}, ""},
+		}, []string{"callmeter", "auto-effort", "example-plugin"}, ""},
 		{"a release reads nothing", func(*testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{SourceRepo: clone, Plugins: defaults}
 		}, defaults, nil, ""},
@@ -228,8 +228,8 @@ func TestClaudePluginBuildWithMarketplacePlugins(t *testing.T) {
 			return ClaudePluginBuild{FromCheckout: true, Plugins: defaults}
 		}, defaults, nil, ""},
 		{"an explicit list beside a clone without a marketplace", func(t *testing.T) ClaudePluginBuild {
-			return ClaudePluginBuild{FromCheckout: true, SourceRepo: t.TempDir(), Plugins: bareList("buddy")}
-		}, bareList("buddy"), nil, ""},
+			return ClaudePluginBuild{FromCheckout: true, SourceRepo: t.TempDir(), Plugins: bareList("callmeter")}
+		}, bareList("callmeter"), nil, ""},
 		{"a default list beside a clone without a marketplace", func(t *testing.T) ClaudePluginBuild {
 			return ClaudePluginBuild{FromCheckout: true, SourceRepo: t.TempDir(), Plugins: defaults}
 		}, defaults, nil, ""},
@@ -370,7 +370,7 @@ func simulateClaude(t *testing.T, runner *pluginRunner) {
 // professor marketplace registered from GitHub is re-pointed at the copies,
 // never removed, and every option value stays.
 func TestEnsureClaudePluginsFromCheckoutMarketplacePlugins(t *testing.T) {
-	names := []string{"forward-compaction", "engine-sync", "buddy", "auto-effort"}
+	names := []string{"forward-compaction", "engine-sync", "callmeter", "auto-effort"}
 	defaultNames := make([]string, 0, len(pfmconfig.DefaultClaudePlugins())+1)
 	for _, plugin := range pfmconfig.DefaultClaudePlugins() {
 		defaultNames = append(defaultNames, plugin.ID)
@@ -395,13 +395,13 @@ func TestEnsureClaudePluginsFromCheckoutMarketplacePlugins(t *testing.T) {
 			map[string]any{
 				"forward-compaction@professor": true,
 				"engine-sync@professor":        true,
-				"buddy@professor":              false,
+				"callmeter@professor":          false,
 				"auto-effort@professor":        false,
 			},
 		},
 		{
 			"unset is the default list and keeps an unlisted plugin disabled",
-			append(slices.Clone(defaultNames), "buddy"), pfmconfig.DefaultClaudePlugins(), false,
+			append(slices.Clone(defaultNames), "callmeter"), pfmconfig.DefaultClaudePlugins(), false,
 			func(marketplace string) []string {
 				var calls []string
 				for _, name := range defaultNames {
@@ -420,7 +420,7 @@ func TestEnsureClaudePluginsFromCheckoutMarketplacePlugins(t *testing.T) {
 				"flights@professor":                    true,
 				"professor@professor":                  true,
 				"rule-control@professor":               true,
-				"buddy@professor":                      false,
+				"callmeter@professor":                  false,
 			},
 		},
 		// The install enables an install-only plugin and the edit after it disables
@@ -440,13 +440,17 @@ func TestEnsureClaudePluginsFromCheckoutMarketplacePlugins(t *testing.T) {
 			marketplace := filepath.Join(home, ".local", "share", "professor-dev")
 			// The store's settings.json, linked from the account dir.
 			store := filepath.Join(home, ".claude", "settings.json")
-			writeFixture(t, store, `{"enabledPlugins":{"forward-compaction@professor":true,"buddy@professor":false},`+
-				`"pluginConfigs":{"forward-compaction@professor":{"options":{"ceilingNative":true}},`+
-				`"buddy@professor":{"options":{"x":1}}}}`)
+			writeFixture(
+				t,
+				store,
+				`{"enabledPlugins":{"forward-compaction@professor":true,"callmeter@professor":false},`+
+					`"pluginConfigs":{"forward-compaction@professor":{"options":{"ceilingNative":true}},`+
+					`"callmeter@professor":{"options":{"x":1}}}}`,
+			)
 			if err := os.Symlink(store, filepath.Join(first, "settings.json")); err != nil {
 				t.Fatal(err)
 			}
-			writeInstalledPlugins(t, first, "forward-compaction@professor", "buddy@professor")
+			writeInstalledPlugins(t, first, "forward-compaction@professor", "callmeter@professor")
 			writeFixture(t, filepath.Join(first, "plugins", "known_marketplaces.json"),
 				`{"professor":{"source":{"source":"github","repo":"rezzminator/professor"}}}`)
 			if err := inst.ensureClaudePlugins(context.Background()); err != nil {
@@ -473,7 +477,7 @@ func TestEnsureClaudePluginsFromCheckoutMarketplacePlugins(t *testing.T) {
 			}
 			wantConfigs := map[string]any{
 				"forward-compaction@professor": map[string]any{"options": map[string]any{"ceilingNative": true}},
-				"buddy@professor":              map[string]any{"options": map[string]any{"x": float64(1)}},
+				"callmeter@professor":          map[string]any{"options": map[string]any{"x": float64(1)}},
 			}
 			if !reflect.DeepEqual(settings["pluginConfigs"], wantConfigs) {
 				t.Fatalf("pluginConfigs = %v, want %v", settings["pluginConfigs"], wantConfigs)
@@ -498,7 +502,7 @@ func TestEnsureClaudePluginsFromCheckoutMarketplacePlugins(t *testing.T) {
 				}
 			}
 			lines := []string{
-				"  ok      claude plugin buddy@professor installed in " + first + ", kept disabled: claude.plugins does not list buddy\n",
+				"  ok      claude plugin callmeter@professor installed in " + first + ", kept disabled: claude.plugins does not list callmeter\n",
 			}
 			if test.names == nil {
 				lines = append(
@@ -597,16 +601,16 @@ func TestEnsureClaudePluginsFromCheckoutUnlistedPluginLeftEnabled(t *testing.T) 
 		wantErr    string
 	}{
 		{"an enabled unlisted plugin is disabled", false, false, []string{
-			"  ok      claude plugin buddy@professor installed in {first}\n",
-			"  change  disable buddy@professor in {first}/settings.json: claude.plugins does not list buddy\n",
+			"  ok      claude plugin callmeter@professor installed in {first}\n",
+			"  change  disable callmeter@professor in {first}/settings.json: claude.plugins does not list callmeter\n",
 		}, ""},
 		{"no checkout: never installed from GitHub, its copy still disabled", false, true, []string{
-			"  skip    claude plugin buddy: not installed — claude.plugins does not list it and claude.pluginSource checkout finds no checkout of it: no checkout at ",
-			"disable buddy@professor in {first}/settings.json",
+			"  skip    claude plugin callmeter: not installed — claude.plugins does not list it and claude.pluginSource checkout finds no checkout of it: no checkout at ",
+			"disable callmeter@professor in {first}/settings.json",
 		}, ""},
 		{
 			"a re-point that does not take", true, false, nil,
-			"claude plugin buddy@professor in {first}: plugin buddy@professor marketplace professor in " +
+			"claude plugin callmeter@professor in {first}: plugin callmeter@professor marketplace professor in " +
 				"{first}/plugins/known_marketplaces.json points at /elsewhere/professor-dev, want {home}/.local/share/professor-dev" +
 				" after the add — claude plugin marketplace remove professor deletes the saved options and data of its plugins",
 		},
@@ -617,7 +621,7 @@ func TestEnsureClaudePluginsFromCheckoutUnlistedPluginLeftEnabled(t *testing.T) 
 			var out bytes.Buffer
 			inst := pluginEngine(home, binary, first, second, runner, &out, true)
 			inst.options.ClaudePluginsFromCheckout = true
-			names := []string{"forward-compaction", "buddy"}
+			names := []string{"forward-compaction", "callmeter"}
 			withCheckout := names
 			if test.noCheckout {
 				withCheckout = names[:1]
@@ -625,8 +629,8 @@ func TestEnsureClaudePluginsFromCheckoutUnlistedPluginLeftEnabled(t *testing.T) 
 			inst.options.SourceRepo = writeMarketplaceClone(t, names, withCheckout)
 			inst.options.ClaudePlugins = bareList("forward-compaction")
 			writeFixture(t, filepath.Join(first, "settings.json"),
-				`{"enabledPlugins":{"forward-compaction@professor":true,"buddy@professor":true}}`)
-			installed := []string{"forward-compaction@professor", "buddy@professor"}
+				`{"enabledPlugins":{"forward-compaction@professor":true,"callmeter@professor":true}}`)
+			installed := []string{"forward-compaction@professor", "callmeter@professor"}
 			if test.noCheckout {
 				// Never installed: with no checkout there is no copy to install.
 				installed = installed[:1]
@@ -656,15 +660,15 @@ func TestEnsureClaudePluginsFromCheckoutUnlistedPluginLeftEnabled(t *testing.T) 
 			}
 			for _, call := range runner.calls {
 				if strings.Contains(call.argv, "rezzminator/professor") ||
-					strings.Contains(call.argv, "install buddy@") {
-					t.Fatalf("unlisted buddy installed: %q\n%s", call.argv, out.String())
+					strings.Contains(call.argv, "install callmeter@") {
+					t.Fatalf("unlisted callmeter installed: %q\n%s", call.argv, out.String())
 				}
 			}
-			if test.foreign && strings.Contains(out.String(), "  ok      claude plugin buddy@professor") {
-				t.Fatalf("buddy reported ensured while its marketplace points elsewhere:\n%s", out.String())
+			if test.foreign && strings.Contains(out.String(), "  ok      claude plugin callmeter@professor") {
+				t.Fatalf("callmeter reported ensured while its marketplace points elsewhere:\n%s", out.String())
 			}
 			if strings.Contains(out.String(), "kept disabled") {
-				t.Fatalf("buddy reported kept disabled while enabled:\n%s", out.String())
+				t.Fatalf("callmeter reported kept disabled while enabled:\n%s", out.String())
 			}
 		})
 	}

@@ -126,7 +126,7 @@ func TestConfigDirFromRunHandlesRegistryAssignments(t *testing.T) {
 		{`CLAUDE_CONFIG_DIR='/account with spaces' claude`, "/account with spaces", false},
 		{`env -u KEY 'CLAUDE_CONFIG_DIR=/account' claude`, "/account", false},
 		{`tmux wait-for ready && env 'CLAUDE_CONFIG_DIR=/account' claude; exit 0`, "/account", false},
-		{`sleep 1`, "", false},
+		{`true`, "", false},
 		{`CLAUDE_CONFIG_DIR= claude`, "", true},
 		{`env CLAUDE_CONFIG_DIR=$(cat /missing) claude`, "", true},
 		{`CLAUDE_CONFIG_DIR=/one claude; CLAUDE_CONFIG_DIR=/two claude`, "", true},

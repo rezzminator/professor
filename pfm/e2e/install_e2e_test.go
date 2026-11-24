@@ -20,10 +20,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -43,12 +43,7 @@ const (
 	e2eCommandRoot     = ".claude/commands"
 )
 
-var commandLinks = []string{
-	"reload.md",
-}
-
 var managedAssets = []string{
-	"reload.command.md",
 	"bin/claude",
 }
 
@@ -381,8 +376,7 @@ func (h *e2eHarness) pfm(home string, args ...string) commandResult {
 
 func (h *e2eHarness) pfmWithBinary(binary, home string, args ...string) commandResult {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
-	defer cancel()
+	ctx := testwait.Context(h.t)
 	command := exec.CommandContext(ctx, binary, args...)
 	command.Dir = h.repo
 	command.Env = h.environment(home)
@@ -533,8 +527,7 @@ func dirEntryNames(entries []os.DirEntry) []string {
 
 func (h *e2eHarness) tool(home, name string, args ...string) commandResult {
 	h.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
+	ctx := testwait.Context(h.t)
 	command := exec.CommandContext(ctx, name, args...)
 	command.Dir = h.repo
 	command.Env = h.environment(home)
@@ -737,7 +730,6 @@ func (h *e2eHarness) assertUninstalled(home string) {
 			h.t.Fatalf("uninstall failed; differing paths: %s; status: %v", relative, err)
 		}
 	}
-	h.assertCommandLinksUninstalled(home)
 	canonical := filepath.Join(home, e2eCanonicalClaude)
 	target, err := os.Readlink(canonical)
 	if err != nil || !strings.HasSuffix(filepath.ToSlash(target), "/.local/share/claude/versions/2.1.238") {

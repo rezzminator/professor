@@ -150,7 +150,7 @@ func TestPlanPlacesHookAndEnvChecks(t *testing.T) {
 		{Block, "store-identity", "/h/store/.credentials.json", "identity in the store", "mv"},
 		unparsable(checkFunctionHookModules, "/h/bad.json", errors.New("unexpected end"), "flag unknown"),
 		{
-			Warn,
+			Skipped,
 			checkShellClaudeEnv,
 			"login shell",
 			"not checked: pfm runs inside a chat",

@@ -14,9 +14,9 @@ import (
 	"os/exec"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const indicatorsSignalHelperEnv = "PFM_HERDR_INDICATORS_SIGNAL_HELPER"
@@ -49,25 +49,20 @@ func TestIndicatorsEntrySecondSignalKillsAPainterStillUnwinding(t *testing.T) {
 		t.Fatalf("first SIGTERM did not cancel the painter: %q %v", lines.Text(), lines.Err())
 	}
 	go func() { exited <- cmd.Wait() }()
-	deadline := time.After(5 * time.Second)
-	tick := time.NewTicker(100 * time.Millisecond)
-	defer tick.Stop()
-	for {
+	// The next signal goes out on every look, until one lands after the reset.
+	testwait.Until(t, "the helper was killed by a later SIGTERM", func() (bool, string) {
 		select {
 		case err := <-exited:
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGTERM {
 				t.Fatalf("helper exit = %v, want killed by the second SIGTERM", err)
 			}
-			return
-		case <-tick.C:
-			_ = cmd.Process.Signal(syscall.SIGTERM) // the next signal, until one lands after the reset
-		case <-deadline:
-			_ = cmd.Process.Kill()
-			<-exited
-			t.Fatal("a painter still unwinding survived repeated SIGTERMs: every later signal was swallowed")
+			return true, "exited"
+		default:
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+			return false, "a painter still unwinding survived repeated SIGTERMs: every later signal was swallowed"
 		}
-	}
+	})
 }
 
 // scanTo reads lines until one is want: the helper's test binary may print
@@ -96,8 +91,7 @@ func TestIndicatorsEntrySignalHelper(t *testing.T) {
 		_, _ = os.Stdout.WriteString("painting\n")
 		<-ctx.Done()
 		_, _ = os.Stdout.WriteString("cancelled\n")
-		time.Sleep(time.Hour) // a restore that never ends
-		return nil
+		select {} // a restore that never ends
 	})
 	os.Exit(3)
 }

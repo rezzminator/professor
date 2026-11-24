@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A resolvable binary passes the preflight and the server is created — the
@@ -31,7 +32,7 @@ func TestNewSessionAcceptsAResolvableBinary(t *testing.T) {
 		Session: "preflight-ok",
 		Window:  "w",
 		CWD:     root,
-		Run:     "sh -c 'sleep 30'",
+		Run:     "sh -c '" + testwait.Hold + "'",
 		Binary:  "sh",
 		Width:   80,
 		Height:  24,

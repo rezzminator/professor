@@ -187,14 +187,13 @@ set -m
 FAKE_GH_HANG=1 JOURNEY_CI_POLL_S=1 bash "$S/main/infra/fence/journey/run.sh" --ci-linux >"$S/int.out" 2>&1 &
 pid=$!
 set +m
-for _ in $(seq 100); do grep -q '^run view' "$S/gh.log" && break; sleep 0.2; done # POLL-STEP: the first status poll
+shtest_wait_until 'run.sh makes its first status poll' grep -q '^run view' "$S/gh.log"
 kill -INT "$pid"
-# POLL-STEP: run.sh ends on the INT; one that ignores it (INT ignored on entry: no trap can catch it) polls a
-# hung run forever, so 20 s on its process group is KILLed and named
-for _ in $(seq 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
-if kill -0 "$pid" 2>/dev/null; then
+# run.sh ends on the INT; one that ignores it (INT ignored on entry: no trap can catch it) polls a hung run
+# forever, so past the door's hung-only limit its process group is KILLed and named
+if ! shtest_wait_gone 'run.sh ends on its INT' "$pid"; then
   kill -KILL -- "-$pid" 2>/dev/null
-  echo "ci-run_test: run.sh still running 20 s after its INT (was INT ignored on its entry?) — KILLed" >>"$S/int.out"
+  echo "ci-run_test: run.sh still running at the hung-only limit after its INT (was INT ignored on its entry?) — KILLed" >>"$S/int.out"
 fi
 wait "$pid"
 rc=$?
@@ -205,8 +204,8 @@ gone interrupt "$S"
 out="$(FAKE_GH_HANG=1 JOURNEY_CI_WAIT_S=0 bash "$S/main/infra/fence/journey/run.sh" --ci-linux 2>&1)" rc=$?
 [ "$rc" = 1 ] && grep -qx 'journey-ci: FAIL run 4242 not completed after 0s' <<<"$out" &&
   grep -qx 'run cancel 4242 --repo acme/widget' "$S/gh.log" && ok 'timeout: exit 1 and the run is cancelled' ||
-  bad timeout "rc $rc" "$out"
-gone timeout "$S"
+  bad 'timeout' "rc $rc" "$out"
+gone 'timeout' "$S"
 
 # A run URL the dispatch does not print is found by the branch.
 out="$(FAKE_GH_NO_URL=1 FAKE_GH_VIEW="$S/view-ok" bash "$S/main/infra/fence/journey/run.sh" --ci-linux 2>&1)" rc=$?

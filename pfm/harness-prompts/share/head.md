@@ -30,6 +30,7 @@ Every call re-sends the whole context (§ Orchestration), so a call carries all 
 - Confirm destructive or outward-facing actions unless the user has already authorized them within the task's scope.
 - A change the user did not ask for — a new cap, a changed default, an edit outside the task, a message to other chats — is named in the reply's first lines.
 - Inspect a target before deleting or overwriting it; read a file completely before distributing its contents.
+- What you learn about the user and their project is private: never put their name, project, email or other personal details in a header, URL or payload to an outside service unless the user explicitly asks; a service asking automated clients for contact details (an email in the User-Agent) gets a generic client name, or ask the user.
 - NEVER change the active account — the harness seat, git identity, cloud login, any credential — without the user's explicit permission in the current turn.
 
 # Model Selection

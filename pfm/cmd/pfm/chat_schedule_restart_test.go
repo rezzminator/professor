@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,26 +21,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/restart"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
-
-// scheduleRestartClock advances the real caller's bounded waits without making
-// this fake transport test spend ninety wall-clock seconds on a broken capture.
-type scheduleRestartClock struct {
-	clock.Clock
-	now     time.Time
-	elapsed atomic.Int64
-}
-
-func (c *scheduleRestartClock) Now() time.Time { return c.now.Add(time.Duration(c.elapsed.Load())) }
-func (c *scheduleRestartClock) Sleep(ctx context.Context, d time.Duration) error {
-	c.elapsed.Add(int64(d))
-	return ctx.Err()
-}
 
 // TestHerdrScheduleSurvivesRestart exercises the actual restart Fleet.End and
 // CLI schedule tick, not an injected deliverer. A fake Herdr implements only the
 // external terminal/agent protocol; pfm owns recovery, readiness and recording.
-// Serial: the CLI jail and clock.Real are process-wide.
+// Serial: the CLI jail and the process clock are process-wide.
 func TestHerdrScheduleSurvivesRestart(t *testing.T) {
 	for _, delayed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("delayed-proof=%t", delayed), func(t *testing.T) {
@@ -57,10 +43,12 @@ func TestHerdrScheduleSurvivesRestart(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			oldClock := clock.Real
-			ticks := &scheduleRestartClock{Clock: oldClock, now: time.Now()}
-			clock.Real = ticks
-			t.Cleanup(func() { clock.Real = oldClock })
+			// The CLI path reads the process clock: it runs on a fake that
+			// starts at the host's time (transcript and socket stamps stay
+			// comparable), each wait released by Drive, so the ninety-second
+			// composer wait and the proof settle are counts, never host speed.
+			ticks := clock.NewFake(time.Now())
+			testwait.ProcessClock(t, ticks)
 
 			account := pfmconfig.DefaultAccountDir(runtime.Paths.Home, 2)
 			if err := os.MkdirAll(account, 0o700); err != nil {
@@ -127,7 +115,11 @@ func TestHerdrScheduleSurvivesRestart(t *testing.T) {
 			t.Setenv("HERDR_SOCKET_PATH", socket)
 			t.Setenv("HERDR_PANE_ID", seat.HerdrPane)
 			// No target argument: this is the chat arming its own one-time wake.
-			code, stdout, stderr := runSchedule(t, "set", "--in", "1m", "--prompt", "check the build once")
+			var code int
+			var stdout, stderr string
+			testwait.Drive(t, "the chat to arm its wake", ticks, func() {
+				code, stdout, stderr = runSchedule(t, "set", "--in", "1m", "--prompt", "check the build once")
+			})
 			if code != 0 || strings.TrimSpace(stdout) != "1" {
 				t.Fatalf("self-arm code=%d out=%q err=%q", code, stdout, stderr)
 			}
@@ -135,17 +127,20 @@ func TestHerdrScheduleSurvivesRestart(t *testing.T) {
 			if err != nil || !found || !armed.Once || armed.SessionID != id || armed.SetByID != id {
 				t.Fatalf("self-armed schedule=%+v found=%t err=%v", armed, found, err)
 			}
-			if err := restart.LiveDeps(
-				runtime,
-				&bytes.Buffer{},
-				nil,
-				struct{ Socket, Pane string }{},
-			).Fleet.End(
-				ctx,
-				headless.Chat{
-					ID: id, SeatID: seat.SeatID, Backend: "herdr", Socket: socket, Pane: seat.HerdrPane,
-				},
-			); err != nil {
+			testwait.Drive(t, "restart to end the chat", ticks, func() {
+				err = restart.LiveDeps(
+					runtime,
+					&bytes.Buffer{},
+					nil,
+					struct{ Socket, Pane string }{},
+				).Fleet.End(
+					ctx,
+					headless.Chat{
+						ID: id, SeatID: seat.SeatID, Backend: "herdr", Socket: socket, Pane: seat.HerdrPane,
+					},
+				)
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
 			retired, found, err := db.SeatBySession(ctx, id)
@@ -161,9 +156,11 @@ func TestHerdrScheduleSurvivesRestart(t *testing.T) {
 			// The host timer is out of process: no caller identity is inherited.
 			t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 			t.Setenv("HERDR_PANE_ID", "w6:p1")
-			ticks.elapsed.Add(int64(2 * time.Minute))
+			ticks.Advance(2 * time.Minute)
 			var out, diagnostics bytes.Buffer
-			code = run([]string{"internal", "schedule-fire"}, &out, &diagnostics)
+			testwait.Drive(t, "the first schedule tick", ticks, func() {
+				code = run([]string{"internal", "schedule-fire"}, &out, &diagnostics)
+			})
 			wantCode := 0
 			if delayed {
 				wantCode = 1
@@ -202,7 +199,10 @@ func TestHerdrScheduleSurvivesRestart(t *testing.T) {
 			}
 			out.Reset()
 			diagnostics.Reset()
-			if code := run([]string{"internal", "schedule-fire"}, &out, &diagnostics); code != 0 {
+			testwait.Drive(t, "the second schedule tick", ticks, func() {
+				code = run([]string{"internal", "schedule-fire"}, &out, &diagnostics)
+			})
+			if code != 0 {
 				t.Fatalf("second tick code=%d err=%q", code, diagnostics.String())
 			}
 			fixture.mu.Lock()

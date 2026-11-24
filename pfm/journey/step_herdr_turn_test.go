@@ -21,19 +21,21 @@ func herdrTurn(c *harness.Ctx, s State) State {
 	reply := c.Unique("reply")
 	term := c.Terminal(s.Term)
 	term.Type(`a turn mock-engine: {"type":"turn","busy_ms":5000,"reply":"` + reply + `"}` + "\r")
-	awaitAttention(c, s, "working", 5*time.Second)
-	term.WaitFor("⏺ "+reply, 20*time.Second)
-	awaitAttention(c, s, "idle", stepBound)
+	awaitAttention(c, s, "working")
+	// The turn's busy stretch ends by signal once Herdr and pfm have shown it working.
+	advanceEngine(c, s.Chat.Engine, 5*time.Second)
+	term.WaitFor("⏺ " + reply)
+	awaitAttention(c, s, "idle")
 	requireStatusRow(c, s)
 	// escape herdr/interrupt-stays-working: Claude fires no hook on an Esc mid-turn; the interrupt record its
 	// transcript gets is the only sign, and Herdr and pfm settle idle on it.
 	term.Type(
 		`an interrupted turn mock-engine: {"type":"turn","busy_ms":60000,"reply":"` + c.Unique("never") + `"}` + "\r",
 	)
-	awaitAttention(c, s, "working", 5*time.Second)
+	awaitAttention(c, s, "working")
 	term.Press(harness.Esc)
-	term.WaitFor("⎿ Interrupted", 20*time.Second)
-	awaitAttention(c, s, "idle", stepBound)
+	term.WaitFor("⎿ Interrupted")
+	awaitAttention(c, s, "idle")
 	aborted := entry{Role: "assistant", Text: "[turn aborted: interrupted]"}
 	if got := entries(c, s.Chat.Session); len(got) == 0 || got[len(got)-1] != aborted {
 		c.Failf("pfm chat read %s after the Esc: last entry of %v, want %v", s.Chat.Session, got, aborted)
@@ -84,10 +86,11 @@ func chatAttention(c *harness.Ctx, s State) string {
 
 // awaitAttention waits for Herdr's status of the branch's pane and pfm's state of its chat to both
 // read want, and for the pane's tab to carry want's mark ahead of the chat's name; a blinking mark
-// (blocked) must then show each of its frames within blinkBound, so a mark that never blinks fails.
-func awaitAttention(c *harness.Ctx, s State, want string, within time.Duration) {
+// (blocked) must then show each of its frames, so a mark that never blinks fails at the wait door's
+// hung-only limit.
+func awaitAttention(c *harness.Ctx, s State, want string) {
 	name := ""
-	c.Poll("Herdr and pfm read pane "+s.Pane+" "+want+", its tab marked "+strings.Join(tabMarks[want], "/"), within,
+	c.Poll("Herdr and pfm read pane "+s.Pane+" "+want+", its tab marked "+strings.Join(tabMarks[want], "/"),
 		func() (bool, string) {
 			herdr, pfm, label := paneAttention(c, s), chatAttention(c, s), paneTabLabel(c, s)
 			name = tabName(c, s)
@@ -95,7 +98,7 @@ func awaitAttention(c *harness.Ctx, s State, want string, within time.Duration) 
 				fmt.Sprintf("Herdr %q, pfm %q, tab %q", herdr, pfm, label)
 		})
 	seen := map[string]bool{}
-	c.Poll("the tab of pane "+s.Pane+" shows each frame of "+strings.Join(tabMarks[want], "/"), blinkBound,
+	c.Poll("the tab of pane "+s.Pane+" shows each frame of "+strings.Join(tabMarks[want], "/"),
 		func() (bool, string) {
 			label := paneTabLabel(c, s)
 			if frame := labelFrame(label, want, name); frame != "" {
@@ -105,16 +108,12 @@ func awaitAttention(c *harness.Ctx, s State, want string, within time.Duration) 
 		})
 }
 
-// blinkBound is how long a blinking mark gets to show each of its frames: a few of its half-second
-// frames.
-const blinkBound = 3 * time.Second
-
 // holdAttention requires Herdr and pfm to keep reading want, and the pane's tab to keep a frame of
 // want's mark ahead of the chat's name, over reads reads in a row, the first included: a read of
 // anything else fails the step at once.
 func holdAttention(c *harness.Ctx, s State, want string, reads int) {
 	held := 0
-	c.Poll(fmt.Sprintf("Herdr and pfm keep reading pane %s %s over %d reads", s.Pane, want, reads), stepBound,
+	c.Poll(fmt.Sprintf("Herdr and pfm keep reading pane %s %s over %d reads", s.Pane, want, reads),
 		func() (bool, string) {
 			herdr, pfm, label := paneAttention(c, s), chatAttention(c, s), paneTabLabel(c, s)
 			if herdr != want || pfm != want || labelFrame(label, want, tabName(c, s)) == "" {
@@ -191,7 +190,7 @@ func tabName(c *harness.Ctx, s State) string {
 // name.
 func awaitTopTab(term *harness.Terminal, state, name string) {
 	label := markedLabel(state, name)
-	term.WaitScreen("a Herdr tab labelled "+label, stepBound, func(screen string) bool {
+	term.WaitScreen("a Herdr tab labelled "+label, func(screen string) bool {
 		top, _, _ := strings.Cut(screen, "\n")
 		return strings.Contains(" "+strings.Join(strings.Fields(top), " ")+" ", " "+label+" ")
 	})
@@ -228,7 +227,7 @@ const fleetCounts = ` [·✦✹]\d* [·✦✹]\d*$`
 func requireStatusRow(c *harness.Ctx, s State) {
 	want := regexp.MustCompile(`^🥇 ◇ Sonnet·effort unknown │ ` + regexp.QuoteMeta(filepath.Base(s.Project)) +
 		` │` + fleetCounts)
-	c.Terminal(s.Term).WaitScreen("the status line "+want.String()+" under the box", stepBound,
+	c.Terminal(s.Term).WaitScreen("the status line "+want.String()+" under the box",
 		func(screen string) bool {
 			row, found := statusRow(screen)
 			return found && want.MatchString(row)

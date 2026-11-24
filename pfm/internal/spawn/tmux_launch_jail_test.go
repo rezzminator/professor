@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // tmux caps one client message at about 16 KiB, and new-session carries its
@@ -57,21 +57,11 @@ func launchKillServer(t *testing.T, tmuxDir, socket string) {
 	})
 }
 
-// launchEventually polls check for up to ten seconds; the last failure names
-// what never became true.
+// launchEventually polls check until it holds; the last failure names what
+// never became true.
 func launchEventually(t *testing.T, what string, check func() (bool, string)) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		ok, detail := check()
-		if ok {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s never held: %s", what, detail)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	testwait.Until(t, what, check)
 }
 
 // launchLeftovers names every entry in the socket directory except socket.
@@ -95,8 +85,8 @@ func TestNewSessionLaunchesARunLongerThanATmuxMessage(t *testing.T) {
 	root, tmuxDir := launchJail(t)
 	marker := filepath.Join(root, "launched")
 	// An env-assignment prefix, as a launch line may carry one, a 64 KiB
-	// argument, and a target that execs sleep so the pane process is known.
-	run := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; exec sleep 120' pfm-launch '" +
+	// argument, and a target that execs tail so the pane process is known.
+	run := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; " + testwait.Hold + "' pfm-launch '" +
 		strings.Repeat("x", 64<<10) + "'"
 	const socket = "cx-1800000011-1-1"
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
@@ -120,13 +110,13 @@ func TestNewSessionLaunchesARunLongerThanATmuxMessage(t *testing.T) {
 		left := launchLeftovers(t, tmuxDir, socket)
 		return len(left) == 0, "socket directory still holds " + strings.Join(left, ", ")
 	})
-	sleep, err := exec.LookPath("sleep")
+	tail, err := exec.LookPath("tail")
 	if err != nil {
-		t.Fatalf("resolve sleep: %v", err)
+		t.Fatalf("resolve tail: %v", err)
 	}
-	want, err := filepath.EvalSymlinks(sleep)
+	want, err := filepath.EvalSymlinks(tail)
 	if err != nil {
-		t.Fatalf("resolve sleep symlinks: %v", err)
+		t.Fatalf("resolve tail symlinks: %v", err)
 	}
 	launchEventually(t, "pane process is the target, not a lingering shell", func() (bool, string) {
 		pid := launchQuery(t, tmuxDir, socket, "#{pane_pid}")
@@ -145,12 +135,20 @@ func TestNewSessionKeepsAShortRunInline(t *testing.T) {
 	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Codex", CWD: root,
-		Width: 180, Height: 45, Run: "sleep 120",
+		Width: 180, Height: 45, Run: testwait.Hold,
 	}); err != nil {
 		t.Fatalf("launch a short run: %v", err)
 	}
 	launchKillServer(t, tmuxDir, socket)
-	if start := launchQuery(t, tmuxDir, socket, "#{pane_start_command}"); strings.Trim(start, `"`) != "sleep 120" {
+	if start := launchQuery(
+		t,
+		tmuxDir,
+		socket,
+		"#{pane_start_command}",
+	); strings.Trim(
+		start,
+		`"`,
+	) != testwait.Hold {
 		t.Fatalf("a short run did not launch inline: pane_start_command = %q", start)
 	}
 	if left := launchLeftovers(t, tmuxDir, socket); len(left) != 0 {

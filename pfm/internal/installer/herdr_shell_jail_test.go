@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestHerdrShellPickerReturnsToShell(t *testing.T) {
@@ -80,28 +80,20 @@ func TestHerdrShellPickerReturnsToShell(t *testing.T) {
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- command.Wait() }()
-	deadline := time.After(15 * time.Second)
-	for !strings.Contains(screen.String(), ready) {
+	t.Cleanup(func() { _ = command.Process.Kill() }) // a wrapper that never reached its prompt or exit
+	testwait.Until(t, "the interactive wrapper drew its first prompt", func() (bool, string) {
 		select {
 		case err := <-exited:
 			t.Fatalf("interactive wrapper ended before its first prompt: %v: %s", err, screen.String())
-		case <-deadline:
-			_ = command.Process.Kill()
-			t.Fatalf("interactive wrapper never drew prompt %q: %s", ready, screen.String())
-		case <-time.After(20 * time.Millisecond):
+		default:
 		}
-	}
+		return strings.Contains(screen.String(), ready), "screen: " + screen.String()
+	})
 	if _, err := typed.WriteString("print -r -- plain:${PFM_AUTO_OPEN-unset} >> \"$HOME/result\"\nexit\n"); err != nil {
 		t.Fatalf("type into interactive wrapper: %v", err)
 	}
-	select {
-	case err := <-exited:
-		if err != nil {
-			t.Fatalf("interactive wrapper: %v: %s", err, screen.String())
-		}
-	case <-deadline:
-		_ = command.Process.Kill()
-		t.Fatalf("interactive wrapper never exited: %s", screen.String())
+	if err, _ := testwait.Receive(t, "the interactive wrapper exited", exited); err != nil {
+		t.Fatalf("interactive wrapper: %v: %s", err, screen.String())
 	}
 	result, err := os.ReadFile(filepath.Join(home, "result"))
 	if err != nil {

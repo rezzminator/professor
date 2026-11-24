@@ -19,7 +19,7 @@
 # record the ruling in .arch/exceptions.md.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C8, C10 … C23, C25 … C35, then C24 (its own script). A job
+# in the order they always have: C1 … C8, C10 … C23, C25 … C36, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -35,7 +35,12 @@ CEIL_SRC="${CEIL_SRC:-240}"; CEIL_FRONT="${CEIL_FRONT:-400}"; CEIL_TEST="${CEIL_
 # import line gained when a symbol it calls moved packages); logic growth fails.
 CEIL_SLACK="${CEIL_SLACK:-5}"
 MODE="${1:-check}"
-case "$MODE" in check|--measure) ;; *) echo "usage: arch-check.sh [--measure]" >&2; exit 2 ;; esac
+case "$MODE" in check|--measure|--clock|--real-wait) ;; *)
+  echo "usage: arch-check.sh [--measure | --clock [path...] | --real-wait [package...]]" >&2; exit 2 ;; esac
+# --clock runs C36 alone, over the paths after it (all of its judged files when none); --real-wait runs
+# C37 alone, over the packages after it (every package when none).
+CLOCK_PATHS=()
+case "$MODE" in --clock|--real-wait) shift; CLOCK_PATHS=("$@") ;; esac
 rc=0
 # say prints one CHECK line. In this shell it also raises rc, the exit status; a
 # job's say cannot reach this rc, so the end of the script folds rc from the lines
@@ -413,8 +418,10 @@ chk_C21() {
 # deps.Runner, tmux.Fake or paths.Env. internal/mockengine + cmd/mock-engine
 # are the fifth seam: the mock IS a host (exec, env, files, clock) — the thing
 # the other four fake — so its doors are its purpose, not a leak to migrate.
+# internal/testwait is the tests' wait door (C36): the one place a test's wait
+# reaches the real clock, under its hung-only limit.
 chk_C22() {
-  grep -vE '^(internal/(clock|deps|paths|tmux|mockengine)|cmd/mock-engine)/' "$L/src.list" > "$T/noseam.list"
+  grep -vE '^(internal/(clock|deps|paths|tmux|mockengine|testwait)|cmd/mock-engine)/' "$L/src.list" > "$T/noseam.list"
   if g "$T/raw" "$T/noseam.list" -nE 'os\.Getenv|LookupEnv|UserHomeDir|user\.Current|exec\.Command|exec\.CommandContext|exec\.LookPath|time\.Now|time\.Sleep|time\.After|time\.NewTimer|time\.NewTicker|time\.Tick|net\.Dial|net\.Listen'; then
     count_by_file "$T/raw" > "$T/c22"; ratchet_counts C22-host-doors host-doors "$T/c22"
   else say C22-host-doors ERROR "grep could not read sources"; fi
@@ -774,7 +781,7 @@ chk_C31() {
 # C35 exact assertions: scripts/testassert reads every test function with go/parser and classes it by
 # its checks, through the helpers it calls; a test whose every value check is a substring or regexp
 # match (strings/bytes Contains, HasPrefix, HasSuffix, Index…, a regexp Match/Find) is substring-only
-# (testing.md: assert the exact value). The set only shrinks: a substring-only test, `{file} {Func}`,
+# (the flights testing rule: assert the exact value). The set only shrinks: a substring-only test, `{file} {Func}`,
 # that .arch/substring-tests.txt lacks FAILs naming it. ERROR when testassert cannot parse a file or
 # the Go toolchain cannot run it.
 chk_C35() {
@@ -788,6 +795,124 @@ chk_C35() {
 # C24 lives in its own script; its exit status (0 PASS · 1 FAIL · 2 ERROR) joins the
 # maximum below, and the status file is how the job hands it over.
 chk_C24() { bash "$PFM/scripts/arch-c24.sh" "$MODE"; echo $? > "$L/jobs/C24.status"; }
+
+# C36 clock door (timing-free-tests): no test waits on, or bounds by, the real clock except through the
+# wait door internal/testwait. scripts/testclock reads the judged files with go/parser and lists every
+# banned spelling (its header names the doors); the door's own file is never judged, and there is no
+# baseline, allowlist or exception: any finding FAILs, one `{file}:{line} door {n} {spelling}` line
+# each above the CHECK line. Judged: every _test.go, every Go file of the test-support packages (a
+# package directory named {x}test included), and
+# every fixture script under a testdata/ directory. ERROR when testclock cannot read a file or the Go
+# toolchain cannot run it, or a named path judges nothing. The full run judges the whole set;
+# `arch-check.sh --clock [path...]` runs it alone over the named paths, relative to pfm/ (a pfm/
+# prefix is dropped), each a file or a directory (`.` the whole judged set).
+CLOCK_SUPPORT='^((internal/(mockengine|hostfixture|testjail)|cmd/mock-engine|journey/harness)/|internal/([a-z]+/)*[a-z]+test/)'
+chk_C36() {
+  { cat "$L/test.list"; grep -E "$CLOCK_SUPPORT" "$L/src.list"
+    repo_git ls-files -co --exclude-standard | { grep -E '(^|/)testdata/' || [ $? = 1 ]; } | { grep -v '\.go$' || [ $? = 1 ]; }
+  } | sort -u > "$T/judged" || { say C36-clock-door ERROR "could not list the judged files"; return; }
+  local want=() p
+  if [ "${#CLOCK_PATHS[@]}" -gt 0 ]; then
+    for p in "${CLOCK_PATHS[@]}"; do
+      p=${p#./}; p=${p%/}; [ "$p" = pfm ] && p=.; p=${p#pfm/}
+      [ "$p" = . ] || [ -z "$p" ] && { want=(); break; }  # the tree itself: the whole judged set
+      want+=("$p")
+    done
+  fi
+  if [ "${#want[@]}" -gt 0 ]; then
+    awk 'NR == FNR {want[$0]; next} {for (p in want) if ($0 == p || index($0, p "/") == 1) {print; next}}' \
+      <(printf '%s\n' "${want[@]}") "$T/judged" > "$T/named"
+    [ -s "$T/named" ] || { say C36-clock-door ERROR "no judged file under: ${CLOCK_PATHS[*]}"; return; }
+    mv "$T/named" "$T/judged"
+  fi
+  if ! go -C "$SCRIPTS/.." run ./scripts/testclock -root "$PFM" < "$T/judged" > "$T/c36" 2> "$T/c36.err"; then
+    say C36-clock-door ERROR "testclock could not look: $(head -n 1 "$T/c36.err")"; return
+  fi
+  local files sites; files=$(wc -l < "$T/judged" | tr -d ' '); sites=$(wc -l < "$T/c36" | tr -d ' ')
+  if [ "$sites" -gt 0 ]; then
+    cat "$T/c36"
+    say C36-clock-door FAIL "$sites real-clock sites in $(cut -d: -f1 "$T/c36" | sort -u | wc -l | tr -d ' ') of $files files"
+    return
+  fi
+  say C36-clock-door PASS "$files files, 0 real-clock sites"
+}
+if [ "$MODE" = --clock ]; then
+  T="$L/c36.d"; mkdir -p "$T" || { say C36-clock-door ERROR "cannot create $T"; exit 2; }
+  chk_C36; exit $rc
+fi
+
+# C37 real-wait tripwire (timing-free-tests door 13): in the unit tier no production code waits on the
+# real clock. It runs `go test -count=1` (untagged: the unit tier alone) over the named packages with
+# PFM_TEST_REAL_WAIT naming a report directory; testjail.Run (internal/testjail/realwait.go) then fails
+# a binary whose code slept, or made a timer or ticker, on clock.Real, and writes its rows and a closing
+# `checked {package}` line there. A package variable copying clock.Real at start-up is out of the swap's
+# reach, so each one in a named package is a row too, `{package} (init-copy) {site}`. Every row prints as `{package} {Test} {site}` above the CHECK line:
+# FAIL on any row; ERROR when go cannot list the packages, or a package with tests left no `checked`
+# line (it did not build, died, or its TestMain skipped testjail.Run), naming each, and each such package
+# whose tests failed prints its first error line above it as `{package} {line}`; PASS otherwise. A
+# test's other failures are not this check's verdict. No baseline, allowlist or exception. Not in the job
+# list below: it runs through `arch-check.sh --real-wait [package...]`, packages as `go list` patterns
+# relative to pfm/ (a pfm/ prefix is dropped; internal/chat, internal/..., `.` for every package).
+chk_C37() {
+  local pkgs=() p
+  for p in "${CLOCK_PATHS[@]}"; do
+    p=${p#./}; p=${p%/}; [ "$p" = pfm ] && p=.; p=${p#pfm/}
+    if [ "$p" = . ] || [ -z "$p" ]; then pkgs+=(./...); else pkgs+=("./$p"); fi
+  done
+  [ "${#pkgs[@]}" -gt 0 ] || pkgs=(./...)
+  if ! go -C "$PFM" list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.Dir}}{{end}}' "${pkgs[@]}" \
+    > "$T/dirs" 2> "$T/list.err"; then
+    say C37-real-wait ERROR "go list could not list ${pkgs[*]}: $(head -n 1 "$T/list.err")"; return
+  fi
+  local root; root=$(cd "$PFM" && pwd -P)
+  { grep -v '^$' "$T/dirs" || [ $? = 1 ]; } | while read -r d; do
+    d=$(cd "$d" && pwd -P); echo "${d#"$root"/}"
+  done | sort -u > "$T/want"
+  [ -s "$T/want" ] || { say C37-real-wait ERROR "no package with tests under: ${pkgs[*]}"; return; }
+  mkdir -p "$T/report" || { say C37-real-wait ERROR "cannot create $T/report"; return; }
+  PFM_TEST_REAL_WAIT="$T/report" go -C "$PFM" test -count=1 "${pkgs[@]}" > "$T/test.out" 2>&1
+  local missing=() rows="$T/rows" pkg file; : > "$rows"
+  while read -r pkg; do
+    file="$T/report/${pkg//\//_}.txt"
+    if grep -Fxq "checked $pkg" "$file" 2> /dev/null; then grep -v '^checked ' "$file" >> "$rows"
+    else missing+=("$pkg"); fi
+  done < "$T/want"
+  # A package variable that copies clock.Real when the binary starts keeps the real clock past the swap
+  # testjail.Run makes, so its waits never reach the tripwire: each such copy is a row of its own.
+  while read -r pkg; do
+    for file in "$PFM/$pkg"/*.go; do
+      case "$file" in *_test.go|*"/*.go") continue ;; esac
+      awk -v pkg="$pkg" -v rel="$pkg/${file##*/}" '
+        /^var \(/ { block = 1; next }
+        block && /^\)/ { block = 0; next }
+        (block && /^\t[A-Za-z_][A-Za-z0-9_]*( [A-Za-z_.]+)? *= *clock\.Real *(\/\/.*)?$/) ||
+          /^var [A-Za-z_][A-Za-z0-9_]*( [A-Za-z_.]+)? *= *clock\.Real *(\/\/.*)?$/ { print pkg " (init-copy) " rel ":" FNR }
+      ' "$file" >> "$rows" || { say C37-real-wait ERROR "could not read $file"; return; }
+    done
+  done < "$T/want"
+  sort -o "$rows" "$rows"
+  cat "$rows"
+  local n total waits; n=$(wc -l < "$rows" | tr -d ' '); total=$(wc -l < "$T/want" | tr -d ' ')
+  waits=$(cut -d' ' -f1 "$rows" | sort -u | wc -l | tr -d ' ')
+  if [ "${#missing[@]}" -gt 0 ]; then
+    # Why a package left no report: the first error line of its block in the go test output.
+    local module; module=$(go -C "$PFM" list -m 2> /dev/null)
+    awk -F'\t' -v module="$module/" -v missing="${missing[*]}" '
+      BEGIN { n = split(missing, names, " "); for (i = 1; i <= n; i++) want[module names[i]] = names[i] }
+      /^(ok  |FAIL|\?   )\t/ { p = $2; sub(/ .*/, "", p); if ((p in want) && first != "") print want[p] " " first; first = ""; next }
+      first == "" && (/^[[:space:]]*[^[:space:]]+\.go:[0-9]+:/ || /^panic: /) { first = $0; sub(/^[[:space:]]+/, "", first) }
+    ' "$T/test.out"
+    say C37-real-wait ERROR "${#missing[@]} of $total packages could not be looked at (no report): ${missing[*]}"
+  elif [ "$n" -gt 0 ]; then
+    say C37-real-wait FAIL "$n real waits in $waits of $total packages"
+  else
+    say C37-real-wait PASS "$total packages, 0 real waits"
+  fi
+}
+if [ "$MODE" = --real-wait ]; then
+  T="$L/c37.d"; mkdir -p "$T" || { say C37-real-wait ERROR "cannot create $T"; exit 2; }
+  chk_C37; exit $rc
+fi
 
 # Start every check; $L/jobs/<id>.out is a job's stdout, and a job that is killed
 # or fails before its CHECK line leaves none. Baselines are one file per check, so
@@ -804,7 +929,7 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
   C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C27-identity-env \
-  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-jail-tests C34-jail-tag C35-substring-tests \
+  C28-signal-door C29-os-door C30-shell-platform C31-front-door C32-os-door-test C33-jail-tests C34-jail-tag C35-substring-tests C36-clock-door \
   C24-unwrapped-door; do
   job "$id"
 done

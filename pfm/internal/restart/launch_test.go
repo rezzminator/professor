@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,12 +14,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
@@ -29,10 +28,13 @@ import (
 const frontRoleEnv = "PFM_RESTART_TEST_FRONT_DIR"
 
 // runFrontRole is the front: it spawns a worker that outlives it, prints the
-// worker's pid, then follows the worker's log until it is killed.
+// worker's pid, then follows the worker's log until it is killed. Its clock never sleeps: the
+// front lives only until the test kills it.
 func runFrontRole(dir string) int {
-	launcher := Launcher{Runner: deps.RealRunner{}, Clock: clock.Real, Exited: childExited}
-	script := "sleep 1; echo survived > " + filepath.Join(dir, "marker") + "; echo '" + ExitMarker + "0'"
+	launcher := Launcher{Runner: deps.RealRunner{}, Clock: newTickClock(), Exited: childExited}
+	// The worker finishes only once the test writes the go pipe, after it has killed the front.
+	script := "read -r _ < " + filepath.Join(dir, "go") + "; echo survived > " + filepath.Join(dir, "marker") +
+		"; echo '" + ExitMarker + "0'"
 	var env []string
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, frontRoleEnv+"=") {
@@ -217,7 +219,8 @@ func TestWorkerRunsOnlyAsTheDetachedWorker(t *testing.T) {
 	for _, args := range [][]string{{}, {"--front", "0"}, {"--front", "5", "--launched-pane", "w1:p2"}, {"--front", "5", "x"}} {
 		var stdout, stderr bytes.Buffer
 		if code := Worker(args, &stdout, &stderr, config.Runtime{}); code != 2 ||
-			stderr.String() != "usage: pfm internal restart-run --front PID [--launched-from SOCKET [--launched-pane PANE]]\n" {
+			stderr.String() != "usage: pfm internal restart-run --front PID [--launched-from SOCKET [--launched-pane PANE]] "+
+				"[--no-restore]\n" {
 			t.Fatalf("Worker(%v) = %d, stderr %q", args, code, stderr.String())
 		}
 	}
@@ -238,19 +241,64 @@ func TestSessionLeaderReadsThisProcess(t *testing.T) {
 	}
 }
 
-func TestLiveDepsReadsTheDaemonFromConfig(t *testing.T) {
-	runtime := config.Runtime{Paths: paths.Values{StateDB: "/jail/state/fleet.db", Home: "/jail"}}
-	plain := LiveDeps(runtime, &bytes.Buffer{}, []int{9}, chatAddress{Socket: "pfm-cc-a"})
-	if plain.DaemonProbe != nil || plain.LaunchedFrom.Socket != "pfm-cc-a" ||
-		!slices.Equal(plain.Spare, []int{9}) {
-		t.Fatalf("plain deps = %+v", plain)
+// TestWorkerArgvCarriesTheRestoreChoice: the detached worker runs with this
+// binary's config, the front's pid, the chat that typed the restart and,
+// under --no-restore, the choice to bring no chat back.
+func TestWorkerArgvCarriesTheRestoreChoice(t *testing.T) {
+	for _, row := range []struct {
+		name       string
+		configPath string
+		launched   chatAddress
+		noRestore  bool
+		want       []string
+	}{
+		{name: "plain", want: []string{"/opt/pfm/bin/pfm", "internal", "restart-run", "--front", "42"}},
+		{
+			name: "typed in a Herdr chat under --no-restore", configPath: "/jail/pfm.config.json",
+			launched: chatAddress{Socket: "/run/herdr.sock", Pane: "w1:p2"}, noRestore: true,
+			want: []string{
+				"/opt/pfm/bin/pfm", "--config", "/jail/pfm.config.json", "internal", "restart-run", "--front", "42",
+				"--launched-from", "/run/herdr.sock", "--launched-pane", "w1:p2", "--no-restore",
+			},
+		},
+	} {
+		if got := workerArgv(
+			"/opt/pfm/bin/pfm",
+			row.configPath,
+			42,
+			row.launched,
+			row.noRestore,
+		); !slices.Equal(
+			got,
+			row.want,
+		) {
+			t.Fatalf("%s: worker argv = %q, want %q", row.name, got, row.want)
+		}
 	}
-	if plain.LogDir != "/jail/.local/state/pfm/log/restart" {
-		t.Fatalf("log dir = %q, want the jailed home's log root", plain.LogDir)
-	}
-	runtime.Config.MCPServers = map[string]config.MCPServer{"chat": {Enabled: true}}
-	configured := LiveDeps(runtime, &bytes.Buffer{}, nil, chatAddress{})
-	if configured.DaemonProbe == nil {
-		t.Fatalf("configured deps: daemon probe set %v", configured.DaemonProbe != nil)
+}
+
+// TestRestartUsageNamesEveryFlag: a stray argument prints the usage line,
+// which names --no-restore, and both entries accept the flag.
+func TestRestartUsageNamesEveryFlag(t *testing.T) {
+	for _, row := range []struct {
+		name  string
+		entry func(args []string, stdout, stderr io.Writer, runtime config.Runtime) int
+		args  []string
+		want  string
+	}{
+		{
+			name: "pfm restart", entry: Main, args: []string{"--no-restore", "stray"},
+			want: "usage: pfm restart [--dry-run] [--no-restore]\n",
+		},
+		{
+			name: "the worker", entry: Worker, args: []string{"--no-restore", "--front", "0"},
+			want: "usage: pfm internal restart-run --front PID [--launched-from SOCKET [--launched-pane PANE]] " +
+				"[--no-restore]\n",
+		},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := row.entry(row.args, &stdout, &stderr, config.Runtime{}); code != 2 || stderr.String() != row.want {
+			t.Fatalf("%s %q = %d, stderr %q; want 2, %q", row.name, row.args, code, stderr.String(), row.want)
+		}
 	}
 }

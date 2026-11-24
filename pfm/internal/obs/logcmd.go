@@ -156,8 +156,12 @@ func streamLog(
 ) int {
 	reader := bufio.NewReader(file)
 	unreadable := 0
+	// torn is the start of a record whose newline has not been written yet:
+	// it joins the rest when that arrives, never printed or dropped as a half.
+	torn := ""
 	for {
 		line, err := reader.ReadString('\n')
+		line, torn = torn+line, ""
 		if strings.HasSuffix(line, "\n") {
 			printed, readable := matchLog(line, filter)
 			if !readable {
@@ -175,6 +179,7 @@ func streamLog(
 		if !follow {
 			break
 		}
+		torn = line
 		if waitErr := timing.Sleep(ctx, followPoll); waitErr != nil {
 			break
 		}

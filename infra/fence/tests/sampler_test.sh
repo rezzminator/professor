@@ -45,28 +45,22 @@ lines() { # lines <var> <file>: the file's line count, without a process
   mapfile -t all 2> /dev/null < "$2"
   printf -v "$1" '%d' "${#all[@]}"
 }
-wait_lines() { # wait_lines <file> <count>: at least <count> lines in the file, a 10 s bound in 0.1 s ticks
-  local n=0 tick
-  for ((tick = 0; tick < 100; tick++)); do
-    lines n "$1"
-    ((n >= $2)) && return 0
-    sleep 0.1
-  done
-  return 1
+lines_at_least() { local n=0; lines n "$1"; ((n >= $2)); } # lines_at_least <file> <count>
+wait_lines() { # wait_lines <file> <count>: at least <count> lines in the file
+  shtest_wait_until "$1 holds $2 lines" lines_at_least "$1" "$2"
 }
-wait_exit() { # wait_exit <pid> <ticks>: the pid is gone within <ticks> 0.1 s ticks
-  local tick
-  for ((tick = 0; tick < $2; tick++)); do
-    kill -0 "$1" 2> /dev/null || return 0
-    sleep 0.1
-  done
-  return 1
+proc_state() { # proc_state <pid> <letter>: the process is in that state (/proc/<pid>/stat field 3)
+  local line
+  { read -r line < "/proc/$1/stat"; } 2> /dev/null || return 1
+  line=${line##*) }
+  [[ ${line:0:1} == "$2" ]]
 }
-# stop_sampler <pid> <signal>: send it, wait up to 3 s for the exit, KILL a sampler that ignored it;
-# GONE is yes when the signal alone ended it, RC is its exit status — a hung sampler cannot hang the suite
+# stop_sampler <pid> <signal>: send it, wait for the exit, KILL a sampler that ignored it to the door's
+# hung-only limit; GONE is yes when the signal alone ended it, RC is its exit status — a hung sampler
+# cannot hang the suite
 stop_sampler() {
   kill "-$2" "$1" 2> /dev/null
-  if wait_exit "$1" 30; then GONE=yes; else GONE=no; kill -KILL "$1" 2> /dev/null; fi
+  if shtest_wait_gone "the sampler $1 exits on $2" "$1"; then GONE=yes; else GONE=no; kill -KILL "$1" 2> /dev/null; fi
   wait "$1" 2> /dev/null
   RC=$?
 }
@@ -87,21 +81,25 @@ capture() {
 }
 
 # --- sampling ---------------------------------------------------------------
+# A 600 s interval, past the door's hung-only limit: the first row is written, then the sampler sleeps in
+# its wait (process state S; a sample starts no process and blocks on nothing else), and the stop writes
+# the one other row. The epoch is bounded by a file the test writes before the start and by the last
+# row's write, both stamped by the filesystem.
 fixtures
-before=$(date +%s)
 R=$T/s1/resources.tsv
 mkdir -p "$T/s1"
-bash "$SUT" run --out "$R" 2> "$T/s1.stderr" &
+: > "$T/s1/before"
+SAMPLER_INTERVAL_S=600 bash "$SUT" run --out "$R" 2> "$T/s1.stderr" &
 pid=$!
-wait_lines "$R" 3 && alive=yes || alive=no
+wait_lines "$R" 2 && alive=yes || alive=no
 kill -0 "$pid" 2> /dev/null && running=yes || running=no
 eq "sampling: rows are visible while the sampler runs (flushed as written)" "yes yes" "$alive $running"
-sleep 1.0
+shtest_wait_until "the sampler waits its interval after the first row" proc_state "$pid" S
 stop_sampler "$pid" TERM
-after=$(date +%s)
+before=$(stat -c %Y "$T/s1/before") after=$(stat -c %Y "$R")
 eq "sampling: the file starts with the contract header" "$HEADER" "$(head -n 1 "$R")"
 lines n "$R"
-if ((n <= 16)); then ok "sampling: a row about every interval, not faster ($((n - 1)) rows in ~1.2 s at 0.1 s)"; else bad "sampling: a row about every interval, not faster" "$n lines in $R"; fi
+if ((n == 3)); then ok "sampling: a row about every interval, not faster ($((n - 1)) rows: the first, then none until the stop's)"; else bad "sampling: a row about every interval, not faster" "$n lines in $R, want 3"; fi
 eq "sampling: every row has the 22 columns" 22 "$(awk -F'\t' '{print NF}' "$R" | sort -u | paste -sd, -)"
 eq "sampling: uptime_s is /proc/uptime field 1" 1000.000000 "$(uniq_col "$R" uptime_s)"
 epoch=$(uniq_col "$R" epoch_s)
@@ -154,33 +152,35 @@ stop_sampler "$pid" TERM
 eq "sampling: a source is read at every row (cg_cpu_s moved from 2.5 to 9)" "2.500000,9.000000" "$(uniq_col "$T/s2/resources.tsv" cg_cpu_s)"
 
 # --- spin_us is the time of SAMPLER_SPIN_ITERS loop iterations --------------
+# The wall time is the sampler's own: uptime_s through a link to the live /proc/uptime. A row reads uptime,
+# then spins, so every spin but the last row's lies between the first row's uptime and the last's.
 fixtures
 SAMPLER_SPIN_ITERS=1000 capture sp1
-spin_t0=$EPOCHREALTIME
+ln -sf /proc/uptime "$T/proc/uptime"
 SAMPLER_SPIN_ITERS=200000 capture sp2
-spin_t1=$EPOCHREALTIME
 small=$(col "$T/sp1/resources.tsv" spin_us | sort -n | sed -n 2p)
 large=$(col "$T/sp2/resources.tsv" spin_us | sort -n | sed -n 2p)
-spent=$(col "$T/sp2/resources.tsv" spin_us | awk '{ sum += $1 } END { print sum }')
-wall=$(( ${spin_t1/./} - ${spin_t0/./} ))
+spent=$(col "$T/sp2/resources.tsv" spin_us | sed '$d' | awk '{ sum += $1 } END { print sum }')
+wall=$(col "$T/sp2/resources.tsv" uptime_s | awk 'NR == 1 { a = $1 } { b = $1 } END { printf "%d", (b - a) * 1000000 + 10000 }') # + one /proc/uptime tick
 if ((spent <= wall && spent * 10 >= wall)); then ok "spin: spin_us is wall microseconds (${spent} µs of spinning in a ${wall} µs run)"; else bad "spin: spin_us is wall microseconds" "spin_us summed to ${spent} µs in a ${wall} µs run"; fi
 if ((large > small * 10)); then ok "spin: 200x the iterations take well over 10x the time ($small µs -> $large µs)"; else bad "spin: iterations scale spin_us" "1000 iterations: $small µs, 200000: $large µs"; fi
 
 # --- stop ---------------------------------------------------------------------
 fixtures
 mkdir -p "$T/st"
-SAMPLER_INTERVAL_S=60 bash "$SUT" run --out "$T/st/resources.tsv" 2> "$T/st.stderr" &
+# a 600 s interval, past the door's hung-only limit: only a stop felt in the wait ends the sampler in time
+SAMPLER_INTERVAL_S=600 bash "$SUT" run --out "$T/st/resources.tsv" 2> "$T/st.stderr" &
 pid=$!
 wait_lines "$T/st/resources.tsv" 2
 lines first "$T/st/resources.tsv"
 stop_sampler "$pid" TERM
 lines last "$T/st/resources.tsv"
-eq "stop: TERM exits 0 within 3 s although the interval is 60 s" "yes 0" "$GONE $RC"
+eq "stop: TERM exits 0 long before the 600 s interval ends" "yes 0" "$GONE $RC"
 eq "stop: TERM writes one final row" "2 3" "$first $last"
 eq "stop: the final row is complete" 22 "$(awk -F'\t' 'END { print NF }' "$T/st/resources.tsv")"
 # a background job of a script ignores INT unless job control is on, as it is for an interactive Ctrl-C
 set -m
-SAMPLER_INTERVAL_S=60 bash "$SUT" run --out "$T/st/int.tsv" 2> /dev/null &
+SAMPLER_INTERVAL_S=600 bash "$SUT" run --out "$T/st/int.tsv" 2> /dev/null &
 pid=$!
 set +m
 wait_lines "$T/st/int.tsv" 2
@@ -191,36 +191,44 @@ eq "stop: INT is a stop too: exit 0, one final row" "yes 0 3" "$GONE $RC $last"
 # --- parent gone --------------------------------------------------------------
 fixtures
 mkdir -p "$T/pg"
-sleep 600 &
+shtest_hold pg-parent &
 parent=$!
 SAMPLER_INTERVAL_S=0.3 bash "$SUT" run --out "$T/pg/resources.tsv" --parent "$parent" 2> "$T/pg.stderr" &
 pid=$!
-wait_lines "$T/pg/resources.tsv" 3
-sleep 0.7
+# four rows: the sampler found the parent alive at three interval ends
+wait_lines "$T/pg/resources.tsv" 5
 kill -0 "$pid" 2> /dev/null && alive=yes || alive=no
+# The parent dies while the sampler is stopped, so the row count at the death is exact: from there a
+# sampler that checks the parent every interval writes at most two rows (one it was about to write, the
+# final one).
+kill -STOP "$pid"
+shtest_wait_until "the sampler $pid is stopped" proc_state "$pid" T
 lines before "$T/pg/resources.tsv"
-t0=$EPOCHREALTIME
 kill "$parent"; wait "$parent" 2> /dev/null
-wait_exit "$pid" 30 && gone=yes || gone=no
-t1=$EPOCHREALTIME
+kill -CONT "$pid"
+shtest_wait_gone "the sampler exits once its parent is gone" "$pid" && gone=yes || gone=no
 [[ $gone == yes ]] || kill -KILL "$pid" 2> /dev/null
 wait "$pid"; rc=$?
 lines after "$T/pg/resources.tsv"
-waited=$(( (${t1/./} - ${t0/./}) / 1000 ))
 eq "parent gone: the sampler runs while the parent lives" yes "$alive"
 eq "parent gone: the sampler exits 0 once the parent is gone" "yes 0" "$gone $rc"
-if ((waited <= 2000)); then ok "parent gone: it exits within two intervals (${waited} ms of 0.3 s intervals, 2 s bound for load)"; else bad "parent gone: exits within two intervals" "${waited} ms"; fi
+if ((after - before <= 2)); then ok "parent gone: it exits within two intervals ($((after - before)) rows after the parent died)"; else bad "parent gone: exits within two intervals" "$((after - before)) rows after the parent died, want 2 at most" "file: $T/pg/resources.tsv"; fi
 if ((after > before)); then ok "parent gone: a final row was written after the parent died"; else bad "parent gone: a final row" "rows $before -> $after"; fi
 eq "parent gone: nothing on stderr" "" "$(cat "$T/pg.stderr")"
-# a zombie parent (exited, not reaped) is gone too
-bash -c 'sleep 0.2 & echo $!; exec sleep 600' > "$T/zombie.pid" &
+# a zombie parent (exited, not reaped) is gone too: its parent execs a holder that never reaps, then the
+# test lets it exit
+mkfifo "$T/zombie.release"
+( cat "$T/zombie.release" > /dev/null & echo $!; shtest_hold zombie-reaper ) > "$T/zombie.pid" &
 holder=$!
 wait_lines "$T/zombie.pid" 1
 zpid=$(< "$T/zombie.pid")
-sleep 0.5
+reaper_held() { [[ $(tr '\0' ' ' < "/proc/$holder/cmdline" 2> /dev/null) == "shtest-hold zombie-reaper "* ]]; }
+shtest_wait_until "the zombie's parent holds without reaping" reaper_held
+: > "$T/zombie.release"
+shtest_wait_until "the parent $zpid is a zombie" proc_state "$zpid" Z
 SAMPLER_INTERVAL_S=0.3 bash "$SUT" run --out "$T/pg/zombie.tsv" --parent "$zpid" 2> /dev/null &
 pid=$!
-wait_exit "$pid" 30 && gone=yes || gone=no
+shtest_wait_gone "the sampler exits on a zombie parent" "$pid" && gone=yes || gone=no
 [[ $gone == yes ]] || kill -KILL "$pid" 2> /dev/null
 wait "$pid"; rc=$?
 kill "$holder" 2> /dev/null; wait "$holder" 2> /dev/null
@@ -297,24 +305,20 @@ stop_sampler "$pid" TERM
 eq "missing source: --out without .tsv logs to <out>.err" "cg_mem_peak_mb" "$(cut -f1 "$T/plain/samples.err" 2> /dev/null)"
 
 # --- clock step ---------------------------------------------------------------
-# /proc/uptime rises 5 s per 0.05 s of wall time: epoch_s must follow it (it is
-# anchored on uptime, never re-read from the wall clock) and never go backwards.
+# /proc/uptime rises 5 s at each row the sampler writes, far faster than the wall clock: epoch_s must follow
+# it (it is anchored on uptime, never re-read from the wall clock) and never go backwards.
 fixtures
 mkdir -p "$T/cs"
-(
-  up=1000
-  while :; do
-    up=$((up + 5))
-    echo "$up.00 3000.00" > "$T/proc/uptime.new" && mv "$T/proc/uptime.new" "$T/proc/uptime"
-    sleep 0.05
-  done
-) &
-updater=$!
 bash "$SUT" run --out "$T/cs/resources.tsv" 2> /dev/null &
 pid=$!
-wait_lines "$T/cs/resources.tsv" 6
+up=1000
+for n in 3 4 5 6; do
+  wait_lines "$T/cs/resources.tsv" "$n"
+  up=$((up + 5))
+  echo "$up.00 3000.00" > "$T/proc/uptime.new" && mv "$T/proc/uptime.new" "$T/proc/uptime"
+done
+wait_lines "$T/cs/resources.tsv" 8
 stop_sampler "$pid" TERM
-kill "$updater" 2> /dev/null; wait "$updater" 2> /dev/null
 verdict=$(awk -F'\t' 'NR == 2 { e0 = $1; u0 = $2 } NR > 2 { if ($1 < prev) back++; if (($1 - e0) - ($2 - u0) > 0.000002 || ($2 - u0) - ($1 - e0) > 0.000002) off++; if ($2 > u0 + 4) rose++ } { prev = $1 } END { printf "backwards=%d off=%d rose=%d", back, off, rose }' "$T/cs/resources.tsv")
 case $verdict in
   "backwards=0 off=0 rose="[1-9]*) ok "clock step: epoch_s rises exactly with /proc/uptime, never backwards ($verdict)" ;;

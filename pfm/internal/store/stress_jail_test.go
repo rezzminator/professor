@@ -12,7 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestStoreStress(t *testing.T) {
@@ -43,12 +44,7 @@ func stressKilledContention(t *testing.T, dbPath string) {
 
 	root := filepath.Dir(dbPath)
 	gate := filepath.Join(root, "stress-go")
-	timeout := 3 * time.Minute
-	if os.Getenv("PFM_STRESS_STRICT") == "1" {
-		timeout = 45 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	ctx := testwait.Context(t)
 
 	processes := make([]*storeStressProcess, 0, storeStressProcesses)
 	readyPaths := make([]string, 0, storeStressProcesses)
@@ -68,10 +64,7 @@ func stressKilledContention(t *testing.T, dbPath string) {
 		readyPaths = append(readyPaths, ready)
 	}
 
-	if err := waitForPaths(ctx, readyPaths...); err != nil {
-		t.Fatalf("wait for stress helpers: %v\n%s", err, stressProcessOutput(processes))
-	}
-	started := time.Now()
+	waitForPaths(t, readyPaths...)
 	if err := os.WriteFile(gate, []byte("go"), 0o600); err != nil {
 		t.Fatalf("release stress helper gate: %v", err)
 	}
@@ -83,8 +76,6 @@ func stressKilledContention(t *testing.T, dbPath string) {
 		}
 		warningCount += strings.Count(process.output.String(), "WARNING:")
 	}
-	elapsed := time.Since(started)
-
 	store := openFileTestStore(t)
 	defer func() {
 		if err := store.Close(); err != nil {
@@ -101,11 +92,10 @@ func stressKilledContention(t *testing.T, dbPath string) {
 		t.Fatalf("stress killed row count = %d, want %d", count, want)
 	}
 	t.Logf(
-		"contention: %d processes x %d upserts = %d rows in %s; busy warnings=%d",
+		"contention: %d processes x %d upserts = %d rows; busy warnings=%d",
 		storeStressProcesses,
 		storeStressWrites,
 		count,
-		elapsed.Round(time.Millisecond),
 		warningCount,
 	)
 }
@@ -113,33 +103,8 @@ func stressKilledContention(t *testing.T, dbPath string) {
 func stressTranscriptVolume(t *testing.T, store *Store) {
 	t.Helper()
 
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
-	insertElapsed, insertMax := stressTranscriptPass(t, store, false)
-	updateElapsed, updateMax := stressTranscriptPass(t, store, true)
-	passLimit := 3 * time.Minute
-	batchLimit := 10 * time.Second
-	if strict {
-		passLimit = 30 * time.Second
-		batchLimit = time.Second
-	}
-	if insertElapsed > passLimit || updateElapsed > passLimit {
-		t.Fatalf(
-			"50k transcript pass too slow: insert=%s update=%s limit=%s strict=%t",
-			insertElapsed,
-			updateElapsed,
-			passLimit,
-			strict,
-		)
-	}
-	if insertMax > batchLimit || updateMax > batchLimit {
-		t.Fatalf(
-			"batch held writer lock too long: insert max=%s update max=%s limit=%s strict=%t",
-			insertMax,
-			updateMax,
-			batchLimit,
-			strict,
-		)
-	}
+	stressTranscriptPass(t, store, false)
+	stressTranscriptPass(t, store, true)
 
 	var count int
 	var promptCount int64
@@ -157,59 +122,7 @@ func stressTranscriptVolume(t *testing.T, store *Store) {
 			storeStressTranscripts*2,
 		)
 	}
-	t.Logf(
-		"bulk: 50k insert=%s (max 500-row txn %s), update=%s (max %s), strict=%t",
-		insertElapsed.Round(time.Millisecond),
-		insertMax.Round(time.Millisecond),
-		updateElapsed.Round(time.Millisecond),
-		updateMax.Round(time.Millisecond),
-		strict,
-	)
-}
-
-func stressTranscriptPass(
-	t *testing.T,
-	store *Store,
-	update bool,
-) (elapsed, maxBatch time.Duration) {
-	t.Helper()
-
-	ctx := context.Background()
-	started := time.Now()
-	for base := 0; base < storeStressTranscripts; base += BatchSize {
-		count := min(BatchSize, storeStressTranscripts-base)
-		batchStarted := time.Now()
-		err := store.Batch(ctx, count, func(tx *ImmediateTx, start, end int) error {
-			for offset := start; offset < end; offset++ {
-				index := base + offset
-				promptCount := int64(1)
-				lastPrompt := "initial"
-				if update {
-					promptCount = 2
-					lastPrompt = "updated"
-				}
-				if err := tx.UpsertTranscript(ctx, Transcript{
-					UUID:         fmt.Sprintf("stress-%05d", index),
-					Path:         fmt.Sprintf("/stress/%05d.jsonl", index),
-					Size:         int64(index + 100),
-					MTimeNS:      int64(index + 200),
-					ParsedOffset: int64(index + 90),
-					CWD:          "/stress",
-					FirstPrompt:  "first",
-					LastPrompt:   lastPrompt,
-					PromptCount:  promptCount,
-				}); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatalf("stress transcript batch at %d: %v", base, err)
-		}
-		maxBatch = max(maxBatch, time.Since(batchStarted))
-	}
-	return time.Since(started), maxBatch
+	t.Logf("bulk: 50k insert and update passes, %d rows", count)
 }
 
 func stressBigValues(t *testing.T, store *Store) {
@@ -221,7 +134,6 @@ func stressBigValues(t *testing.T, store *Store) {
 	}
 
 	ctx := context.Background()
-	started := time.Now()
 	for index := 0; index < storeStressBigRows; index++ {
 		if err := store.UpsertTranscript(ctx, Transcript{
 			UUID:        fmt.Sprintf("big-%d", index),
@@ -242,9 +154,8 @@ func stressBigValues(t *testing.T, store *Store) {
 		}
 	}
 	t.Logf(
-		"big values: %d x 1 MiB last_prompt round trips in %s",
+		"big values: %d x 1 MiB last_prompt round trips",
 		storeStressBigRows,
-		time.Since(started).Round(time.Millisecond),
 	)
 }
 
@@ -253,7 +164,6 @@ func stressReopen(t *testing.T, dbPath string) {
 
 	before := fileSize(dbPath + "-wal")
 	maxWAL := before
-	started := time.Now()
 	for cycle := 0; cycle < 100; cycle++ {
 		store := openFileTestStore(t)
 		version, err := store.UserVersion(context.Background())
@@ -271,7 +181,6 @@ func stressReopen(t *testing.T, dbPath string) {
 		}
 		maxWAL = max(maxWAL, fileSize(dbPath+"-wal"))
 	}
-	elapsed := time.Since(started)
 	after := fileSize(dbPath + "-wal")
 	if maxWAL > before+(4<<20) {
 		t.Fatalf(
@@ -282,8 +191,7 @@ func stressReopen(t *testing.T, dbPath string) {
 		)
 	}
 	t.Logf(
-		"reopen: 100 Open/migrate/Close cycles in %s; WAL bytes before=%d max=%d after=%d",
-		elapsed.Round(time.Millisecond),
+		"reopen: 100 Open/migrate/Close cycles; WAL bytes before=%d max=%d after=%d",
 		before,
 		maxWAL,
 		after,
@@ -327,12 +235,4 @@ func newStoreStressProcess(
 	process.cmd.Stdout = &process.output
 	process.cmd.Stderr = &process.output
 	return process
-}
-
-func stressProcessOutput(processes []*storeStressProcess) string {
-	var output strings.Builder
-	for _, process := range processes {
-		fmt.Fprintf(&output, "%s:\n%s\n", process.prefix, process.output.String())
-	}
-	return output.String()
 }

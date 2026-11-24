@@ -18,6 +18,39 @@ type Process struct {
 	Argv  []string `json:"argv"`
 }
 
+// IsEngine reports whether process is engine's executable, by the engine
+// package's matcher over its name, argv0 and argv: a Claude native build is
+// named by its version, and Herdr now and then lists one with an empty argv.
+func (process Process) IsEngine(engine pfmengine.ID) bool {
+	for _, argv := range [][]string{{process.Name}, {process.Argv0}, process.Argv} {
+		if pfmengine.MatchCommand(engine, argv, engine == pfmengine.Claude) {
+			return true
+		}
+	}
+	return false
+}
+
+// RunsEngine reports whether process runs engine's program, judged by the
+// command it runs alone (its argv0, else its argv, else its name, through the
+// engine package's matcher): unlike IsEngine, a child an engine's executable
+// runs under another argv0 (Claude native runs its bundled rg so, named by
+// Claude's version) is not the engine, so a reload never takes its pid.
+func (process Process) RunsEngine(engine pfmengine.ID) bool {
+	command := process.Argv
+	switch {
+	case process.Argv0 != "":
+		command = []string{process.Argv0}
+	case len(command) == 0:
+		command = []string{process.Name}
+	}
+	return pfmengine.MatchCommand(engine, command, engine == pfmengine.Claude)
+}
+
+// String names process as Herdr listed it, for a refusal that says what it read.
+func (process Process) String() string {
+	return fmt.Sprintf("pid %d name %q argv0 %q argv %q", process.PID, process.Name, process.Argv0, process.Argv)
+}
+
 // PaneProcesses is a pane's processes as Herdr's pane.process_info names them.
 type PaneProcesses struct {
 	// Pane is the canonical pane id Herdr answered for.
@@ -115,9 +148,7 @@ func EngineForeground(processes PaneProcesses, pane string, engine pfmengine.ID)
 			unidentified = true
 			continue
 		}
-		for _, argv := range [][]string{{process.Name}, {process.Argv0}, process.Argv} {
-			present = present || pfmengine.MatchCommand(engine, argv, engine == pfmengine.Claude)
-		}
+		present = present || process.IsEngine(engine)
 	}
 	if !present && unidentified {
 		return false, fmt.Errorf("read Herdr processes in %s: process has no valid pid or identity", pane)

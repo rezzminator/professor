@@ -44,7 +44,7 @@ U — both databases are temp/local and the concurrency seam is in-process.
 
 **Source:** [pfm/internal/reload/reload_then_proof_test.go](../../../pfm/internal/reload/reload_then_proof_test.go) line 226 · **Observed:** 0.00s · **Class:** injected fake seams
 
-fakeReloadTmux; fakeReloadProc; clock.NewFake; driveFakeClock; deliverThen.
+fakeReloadTmux; fakeReloadProc; clock.NewFake; testwait.Drive; deliverThen.
 
 U — no process or real clock; reload proof is already seam-driven.
 
@@ -52,7 +52,7 @@ U — no process or real clock; reload proof is already seam-driven.
 
 **Source:** [pfm/internal/reload/reload_then_proof_test.go](../../../pfm/internal/reload/reload_then_proof_test.go) line 148 · **Observed:** 0.00s · **Class:** injected fake seams
 
-stalePlaceholderScrollbackTmux; fakeReloadProc; clock.NewFake; driveFakeClock; deliverThen.
+stalePlaceholderScrollbackTmux; fakeReloadProc; clock.NewFake; testwait.Drive; deliverThen.
 
 U — local fake tmux/process and fake clock isolate the proof.
 
@@ -108,7 +108,7 @@ U — temp SQLite and parser validation are local package seams.
 
 **Source:** [pfm/internal/headless/converse_test.go](../../../pfm/internal/headless/converse_test.go) line 335 · **Observed:** 2.02s · **Class:** timer/file concurrency
 
-newConversation file transcript; entryProgressGate; goroutine writes; Await uses real poll timers and a 2 s settle.
+newConversation file transcript; run.step drives each write; Await polls and settles on a fake clock.
 
 mock seam — inject wait/clock boundary so latest-question ordering stays U without wall-clock settle time.
 

@@ -30,7 +30,8 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 		_, writeErr := fmt.Fprintln(persisted, loadErr)
 		return errors.Join(loadErr, writeErr)
 	}
-	run, err := newHerdrIndicatorRun(&runtime, persisted)
+	lifecycle := tabIndicatorWarnings{dir: lockDir, stderr: stderr, info: true}
+	run, err := newHerdrIndicatorRun(&runtime, persisted, lifecycle)
 	if err != nil {
 		_, writeErr := fmt.Fprintln(persisted, err)
 		return errors.Join(err, writeErr)
@@ -40,11 +41,13 @@ func PaintHerdrIndicators(ctx context.Context, socket, lockDir string, stderr io
 			returnErr = errors.Join(returnErr, fmt.Errorf("close the tab indicators' fleet store: %w", err))
 		}
 	}()
+	// The painter persists its own diagnostics in the indicators log; only
+	// stderr is shared, so one event is one row.
 	return herdr.PaintIndicatorsWithTabs(
 		ctx,
 		socket,
 		lockDir,
-		persisted,
+		stderr,
 		run.provider.tabs,
 		run.provider.changed,
 		run.provePane,
@@ -62,9 +65,10 @@ type herdrIndicatorRun struct {
 }
 
 // newHerdrIndicatorRun builds a painter run over runtime; persisted receives
-// its diagnostics, each per-chat one named once while it recurs (tickWarnings).
-func newHerdrIndicatorRun(runtime *pfmconfig.Runtime, persisted io.Writer) (*herdrIndicatorRun, error) {
-	warnings := &tickWarnings{out: persisted}
+// its diagnostics and lifecycle its expected lifecycle outcomes, each per-chat
+// one named once while it recurs (tickWarnings).
+func newHerdrIndicatorRun(runtime *pfmconfig.Runtime, persisted, lifecycle io.Writer) (*herdrIndicatorRun, error) {
+	warnings := &tickWarnings{out: persisted, info: lifecycle}
 	proc := gather.NewProcFS(runtime.Paths.ProcRoot)
 	inspector := NewSeatInspector(runtime)
 	run := &herdrIndicatorRun{held: store.NewHeld(store.WithWarningWriter(persisted))}
@@ -99,9 +103,10 @@ func newHerdrIndicatorRun(runtime *pfmconfig.Runtime, persisted io.Writer) (*her
 		return scanFleetRows(ctx, database, persisted, runtime)
 	}
 	run.reader = tabViewReader{
-		runtime: runtime,
-		warn:    warnings,
-		tmux:    gather.TmuxRead,
+		runtime:   runtime,
+		warn:      warnings,
+		lifecycle: warnings.lifecycle(),
+		tmux:      gather.TmuxRead,
 		resolve: herdr.WireResolver(
 			proc.Environ,
 			herdr.Call,
@@ -191,4 +196,28 @@ func nativeSeatIn(
 		found = false
 	}
 	return seat, found, returnErr
+}
+
+// tabIndicatorWarnings persists each diagnostic in the tab-status log: an
+// error row, or an INFO row when info (an expected lifecycle outcome).
+type tabIndicatorWarnings struct {
+	dir    string
+	stderr io.Writer
+	info   bool
+}
+
+func (writer tabIndicatorWarnings) Write(body []byte) (int, error) {
+	if writer.stderr != nil {
+		if _, err := writer.stderr.Write(body); err != nil {
+			return 0, fmt.Errorf("write tab diagnostic: %w", err)
+		}
+	}
+	appendRow := herdr.AppendError
+	if writer.info {
+		appendRow = herdr.AppendInfo
+	}
+	if err := appendRow(writer.dir, "tab-status", clock.Real.Now(), string(body)); err != nil {
+		return 0, fmt.Errorf("persist tab diagnostic: %w", err)
+	}
+	return len(body), nil
 }

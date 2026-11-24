@@ -41,16 +41,36 @@ mkdir -p "$PFM_FENCE_CGROUP_ROOT"
 printf '%s\n' 5368709120 > "$PFM_FENCE_CGROUP_ROOT/memory.max"
 printf '%s\n' 1073741824 > "$PFM_FENCE_CGROUP_ROOT/memory.current"
 
-beat() { while printf '.\n' 2>/dev/null; do sleep 0.3; done; }
-srun() { # srun <id> <mode> <command string>: a run with a live heartbeat; prints its output
-  beat | bash "$SUT" run "$1" "$2" "$TREE" - wt -- bash -c "$3" 2>&1
-  return "${PIPESTATUS[1]}" # the beat dies of SIGPIPE once the run ends; the run's code is the verdict
+# A run's command waits through the wait door, copied into its tree (/worktree/shtest-wait.sh); runs
+# meet and are released through the worktree's timing base, $TIMING outside and /pfm-timing inside.
+cp "$FENCE/../../scripts/shtest-wait.sh" "$TREE/shtest-wait.sh"
+TIMING="$FENCE_HOST_DIR/wt/timing"
+mkdir -p "$TIMING"
+srun() { # srun <id> <mode> <command string>: a run whose caller holds its heartbeat stream open; prints its output
+  # One beat, then the stream stays open without another until the run ends: the run's monitor waits
+  # PFM_FENCE_HEARTBEAT_S=120 (the hung-only limit) for the next. The heartbeat kills have their own runs below.
+  local beat="$T/beat.$1" holder rc=0
+  mkfifo "$beat"
+  { printf '.\n'; shtest_hold "beat-$1"; } >"$beat" &
+  holder=$!
+  PFM_FENCE_HEARTBEAT_S=120 bash "$SUT" run "$1" "$2" "$TREE" - wt -- bash -c "$3" <"$beat" 2>&1 || rc=$?
+  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null; rm -f "$beat"
+  return "$rc"
 }
-wait_for() { # wait_for <path>: up to 10 s
-  local i
-  for ((i = 0; i < 100; i++)); do [ -e "$1" ] && return 0; sleep 0.1; done
-  return 1
+release() { # release <fifo>: lets the command blocked reading the FIFO go on (its read sees EOF)
+  # The open blocks until a reader opens the FIFO, so it runs apart under the wait door: a reader that
+  # died reports a hung wait and a FAIL, never a suite held to its step's timeout.
+  (: >"$1") &
+  local writer=$!
+  shtest_wait_gone "a reader takes the release of $1" "$writer" && return 0
+  kill "$writer" 2>/dev/null
+  wait "$writer" 2>/dev/null
+  bad "release $1" "no reader opened the FIFO: the command meant to read it is gone"
 }
+# A run's command that holds until killed goes through the wait door's shtest_hold. The marker is this
+# test's alone: the gate runs other suites' processes in this pid namespace.
+hold_cmd() { printf ". /worktree/shtest-wait.sh; shtest_hold '%s.%s'" "$1" "$$"; } # hold_cmd <run id>
+holding() { pgrep -f "^shtest-hold $1.$$ " >/dev/null; } # holding <run id>: the run's command is alive
 
 # --- exit code, tree, cwd -----------------------------------------------------------------------------
 out="$(srun r-exit shared 'exit 7')"; rc=$?
@@ -134,7 +154,11 @@ printf '%s\n' 5368709120 > "$PFM_FENCE_CGROUP_ROOT/memory.max"
 printf '%s\n' 1073741824 > "$PFM_FENCE_CGROUP_ROOT/memory.current"
 
 # --- per-run fixed paths ----------------------------------------------------------------------------------
-fixed='for d in /tmp /root /var/tmp /dev/shm; do echo "$ID" > "$d/fixed"; done; sleep 1.5
+# Each run writes its fixed paths, marks it, and reads them back only once the other has written its own.
+fixed='. /worktree/shtest-wait.sh
+for d in /tmp /root /var/tmp /dev/shm; do echo "$ID" > "$d/fixed"; done; : > "/pfm-timing/fixed-$ID"
+both_wrote() { [ -e /pfm-timing/fixed-a ] && [ -e /pfm-timing/fixed-b ]; }
+shtest_wait_until "the other run writes its fixed paths" both_wrote || exit 1
 for d in /tmp /root /var/tmp /dev/shm; do [ "$(cat "$d/fixed")" = "$ID" ] || { echo "$d/fixed is $(cat "$d/fixed"), not $ID"; exit 1; }; done'
 ( out="$(srun r-fa shared "ID=a; $fixed")"; echo "$?" >"$T/fa.rc"; printf '%s\n' "$out" >"$T/fa.out" ) &
 ( out="$(srun r-fb shared "ID=b; $fixed")"; echo "$?" >"$T/fb.rc"; printf '%s\n' "$out" >"$T/fb.out" ) &
@@ -149,19 +173,37 @@ out="$(srun r-hide shared '[ -z "$(ls -A /mnt/state)" ] && [ -z "$(ls -A /mnt/ho
 if [ "$rc" = 0 ]; then ok "a run sees neither the state directory nor the host directory"; else bad "a run sees the state or host directory" "$out"; fi
 
 # --- live record, PFM_FENCE_CONCURRENT, pid namespace -------------------------------------------------------
-( srun r-la shared 'echo "$PFM_FENCE_CONCURRENT" > /pfm-timing/conc-a; sleep 3' >"$T/la.out" ) &
-wait_for "$FENCE_HOST_DIR/wt/timing/conc-a" || bad "run r-la never started" "$(cat "$T/la.out")"
+# r-la holds its command until r-lb has looked for it, then the test kills the hold.
+( srun r-la shared "echo \"\$PFM_FENCE_CONCURRENT\" > /pfm-timing/conc-a; $(hold_cmd r-la)" >"$T/la.out" ) &
+la=$!
+la_holds() { [ -s "$TIMING/conc-a" ] && holding r-la; }
+shtest_wait_until "run r-la holds its command" la_holds || bad "run r-la never started" "$(cat "$T/la.out")"
 if [ -n "$(cat "$FENCE_STATE_DIR/live/r-la" 2>/dev/null)" ]; then ok "a live run has its live record"; else bad "no live record for a live run" "$(ls -R "$FENCE_STATE_DIR")"; fi
-out="$(srun r-lb shared 'echo "$PFM_FENCE_CONCURRENT" > /pfm-timing/conc-b; n=$(ls -d /proc/[0-9]* | wc -l); [ "$n" -lt 12 ] || { echo "$n processes visible"; exit 1; }; ! pgrep -x sleep')"; rc=$?
-if [ "$rc" = 0 ]; then ok "a run sees only its own processes (another run's sleep is invisible)"; else bad "a run sees other runs' processes" "$out"; fi
+out="$(srun r-lb shared 'echo "$PFM_FENCE_CONCURRENT" > /pfm-timing/conc-b; n=$(ls -d /proc/[0-9]* | wc -l); [ "$n" -lt 12 ] || { echo "$n processes visible"; exit 1; }; ! pgrep -f "^shtest-hold r-la"')"; rc=$?
+if [ "$rc" = 0 ]; then ok "a run sees only its own processes (another run's hold is invisible)"; else bad "a run sees other runs' processes" "$out"; fi
 if [ "$(cat "$FENCE_HOST_DIR/wt/timing/conc-b")" = 2 ]; then ok "PFM_FENCE_CONCURRENT counts the live runs, this one included"
 else bad "PFM_FENCE_CONCURRENT" "conc-a=$(cat "$FENCE_HOST_DIR/wt/timing/conc-a") conc-b=$(cat "$FENCE_HOST_DIR/wt/timing/conc-b")"; fi
+pkill -f "^shtest-hold r-la.$$ "
+shtest_wait_gone "run r-la ends" "$la"
 wait
 
 # --- private network ------------------------------------------------------------------------------------
-port='python3 -c "import socket,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0); s.bind((\"127.0.0.1\", 18765)); s.listen(1); time.sleep(1.5)"'
-( srun r-pa private "$port" >"$T/pa.out"; echo "$?" >"$T/pa.rc" ) &
-( srun r-pb private "$port" >"$T/pb.out"; echo "$?" >"$T/pb.rc" ) &
+# Each run binds the fixed port, marks it bound, and holds the socket until both are bound at once.
+cat >"$T/tree/port.py" <<'PORT'
+import socket, sys
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0); s.bind(("127.0.0.1", 18765)); s.listen(1)
+open("/pfm-timing/port-" + sys.argv[1], "w").close()
+open("/pfm-timing/port-" + sys.argv[1] + ".hold").read()
+PORT
+mkfifo "$TIMING/port-a.hold" "$TIMING/port-b.hold"
+( srun r-pa private 'python3 /worktree/port.py a' >"$T/pa.out"; echo "$?" >"$T/pa.rc" ) &
+pa=$!
+( srun r-pb private 'python3 /worktree/port.py b' >"$T/pb.out"; echo "$?" >"$T/pb.rc" ) &
+pb=$!
+both_bound() { [ -e "$TIMING/port-a" ] && [ -e "$TIMING/port-b" ]; }
+shtest_wait_until "both private runs hold port 18765" both_bound
+for x in a b; do [ ! -e "$TIMING/port-$x" ] || release "$TIMING/port-$x.hold"; done
+shtest_wait_gone "run r-pa ends" "$pa"; shtest_wait_gone "run r-pb ends" "$pb"
 wait
 if [ "$(cat "$T/pa.rc")" = 0 ] && [ "$(cat "$T/pb.rc")" = 0 ]; then ok "two concurrent private runs bind the same fixed port"
 else bad "two private runs on one port" "$(cat "$T/pa.out" "$T/pb.out")"; fi
@@ -169,32 +211,39 @@ out="$(srun r-pc private 'python3 -c "import socket; socket.create_connection((\
 if [ "$rc" = 0 ]; then ok "a private run has lo up and no outside connection"; else bad "a private run's network" "$out"; fi
 
 # --- the heartbeat kill -----------------------------------------------------------------------------------
-start=$(date +%s)
-eof_sleep="sleep 60.$$" # a marker of this test alone: the gate runs other suites' sleeps in this pid namespace
-out="$( { printf '.\n'; sleep 1; } | bash "$SUT" run r-eof shared "$TREE" - wt -- bash -c "$eof_sleep" 2>&1)"; rc=$?
-el=$(( $(date +%s) - start ))
-if [ "$rc" != 0 ] && [ "$el" -le 5 ]; then ok "a heartbeat EOF kills the run within 5 s (${el}s)"; else bad "a heartbeat EOF kill" "rc=$rc after ${el}s" "$out"; fi
+# Each run's command holds until killed (hold_cmd): a run that ends at all was killed, and the door's
+# hung-only limit turns a kill that never comes into a failure.
+# The heartbeat EOF: one beat, then the caller closes the stream once the run's command holds.
+( { printf '.\n'; shtest_wait_until "run r-eof holds its command" holding r-eof; } \
+  | bash "$SUT" run r-eof shared "$TREE" - wt -- bash -c "$(hold_cmd r-eof)" >"$T/eof.out" 2>&1; echo "${PIPESTATUS[1]}" >"$T/eof.rc" ) &
+eof_run=$!
+shtest_wait_gone "run r-eof is killed" "$eof_run" || { bad "a heartbeat EOF kill" "run r-eof was not killed: the test kills it"; bash "$SUT" kill r-eof; }
+wait "$eof_run"
+out="$(cat "$T/eof.out")"; rc="$(cat "$T/eof.rc")"
+if [ "$rc" != 0 ]; then ok "a heartbeat EOF kills the run"; else bad "a heartbeat EOF kill" "rc=$rc" "$out"; fi
 if grep -qF 'shared-run: the caller of run r-eof is gone (heartbeat ended) — killing the run' <<<"$out"; then ok "the EOF kill is named"; else bad "the EOF kill is named" "$out"; fi
-if ! pgrep -f "$eof_sleep" >/dev/null; then ok "a killed run leaves no process"; else bad "a killed run left a process" "$(pgrep -af "$eof_sleep")"; fi
+if ! holding r-eof; then ok "a killed run leaves no process"; else bad "a killed run left a process" "$(pgrep -af "shtest-hold r-eof")"; fi
 # The stalled caller: a writer holding the run's stdin open without a beat. A fifo, not < <(…): the
 # command substitution would wait for its process substitution's exit.
 mkfifo "$T/stall"
-( exec 4>"$T/stall"; exec sleep 30 ) &
+( exec 4>"$T/stall"; shtest_hold stall-writer ) &
 stall_writer=$!
-start=$(date +%s)
-out="$(bash "$SUT" run r-stall shared "$TREE" - wt -- bash -c 'sleep 61' 2>&1 <"$T/stall")"; rc=$?
-el=$(( $(date +%s) - start ))
+( bash "$SUT" run r-stall shared "$TREE" - wt -- bash -c "$(hold_cmd r-stall)" <"$T/stall" >"$T/stall.out" 2>&1; echo "$?" >"$T/stall.rc" ) &
+stall_run=$!
+shtest_wait_gone "run r-stall is killed" "$stall_run" || { bad "a stalled heartbeat kill" "run r-stall was not killed: the test kills it"; bash "$SUT" kill r-stall; }
+wait "$stall_run"
+out="$(cat "$T/stall.out")"; rc="$(cat "$T/stall.rc")"
 kill "$stall_writer" 2>/dev/null
-if [ "$rc" != 0 ] && [ "$el" -le 5 ]; then ok "a stalled heartbeat kills the run after PFM_FENCE_HEARTBEAT_S (${el}s)"; else bad "a stalled heartbeat kill" "rc=$rc after ${el}s" "$out"; fi
-if ! pgrep -f 'sleep 61' >/dev/null; then ok "a stalled run leaves no process"; else bad "a stalled run left a process" "$(pgrep -af 'sleep 61')"; fi
-( srun r-kill shared 'sleep 62' >"$T/kill.out"; echo "$?" >"$T/kill.rc" ) &
-wait_for "$FENCE_STATE_DIR/runs/r-kill/ns.pid" || bad "run r-kill never started" "$(cat "$T/kill.out")"
-start=$(date +%s)
+if [ "$rc" != 0 ]; then ok "a stalled heartbeat kills the run after PFM_FENCE_HEARTBEAT_S"; else bad "a stalled heartbeat kill" "rc=$rc" "$out"; fi
+if ! holding r-stall; then ok "a stalled run leaves no process"; else bad "a stalled run left a process" "$(pgrep -af 'shtest-hold r-stall')"; fi
+( srun r-kill shared "$(hold_cmd r-kill)" >"$T/kill.out"; echo "$?" >"$T/kill.rc" ) &
+kill_run=$!
+shtest_wait_until "run r-kill holds its command" holding r-kill || bad "run r-kill never started" "$(cat "$T/kill.out")"
 bash "$SUT" kill r-kill
+shtest_wait_gone "run r-kill ends" "$kill_run"
 wait
-el=$(( $(date +%s) - start ))
-if [ "$(cat "$T/kill.rc")" != 0 ] && [ "$el" -le 3 ] && ! pgrep -f 'sleep 62' >/dev/null; then ok "kill <id> ends the run and all it holds (${el}s)"
-else bad "kill <id>" "rc=$(cat "$T/kill.rc") after ${el}s" "$(pgrep -af 'sleep 62')"; fi
+if [ "$(cat "$T/kill.rc")" != 0 ] && ! holding r-kill; then ok "kill <id> ends the run and all it holds"
+else bad "kill <id>" "rc=$(cat "$T/kill.rc")" "$(pgrep -af 'shtest-hold r-kill')"; fi
 
 # --- closing, markers, tty, refusals ----------------------------------------------------------------------
 mkdir -p "$FENCE_STATE_DIR/closing"
@@ -208,7 +257,13 @@ out="$(srun r-mark shared 'echo hi > /pfm-run/note')"; rc=$?
 if [ "$rc" = 0 ] && [ -e "$FENCE_HOST_DIR/.runs/r-mark/started" ] && [ "$(cat "$FENCE_HOST_DIR/.runs/r-mark/note")" = hi ]; then
   ok "a run marks its host directory started and writes it on /pfm-run"
 else bad "the started marker and /pfm-run" "rc=$rc" "$out"; fi
-out="$(bash "$SUT" run r-tty tty "$TREE" - wt -- bash -c 'sleep 3; exit 3' </dev/null 2>&1)"; rc=$?
+# A tty run on a closed stdin lives on until its caller releases it: no heartbeat monitor reads that EOF.
+mkfifo "$TIMING/tty.hold"
+( bash "$SUT" run r-tty tty "$TREE" - wt -- bash -c ': > /pfm-timing/tty-up; cat /pfm-timing/tty.hold; exit 3' </dev/null >"$T/tty.out" 2>&1; echo "$?" >"$T/tty.rc" ) &
+tty_run=$!
+shtest_wait_until "the tty run r-tty starts" test -e "$TIMING/tty-up" && release "$TIMING/tty.hold"
+shtest_wait_gone "the tty run r-tty ends" "$tty_run"; wait "$tty_run"
+out="$(cat "$T/tty.out")"; rc="$(cat "$T/tty.rc")"
 if [ "$rc" = 3 ]; then ok "a tty run needs no heartbeat"; else bad "a tty run" "rc=$rc" "$out"; fi
 for args in 'run a/b shared TREE - wt -- true' 'run r1 bogus TREE - wt -- true' 'run r1 shared /nonexistent - wt -- true' 'run r1 shared TREE /nonexistent wt -- true' 'kill a/b'; do
   # shellcheck disable=SC2086 # the cases are word lists
@@ -224,55 +279,48 @@ else bad "a state directory under /tmp" "rc=$rc" "$out"; fi
 # It reads the fixed /var/fence; this suite's private mount namespace gives it a tmpfs there.
 DAEMON="$(bash -c '. "$1" && printf "%s" "$FENCE_SHARED_DAEMON"' _ "$FENCE/shared.sh")"
 if [ -n "$DAEMON" ] && mkdir -p /var/fence && mount -t tmpfs tmpfs /var/fence; then
-  wait_gone() { # wait_gone <pid> <tenths>: 0 once the pid is gone
-    local i
-    for ((i = 0; i < $2; i++)); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done
-    return 1
+  none_left() { local p; for p; do [ ! -e "$p" ] || return 1; done; } # none_left <path>…
+  daemon_pass() { # daemon_pass <record>: a dead supervisor's record the daemon removes on a pass of its loop
+    echo 999999 > "/var/fence/live/$1"
+    shtest_wait_until "the daemon removes the dead record $1" none_left "/var/fence/live/$1"
   }
-  wait_removed() { # wait_removed <tenths> <path>…: 0 once none of the paths is left
-    local i p left
-    for ((i = 0; i < $1; i++)); do
-      left=''
-      for p in "${@:2}"; do [ ! -e "$p" ] || left="$p"; done
-      [ -n "$left" ] || return 0
-      sleep 0.1
-    done
-    return 1
-  }
+  # Two passes the daemon made, each read by the record it removed, stand for "past its idle time":
+  # PFM_FENCE_IDLE_S=0, so every pass is past it; PFM_FENCE_DAEMON_POLL_S=0 makes the passes back to back.
   # idle: a live run holds it past PFM_FENCE_IDLE_S; once none is live it closes and exits 0
   mkdir -p /var/fence/live /var/fence/runs
-  sleep 30 & held=$!
+  shtest_hold d-held & held=$!
   echo "$held" > /var/fence/live/d-held
-  PFM_FENCE_IDLE_S=1 bash -c "$DAEMON" & dmn=$!
-  sleep 4
+  PFM_FENCE_IDLE_S=0 PFM_FENCE_DAEMON_POLL_S=0 bash -c "$DAEMON" & dmn=$!
+  daemon_pass d-pass1 && daemon_pass d-pass2
   if kill -0 "$dmn" 2>/dev/null; then ok "the container stays up while a run is live, past its idle time"
   else bad "the container exited with a live run"; fi
   kill "$held" 2>/dev/null; wait "$held" 2>/dev/null
-  if wait_gone "$dmn" 80; then
+  if shtest_wait_gone "the idle daemon exits" "$dmn"; then
     wait "$dmn"; rc=$?
     if [ "$rc" = 0 ] && [ -d /var/fence/closing ]; then ok "with no live run past PFM_FENCE_IDLE_S it marks closing and exits 0"
     else bad "the idle exit" "rc=$rc closing=$(ls -d /var/fence/closing 2>&1)"; fi
-  else bad "no idle exit within 8 s of the last run's end"; kill -KILL "$dmn" 2>/dev/null; fi
+  else bad "no idle exit after the last run's end"; kill -KILL "$dmn" 2>/dev/null; fi
   rm -rf /var/fence/*
   # reap: a dead supervisor's run is killed and its records removed; superseded drains, then exits
   mkdir -p /var/fence/live /var/fence/runs/d-dead
-  sleep 31 & orphan=$!
+  shtest_hold d-orphan & orphan=$!
   echo 999999 > /var/fence/live/d-dead; echo "$orphan" > /var/fence/runs/d-dead/ns.pid
-  PFM_FENCE_IDLE_S=600 bash -c "$DAEMON" & dmn=$!
+  PFM_FENCE_IDLE_S=600 PFM_FENCE_DAEMON_POLL_S=0 bash -c "$DAEMON" & dmn=$!
   # The daemon kills the run, then removes its records: the removal is waited for, never read at the kill.
-  if wait_gone "$orphan" 50 && wait_removed 50 /var/fence/live/d-dead /var/fence/runs/d-dead; then
+  if shtest_wait_gone "the dead supervisor's run is killed" "$orphan" \
+    && shtest_wait_until "the dead supervisor's records are removed" none_left /var/fence/live/d-dead /var/fence/runs/d-dead; then
     ok "a run whose supervisor died is killed and its records removed"
   else bad "the dead supervisor's run" "orphan alive=$(kill -0 "$orphan" 2>/dev/null && echo yes || echo no)" "$(ls -R /var/fence)"; kill "$orphan" 2>/dev/null; fi
   wait "$orphan" 2>/dev/null
-  sleep 30 & held=$!
+  shtest_hold d-held2 & held=$!
   echo "$held" > /var/fence/live/d-held2
   touch /var/fence/superseded
-  sleep 3
+  daemon_pass d-pass3 && daemon_pass d-pass4
   if kill -0 "$dmn" 2>/dev/null; then ok "a superseded container drains: it stays up while a run is live"
   else bad "a superseded container exited with a live run"; fi
   kill "$held" 2>/dev/null; wait "$held" 2>/dev/null
-  if wait_gone "$dmn" 60; then ok "a superseded container exits once its last live run ends"
-  else bad "the superseded container did not exit within 6 s of its last run"; kill -KILL "$dmn" 2>/dev/null; fi
+  if shtest_wait_gone "the superseded daemon exits" "$dmn"; then ok "a superseded container exits once its last live run ends"
+  else bad "the superseded container did not exit after its last run"; kill -KILL "$dmn" 2>/dev/null; fi
   wait "$dmn" 2>/dev/null
   umount /var/fence
 else bad "the container daemon's text could not be read from $FENCE/shared.sh, or no tmpfs on /var/fence"; fi

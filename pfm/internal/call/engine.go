@@ -684,7 +684,8 @@ func (engine *Engine) callResolved(
 	// stash slot; a later stash overwrites it. C-s on an empty composer pops
 	// it back. The next confirmed submit of any kind restores it. Claude Code
 	// does not document them; the fake engine's composer (mockengine/tty.go)
-	// plays them, a parked draft restored included; TESTPLAN.md 28c keeps Claude Code's side unproven.
+	// plays them, a parked draft restored included; internal/mockengine/README.md
+	// keeps Claude Code's side unproven.
 	needsStashGuard := !queueing
 	if queueing && hasDraft(composerLastLine(capture)) {
 		styled, _ := engine.tmux.Capture(

@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -42,18 +43,31 @@ func TestPromptHooksAnswerWithinTheirDeadline(t *testing.T) {
 			},
 		},
 		{
-			name: "reload-intercept blocks the prompt while the reload is scheduled",
-			wantStderr: "pfm internal reload-intercept: schedule reload (it may still be scheduled: " +
+			name: "command-intercept blocks the prompt while the reload is scheduled",
+			wantStderr: "pfm internal command-intercept: schedule reload (it may still be scheduled: " +
 				"its worker logs to reload-*.log in /jail/sid) timed out after 100ms\n",
 			wantCode: 2,
 			call: func(block func(), stdout, stderr io.Writer) int {
 				front := func(context.Context, []string, io.Writer, io.Writer, config.Runtime) int { block(); return 0 }
-				return ReloadIntercept(
-					strings.NewReader(`{"prompt":"/reload"}`),
+				return CommandIntercept(
+					strings.NewReader(`{"prompt":"/pfm:reload"}`),
 					stdout,
 					stderr,
 					config.Runtime{Paths: paths.Values{SIDDir: "/jail/sid"}},
 					front,
+					nil,
+				)
+			},
+		},
+		{
+			name: "command-intercept blocks the prompt while the space is set",
+			wantStderr: "pfm internal command-intercept: set the chat's space (it may still be set: " +
+				"check `pfm chat ls`) timed out after 100ms\n",
+			wantCode: 2,
+			call: func(block func(), stdout, stderr io.Writer) int {
+				space := func(context.Context, *config.Runtime, string) (string, error) { block(); return "", nil }
+				return CommandIntercept(
+					strings.NewReader(`{"prompt":"/pfm:space work"}`), stdout, stderr, config.Runtime{}, nil, space,
 				)
 			},
 		},
@@ -80,32 +94,29 @@ func TestPromptHooksAnswerWithinTheirDeadline(t *testing.T) {
 			},
 		},
 	}
+	timeouts := swapPromptTimeouts(t)
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			oldIdentify := epicInjectIdentify
-			release, done := make(chan struct{}), make(chan struct{})
+			entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			hung := testwait.Context(t).Done()
 			block := func() {
 				defer close(done)
+				close(entered)
 				select {
 				case <-release:
-				case <-time.After(2 * time.Second):
+				case <-hung:
 				}
 			}
 			t.Cleanup(func() {
 				close(release)
-				select {
-				case <-done:
-				case <-time.After(5 * time.Second):
-					t.Error("blocked hook body never returned")
-				}
+				testwait.Receive(t, "the blocked hook body to return", done)
 				epicInjectIdentify = oldIdentify
 			})
+			// The deadline passes once the body is blocked in its step.
+			timeouts.fireAfter(t, entered, promptHookDeadline)
 			var stdout, stderr bytes.Buffer
-			started := time.Now()
 			code := test.call(block, &stdout, &stderr)
-			if elapsed := time.Since(started); elapsed >= time.Second {
-				t.Fatalf("hook answered after %s, want under 1s (deadline 100ms)", elapsed)
-			}
 			if code != test.wantCode {
 				t.Fatalf("exit code = %d, want %d; stderr=%q", code, test.wantCode, stderr.String())
 			}
@@ -119,11 +130,64 @@ func TestPromptHooksAnswerWithinTheirDeadline(t *testing.T) {
 	}
 }
 
+// promptTimeouts arms the prompt hooks' deadline and commit grace on contexts
+// the test ends by hand, so the order of the body, the deadline and the grace
+// is the test's and no host time decides it.
+type promptTimeouts struct {
+	mu      sync.Mutex
+	pending map[time.Duration]context.CancelFunc
+	armed   chan time.Duration
+}
+
+func swapPromptTimeouts(t *testing.T) *promptTimeouts {
+	t.Helper()
+	timeouts := &promptTimeouts{pending: map[time.Duration]context.CancelFunc{}, armed: make(chan time.Duration, 16)}
+	previous := promptHookTimeout
+	promptHookTimeout = func(d time.Duration) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		timeouts.mu.Lock()
+		timeouts.pending[d] = cancel
+		timeouts.mu.Unlock()
+		timeouts.armed <- d
+		return ctx, cancel
+	}
+	t.Cleanup(func() { promptHookTimeout = previous })
+	return timeouts
+}
+
+// fireAfter ends the contexts armed for each of waits, in order, once ready is
+// closed: the first the deadline, the next the grace the hook arms when it
+// waits on a commit span.
+func (timeouts *promptTimeouts) fireAfter(t *testing.T, ready <-chan struct{}, waits ...time.Duration) {
+	t.Helper()
+	hung := testwait.Context(t).Done()
+	go func() {
+		select {
+		case <-ready:
+		case <-hung:
+			return
+		}
+		for _, d := range waits {
+			for armed := d - 1; armed != d; {
+				select {
+				case armed = <-timeouts.armed:
+				case <-hung:
+					return
+				}
+			}
+			timeouts.mu.Lock()
+			cancel := timeouts.pending[d]
+			timeouts.mu.Unlock()
+			cancel()
+		}
+	}()
+}
+
 // TestPromptHookPassesTheBodyAnswerThroughWithinTheDeadline: a body that
 // finishes in time keeps its own output and exit code.
 func TestPromptHookPassesTheBodyAnswerThroughWithinTheDeadline(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := RunPromptHook("pfm internal reload-intercept", &stdout, &stderr, 2,
+	code := RunPromptHook("pfm internal command-intercept", &stdout, &stderr, 2,
 		func(_ context.Context, step func(string), stdout, stderr io.Writer) int {
 			step("schedule reload")
 			_ = json.NewEncoder(stdout).Encode(map[string]string{"decision": "block"})
@@ -145,28 +209,30 @@ func TestPromptHookDeadlineNeverSplitsACommit(t *testing.T) {
 	oldDeadline, oldGrace := promptHookDeadline, promptHookCommitGrace
 	promptHookDeadline, promptHookCommitGrace = 100*time.Millisecond, 500*time.Millisecond
 	t.Cleanup(func() { promptHookDeadline, promptHookCommitGrace = oldDeadline, oldGrace })
+	timeouts := swapPromptTimeouts(t)
 	cases := []struct {
 		name       string
-		pause      time.Duration // before BeginCommit
-		span       time.Duration // between start and record
+		askLate    bool // the body asks for its commit only once the hook has answered
+		spanEnds   string
+		fireGrace  bool
 		wantOpened bool
 		wantRecord bool
 		wantStderr string
 	}{
 		{
-			name: "a deadline between start and record waits for the record",
-			span: 250 * time.Millisecond, wantOpened: true, wantRecord: true,
+			name: "a deadline between start and record waits for the record", spanEnds: "deadline",
+			wantOpened: true, wantRecord: true,
 			wantStderr: "pfm test-hook: record worker timed out after 100ms, " +
 				"then waited up to 500ms for the step it had started\n",
 		},
 		{
-			name:  "a commit asked for past the deadline never starts",
-			pause: 200 * time.Millisecond, wantOpened: false, wantRecord: false,
+			name: "a commit asked for past the deadline never starts", askLate: true,
+			wantOpened: false, wantRecord: false,
 			wantStderr: "pfm test-hook: start worker timed out after 100ms\n",
 		},
 		{
-			name: "a span that outlasts the grace is answered over",
-			span: 1000 * time.Millisecond, wantOpened: true, wantRecord: false,
+			name: "a span that outlasts the grace is answered over", spanEnds: "answer", fireGrace: true,
+			wantOpened: true, wantRecord: false,
 			wantStderr: "pfm test-hook: record worker timed out after 100ms, " +
 				"and the step it had started was still running 500ms later; it may be cut short\n",
 		},
@@ -175,14 +241,21 @@ func TestPromptHookDeadlineNeverSplitsACommit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var mu sync.Mutex
 			opened, recorded := false, false
-			finished := make(chan struct{})
+			ready, answered, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			waits := []time.Duration{promptHookDeadline}
+			if tc.fireGrace {
+				waits = append(waits, promptHookCommitGrace)
+			}
+			timeouts.fireAfter(t, ready, waits...)
 			var stdout, stderr bytes.Buffer
-			started := time.Now()
 			code := RunPromptHook("pfm test-hook", &stdout, &stderr, 2,
 				func(ctx context.Context, step func(string), _, _ io.Writer) int {
 					defer close(finished)
 					step("start worker")
-					time.Sleep(tc.pause)
+					if tc.askLate {
+						close(ready)
+						<-answered
+					}
 					end, ok := deps.BeginCommit(ctx)
 					if !ok {
 						return 1
@@ -191,17 +264,21 @@ func TestPromptHookDeadlineNeverSplitsACommit(t *testing.T) {
 					opened = true
 					mu.Unlock()
 					step("record worker")
-					time.Sleep(tc.span)
+					if !tc.askLate {
+						close(ready)
+					}
+					if tc.spanEnds == "deadline" {
+						<-ctx.Done()
+					} else {
+						<-answered
+					}
 					mu.Lock()
 					recorded = true
 					mu.Unlock()
 					end()
-					time.Sleep(400 * time.Millisecond) // the body outlives its commit
+					<-answered // the body outlives its commit
 					return 0
 				})
-			if elapsed := time.Since(started); elapsed >= 900*time.Millisecond {
-				t.Fatalf("hook answered after %s, want within the deadline plus the grace (600ms)", elapsed)
-			}
 			mu.Lock()
 			gotRecord := recorded
 			mu.Unlock()
@@ -216,7 +293,8 @@ func TestPromptHookDeadlineNeverSplitsACommit(t *testing.T) {
 					tc.wantStderr,
 				)
 			}
-			<-finished
+			close(answered)
+			testwait.Receive(t, "the hook body to finish after the hook answered", finished)
 			mu.Lock()
 			gotOpened := opened
 			mu.Unlock()
@@ -234,13 +312,14 @@ func TestPromptInterceptsHandTheirFrontTheCommitGate(t *testing.T) {
 	oldDeadline := promptHookDeadline
 	promptHookDeadline = 50 * time.Millisecond
 	t.Cleanup(func() { promptHookDeadline = oldDeadline })
+	timeouts := swapPromptTimeouts(t)
 	for _, tc := range []struct {
 		name string
 		call func(front func(context.Context)) int
 	}{
 		{name: "reload", call: func(front func(context.Context)) int {
-			return ReloadIntercept(strings.NewReader(`{"prompt":"/reload"}`), io.Discard, io.Discard, config.Runtime{},
-				func(ctx context.Context, _ []string, _, _ io.Writer, _ config.Runtime) int { front(ctx); return 0 })
+			return CommandIntercept(strings.NewReader(`{"prompt":"/pfm:reload"}`), io.Discard, io.Discard, config.Runtime{},
+				func(ctx context.Context, _ []string, _, _ io.Writer, _ config.Runtime) int { front(ctx); return 0 }, nil)
 		}},
 		{name: "exit", call: func(front func(context.Context)) int {
 			return ExitIntercept(strings.NewReader(`{"prompt":"e"}`), io.Discard, io.Discard, config.Runtime{},
@@ -249,15 +328,19 @@ func TestPromptInterceptsHandTheirFrontTheCommitGate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			opened := make(chan bool, 1)
+			ready, answered := make(chan struct{}), make(chan struct{})
+			timeouts.fireAfter(t, ready, promptHookDeadline)
 			tc.call(func(ctx context.Context) {
-				time.Sleep(150 * time.Millisecond)
+				close(ready)
+				<-answered // the hook has answered, its gate closed
 				end, ok := deps.BeginCommit(ctx)
 				if ok {
 					end()
 				}
 				opened <- ok
 			})
-			if <-opened {
+			close(answered)
+			if ok, _ := testwait.Receive(t, "the front to ask for its commit", opened); ok {
 				t.Fatal("the front opened a commit past the hook deadline: its ctx does not carry the hook's gate")
 			}
 		})

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -67,7 +66,7 @@ func stopHerdrSession(c *harness.Ctx, s State) {
 	run("herdr", "session", "stop", s.Session)
 	run("herdr", "session", "delete", s.Session)
 	phase(c, func() {
-		c.Poll("no engine of Herdr session "+s.Session+" left", 20*time.Second, func() (bool, string) {
+		c.Poll("no engine of Herdr session "+s.Session+" left", func() (bool, string) {
 			var left []string
 			for pid, p := range processes(c) {
 				if _, seated := ever[p.Session]; p.Engine != "" && (branch[pid] || seated) {
@@ -87,7 +86,7 @@ func endSeated(c *harness.Ctx, sock string, run func(argv ...string)) {
 		run("pfm", "chat", "end", session)
 	}
 	phase(c, func() {
-		c.Poll("no live seat on "+sock, 20*time.Second, func() (bool, string) {
+		c.Poll("no live seat on "+sock, func() (bool, string) {
 			seats := liveSeats(c, sock)
 			return len(seats) == 0, fmt.Sprintf("%v", seats)
 		})

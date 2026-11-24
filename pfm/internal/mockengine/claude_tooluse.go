@@ -1,7 +1,6 @@
 package mockengine
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,7 +59,7 @@ func (session *claudeSession) useTool(step Step) (toolUse, error) {
 	if err != nil {
 		return toolUse{}, err
 	}
-	use := toolUse{part: part, answers: answers, preReturned: time.Now()}
+	use := toolUse{part: part, answers: answers, preReturned: session.proc.clock().Now()}
 	return use, session.write(session.assistantRecord([]contentPart{part}, session.proc.script.Tokens, false))
 }
 
@@ -102,12 +101,13 @@ func (session *claudeSession) toolResult(result contentPart) error {
 	})
 }
 
-// postToolUse fires PostToolUse for a performed call, its duration counted from PreToolUse's return.
+// postToolUse fires PostToolUse for a performed call, its duration counted on the mock's clock
+// from PreToolUse's return.
 func (session *claudeSession) postToolUse(tool string, input, response json.RawMessage, use toolUse) error {
 	payload := session.payload(hookPostToolUse)
 	payload.ToolName, payload.ToolInput, payload.ToolUseID = tool, input, use.part.ID
 	payload.ToolResponse = response
-	ms := time.Since(use.preReturned).Milliseconds()
+	ms := session.proc.clock().Now().Sub(use.preReturned).Milliseconds()
 	payload.DurationMS = &ms
 	_, err := session.fire(hookPostToolUse, tool, payload)
 	return err
@@ -137,9 +137,7 @@ func performTool(
 		if err != nil {
 			return "", false, err
 		}
-		bounded, cancel := context.WithTimeout(proc.ctx, time.Minute)
-		defer cancel()
-		cmd := exec.CommandContext(bounded, argv[0], argv[1:]...)
+		cmd := exec.CommandContext(proc.ctx, argv[0], argv[1:]...)
 		cmd.Dir, cmd.Env = proc.cwd, env
 		output, err := cmd.CombinedOutput()
 		var exit *exec.ExitError

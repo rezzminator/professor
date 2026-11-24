@@ -134,7 +134,7 @@ logged() { grep -qxF -- "$1" "$STUB_DOCKER_LOG"; }
 warned() { grep -q "^WARN fence housekeeping: $1 failed: " "$T/err"; }
 nowarn() { ! grep -q '^WARN' "$T/err"; }
 hk() { fence_housekeeping "$@" >"$T/out" 2>"$T/err"; }
-iso_ago() { date -u -d "@$(( $(date +%s) - $1 ))" +%Y-%m-%dT%H:%M:%S.123456789Z; }
+iso_ago() { date -u -d "$1 seconds ago" +%Y-%m-%dT%H:%M:%S.123456789Z; }
 
 # 1 — containers: only labelled listings feed a removal; exited go, running past
 #     the age limit are forced out, younger ones and unparsable dates stay
@@ -227,10 +227,10 @@ if ! grep -q '^system df\|^volume inspect pfm-dev-gocache\|^volume rm pfm-dev-go
 else bad "budget stamp" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 9b — budget: the stamp is fresh for PFM_FENCE_BUDGET_MINUTES (default 120), not a day
-fresh; touch -d @$(( $(date +%s) - 3 * 3600 )) "$STAMP"; STUB_MB=250 hk; r1=0; logged 'volume rm pfm-dev-gocache' && r1=1
-fresh; touch -d @$(( $(date +%s) - 3600 )) "$STAMP"; STUB_MB=250 hk; r2=0; logged 'volume rm pfm-dev-gocache' || r2=1
-fresh; touch -d @$(( $(date +%s) - 3600 )) "$STAMP"; PFM_FENCE_BUDGET_MINUTES=30 STUB_MB=250 hk; r3=0; logged 'volume rm pfm-dev-gocache' && r3=1
-fresh; touch -d @$(( $(date +%s) - 3 * 3600 )) "$STAMP"; PFM_FENCE_BUDGET_MINUTES=2h STUB_MB=250 hk; invalid_rc=$?
+fresh; touch -d "3 hours ago" "$STAMP"; STUB_MB=250 hk; r1=0; logged 'volume rm pfm-dev-gocache' && r1=1
+fresh; touch -d "1 hour ago" "$STAMP"; STUB_MB=250 hk; r2=0; logged 'volume rm pfm-dev-gocache' || r2=1
+fresh; touch -d "1 hour ago" "$STAMP"; PFM_FENCE_BUDGET_MINUTES=30 STUB_MB=250 hk; r3=0; logged 'volume rm pfm-dev-gocache' && r3=1
+fresh; touch -d "3 hours ago" "$STAMP"; PFM_FENCE_BUDGET_MINUTES=2h STUB_MB=250 hk; invalid_rc=$?
 r4=0; [[ $invalid_rc != 0 ]] && grep -q 'PFM_FENCE_BUDGET_MINUTES' "$T/err" && [[ ! -s "$STUB_DOCKER_LOG" ]] && r4=1
 if [ "$r1$r2$r3$r4" = 1111 ]; then ok "budget: a 3 h old stamp re-sizes, a 1 h old one skips, PFM_FENCE_BUDGET_MINUTES overrides, an invalid one refuses all cleanup"
 else bad "budget cadence" "3h=$r1 1h-skip=$r2 override=$r3 invalid=$r4" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi

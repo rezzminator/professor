@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/servicemanager"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A chat server spawned from inside a systemd user service escapes it through
@@ -79,7 +80,7 @@ exit 0
 			}
 			err := tmux.NewSession(context.Background(), SessionSpec{
 				Socket: "cx-scope", Session: "cx-scope", Window: "Codex", CWD: root,
-				Width: 180, Height: 45, Run: "sleep 120",
+				Width: 180, Height: 45, Run: testwait.Hold,
 			})
 			if tc.wantErr != "" {
 				if err == nil || err.Error() != tc.wantErr {

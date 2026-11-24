@@ -13,11 +13,12 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -30,17 +31,40 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
+
+// seatFixtureLedger reports whether mode's engine starts go through the faked ledger seam, and
+// whether the ledger is on for them.
+func seatFixtureLedger(mode string) (faked, enabled bool) {
+	enabled = strings.HasSuffix(mode, "ledger-on") || mode == "reload-success" || mode == "reload-replaced"
+	return enabled || strings.Contains(mode, "ledger-"), enabled
+}
 
 // Jail: the subject is a real PTY and the engine children on it.
 func TestSeatHostPTY(t *testing.T) {
 	if os.Getenv("PFM_S3_FIXTURE") == "1" {
 		root := os.Getenv("PFM_S3_ROOT")
 		mode := os.Getenv("PFM_S3_MODE")
-		if strings.Contains(mode, "ledger-") {
+		ledgerFaked, ledgerOn := seatFixtureLedger(mode)
+		if ledgerFaked {
 			calls := 0
 			armCostLedger = func(environ []string, _ paths.Env, enabled bool, _ io.Writer) ([]string, string) {
+				// costsink.Prepare keeps the sink of a launch already armed for this process.
+				if enabled && claudelaunch.CostArmedFor(environ, os.Getpid()) {
+					return environ, claudelaunch.CostLedgerOn
+				}
 				calls++
+				arms, err := os.OpenFile(filepath.Join(root, "ledger-arms"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := arms.WriteString("armed\n"); err != nil {
+					t.Fatal(err)
+				}
+				if err := arms.Close(); err != nil {
+					t.Fatal(err)
+				}
 				environ = seatEnvironment(
 					environ,
 					[]string{"PFM_S3_ARM_CALLS=" + strconv.Itoa(calls)},
@@ -56,7 +80,7 @@ func TestSeatHostPTY(t *testing.T) {
 			}
 		}
 		runtime := config.Runtime{
-			Config: config.Config{Claude: config.ClaudePrefs{CostLedger: strings.HasSuffix(mode, "ledger-on")}},
+			Config: config.Config{Claude: config.ClaudePrefs{CostLedger: ledgerOn}},
 			Paths: paths.Values{
 				Home:     root,
 				StateDB:  os.Getenv(paths.EnvStateDB),
@@ -105,7 +129,7 @@ func TestSeatHostPTY(t *testing.T) {
 	for _, mode := range []string{
 		"exit", "ordinary-stdio", "redirected-stdin", "hup", "int", "launch", "failed-missing-recipe", "failed-malformed-recipe", "failed-missing-executable",
 		"ledger-on", "ledger-off", "launch-ledger-on", "launch-ledger-off",
-		"reload-failure-locked", "reload-success", "reload-replaced", "end-replaced", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one", "failed-hangup",
+		"reload-failure-locked", "reload-success", "reload-replaced", "end-replaced", "reload-retry", "reload-close", "reload-move-retry", "move-start", "raw-codex", "raw-opencode", "hangup-exit-one", "failed-hangup", "resume-dies",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			root, environment := testjail.FleetEnv(t)
@@ -116,6 +140,8 @@ func TestSeatHostPTY(t *testing.T) {
 			}
 			server := newSeatHostHerdr(t, root, mode)
 			server.addPane("w6:p3", "native")
+			holdSeatRelease(t, root, "engine-report-release")
+			holdSeatRelease(t, root, "engine-report-next-release")
 			if mode == "move-start" {
 				if err := os.WriteFile(filepath.Join(root, "move-on-proof"), []byte("move"), 0o600); err != nil {
 					t.Fatal(err)
@@ -138,7 +164,9 @@ func TestSeatHostPTY(t *testing.T) {
 			values := paths.Values{StateDB: filepath.Join(root, "pfm.db")}
 			db := fleetdb.OpenSharedState(context.Background(), values)
 			defer func() { _ = db.Close() }()
-			if strings.Contains(mode, "ledger-") {
+			ledgerFaked, ledgerOn := seatFixtureLedger(mode)
+			if ledgerFaked {
+				// A parent pfm chat's own ledger, which no start of this seat may keep.
 				environment = append(environment, claudelaunch.CostEnv(11111, 1)...)
 			}
 			engineID := pfmengine.Claude
@@ -169,13 +197,16 @@ func TestSeatHostPTY(t *testing.T) {
 					Binary:     binary,
 					Env:        saved,
 					CWD:        root,
-					CostLedger: strings.HasSuffix(mode, "ledger-on"),
+					CostLedger: ledgerOn,
 				}
 				if mode == "failed-malformed-recipe" {
 					run.Binary = "relative-engine"
 				}
 				if mode == "failed-missing-executable" || mode == "failed-hangup" {
 					run.Binary = filepath.Join(root, "missing-engine")
+				}
+				if mode == "resume-dies" {
+					run.Args = []string{"--resume", "fixture-session"}
 				}
 				if mode != "failed-missing-recipe" {
 					if err := db.WriteSeatRun("native-seat", run); err != nil {
@@ -189,7 +220,7 @@ func TestSeatHostPTY(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = slave.Close() }()
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithCancel(testwait.Context(t))
 			defer cancel()
 			hostBinary := filepath.Join(root, "pfm")
 			if mode == "reload-replaced" || mode == "end-replaced" || mode == "reload-retry" || mode == "reload-close" {
@@ -227,11 +258,7 @@ func TestSeatHostPTY(t *testing.T) {
 					current, found, err := db.Seat(context.Background(), "native-seat")
 					return err == nil && found && current.State == "live" && current.HerdrPane == "w9:p2"
 				})
-				if err := os.WriteFile(
-					filepath.Join(root, "engine-report-release"),
-					[]byte("ready"),
-					0o600,
-				); err != nil {
+				if err := releaseSeatFixture(filepath.Join(root, "engine-report-release")); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -257,7 +284,7 @@ func TestSeatHostPTY(t *testing.T) {
 				}
 				return
 			}
-			if strings.HasPrefix(mode, "failed-") {
+			if strings.HasPrefix(mode, "failed-") || mode == "resume-dies" {
 				if _, err := master.Write([]byte{4}); err != nil {
 					t.Fatal(err)
 				}
@@ -329,11 +356,7 @@ func TestSeatHostPTY(t *testing.T) {
 				if err := db.UpdateSeat(context.Background(), before, seat); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(
-					filepath.Join(root, "engine-report-release"),
-					[]byte("ready"),
-					0o600,
-				); err != nil {
+				if err := releaseSeatFixture(filepath.Join(root, "engine-report-release")); err != nil {
 					t.Fatal(err)
 				}
 				if mode != "reload-success" && mode != "reload-replaced" {
@@ -403,6 +426,23 @@ func TestSeatHostPTY(t *testing.T) {
 					if next.Pane != wantPane || next.SupervisorPID != command.Process.Pid {
 						t.Fatalf("reload moved lifetime owner: %+v", next)
 					}
+					if ledgerOn {
+						// The sink serves the host until it exits, so the engine a reload starts gets
+						// the one the first start armed, from a replaced host image too.
+						arms, err := os.ReadFile(filepath.Join(root, "ledger-arms"))
+						if err != nil || string(arms) != "armed\n" || !next.LedgerArmed ||
+							next.LedgerPID != strconv.Itoa(command.Process.Pid) {
+							t.Fatalf(
+								"reloaded engine's ledger: arms=%q (%v), want one %q; armed=%t pid=%q, want true and %d",
+								arms,
+								err,
+								"armed\n",
+								next.LedgerArmed,
+								next.LedgerPID,
+								command.Process.Pid,
+							)
+						}
+					}
 					if mode == "reload-replaced" || mode == "reload-retry" {
 						running, runErr := os.Stat("/proc/" + strconv.Itoa(command.Process.Pid) + "/exe")
 						installed, installErr := os.Stat(hostBinary)
@@ -411,11 +451,7 @@ func TestSeatHostPTY(t *testing.T) {
 								command.Process.Pid, running, runErr, hostBinary, installed, installErr)
 						}
 					}
-					if err := os.WriteFile(
-						filepath.Join(root, "engine-report-next-release"),
-						[]byte("ready"),
-						0o600,
-					); err != nil {
+					if err := releaseSeatFixture(filepath.Join(root, "engine-report-next-release")); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -431,34 +467,21 @@ func TestSeatHostPTY(t *testing.T) {
 				if err := os.Rename(hostBinary+".new", hostBinary); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(
-					filepath.Join(root, "engine-report-release"),
-					[]byte("ready"),
-					0o600,
-				); err != nil {
+				if err := releaseSeatFixture(filepath.Join(root, "engine-report-release")); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if mode == "hup" || mode == "int" {
 				sent := map[string]syscall.Signal{"hup": syscall.SIGHUP, "int": syscall.SIGINT}[mode]
-				deadline := time.NewTimer(8 * time.Second)
-				defer deadline.Stop()
-				tick := time.NewTicker(time.Millisecond)
-				defer tick.Stop()
-			ready:
-				for {
+				testwait.Until(t, "the engine's readiness report", func() (bool, string) {
 					select {
 					case err := <-done:
 						t.Fatalf("supervisor exited before engine readiness: %v %s", err, &output)
-					case <-deadline.C:
-						_ = command.Process.Signal(syscall.SIGHUP)
-						t.Fatal("engine readiness timeout")
-					case <-tick.C:
-						if _, err := os.Stat(filepath.Join(root, "engine-report")); err == nil {
-							break ready
-						}
+					default:
 					}
-				}
+					_, err := os.Stat(filepath.Join(root, "engine-report"))
+					return err == nil, "no engine-report yet"
+				})
 				if err := command.Process.Signal(sent); err != nil {
 					t.Fatal(err)
 				}
@@ -484,6 +507,33 @@ func TestSeatHostPTY(t *testing.T) {
 				return
 			}
 			err = <-done
+			if mode == "resume-dies" {
+				// A resumed engine that died at start failed its start: the seat, its recipe and the
+				// pane stay, the exit and the pane's lines its loss note.
+				seat, found, readErr := db.Seat(context.Background(), "native-seat")
+				note := regexp.MustCompile(
+					`^the engine exited 1 after [0-9.]+[mµn]?s, inside its 10s start window: .+$`,
+				)
+				if command.ProcessState.ExitCode() != 1 || readErr != nil || !found || seat.State != "failed" ||
+					!note.MatchString(
+						seat.LostNote,
+					) || !strings.Contains(output.String(), "press Enter to retry, q to close") {
+					t.Fatalf(
+						"resumed start death status=%v seat=%+v found=%t err=%v, want failed with note %s; output=%s",
+						err,
+						seat,
+						found,
+						readErr,
+						note,
+						&output,
+					)
+				}
+				run, err := db.ReadSeatRun(seat.SeatID)
+				if err != nil || !slices.Equal(run.Args, []string{"--resume", "fixture-session"}) {
+					t.Fatalf("resumed start death recipe=%+v err=%v", run, err)
+				}
+				return
+			}
 			if strings.HasPrefix(mode, "failed-") {
 				cause := map[string]string{
 					"failed-missing-recipe":     "read seat run",
@@ -621,13 +671,13 @@ func TestSeatHostPTY(t *testing.T) {
 					t.Fatalf("lingering-pid %q: %v", raw, err)
 				}
 				t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-				deadline := time.Now().Add(5 * time.Second)
-				for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
-					if time.Now().After(deadline) {
-						t.Fatalf("job %d the engine left in its group outlived the host's final stop", pid)
-					}
-					time.Sleep(20 * time.Millisecond)
-				}
+				testwait.Until(
+					t,
+					fmt.Sprintf("job %d the engine left in its group to end at the host's final stop", pid),
+					func() (bool, string) {
+						return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH), "the job outlived the host's final stop"
+					},
+				)
 			}
 		})
 	}
@@ -659,10 +709,18 @@ func init() {
 		return
 	}
 	root := os.Getenv("PFM_S3_ROOT")
+	if os.Getenv("PFM_S3_MODE") == "resume-dies" {
+		fmt.Fprintln(os.Stderr, "Error: Invalid MCP configuration: fixture config file not found")
+		os.Exit(1)
+	}
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP, syscall.SIGINT)
 	if os.Args[0] == "seat-descendant" {
-		if err := os.WriteFile(filepath.Join(root, "descendant-ready"), []byte("ready"), 0o600); err != nil {
+		ready := os.NewFile(3, "descendant-ready")
+		if _, err := ready.WriteString("ready"); err != nil {
+			panic(err)
+		}
+		if err := ready.Close(); err != nil {
 			panic(err)
 		}
 		sig := <-hup
@@ -676,24 +734,26 @@ func init() {
 		child = exec.Command(os.Getenv("PFM_S3_BINARY"))
 		child.Args = []string{"seat-descendant"}
 		child.Env = os.Environ()
+		readyRead, readyWrite, err := os.Pipe()
+		if err != nil {
+			panic(err)
+		}
+		child.ExtraFiles = []*os.File{readyWrite}
 		if err := child.Start(); err != nil {
 			panic(err)
 		}
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			if _, err := os.Stat(filepath.Join(root, "descendant-ready")); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				panic("descendant not ready")
-			}
-			time.Sleep(time.Millisecond)
+		// The descendant writes its readiness on fd 3 and closes it; a read that
+		// ends without it means the descendant died first.
+		_ = readyWrite.Close()
+		if told, err := io.ReadAll(readyRead); err != nil || string(told) != "ready" {
+			panic(fmt.Sprintf("descendant not ready: %q %v", told, err))
 		}
+		_ = readyRead.Close()
 	}
 	if os.Getenv("PFM_S3_MODE") == "int" {
 		// A job the engine leaves behind in its group, deaf to the forwarded
 		// SIGINT: only the host's final stop of the group ends it.
-		lingering := exec.Command("sh", "-c", `trap "" INT; exec sleep 60`)
+		lingering := exec.Command("sh", "-c", `trap "" INT; `+testwait.Hold)
 		if err := lingering.Start(); err != nil {
 			panic(err)
 		}
@@ -776,16 +836,15 @@ func init() {
 	}
 	if strings.HasPrefix(os.Getenv("PFM_S3_MODE"), "reload-") || os.Getenv("PFM_S3_MODE") == "move-start" ||
 		os.Getenv("PFM_S3_MODE") == "end-replaced" {
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			if _, err := os.Stat(filepath.Join(root, reportFile+"-release")); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				panic("reload release timeout")
-			}
-			time.Sleep(time.Millisecond)
+		// The test holds the FIFO open and writes one byte when it lets the engine go on.
+		release, err := os.OpenFile(filepath.Join(root, reportFile+"-release"), os.O_RDWR, 0)
+		if err != nil {
+			panic(err)
 		}
+		if _, err := release.Read(make([]byte, 1)); err != nil {
+			panic(err)
+		}
+		_ = release.Close()
 	}
 	if os.Getenv("PFM_S3_MODE") == "hangup-exit-one" {
 		<-hup
@@ -801,6 +860,22 @@ func init() {
 		}
 	}
 	os.Exit(7)
+}
+
+// holdSeatRelease makes the FIFO a fixture engine blocks on until the test lets
+// it go, and keeps it open read-write until the test ends so a byte written
+// before the engine reads it is not lost.
+func holdSeatRelease(t *testing.T, root, name string) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	held, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
 }
 
 // copySeatHostBuild copies this test binary, the seat-host build, to path.

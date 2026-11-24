@@ -14,10 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestWhoamiHerdrRequiresPersistedSeatAndEngineAncestor(t *testing.T) {
@@ -353,12 +355,19 @@ func TestHerdrCallerTimeoutIsFailedRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
+	ctx, cancel := context.WithCancel(testwait.Context(t))
+	defer cancel()
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
 		defer func() { _ = conn.Close() }()
+		// The caller gives up once the server has read its request and said nothing.
+		var request [1]byte
+		if _, err := conn.Read(request[:]); err == nil {
+			cancel()
+		}
 		_, _ = io.Copy(io.Discard, conn)
 	}()
 	identifier, err := NewWhoami(
@@ -372,8 +381,6 @@ func TestHerdrCallerTimeoutIsFailedRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
 	_, err = identifier.Identify(ctx)
 	if err == nil || !strings.Contains(err.Error(), "look up the caller: herdr pane wC:p24:") ||
 		errors.Is(err, ErrNotInChat) ||
@@ -395,9 +402,7 @@ func TestHerdrCallerDeadlineWrapsItsCause(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancel()
-	_, err = identifier.Identify(ctx)
+	_, err = identifier.Identify(testwait.Expired())
 	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrNotInChat) {
 		t.Fatalf("deadline lost: %v", err)
 	}
@@ -413,6 +418,9 @@ func TestWhoamiHerdrMovedPane(t *testing.T) {
 	for _, tc := range []string{"moved-seat", "older-state", "seatless", "broken-state"} {
 		t.Run(tc, func(t *testing.T) {
 			testjail.Fleet(t)
+			// The older-state migration's backup bounds its checkpoint on the
+			// process clock; a fake keeps that bound off the real clock.
+			testwait.ProcessClock(t, clock.NewFake(time.Unix(0, 0)))
 			proc := t.TempDir()
 			t.Setenv(paths.EnvProcRoot, proc)
 			for name, body := range map[string]string{

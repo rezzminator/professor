@@ -150,83 +150,16 @@ func gitGuardDenyReason(t *testing.T, stdout string) string {
 	return response.HookSpecificOutput.PermissionDecisionReason
 }
 
+// The commands are data, never shell text this file runs: the guard's subject is the commands
+// it reads (a wrapper such as `timeout` among them) and refuses.
 func TestGitGuardBlocksSharedStateWritesForAnExecutor(t *testing.T) {
 	cwd := t.TempDir()
-	for _, command := range []string{
-		"git stash",
-		"git stash push",
-		"git stash save wip",
-		"git stash drop",
-		"git add -N .",
-		"git rm --cached f",
-		"git reset --hard",
-		"git reset HEAD~1",
-		"git reset -- a.py",
-		"git checkout -b x",
-		"git checkout main",
-		"git switch main",
-		"git push",
-		"git fetch",
-		"git pull",
-		"git config --global --add safe.directory '*'",
-		"git config user.name x",
-		"git branch -D x",
-		"git branch feature",
-		"git tag v1",
-		"git tag -d v1",
-		"git clean -fd",
-		"git checkout -- .",
-		"git restore .",
-		"git restore --staged a.py",
-		"git apply --index p.diff",
-		"git symbolic-ref HEAD refs/heads/x",
-		"git remote add o u",
-		"git submodule update --init",
-		"git notes add -m x",
-		"git gc",
-		"cd /r && git commit -am x",
-		`bash -c "git merge x"`,
-		"timeout 60 git rebase main",
-		"git -C /r worktree remove /r/.worktrees/x",
-		"git --no-pager -c core.pager=cat cherry-pick abc",
-		"bash .claude/scripts/worktree.sh create x",
-		".claude/scripts/worktree.sh prune",
-		"bash .claude/scripts/worktree.sh list",
-		"bash -x .claude/scripts/worktree.sh create x",
-		"git bisect start",
-		"git sparse-checkout set x",
-		"git init",
-		"git archive HEAD",
-		"git archive HEAD pfm",
-		"git reflog expire --all",
-		"git submodule init",
-		"git submodule set-url plugins/x y",
-		"git submodule set-branch -b main plugins/x",
-		"git submodule absorbgitdirs",
-		"git submodule foreach 'git commit -m x'",
-		"git submodule --quiet foreach --recursive git push",
-		"git config edit",
-		"git config set a.b c",
-		"git config unset a.b",
-		"git config rename-section a b",
-		"git config remove-section a",
-		"git config --file /r/x a.b c",
-		"git worktree",
-		"git worktree move a b",
-		"git remote prune origin",
-		"git remote set-head origin -a",
-		`eval "git commit -m x"`,
-		"eval git push",
-		"dash -c 'git commit -m x'",
-		"ksh -c 'git commit -m x'",
-		`find . -name x -exec git commit -m x \;`,
-		"find . -execdir git add {} +",
-		`find . -ok git rm {} \;`,
-		`find . -okdir git checkout main \;`,
-		"for c in status commit; do git $c; done",
-		"c=commit; git $c -m x",
-		"g''it push",
-	} {
+	var commands []string
+	readHookentryData(t, "git_guard_executor_denied.json", &commands)
+	if len(commands) != 73 {
+		t.Fatalf("testdata/git_guard_executor_denied.json holds %d commands, want 73", len(commands))
+	}
+	for _, command := range commands {
 		t.Run(command, func(t *testing.T) {
 			code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
 			if code != 0 || gitGuardDecision(t, stdout) != "deny" {

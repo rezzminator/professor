@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -66,9 +67,10 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 		// The open births where this placement said, without asking again.
 		return OpenID(WithPlacement(ctx, choice), id, stdout, stderr, &effective)
 	}
-	lockID := id
-	if initialFound {
-		lockID = fleetdb.ConversationIdentity(initial.SessionID, initial.SeatID)
+	id, lockID, err := restoredPaneConversation(ctx, effective, choice, id, initial, initialFound, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: restored pane owner: %v\n", err)
+		return 1
 	}
 	unlock, err := fleetdb.LockSeat(ctx, effective.Paths, lockID)
 	if err != nil {
@@ -93,7 +95,8 @@ func OpenRestoredID(ctx context.Context, id string, stdout, stderr io.Writer, ru
 			return 1
 		}
 	}
-	if err := restoreNative(ctx, effective, seat, choice, !found, stdout, stderr); err != nil {
+	refused := restoreNative(ctx, effective, seat, choice, !found, stdout, stderr)
+	if err := restoreRefused(ctx, effective, seat, found, choice, refused); err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: restored recovery: %v\n", err)
 		return 1
 	}
@@ -220,6 +223,7 @@ func restoreNative(
 	current.SeatHostPID = 0
 	current.SeatHostStart = 0
 	current.SeatHostBirth = 0
+	current.UpdatedAt = clock.Real.Now().Unix() // the restored launch's birth window counts from here
 	// SeatHost marks live only after the engine actually starts.
 	current.State = "lost"
 	if noteErr != nil {

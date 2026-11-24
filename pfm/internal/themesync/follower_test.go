@@ -109,7 +109,7 @@ func TestFollowerReloadOwedUntilABootstrapSucceeds(t *testing.T) {
 	}
 	t.Run("a failed bootout stays due", func(t *testing.T) {
 		saved := wallClock
-		wallClock = instantSleep{Clock: clock.Real}
+		wallClock = instantSleep{Clock: clock.NewFake(time.Now())}
 		t.Cleanup(func() { wallClock = saved })
 		h := newHarness(t)
 		h.on()

@@ -496,9 +496,17 @@ py_inv() { # py_inv <test file> <has selector 0|1> <selector>: unittest when the
   if [ "$has" = 1 ]; then add_inv t_proof "$f::$sel" unittest env "PYTHONPATH=$dir" python3 -m unittest "$f" -k "$sel"
   else add_inv t_proof "$f" unittest env "PYTHONPATH=$dir" python3 -m unittest "$f"; fi
 }
+rel_path() { # rel_path <repository-relative dir> <repository-relative path>: the path as seen from the dir
+  local from="$1" to="$2" up=
+  while [ -n "$from" ] && [[ "$to" != "$from"/* ]]; do
+    up+=../
+    case "$from" in */*) from="${from%/*}" ;; *) from= ;; esac
+  done
+  printf '%s%s' "$up" "${to#"$from"/}"
+}
 no_sel() { [ "$2" = 0 ] || { echo "test.sh: $1: a $3 takes no selector" >&2; usage; }; }
 derive() { # derive <repository-relative path> <has selector 0|1> <selector>
-  local f="$1" has="$2" sel="$3" dir base names fn sib tier
+  local f="$1" has="$2" sel="$3" dir base names fn sib tier ld lds
   case "$f" in
     pfm/*_test.go)
       dir="${f%/*}"; dir="${dir#pfm}"; dir="${dir#/}"
@@ -531,9 +539,22 @@ derive() { # derive <repository-relative path> <has selector 0|1> <selector>
         .claude/scripts/dev.sh)
           shell_test scripts/test-dev-report.sh .claude/scripts/dev.sh
           [ ! -f "$ROOT/infra/fence/tests/iso-housekeeping_test.sh" ] || shell_test infra/fence/tests/iso-housekeeping_test.sh ;;
-        scripts/shtest.sh | scripts/stub-root.sh | scripts/worktree-verbs.sh)
+        scripts/shtest.sh | scripts/shtest-wait.sh | scripts/stub-root.sh | scripts/worktree-verbs.sh)
+          # The wait door also comes through each tracked non-test shell file sourcing it: a test naming
+          # that loader, by its path or relative to the test's own directory, runs too.
+          lds=()
+          if [ "$f" = scripts/shtest-wait.sh ]; then
+            while IFS= read -r ld; do
+              case "$ld" in *_test.sh | scripts/test-*.sh | "$f") ;; *) lds+=("$ld") ;; esac
+            done < <(git -C "$ROOT" grep -lE -- '^[[:space:]]*(source|\.)[[:space:]].*shtest-wait\.sh' -- '*.sh')
+          fi
           while IFS= read -r sib; do
-            [ -z "$sib" ] || [ "$sib" = "$f" ] || [ ! -f "$ROOT/$sib" ] || ! grep -qF -- "$f" "$ROOT/$sib" || shell_test "$sib"
+            { [ -n "$sib" ] && [ "$sib" != "$f" ] && [ -f "$ROOT/$sib" ]; } || continue
+            if grep -qF -- "$f" "$ROOT/$sib"; then shell_test "$sib"; continue; fi
+            dir="${sib%/*}"; [ "$dir" != "$sib" ] || dir=
+            for ld in "${lds[@]+"${lds[@]}"}"; do
+              if grep -qF -e "$ld" -e "$(rel_path "$dir" "$ld")" "$ROOT/$sib"; then shell_test "$sib"; break; fi
+            done
           done < <(git -C "$ROOT" ls-files -- '*_test.sh' 'scripts/test-*.sh') ;;
         infra/fence/local-env.sh)
           for sib in infra/fence/tests/fence-env_test.sh infra/fence/tests/iso-housekeeping_test.sh; do

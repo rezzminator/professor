@@ -92,8 +92,16 @@ func proveHerdrOwner(
 		return target, fmt.Errorf("herdr pane %s ownership unproved: durable owner changed", target.Pane)
 	}
 	proved, owned, err := prove(*owner)
+	if errors.Is(err, gather.ErrHerdrSeatGone) {
+		// The seat ended during its proof: the pane has no durable owner now.
+		return target, fmt.Errorf("herdr seat %s ownership unproved: %w: %w", owner.SeatID, errNoHerdrOwner, err)
+	}
 	if err != nil {
 		return target, fmt.Errorf("herdr seat %s ownership unproved: %w", owner.SeatID, err)
+	}
+	if !owned && gather.HerdrRestorePending(proved) {
+		return target, fmt.Errorf("herdr seat %s ownership unproved: awaiting its restored launch: %w",
+			owner.SeatID, herdr.ErrSeatUnbound)
 	}
 	if !owned {
 		return target, fmt.Errorf(
@@ -111,7 +119,8 @@ func proveHerdrOwner(
 // ProveHerdrPane refuses stale observations rather than applying their data to
 // a different canonical pane. Callers with retargetable input use ProveHerdrTarget.
 // A pane no durable seat owns is proved when it hosts a pfm tmux chat client.
-// Positive absence of both returns herdr.ErrNotFleetPane; a failed read never does.
+// Positive absence of both, or Herdr refusing the pane as not found where no
+// seat proved otherwise, returns herdr.ErrNotFleetPane; a failed read never does.
 func ProveHerdrPane(ctx context.Context, socket, pane string) error {
 	return proveHerdrPaneOrBridge(ctx, socket, pane, ProveHerdrBridge)
 }
@@ -143,7 +152,9 @@ func proveHerdrPaneWith(
 	proved, err := prove(ctx, Target{SocketPath: socket, Pane: pane})
 	if err != nil {
 		if _, bridgeErr := bridge(ctx, socket, pane); bridgeErr != nil {
-			if errors.Is(err, errNoHerdrOwner) && errors.Is(bridgeErr, errNoHerdrBridge) {
+			// The bridge asks Herdr for this very pane: pane_not_found there is the pane closed.
+			paneGone := herdr.PaneGone(bridgeErr) && (errors.Is(err, errNoHerdrOwner) || herdr.PaneGone(err))
+			if paneGone || errors.Is(err, errNoHerdrOwner) && errors.Is(bridgeErr, errNoHerdrBridge) {
 				return errors.Join(herdr.ErrNotFleetPane, err, bridgeErr)
 			}
 			return errors.Join(err, bridgeErr)

@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
 
@@ -38,7 +39,7 @@ func TestNameSyncDefaultsToPreview(t *testing.T) {
 	start := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
 		"new-session", "-d", "-s", socket, "-n", original,
-		"printf '🥇 acct  🔖 "+targetLabel+" │ 42%%\\n'; sleep 120",
+		"printf '🥇 acct  🔖 "+targetLabel+" │ 42%%\\n'; "+testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
 	if output, err := start.CombinedOutput(); err != nil {
@@ -138,7 +139,7 @@ func TestNameSyncCountsOnlyVerifiedWindowsAsConverged(t *testing.T) {
 	socketPath := filepath.Join(root, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "CONVERGED", "sleep 120",
+		"new-session", "-d", "-s", socket, "-n", "CONVERGED", testwait.Hold,
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)
@@ -147,7 +148,7 @@ func TestNameSyncCountsOnlyVerifiedWindowsAsConverged(t *testing.T) {
 		_ = exec.Command("tmux", "-S", socketPath, "kill-server").Run()
 	})
 	if output, err := exec.Command(
-		"tmux", "-S", socketPath, "new-window", "-d", "-n", "TAKEN-BACK", "sleep 120",
+		"tmux", "-S", socketPath, "new-window", "-d", "-n", "TAKEN-BACK", testwait.Hold,
 	).CombinedOutput(); err != nil {
 		t.Fatalf("create second window: %v: %s", err, output)
 	}
@@ -214,7 +215,7 @@ func TestNameSyncThemesLiveServersOnlyWhileTheSyncIsOn(t *testing.T) {
 	resolved := jailPaths(t)
 	const socket = "cc-1800000098-42-1"
 	start := exec.Command(
-		"tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "-n", "W", "sleep 120",
+		"tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "-n", "W", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
 	if output, err := start.CombinedOutput(); err != nil {

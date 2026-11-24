@@ -4,25 +4,23 @@ package kill
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 	jail := newKillJail(t)
 	testjail.DatabaseFiles(t, jail.root) // the helper processes open the same files
 	database := jail.open(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	if err := database.Batch(
 		ctx,
 		killStressProcesses*killStressIDs*2,
@@ -85,10 +83,7 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 			}
 		}
 	})
-	if err := waitKillStressPaths(ctx, readyPaths); err != nil {
-		t.Fatalf("wait for helpers: %v\n%s", err, killStressOutputs(processes))
-	}
-	started := time.Now()
+	waitKillStressPaths(t, readyPaths, processes)
 	if err := os.WriteFile(gate, []byte("go"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +94,6 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 		}
 		warnings += strings.Count(process.output.String(), "WARNING:")
 	}
-	elapsed := time.Since(started)
 
 	database = jail.open(t)
 	defer func() {
@@ -132,12 +126,11 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 		)
 	}
 	t.Logf(
-		"STRESS kill/unkill processes=%d operations=%d final=%d warnings=%d elapsed=%s",
+		"STRESS kill/unkill processes=%d operations=%d final=%d warnings=%d",
 		killStressProcesses,
 		killStressProcesses*killStressIDs*3,
 		len(killed),
 		warnings,
-		elapsed,
 	)
 }
 
@@ -146,26 +139,16 @@ type killStressProcess struct {
 	output  bytes.Buffer
 }
 
-func waitKillStressPaths(ctx context.Context, paths []string) error {
-	pending := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		pending[path] = struct{}{}
-	}
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for len(pending) != 0 {
-		for path := range pending {
-			if _, err := os.Stat(path); err == nil {
-				delete(pending, path)
+func waitKillStressPaths(t *testing.T, paths []string, processes []*killStressProcess) {
+	t.Helper()
+	testwait.Until(t, "the stress helpers to report ready", func() (bool, string) {
+		for _, path := range paths {
+			if _, err := os.Stat(path); err != nil {
+				return false, fmt.Sprintf("%s: %v\n%s", path, err, killStressOutputs(processes))
 			}
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
-	return nil
+		return true, ""
+	})
 }
 
 func killStressOutputs(processes []*killStressProcess) string {

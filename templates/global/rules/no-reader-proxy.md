@@ -1,0 +1,1 @@
+- No loop reads a page via `r.jina.ai` or another third-party reader proxy, by any route; unreadable, it stays unread.

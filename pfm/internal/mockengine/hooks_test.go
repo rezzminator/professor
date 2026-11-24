@@ -2,14 +2,15 @@ package mockengine
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -29,7 +30,7 @@ case "$event" in
   SessionStart)
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"CTX-FIXTURE"}}' ;;
   UserPromptSubmit)
-    if printf '%s' "$payload" | grep -q '"prompt":"/reload'; then
+    if printf '%s' "$payload" | grep -q '"prompt":"/pfm:reload'; then
       printf '%s\n' '{"decision":"block","reason":"reload scheduled — this chat reboots when the current turn ends","suppressOriginalPrompt":true}'
     fi ;;
   PreToolUse)
@@ -200,15 +201,12 @@ func (fix *fixture) recorded(event string) []string {
 
 func (fix *fixture) waitRecorded(event string, count int) []string {
 	fix.t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
-	for time.Now().Before(deadline) {
-		if lines := fix.recorded(event); len(lines) >= count {
-			return lines
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	fix.t.Fatalf("%s hook fired %d time(s), want %d", event, len(fix.recorded(event)), count)
-	return nil
+	var lines []string
+	testwait.Until(fix.t, fmt.Sprintf("the %s hook to fire %d time(s)", event, count), func() (bool, string) {
+		lines = fix.recorded(event)
+		return len(lines) >= count, fmt.Sprintf("fired %d time(s): %q", len(lines), lines)
+	})
+	return lines
 }
 
 // hookEnvelope mirrors the keys every handler table row reads

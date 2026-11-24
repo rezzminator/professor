@@ -179,7 +179,7 @@ func proveHerdrSeatSnapshot(
 				return seat, false, nil
 			}
 		}
-		return seat, false, fmt.Errorf("seat %s ownership unproved: %w", seat.SeatID, errHerdrPaneAbsent)
+		return seat, false, fmt.Errorf("seat %s ownership unproved: %w", seat.SeatID, ErrHerdrPaneAbsent)
 	}
 	body, err = herdr.SeatRequest(
 		ctx,
@@ -294,8 +294,7 @@ func proveHerdrSeatSnapshot(
 	next.HerdrWorkspace = candidate.WorkspaceID
 	if next != seat && !observe {
 		if err := db.UpdateSeat(ctx, seat, next); err != nil {
-			return seat, false, fmt.Errorf("persist proved seat %s: %w", seat.SeatID,
-				errors.Join(ErrHerdrProofPersistence, err))
+			return seat, false, herdrProofWriteRefused(ctx, db, seat, err)
 		}
 	}
 	// UpdateSeat composes independent metadata changes. Return the stored row,
@@ -309,7 +308,7 @@ func proveHerdrSeatSnapshot(
 		expected = seat
 	}
 	if !found {
-		return seat, false, fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatGone)
+		return seat, false, fmt.Errorf("seat %s %w", seat.SeatID, ErrHerdrSeatGone)
 	}
 	if latest.SeatID != expected.SeatID ||
 		latest.Engine != expected.Engine ||
@@ -460,7 +459,7 @@ func proveHerdrSeats(
 			// failure unless the seat is gone or its supervisor positively dead.
 			canonical, gone, reason, err := unansweredHerdrSeat(ctx, db, proc, row.Seat, herdr.SocketFileGone(row.Err))
 			switch {
-			case errors.Is(err, errHerdrSeatGone):
+			case errors.Is(err, ErrHerdrSeatGone):
 				continue
 			case err != nil:
 				row.Err = errors.Join(row.Err, err)
@@ -480,17 +479,17 @@ func proveHerdrSeats(
 		canonical, owned, err := settleHerdrRow(ctx, db, &row, prove)
 		row.CWD = ""
 		switch {
-		case errors.Is(err, errHerdrSeatGone):
+		case errors.Is(err, ErrHerdrSeatGone):
 			continue // ended or replaced while this listing read it: not listed
 		case errors.Is(err, errHerdrBirthFailed):
 			if row.Err = retireFailedHerdrBirth(ctx, db, canonical, readOnly); row.Err == nil {
 				continue // a reservation that never named a pane: a failed birth, never a chat
 			}
-		case errors.Is(err, errHerdrSeatUnbound):
+		case errors.Is(err, herdr.ErrSeatUnbound):
 			continue // a reservation with no pane or no supervisor yet: not a chat yet
-		case err != nil && canonical.EndPending && (herdr.PaneGone(err) || errors.Is(err, errHerdrPaneAbsent)):
+		case err != nil && canonical.EndPending && (herdr.PaneGone(err) || errors.Is(err, ErrHerdrPaneAbsent)):
 			continue // its end worker closed the pane during this listing: the end is landing
-		case errors.Is(err, errHerdrPaneAbsent) && canonical.SeatHostPID > 0:
+		case errors.Is(err, ErrHerdrPaneAbsent) && canonical.SeatHostPID > 0:
 			listClosedHerdrSeat(&row, canonical)
 		case err != nil:
 			row.Err = fmt.Errorf("HERDR ERROR %s: %w", row.Seat.HerdrSocket, err)

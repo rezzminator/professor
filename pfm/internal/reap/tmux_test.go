@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -45,6 +47,7 @@ func requireTmuxRecord(t *testing.T, recorder *obs.Recorder, index int, subcmd, 
 // TestTmuxReaperRecordsEveryInvocation: the reap façade terminates through
 // the observed tmux command — one record per call, the session as target.
 func TestTmuxReaperRecordsEveryInvocation(t *testing.T) {
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	ctx, recorder := obs.Test(t)
 	ctx = pfmtmux.WithClientRunner(ctx, testjail.TmuxRunner(deps.RunResult{}))
 	tmux := TmuxReaper{Binary: "tmux", TmuxDir: t.TempDir()}
@@ -64,6 +67,7 @@ func TestTmuxReaperRecordsEveryInvocation(t *testing.T) {
 // state of a bunker socket that was never opened. That reads as absence, not
 // a sweep failure.
 func TestTmuxReaperSessionsNoServerIsAbsence(t *testing.T) {
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	fake := testjail.TmuxRunner(deps.RunResult{Stderr: []byte("no server running on vsct\n"), ExitCode: 1})
 	tmux := TmuxReaper{TmuxDir: t.TempDir()}
 	sessions, err := tmux.Sessions(pfmtmux.WithClientRunner(context.Background(), fake), "vsct")
@@ -80,6 +84,7 @@ func TestTmuxReaperSessionsNoServerIsAbsence(t *testing.T) {
 // bunker sessions". The runner's abort path (runner.go's "list bunker
 // sessions" wrap) depends on this error reaching it.
 func TestTmuxReaperSessionsCouldNotRunIsAnError(t *testing.T) {
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	tmux := TmuxReaper{
 		Binary:  filepath.Join(t.TempDir(), "tmux-does-not-exist"),
 		TmuxDir: t.TempDir(),
@@ -104,6 +109,7 @@ func scriptedTmux(stdout string, exit int) context.Context {
 // One session line tmux answers in an unreadable shape costs only that line: it is
 // kept, named, with its idle unknown, and the bunker's other sessions list normally.
 func TestTmuxReaperSessionsKeepsAnUnreadableLineAsUnknown(t *testing.T) {
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	const sep = "\x1f"
 	now := time.Unix(10_000, 0)
 	output := "good" + sep + "1" + sep + "9000\n" +
@@ -135,6 +141,7 @@ func TestTmuxReaperSessionsKeepsAnUnreadableLineAsUnknown(t *testing.T) {
 
 // A list-clients that fails is the probe's own error, never "no client answered".
 func TestTmuxReaperClientIdleReturnsAFailedProbe(t *testing.T) {
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	tmux := TmuxReaper{Binary: "tmux", TmuxDir: t.TempDir()}
 	_, found, err := tmux.ClientIdle(scriptedTmux("", 1), "cc-1-2-3")
 	if found || err == nil || err.Error() != "tmux cc-1-2-3 list-clients: exit status 1" {

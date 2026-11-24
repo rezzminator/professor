@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
@@ -82,8 +81,21 @@ func fullHost(t *testing.T, order *[]string) (Deps, *hostRunner, *fakeKernel, *f
 	fleet := &fakeFleet{chats: []headless.Chat{
 		{Engine: pfmengine.Claude, Name: "launcher", ID: "sess-launch", Socket: "pfm-cc-launcher", Pane: "%0"},
 		{Engine: pfmengine.Codex, Name: "builder", ID: "sess-build", Socket: "pfm-cx-builder", Pane: "%1"},
-		{Engine: pfmengine.OpenCode, Name: "", ID: "sess-oc", Backend: spawn.BackendHerdr, SeatID: "seat-3"},
+		{
+			Engine: pfmengine.OpenCode, Name: "", ID: "sess-oc", Backend: spawn.BackendHerdr, SeatID: "seat-3",
+			Socket: "/run/herdr.sock", Pane: "w1:p3",
+		},
 	}}
+	// The Herdr chat is back only once the restart started the Herdr server again.
+	fleet.back = func(chat headless.Chat, _ string) (bool, string, error) {
+		*order = append(*order, "back "+chat.ID)
+		for index := range runner.starts {
+			if runner.starts[index].Argv[0] == "/opt/bin/herdr" {
+				return true, "seat " + chat.SeatID + " live in Herdr pane " + chat.Pane, nil
+			}
+		}
+		return false, "the Herdr server is not started", nil
+	}
 	dependencies := testDeps(t, runner, kernel, fleet)
 	dependencies.Spare = []int{13}
 	dependencies.LaunchedFrom = chatAddress{Socket: "pfm-cc-launcher"}
@@ -125,21 +137,36 @@ func TestBuildPlanOrdersEveryFamilyDownstreamFirst(t *testing.T) {
 	}
 }
 
+// TestDryRunChangesNothing: --dry-run prints the plan a real run would carry
+// out, today's every-chat-ended plan under --no-restore, and runs nothing but
+// the reads, each once.
 func TestDryRunChangesNothing(t *testing.T) {
-	var order []string
-	dependencies, runner, kernel, fleet := fullHost(t, &order)
-	plan := BuildPlan(context.Background(), dependencies)
-	var out bytes.Buffer
-	plan.Print(&out)
-	if len(order) != 0 || len(kernel.sent()) != 0 || len(runner.starts) != 0 || len(fleet.ended) != 0 {
-		t.Fatalf("the dry run changed something: steps %v, signals %v, starts %v, ended %v",
-			order, kernel.sent(), runner.starts, fleet.ended)
+	for _, row := range []struct {
+		golden    string
+		noRestore bool
+	}{
+		{golden: "dry_run_plan.txt", noRestore: true},
+		{golden: "dry_run_plan_restore.txt", noRestore: false},
+	} {
+		t.Run(row.golden, func(t *testing.T) {
+			var order []string
+			dependencies, runner, kernel, fleet := fullHost(t, &order)
+			dependencies.NoRestore = row.noRestore
+			plan := BuildPlan(context.Background(), dependencies)
+			var out bytes.Buffer
+			plan.Print(&out)
+			if len(order) != 0 || len(kernel.sent()) != 0 || len(runner.starts) != 0 || len(fleet.ended) != 0 ||
+				len(fleet.polled) != 0 {
+				t.Fatalf("the dry run changed something: steps %v, signals %v, starts %v, ended %v, polled %v",
+					order, kernel.sent(), runner.starts, fleet.ended, fleet.polled)
+			}
+			ran := make([]string, 0, len(runner.ran()))
+			for _, argv := range runner.ran() {
+				ran = append(ran, strings.Join(argv, " "))
+			}
+			golden(t, row.golden, out.String()+"--- ran\n"+strings.Join(ran, "\n")+"\n")
+		})
 	}
-	ran := make([]string, 0, len(runner.ran()))
-	for _, argv := range runner.ran() {
-		ran = append(ran, strings.Join(argv, " "))
-	}
-	golden(t, "dry_run_plan.txt", out.String()+"--- ran\n"+strings.Join(ran, "\n")+"\n")
 }
 
 func TestDryRunNamesTheWorkerARealRunStarts(t *testing.T) {
@@ -205,34 +232,79 @@ func TestAHerdrLaunchingChatEndsLastOfTheChats(t *testing.T) {
 	}
 }
 
+// TestExecuteRunsTheWholeRestartAndEndsTheLaunchingChatLastOfTheChats: a
+// plain restart leaves the Herdr chat for the Herdr server stop and verifies
+// it back after the server starts, ending the tmux chats with why; under
+// --no-restore it ends every chat, the launching one last.
 func TestExecuteRunsTheWholeRestartAndEndsTheLaunchingChatLastOfTheChats(t *testing.T) {
-	var order []string
-	dependencies, runner, kernel, fleet := fullHost(t, &order)
-	plan := BuildPlan(context.Background(), dependencies)
-	var out bytes.Buffer
-	if code := plan.Execute(context.Background(), &out); code != 0 {
-		t.Fatalf("Execute = %d:\n%s", code, out.String())
-	}
-	if !slices.Equal(fleet.ended, []string{"sess-build", "sess-oc", "sess-launch"}) {
-		t.Fatalf("ended = %v, want the launching chat last", fleet.ended)
-	}
-	if !slices.Equal(order, []string{"stop systemd pfm-schedule.timer", "start systemd pfm-schedule.timer"}) {
-		t.Fatalf("service steps = %v", order)
-	}
-	if got := kernel.sent(); !slices.Equal(got, []string{"10 terminated", "11 terminated", "12 terminated"}) {
-		t.Fatalf("signals = %v (pid 13, the front, must be spared)", got)
-	}
-	var started []string
-	for _, call := range runner.starts {
-		started = append(started, strings.Join(call.Argv, " "))
-	}
-	if !slices.Equal(started, []string{"/opt/pfm/bin/pfm mcp serve", "/opt/bin/herdr server"}) {
-		t.Fatalf("starts = %v, want the daemon before Herdr", started)
-	}
-	for _, line := range []string{"restart: ended 3 chat(s)", "sess-launch", "sess-oc", "restart: every step verified"} {
-		if !strings.Contains(out.String(), line) {
-			t.Fatalf("output lacks %q:\n%s", line, out.String())
-		}
+	for _, row := range []struct {
+		name      string
+		noRestore bool
+		ended     []string
+		order     []string
+		chats     string
+	}{
+		{
+			name: "no restore", noRestore: true,
+			ended: []string{"sess-build", "sess-oc", "sess-launch"},
+			order: []string{"stop systemd pfm-schedule.timer", "start systemd pfm-schedule.timer"},
+			chats: `restart: ended 3 chat(s)
+  ended  codex    builder                  sess-build
+  ended  opencode (unnamed)                sess-oc
+  ended  claude   launcher                 sess-launch
+`,
+		},
+		{
+			name:  "restore",
+			ended: []string{"sess-build", "sess-launch"},
+			order: []string{"stop systemd pfm-schedule.timer", "start systemd pfm-schedule.timer", "back sess-oc"},
+			chats: `restart: ended 2 chat(s)
+  ended  codex    builder                  sess-build  not brought back: it runs in tmux, and only a chat in a Herdr pane comes back with Herdr's restore
+  ended  claude   launcher                 sess-launch  not brought back: it runs in tmux, and only a chat in a Herdr pane comes back with Herdr's restore
+restart: brought back 1 chat(s)
+  back   opencode (unnamed)                sess-oc
+`,
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var order []string
+			dependencies, runner, kernel, fleet := fullHost(t, &order)
+			dependencies.NoRestore = row.noRestore
+			plan := BuildPlan(context.Background(), dependencies)
+			var out bytes.Buffer
+			if code := plan.Execute(context.Background(), &out); code != 0 {
+				t.Fatalf("Execute = %d:\n%s", code, out.String())
+			}
+			if !slices.Equal(fleet.ended, row.ended) {
+				t.Fatalf("ended = %v, want %v, the launching chat last", fleet.ended, row.ended)
+			}
+			if !slices.Equal(order, row.order) {
+				t.Fatalf("steps = %v, want %v", order, row.order)
+			}
+			if got := kernel.sent(); !slices.Equal(got, []string{"10 terminated", "11 terminated", "12 terminated"}) {
+				t.Fatalf("signals = %v (pid 13, the front, must be spared)", got)
+			}
+			var started []string
+			for _, call := range runner.starts {
+				started = append(started, strings.Join(call.Argv, " "))
+			}
+			if !slices.Equal(started, []string{"/opt/pfm/bin/pfm mcp serve", "/opt/bin/herdr server"}) {
+				t.Fatalf("starts = %v, want the daemon before Herdr", started)
+			}
+			text := out.String()
+			from, to := strings.Index(text, "restart: ended"), strings.Index(text, "last   pfm")
+			if from < 0 || to < from || text[from:to] != row.chats {
+				t.Fatalf(
+					"chats report:\n%s\nwant:\n%s\nwhole output:\n%s",
+					text[max(from, 0):max(to, 0)],
+					row.chats,
+					text,
+				)
+			}
+			if !strings.HasSuffix(text, "restart: every step verified\nrestart: exit 0\n") {
+				t.Fatalf("output does not end verified:\n%s", text)
+			}
+		})
 	}
 }
 
@@ -385,34 +457,5 @@ func TestAnUnknownSupervisorLeavesTheDaemonRunning(t *testing.T) {
 	if daemonErr == nil ||
 		daemonErr.Error() != "the services find failed, so whether a service unit supervises the daemon is unknown — 1 pfm mcp serve process(es) left running: systemctl --user: no bus" {
 		t.Fatalf("mcp-daemon find with its supervisor unknown = %v, want a failed find naming the daemon", daemonErr)
-	}
-}
-
-// TestAChatUnitStopsTheWayChatEndsIt: the plan's stop line for a chat is the
-// chat package's own end decision (EndHow), so the plan never promises an end
-// the end door does not perform.
-func TestAChatUnitStopsTheWayChatEndsIt(t *testing.T) {
-	fleet := &fakeFleet{chats: []headless.Chat{
-		{Engine: pfmengine.Claude, Name: "native", ID: "sess-native", Backend: spawn.BackendHerdr, SeatID: "seat-1"},
-		{Engine: pfmengine.Codex, Name: "builder", ID: "sess-build", Socket: "pfm-cx-builder", Pane: "%1"},
-	}}
-	plan := BuildPlan(context.Background(), testDeps(t, &hostRunner{}, newKernel(), fleet))
-	stops := 0
-	for index := range plan.Units {
-		unit := &plan.Units[index]
-		if unit.Family != FamilyChats {
-			continue
-		}
-		stops++
-		want := pfmchat.EndHow(headless.Chat{Backend: spawn.BackendHerdr}) + "; not brought back"
-		if unit.Chat.SessionID == "sess-build" {
-			want = "tmux kill-server on pfm-cx-builder; verified: tmux says the server is dead; not brought back"
-		}
-		if unit.StopHow != want {
-			t.Fatalf("%s stops by %q, want %q", unit.Chat.SessionID, unit.StopHow, want)
-		}
-	}
-	if stops != 2 {
-		t.Fatalf("plan holds %d chat units, want 2", stops)
 	}
 }

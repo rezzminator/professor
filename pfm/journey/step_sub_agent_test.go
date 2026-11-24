@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,31 +26,38 @@ func subAgent(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	first, sibling, reply := c.Unique("agent"), c.Unique("agent"), c.Unique("reply")
 	firstGate, siblingGate := agentGate(c, first), agentGate(c, sibling)
-	agentStep := func(name, gate string) string {
-		return `{"type":"background_agent","name":"` + name + `","until_gone":"` + gate + `","busy_ms":4000}`
+	agentStep := func(name, gate string, busyMS int) string {
+		return `{"type":"background_agent","name":"` + name + `","until_gone":"` + gate + `","busy_ms":` +
+			strconv.Itoa(busyMS) + `}`
 	}
-	term.Type(`two agents mock-engine: [` + agentStep(first, firstGate) + "," + agentStep(sibling, siblingGate) +
+	// The first agent's result turn works for 4 s of the engine's clock, ended once it shows working.
+	const report = 4 * time.Second
+	term.Type(`two agents mock-engine: [` + agentStep(first, firstGate, int(report.Milliseconds())) + "," +
+		agentStep(sibling, siblingGate, 0) +
 		`,{"type":"turn","reply":"` + reply + `"}]` + "\r")
-	term.WaitFor("⏺ "+reply, 20*time.Second)
+	term.WaitFor("⏺ " + reply)
 	term.WaitFor("✻ Waiting for 2 background agents to finish")
-	awaitAttention(c, s, "working", stepBound)
+	awaitAttention(c, s, "working")
 	holdAttention(c, s, "working", 3)
 	onlyChat(c, s, first, sibling)
 
 	ask(c, s)
-	endAgent(c, siblingGate)
-	term.WaitGone("● "+sibling+"  running", stepBound)
+	endAgent(c, s, siblingGate)
+	term.WaitGone("● " + sibling + "  running")
 	holdAttention(c, s, "blocked", 3)
 	term.Press(harness.Enter)
-	term.WaitFor(`⏺ Agent "`+sibling+`" finished`, 20*time.Second)
+	term.WaitFor(`⏺ Agent "` + sibling + `" finished`)
 	term.WaitFor("✻ Waiting for 1 background agent to finish")
-	awaitAttention(c, s, "working", stepBound)
+	awaitAttention(c, s, "working")
 
-	endAgent(c, firstGate)
-	awaitAttention(c, s, "working", 4*time.Second)
-	term.WaitFor(`⏺ Agent "`+first+`" finished`, 20*time.Second)
-	term.WaitGone("background agent", stepBound)
-	awaitAttention(c, s, "idle", stepBound)
+	endAgent(c, s, firstGate)
+	term.WaitGone("● " + first + "  running")
+	term.WaitFor("✻ Thinking…")
+	awaitAttention(c, s, "working")
+	advanceEngine(c, s.Chat.Engine, report)
+	term.WaitFor(`⏺ Agent "` + first + `" finished`)
+	term.WaitGone("background agent")
+	awaitAttention(c, s, "idle")
 	onlyChat(c, s, first, sibling)
 	fleetConsistent(c, s)
 	return s
@@ -96,9 +104,10 @@ func agentGate(c *harness.Ctx, name string) string {
 }
 
 // endAgent ends the fake background agent waiting on gate.
-func endAgent(c *harness.Ctx, gate string) {
+func endAgent(c *harness.Ctx, s State, gate string) {
 	if err := os.Remove(gate); err != nil {
 		c.Failf("end the agent of %s: %v", gate, err)
 	}
 	c.Logf("%s", fmt.Sprintf("agent gate %s removed", gate))
+	nudgeEngine(c, s.Chat.Engine)
 }

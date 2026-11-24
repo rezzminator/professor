@@ -17,7 +17,8 @@ const checkShellClaudeEnv = "shell-claude-env"
 // run under launchd or systemd and inherit no login-shell export, so such a
 // variable reaches terminal chats only. Names every pfm launch sets itself are
 // not compared: each chat carries them whoever spawned it. Inside a Claude
-// chat the environment is the chat's, so the check reports it did not look.
+// chat the environment is the chat's, so the check reports it did not look,
+// a Skipped row no doctor run counts as a warning.
 func shellClaudeEnv(env Env) ([]Row, error) {
 	exported := map[string]string{}
 	for _, entry := range env.Environ {
@@ -26,7 +27,7 @@ func shellClaudeEnv(env Env) ([]Row, error) {
 	}
 	if exported[claudelaunch.SessionMarkerEnv] != "" {
 		return []Row{{
-			Warn,
+			Skipped,
 			checkShellClaudeEnv,
 			"login shell",
 			"not checked: pfm runs inside a Claude Code chat (" + claudelaunch.SessionMarkerEnv +

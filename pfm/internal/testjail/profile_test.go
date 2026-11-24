@@ -2,7 +2,6 @@ package testjail
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The profiler is tested from outside, the way a package meets it: a copy of
@@ -54,7 +54,7 @@ func TestProfileChild(t *testing.T) {
 	switch mode {
 	case "pass":
 	case "cpu":
-		burn(50 * time.Millisecond)
+		burn()
 	case "fail":
 		t.Fatal("deliberate failure")
 	case "hang":
@@ -66,12 +66,18 @@ func TestProfileChild(t *testing.T) {
 	}
 }
 
-func burn(d time.Duration) {
-	from := time.Now()
-	for n := 0; time.Since(from) < d; n++ {
-		_ = n
+// burn is CPU work for the profile to sample: a fixed count of steps, never a
+// stretch of wall time.
+func burn() {
+	sum := uint64(0)
+	for n := range uint64(50_000_000) {
+		sum = sum*31 + n
 	}
+	burnSink = sum
 }
+
+// burnSink keeps burn's loop from being optimised away.
+var burnSink uint64
 
 // child is one run of a test binary with the profiler's environment.
 type child struct {
@@ -104,9 +110,7 @@ func (c *child) command(t *testing.T) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) 
 	if c.mode != "" {
 		args = append([]string{"-test.run=^TestProfileChild$"}, args...)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	t.Cleanup(cancel)
-	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd := exec.CommandContext(testwait.Context(t), exe, args...)
 	cmd.Dir = c.dir
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
@@ -163,19 +167,6 @@ func (c *child) run(t *testing.T) childResult {
 	return res
 }
 
-// waitFor polls cond every 50 ms until it holds, or fails the test after
-// limit, naming what it waited for.
-func waitFor(t *testing.T, limit time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(limit)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("waited %v for %s", limit, what)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -216,7 +207,13 @@ func readFile(t *testing.T, path string) string {
 
 func TestProfileCPUStartFailureIsInTheSummary(t *testing.T) {
 	t.Parallel()
-	p := &profiler{dir: filepath.Join(t.TempDir(), "gone"), pkg: "x", start: time.Now(), bundles: []string{}}
+	p := &profiler{
+		dir:     filepath.Join(t.TempDir(), "gone"),
+		pkg:     "x",
+		start:   time.Now(),
+		wall:    testwait.Stopwatch(),
+		bundles: []string{},
+	}
 	p.startCPU()
 	if p.cpuErr == nil || p.cpu != nil {
 		t.Fatalf("startCPU into a missing directory: cpuErr %v, cpu %v", p.cpuErr, p.cpu)
@@ -351,7 +348,14 @@ func TestProfileBundleListsAnArtifactItCouldNotWrite(t *testing.T) {
 	if err := os.MkdirAll(heap, 0o755); err != nil { // a directory where the heap profile goes
 		t.Fatal(err)
 	}
-	p := &profiler{dir: dir, pkg: "x", start: time.Now(), bundles: []string{}, frErr: errors.New("recorder refused")}
+	p := &profiler{
+		dir:     dir,
+		pkg:     "x",
+		start:   time.Now(),
+		wall:    testwait.Stopwatch(),
+		bundles: []string{},
+		frErr:   errors.New("recorder refused"),
+	}
 	p.bundle("exit")
 	errs := readFile(t, filepath.Join(dir, "exit", "errors.txt"))
 	for _, want := range []string{"create " + heap, "trace window: flight recorder not running: recorder refused"} {
@@ -374,32 +378,35 @@ func TestProfileBundleListsAnArtifactItCouldNotWrite(t *testing.T) {
 // exited: finish waits for the firing, so the imminent summary never lands last.
 func TestProfileFinishAfterAFiredWatchdogLeavesTheExitSummaryLast(t *testing.T) {
 	dir := t.TempDir()
-	p := &profiler{dir: dir, pkg: "x", start: time.Now(), bundles: []string{}, frErr: errors.New("no recorder here")}
+	p := &profiler{
+		dir:     dir,
+		pkg:     "x",
+		start:   time.Now(),
+		wall:    testwait.Stopwatch(),
+		bundles: []string{},
+		frErr:   errors.New("no recorder here"),
+	}
 	// Held, p.mu stops the firing and finish both, so the two meet as they do
 	// at a real deadline: the watchdog already running when finish starts.
 	p.armWatchdog(time.Hour, "deadline")
 	p.mu.Lock()
 	p.watch.Reset(0)
-	running := func(frame string) func() bool {
-		return func() bool {
+	running := func(frame string) func() (bool, string) {
+		return func() (bool, string) {
 			var dump bytes.Buffer
 			_ = pprof.Lookup("goroutine").WriteTo(&dump, 2)
-			return strings.Contains(dump.String(), frame)
+			return strings.Contains(dump.String(), frame), "goroutines:\n" + dump.String()
 		}
 	}
-	waitFor(t, 10*time.Second, "the watchdog to fire", running("(*profiler).armWatchdog.func1"))
+	testwait.Until(t, "the watchdog to fire", running("(*profiler).armWatchdog.func1"))
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
 		p.finish(0)
 	}()
-	waitFor(t, 10*time.Second, "finish to start", running("(*profiler).finish("))
+	testwait.Until(t, "finish to start", running("(*profiler).finish("))
 	p.mu.Unlock()
-	select {
-	case <-finished:
-	case <-time.After(30 * time.Second):
-		t.Fatal("finish did not return within 30s of the watchdog's firing")
-	}
+	testwait.Receive(t, "finish to return after the watchdog's firing", finished)
 	wantSummary(t, readSummary(t, dir), map[string]any{
 		"event": "exit", "exit_code": float64(0), "bundles": []any{"deadline"},
 	})
@@ -409,7 +416,13 @@ func TestProfileFinishAfterAFiredWatchdogLeavesTheExitSummaryLast(t *testing.T) 
 }
 
 func TestProfileSummaryNeverRendersAnUnreadablePSIAsZero(t *testing.T) {
-	p := &profiler{pkg: "x", start: time.Now(), bundles: []string{}, psiErr: errors.New("psi: no pressure files")}
+	p := &profiler{
+		pkg:     "x",
+		start:   time.Now(),
+		wall:    testwait.Stopwatch(),
+		bundles: []string{},
+		psiErr:  errors.New("psi: no pressure files"),
+	}
 	p.mu.Lock()
 	data, err := json.Marshal(p.summary(0, "exit"))
 	p.mu.Unlock()

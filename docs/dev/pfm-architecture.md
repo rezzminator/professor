@@ -78,7 +78,7 @@ pfm/
     hooks/                          # NEW. Harness hook bodies with no other domain home.
       README.md
       table.go                      # THE entry table {Entry, Event, Matcher, Engines, Summary}; installer reads it
-      epic_inject.go reload_intercept.go exit_intercept.go …
+      epic_inject.go command_intercept.go exit_intercept.go …
       <entry>_test.go
     doctor/                         # NEW. From cmd/pfm/doctor.go + *_doctor.go.
       README.md doctor.go           # probe runner; three distinct verdicts: healthy / broken / could-not-look

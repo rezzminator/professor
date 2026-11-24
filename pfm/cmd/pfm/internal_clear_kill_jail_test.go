@@ -12,13 +12,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The CLAUDE_RULES report: a named chat cleared twice, then exited, stayed in
@@ -439,50 +439,41 @@ func TestClearHidesTheNamedConversationAndListsItsNumberedSuccessor(t *testing.T
 	seat.turn()
 
 	var rows []compose.Row
-	deadline := time.Now().Add(15 * time.Second)
-	for {
+	condition := "after /clear " + original + " hidden and the successor listed as " + name + " #2"
+	testwait.Until(t, condition, func() (bool, string) {
 		var err error
 		if rows, err = pfmchat.Rows(context.Background(), io.Discard, nil); err != nil {
 			t.Fatalf("scan the fleet after /clear: %v", err)
 		}
 		listed, named := false, false
+		var seen []string
 		for _, row := range rows {
 			listed = listed || (row.ID == original && !row.Killed)
 			named = named || (row.ID == strings.TrimSuffix(filepath.Base(successor), ".jsonl") &&
 				row.Name == name+" #2" && !row.Killed)
+			seen = append(seen, fmt.Sprintf("%s name=%q killed=%v", row.ID, row.Name, row.Killed))
 		}
-		if !listed && named {
-			return
-		}
-		if time.Now().After(deadline) {
-			var seen []string
-			for _, row := range rows {
-				seen = append(seen, fmt.Sprintf("%s name=%q killed=%v", row.ID, row.Name, row.Killed))
-			}
-			t.Fatalf("after /clear want %s hidden and the successor listed as %q; rows: %q", original, name+" #2", seen)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return !listed && named, fmt.Sprintf("rows: %q", seen)
+	})
 }
 
 // waitForNewTranscript waits for the one transcript in project that is not
 // known: the successor session a /clear opens.
 func waitForNewTranscript(t *testing.T, project, known string) string {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
+	var successor string
+	testwait.Until(t, "a successor transcript beside "+known+" in "+project, func() (bool, string) {
 		files, err := filepath.Glob(filepath.Join(project, "*.jsonl"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, file := range files {
 			if filepath.Base(file) != known {
-				return file
+				successor = file
+				return true, ""
 			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no successor transcript beside %s in %s", known, project)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+		return false, fmt.Sprintf("transcripts: %q", files)
+	})
+	return successor
 }

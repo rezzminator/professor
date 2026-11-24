@@ -17,22 +17,21 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // mcpTimeout bounds the mock's own MCP handshake against a dead or hanging
-// endpoint — the same discipline hooks.go:162 applies to hook commands. A
-// var, not a const, so a test can shrink it rather than block for 30s proving
-// a hang is eventually bounded.
-var mcpTimeout = 30 * time.Second
+// endpoint, on the mock's clock (clockBound): under Scenario.Control only the
+// test's clock passes it, and the test's own wait is the hang guard.
+const mcpTimeout = 30 * time.Second
 
 // mcpBoundedContext is the context session.mcp spawns the server under and
 // connects and lists tools under: a stdio server that never answers has no
-// bound of its own, so a hanging server would otherwise block the mock
-// forever — the same discipline hooks.go:162 applies to hook commands.
-func mcpBoundedContext(parent context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, mcpTimeout)
+// bound of its own, so this one ends it once clk passes mcpTimeout.
+func mcpBoundedContext(parent context.Context, clk clock.Clock) (context.Context, context.CancelFunc) {
+	return clockBound(parent, clk, mcpTimeout)
 }
 
 // codexInvocation is the Codex command line pfm emits (internal/action for
@@ -244,7 +243,7 @@ func (session *codexSession) headless() int {
 		return step.ExitCode
 	}
 	reply, busyMS, usage := running.turnReply(step)
-	if !sleepOrCancel(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
+	if !proc.wait(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
 		warn(proc.stderr, "exec cancelled: %v", proc.ctx.Err())
 		return ExitUsage
 	}
@@ -277,9 +276,14 @@ func (session *codexSession) composerPlaceholder() string { return "Ask Codex to
 
 const codexCompactMS = 5000
 
+// compactBusyDuration is a /compact's busy time: its step's, else Codex's default, which only a scenario
+// with a control FIFO gets: without one nothing moves the mock's clock, so a typed /compact is not busy.
 func (session *codexSession) compactBusyDuration(step Step) time.Duration {
 	if step.BusyMS > 0 {
 		return time.Duration(step.BusyMS) * time.Millisecond
+	}
+	if session.proc.script.Control == "" {
+		return 0
 	}
 	return codexCompactMS * time.Millisecond
 }
@@ -601,7 +605,7 @@ func (session *codexSession) callMCP(step Step) (*mcp.CallToolResult, error) {
 	if !ok || server.Command == "" {
 		return nil, fmt.Errorf("%s has no [mcp_servers.%s] command", path, name)
 	}
-	bounded, cancel := mcpBoundedContext(session.proc.ctx)
+	bounded, cancel := mcpBoundedContext(session.proc.ctx, session.proc.clock())
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "mock-engine", Version: session.proc.script.Version}, nil)
 	launched := strings.Join(append([]string{server.Command}, server.Args...), " ")

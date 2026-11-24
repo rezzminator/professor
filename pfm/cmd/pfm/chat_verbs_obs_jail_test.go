@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestChatKillAndUnkillRecordChatStateTransitions: the CLI kill/unkill verbs
@@ -36,7 +37,7 @@ func TestChatKillAndUnkillRecordChatStateTransitions(t *testing.T) {
 	socket := "probe-killobs-" + strconv.Itoa(os.Getpid())
 	session := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", "bg", "sleep", "120",
+		"new-session", "-d", "-s", "bg", testwait.Hold,
 	)
 	if output, err := session.CombinedOutput(); err != nil {
 		t.Fatalf("start background pane: %v: %s", err, output)
@@ -264,7 +265,7 @@ func TestApplyChatNameRecordsAChatStateTransition(t *testing.T) {
 	session := "probe-nameobs"
 	start := exec.Command(
 		"tmux", "-S", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", session, "-n", "before", "sleep", "120",
+		"new-session", "-d", "-s", session, "-n", "before", testwait.Hold,
 	)
 	if output, err := start.CombinedOutput(); err != nil {
 		t.Fatalf("start probe server: %v: %s", err, output)

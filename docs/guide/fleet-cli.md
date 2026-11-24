@@ -42,6 +42,6 @@ Account 🥇 is at 96% of its 5-hour window. The usage hook warns the chat mid-t
 
 ![Reload without losing the conversation: the usage-limit hook fires at 96% on account 1; the chat finishes step 3, calls pfm chat reload --account 2 --then, the pane reboots in place on account 2 with every earlier turn still there, and resumes at step 4](../img/cards/reloadx.webp)
 
-> The red banner is the usage hook — it reaches the model before the limit does. `/reload` typed by a human goes through a hook too, before the model sees it, so the reboot never spends a turn.
+> The red banner is the usage hook — it reaches the model before the limit does. `/pfm:reload` typed by a human goes through a hook too, before the model sees it, so the reboot never spends a turn.
 
-The running chat reboots in place — same pane, same history, new account, model, or effort. `--then "prompt"` hands the baton unattended; `/reload` typed by a human runs through a hook without spending a model turn; `/handoff --branch` carries the full context into a detached successor.
+The running chat reboots in place — same pane, same history, new account, model, or effort. `--then "prompt"` hands the baton unattended; `/pfm:reload` typed by a human runs through a hook without spending a model turn; `/handoff --branch` carries the full context into a detached successor.

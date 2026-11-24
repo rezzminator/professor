@@ -15,9 +15,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -385,6 +387,8 @@ type fakeTmux struct {
 	// hangOn is the subcommand a loaded server leaves unanswered until the
 	// caller's deadline.
 	hangOn string
+	// hung counts the calls left unanswered by hangOn so far.
+	hung atomic.Int32
 	// probeErr is what the pane-list door (deps.listPanes) answers instead of
 	// the panes: a dead or unresponsive server.
 	probeErr error
@@ -401,6 +405,7 @@ func (tmux *fakeTmux) run(ctx context.Context, socket string, args ...string) (s
 	hang := tmux.hangOn != "" && args[0] == tmux.hangOn
 	tmux.mu.Unlock()
 	if hang {
+		tmux.hung.Add(1)
 		<-ctx.Done()
 		return "", fmt.Errorf("fake tmux %s did not answer: %w", args[0], ctx.Err())
 	}
@@ -565,6 +570,9 @@ type herdrJail struct {
 	// started is each process's spawn, in Unix nanoseconds; nil leaves the
 	// spawn clock out of the run, so a hook is ordered by its run.
 	started map[int]int64
+	// clock is the reporter's clock (a *clock.Fake a test steps or drives);
+	// nil leaves it the real one.
+	clock clock.Clock
 }
 
 // newHerdrJail lays out the usual chat: the engine (pid 50) is the pane's own
@@ -576,6 +584,8 @@ func newHerdrJail(t *testing.T) *herdrJail {
 		sidDir:  t.TempDir(),
 		hookPID: 100,
 		procs:   map[int]fakeProc{100: {50, "pfm"}, 50: {1, "claude"}},
+		// A deadline nobody advances: a test that wants one to pass takes fakeClock.
+		clock: clock.NewFake(time.Now()),
 	}
 }
 
@@ -646,6 +656,7 @@ func (jail *herdrJail) deps(env map[string]string, clock *int64) herdrDeps {
 			return environment, nil
 		},
 	}
+	deps.clock = jail.clock
 	if jail.started != nil {
 		deps.started = func(pid int) (time.Time, error) {
 			spawned, ok := jail.started[pid]

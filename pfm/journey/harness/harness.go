@@ -2,9 +2,15 @@
 // together node's children run as parallel subtests, a failed step blocks its own descendants and
 // nothing else, and the run ends with a timeline. It knows nothing of the product it drives.
 //
+// Every wait (Poll, WaitScreen and the waits built on them, a terminal's close) runs on the wait door,
+// pfm/internal/testwait: a named condition, no duration of its own, bounded only by the door's hung-only
+// limit. The harness records how long each step and wait took, never judging it; the journey's time
+// budget is the gate's verdict (infra/fence/journey/budget.sh), not the walker's.
+//
 // Entry points: Do, Together and Run. The other files:
 //
-//   - ctx.go: Ctx, the step's handle on its node — Read, Poll, Unique, Expect, Artifact, Failf, Cleanup.
+//   - ctx.go: Ctx, the step's handle on its node — Read, Unique, Expect, Artifact, Failf, Cleanup.
+//   - wait.go: Poll and the door every harness wait runs through, recording each wait for waits.tsv.
 //   - terminal.go: Terminal, a kernel PTY running the owner's login shell read through a screen
 //     emulator — Type, Press, Screen, WaitFor, WaitGone, WaitScreen, Resize.
 //   - session.go: the open terminal under a Terminal — the PTY, its login shell's session, the
@@ -52,13 +58,12 @@ type Hooks struct {
 	Shell []string
 	// Artifacts is the directory evidence, timeline.tsv, steps.tsv and waits.tsv land in; empty keeps none.
 	Artifacts string
-	// Budget bounds the whole tree's wall time, first step start to last step end; zero: none.
-	Budget time.Duration
 	// AfterStep runs after every step with its verdict; under a together node it runs again once over
 	// the together node's whole window, with Window spanning every branch (Ctx.Concurrent is false).
 	AfterStep func(c *Ctx, failed bool)
-	// Clock measures and waits; nil is the real clock.
-	Clock clock.Clock
+	// Clock reads the time each step's window and each wait are recorded at, never judged and never
+	// waited on; nil is the host's own time (clock.Wall).
+	Clock func() time.Time
 }
 
 var nameShape = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -76,7 +81,7 @@ type record struct {
 // walker holds one Run's shared state.
 type walker[S any] struct {
 	hooks   Hooks
-	clock   clock.Clock
+	now     func() time.Time
 	runID   string
 	started time.Time
 	mu      sync.Mutex
@@ -91,18 +96,15 @@ func Run[S any](t *testing.T, root Node[S], start S, hooks Hooks) {
 	if err := validate(root, root.Name); err != nil {
 		t.Fatalf("tree: %v", err)
 	}
-	w := &walker[S]{hooks: hooks, clock: hooks.Clock, uniques: map[string]int{}}
-	if w.clock == nil {
-		w.clock = clock.Real
+	recorder := hooks.Clock
+	if recorder == nil {
+		recorder = clock.Wall
 	}
-	w.started = w.clock.Now()
+	w := &walker[S]{hooks: hooks, now: recorder, uniques: map[string]int{}}
+	w.started = w.now()
 	w.runID = fmt.Sprintf("%x", w.started.UnixNano()&0xffffff)
 	w.node(t, nil, root, start, root.Name, false)
-	elapsed := w.clock.Now().Sub(w.started)
 	w.report(t)
-	if hooks.Budget > 0 && elapsed > hooks.Budget {
-		t.Errorf("budget: the tree took %.1fs, allowed %.0fs", elapsed.Seconds(), hooks.Budget.Seconds())
-	}
 }
 
 func validate[S any](node Node[S], path string) error {
@@ -132,21 +134,21 @@ func (w *walker[S]) node(t *testing.T, parent *Ctx, node Node[S], in S, path str
 		}
 		// Once the whole subtree, parallel branches included, has run and closed its terminals: t.Run
 		// returns before a parallel subtest has even started its step.
-		t.Cleanup(func() { w.ended(path, w.clock.Now()) })
-		c = newCtx(t, w.hooks, parent, path, parallel || parent != nil && parent.concurrent, w.clock, w.unique)
+		t.Cleanup(func() { w.ended(path, w.now()) })
+		c = newCtx(t, w.hooks, parent, path, parallel || parent != nil && parent.concurrent, w.now, w.unique)
 		c.waited = w.waited
 		t.Cleanup(c.closeTerminals) // after the whole subtree, parallel branches included
 		out, failed := in, false
 		if node.Step != nil {
 			out, failed = runStep(c, node.Step, in)
-			c.window[1] = w.clock.Now()
+			c.window[1] = w.now()
 			if w.hooks.AfterStep != nil {
 				after := c.guard(func() { w.hooks.AfterStep(c, failed) })
 				failed = failed || after
 			}
 		}
 		if node.Step == nil {
-			c.window[1] = w.clock.Now()
+			c.window[1] = w.now()
 		}
 		w.record(path, verdict(failed), c.window[0], c.window[1])
 		if failed {

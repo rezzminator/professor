@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestChatKeysRefusesATokenTmuxWouldType guards the silent failure the whole
@@ -82,19 +83,12 @@ func TestChatKeysDrivesALiveChat(t *testing.T) {
 		t.Fatalf("receipt = %q, want the count of keys pressed", stdout.String())
 	}
 
-	deadline := time.Now().Add(20 * time.Second)
-	for {
+	testwait.Until(t, "the keys to reach the engine", func() (bool, string) {
 		var transcript, transcriptErrors bytes.Buffer
 		run([]string{"chat", "read", socket, "--tail", "10", "--condensed"},
 			&transcript, &transcriptErrors)
-		if strings.Contains(transcript.String(), "typed by keys") {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the keys never reached the engine: %q", transcript.String())
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
+		return strings.Contains(transcript.String(), "typed by keys"), transcript.String()
+	})
 }
 
 // TestChatModalDeniesOnTheResolvedTmuxPane routes a tmux modal deny through
@@ -126,16 +120,19 @@ func TestChatModalDeniesOnTheResolvedTmuxPane(t *testing.T) {
 	if code := run([]string{"chat", "modal", socket, "deny", "1"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("modal exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		decoy, err := exec.Command("tmux", "-S", server, "capture-pane", "-p", "-t", "decoy").Output()
-		if err != nil {
-			t.Fatalf("capture the decoy session: %v", err)
-		}
-		if text := strings.TrimSpace(string(decoy)); text != "" {
-			t.Fatalf("the deny keys landed in another session's pane: %q", text)
-		}
-		time.Sleep(100 * time.Millisecond)
+	// The stub engine reads Down as the text "[B" and records it as a turn on Enter:
+	// the chat's own transcript holding it proves the keys reached the chat's pane,
+	// and the sends were synchronous, so the decoy was read after they all landed.
+	testwait.Until(t, "the chat's own pane to receive the deny keys", func() (bool, string) {
+		recorded, _ := os.ReadFile(jail.transcript)
+		return strings.Contains(string(recorded), `"content":"[B"`), string(recorded)
+	})
+	decoy, err := exec.Command("tmux", "-S", server, "capture-pane", "-p", "-t", "decoy").Output()
+	if err != nil {
+		t.Fatalf("capture the decoy session: %v", err)
+	}
+	if text := strings.TrimSpace(string(decoy)); text != "" {
+		t.Fatalf("the deny keys landed in another session's pane: %q", text)
 	}
 }
 
@@ -171,9 +168,12 @@ func TestRunRescuesAPromptStrandedByAnOverlay(t *testing.T) {
 	jail := newRunJail(t)
 	defer jail.killSockets(t)
 	t.Setenv("CC_STUB_OVERLAY", "1")
-	restoreGrace, restoreWindow := launchGrace, launchProofWindow
-	launchGrace, launchProofWindow = 50*time.Millisecond, 250*time.Millisecond
-	t.Cleanup(func() { launchGrace, launchProofWindow = restoreGrace, restoreWindow })
+	// The overlay holds the prompt unsent, so the first proof window is the
+	// limit that wins: it is already over at its first look, and the rescue's
+	// own window keeps its production length.
+	restoreWindow := launchProofWindow
+	launchProofWindow = time.Nanosecond
+	t.Cleanup(func() { launchProofWindow = restoreWindow })
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
@@ -315,10 +315,8 @@ func serveNativeAdapter(t *testing.T, path string, table map[string]string, reco
 			}
 			func() {
 				defer func() { _ = conn.Close() }()
-				if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-					t.Error(err)
-					return
-				}
+				// A client that never writes is cut off when the test ends.
+				defer context.AfterFunc(t.Context(), func() { _ = conn.Close() })()
 				var request map[string]any
 				if err := json.NewDecoder(conn).Decode(&request); err != nil {
 					return

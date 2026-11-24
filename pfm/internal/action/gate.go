@@ -14,6 +14,20 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
+// Gate asks on /dev/tty whether a mismatched live Claude chat should reboot.
+type Gate interface {
+	Confirm(ctx context.Context, request GateRequest) (bool, error)
+}
+
+// GateRequest is the live birth environment versus this picker invocation.
+type GateRequest struct {
+	Name           string
+	BirthAccount   int
+	PrimaryAccount int
+	BirthCache1H   bool
+	WantCache1H    bool
+}
+
 // ReaderGate is the injectable open-gate core. Reader and Writer must be the
 // same terminal in production.
 type ReaderGate struct {

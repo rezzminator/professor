@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func chatServerRuntime(t *testing.T, enabled bool) (config.Runtime, string) {
@@ -78,7 +79,7 @@ func TestChatServerDoorCreatesTheShellsServerThroughTheOneCreator(t *testing.T) 
 	}
 	runtime, tmuxDir := chatServerRuntime(t, true)
 	socket := "cx-1800000051-1-1"
-	if stderr, code := runChatServer(t, runtime, socket, "/tmp", "sleep 120"); code != 0 {
+	if stderr, code := runChatServer(t, runtime, socket, "/tmp", testwait.Hold); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
 	socketPath := filepath.Join(tmuxDir, socket)
@@ -102,7 +103,7 @@ func TestChatServerDoorLeavesTheTitleToTheHostOnAnUnreadableConfig(t *testing.T)
 	runtime, tmuxDir := chatServerRuntime(t, true)
 	runtime.ConfigError = errors.New("boom")
 	socket := "cx-1800000052-1-1"
-	stderr, code := runChatServer(t, runtime, socket, "/tmp", "sleep 120")
+	stderr, code := runChatServer(t, runtime, socket, "/tmp", testwait.Hold)
 	if code != 0 || !strings.Contains(stderr, "config unreadable") {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
@@ -120,9 +121,9 @@ func TestChatServerDoorRefusesWhatItCannotPlace(t *testing.T) {
 	for _, args := range [][]string{
 		nil,
 		{"cx-1800000053-1-1", "/tmp"},
-		{"zz-1800000053-1-1", "/tmp", "sleep 1"},
-		{"../cx-1800000053-1-1", "/tmp", "sleep 1"},
-		{"cx-1800000053-1-1", "relative", "sleep 1"},
+		{"zz-1800000053-1-1", "/tmp", "true"},
+		{"../cx-1800000053-1-1", "/tmp", "true"},
+		{"cx-1800000053-1-1", "relative", "true"},
 		{"cx-1800000053-1-1", "/tmp", ""},
 	} {
 		if stderr, code := runChatServer(t, runtime, args...); code != 2 || stderr == "" {
@@ -156,7 +157,7 @@ func TestChatServerDoorPlacesOnce(t *testing.T) {
 			runtime.Config.Chat.Backend = tc.backend
 			_, recorder := obs.Test(t)
 			socket := "cx-1800000054-1-1"
-			stderr, code := runChatServer(t, runtime, socket, "/tmp", "sleep 120")
+			stderr, code := runChatServer(t, runtime, socket, "/tmp", testwait.Hold)
 			var placed []string
 			for _, record := range recorder.Records() {
 				if record.Message == "chat.placement" {

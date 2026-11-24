@@ -41,10 +41,10 @@ func adopterInit(c *harness.Ctx, s State) State {
 	term.WaitFor(prompt)
 	if code := shellRun(term, "project", `mkdir -p "$HOME/work/`+name+`" && cd "$HOME/work/`+name+
 		`" && git init -q && printf '%s\n' '`+strings.TrimSuffix(adopterReadme, "\n")+`' >README.md && printf '%s\n' '`+
-		strings.TrimSuffix(adopterRumdl, "\n")+`' >`+rumdlLocal, stepBound); code != 0 {
+		strings.TrimSuffix(adopterRumdl, "\n")+`' >`+rumdlLocal); code != 0 {
 		c.Failf("making the owner's project exited %d:\n%s", code, term.Screen())
 	}
-	if code := shellRun(term, "init", "pfm init .", stepBound); code != 0 {
+	if code := shellRun(term, "init", "pfm init ."); code != 0 {
 		c.Failf("pfm init . exited %d:\n%s", code, term.Screen())
 	}
 	screen := term.Screen()

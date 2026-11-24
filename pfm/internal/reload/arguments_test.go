@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// The spellings users actually typed and saw refused: `/reload --1h on`,
-// `/reload --model=opus effort=high`, `/reload --model opus effort high`. Every
+// The spellings users actually typed and saw refused: `/pfm:reload --1h on`,
+// `/pfm:reload --model=opus effort=high`, `/pfm:reload --model opus effort high`. Every
 // setting spelling lands on its flag, every cache spelling on the one canonical
 // --cache 1h|5m, and a flag's value is never rewritten.
 func TestNormalizeArgumentsSpellings(t *testing.T) {

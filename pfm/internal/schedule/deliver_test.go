@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/archive"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -22,9 +23,38 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmstore "github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
+// processClock puts the test's fake on the process-wide clock: the composer
+// wait, the launch watch and the archive lease heartbeat all read it.
+func processClock(t *testing.T) *clock.Fake {
+	t.Helper()
+	fake := clock.NewFake(time.Now())
+	testwait.ProcessClock(t, fake)
+	return fake
+}
+
+// deliverOn runs one Deliver to its end on the fake clock: each wait it parks
+// on (the composer poll) is released as the call blocks, so a bound is a count
+// of polls, never host time.
+func deliverOn(
+	t *testing.T,
+	fake *clock.Fake,
+	deliverer *chatDeliverer,
+	request fleetdb.Schedule,
+	message string,
+) error {
+	t.Helper()
+	var err error
+	testwait.Drive(t, "the delivery to return", fake, func() {
+		err = deliverer.Deliver(testwait.Context(t), request, message)
+	})
+	return err
+}
+
 type deliveryRig struct {
+	clock         *clock.Fake
 	state         string
 	openErr       error
 	captures      []string
@@ -52,8 +82,18 @@ func (rig *deliveryRig) unhideSeam(_ context.Context, sessionID string) (bool, e
 	return removed, nil
 }
 
+// deliver is one Deliver of the rig's deliverer, on the rig's fake clock.
+func (rig *deliveryRig) deliver(t *testing.T, request fleetdb.Schedule, message string) error {
+	t.Helper()
+	deliverer := rig.deliverer(t)
+	return deliverOn(t, rig.clock, deliverer, request, message)
+}
+
 func (rig *deliveryRig) deliverer(t *testing.T) *chatDeliverer {
 	t.Helper()
+	if rig.clock == nil {
+		rig.clock = processClock(t)
+	}
 	return &chatDeliverer{
 		runtime: &pfmconfig.Runtime{Paths: paths.Values{
 			StateDB:  filepath.Join(t.TempDir(), "state.db"),
@@ -91,7 +131,7 @@ var testSchedule = fleetdb.Schedule{
 
 func TestScheduleDelivererCallsALiveChatByItsSessionId(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}}
-	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err != nil {
+	if err := rig.deliver(t, testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if len(rig.called) != 1 || rig.called[0] != "sess-7" || rig.captured != 0 {
@@ -101,9 +141,9 @@ func TestScheduleDelivererCallsALiveChatByItsSessionId(t *testing.T) {
 }
 
 func TestScheduleDelivererWaitsForThreeConsecutiveComposerReads(t *testing.T) {
-	shortenComposerWait(t, time.Millisecond, 5*time.Second)
+	shortenComposerWait(t, time.Second, 5*time.Minute)
 	rig := &deliveryRig{state: "opened", captures: []string{"booting", "❯ ", "booting", "❯ ", "❯ ", "❯ "}}
-	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err != nil {
+	if err := rig.deliver(t, testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if rig.captured != 6 || len(rig.called) != 1 || rig.called[0] != "sess-7" ||
@@ -114,9 +154,9 @@ func TestScheduleDelivererWaitsForThreeConsecutiveComposerReads(t *testing.T) {
 }
 
 func TestScheduleDelivererRefusesAFolderTrustDialog(t *testing.T) {
-	shortenComposerWait(t, time.Millisecond, 5*time.Second)
+	shortenComposerWait(t, time.Second, 5*time.Minute)
 	rig := &deliveryRig{state: "opened", captures: []string{"Yes, I trust this folder\nNo, exit\n❯ 1. Yes"}}
-	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
+	err := rig.deliver(t, testSchedule, "msg")
 	if err == nil || err.Error() != "revived chat on cc-revived is held at the folder-trust dialog; nothing typed" ||
 		len(rig.called) != 0 {
 		t.Fatalf("err=%v called=%v, want the trust-dialog refusal and nothing typed", err, rig.called)
@@ -124,11 +164,11 @@ func TestScheduleDelivererRefusesAFolderTrustDialog(t *testing.T) {
 }
 
 func TestScheduleDelivererTimesOutWithoutAComposer(t *testing.T) {
-	shortenComposerWait(t, time.Millisecond, 30*time.Millisecond)
+	shortenComposerWait(t, time.Second, 30*time.Second)
 	rig := &deliveryRig{state: "opened", captures: []string{"still booting"}}
-	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
+	err := rig.deliver(t, testSchedule, "msg")
 	if err == nil ||
-		err.Error() != "revived chat on socket cc-revived showed no composer within 30ms; it stays running and the next tick will call it" ||
+		err.Error() != "revived chat on socket cc-revived showed no composer within 30s; it stays running and the next tick will call it" ||
 		len(rig.called) != 0 {
 		t.Fatalf("err=%v called=%v", err, rig.called)
 	}
@@ -136,12 +176,12 @@ func TestScheduleDelivererTimesOutWithoutAComposer(t *testing.T) {
 
 func TestScheduleDelivererReportsResolveAndCallFailures(t *testing.T) {
 	rig := &deliveryRig{openErr: errors.New("chat is not indexed")}
-	err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
+	err := rig.deliver(t, testSchedule, "msg")
 	if err == nil || err.Error() != "resolve chat sess-7 (seven): chat is not indexed" {
 		t.Fatalf("open failure err=%v", err)
 	}
 	rig = &deliveryRig{state: "live", callErr: errors.New("pane gone")}
-	err = rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg")
+	err = rig.deliver(t, testSchedule, "msg")
 	if err == nil || !strings.Contains(err.Error(), "pane gone") {
 		t.Fatalf("call failure err=%v", err)
 	}
@@ -149,7 +189,7 @@ func TestScheduleDelivererReportsResolveAndCallFailures(t *testing.T) {
 
 func TestScheduleDelivererUnhidesAHiddenChatAfterTheCall(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}, hidden: true}
-	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err != nil {
+	if err := rig.deliver(t, testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(rig.events, ","); got != "call,unhide" || rig.unhides[0] != "sess-7" {
@@ -162,7 +202,7 @@ func TestScheduleDelivererUnhidesAHiddenChatAfterTheCall(t *testing.T) {
 
 func TestScheduleDelivererLeavesAVisibleChatAlone(t *testing.T) {
 	rig := &deliveryRig{state: "live", captures: []string{""}}
-	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err != nil {
+	if err := rig.deliver(t, testSchedule, "msg"); err != nil {
 		t.Fatal(err)
 	}
 	if rig.stdout.Len() != 0 || len(rig.called) != 1 {
@@ -173,7 +213,7 @@ func TestScheduleDelivererLeavesAVisibleChatAlone(t *testing.T) {
 
 func TestScheduleDelivererDoesNotUnhideAChatItFailedToDeliverTo(t *testing.T) {
 	rig := &deliveryRig{state: "live", callErr: errors.New("pane gone"), hidden: true}
-	if err := rig.deliverer(t).Deliver(context.Background(), testSchedule, "msg"); err == nil {
+	if err := rig.deliver(t, testSchedule, "msg"); err == nil {
 		t.Fatal("want the call failure")
 	}
 	if len(rig.unhides) != 0 || !rig.hidden || rig.stdout.Len() != 0 {
@@ -289,6 +329,7 @@ func TestWriteReportPrintsAWarnedScheduleOnStderrAndExitsOne(t *testing.T) {
 // stands in for the index: a chat is "indexed" exactly when its transcript sits
 // at its original path, so the order of restore and open is decided by real files.
 type archiveRig struct {
+	clock    *clock.Fake
 	values   paths.Values
 	id       string
 	original string
@@ -320,6 +361,7 @@ func (set *killedSet) Unkill(context.Context, string) error                 { re
 // archive package itself moves it out of the tree and records the manifest.
 func newArchiveRig(t *testing.T, archived bool) *archiveRig {
 	t.Helper()
+	fake := processClock(t)
 	root := t.TempDir()
 	values := paths.Values{
 		Home: filepath.Join(root, "home"),
@@ -345,7 +387,7 @@ func newArchiveRig(t *testing.T, archived bool) *archiveRig {
 	if archived {
 		archiveChat(t, values, id, original)
 	}
-	return &archiveRig{values: values, id: id, original: original}
+	return &archiveRig{clock: fake, values: values, id: id, original: original}
 }
 
 // archiveChat moves a killed chat's transcript out of the tree through the
@@ -407,14 +449,21 @@ func (rig *archiveRig) deliverer(t *testing.T) *chatDeliverer {
 	}
 }
 
+// deliver is one Deliver of the rig's deliverer, on the rig's fake clock.
+func (rig *archiveRig) deliver(t *testing.T, message string) error {
+	t.Helper()
+	deliverer := rig.deliverer(t)
+	return deliverOn(t, rig.clock, deliverer, rig.schedule(), message)
+}
+
 func (rig *archiveRig) schedule() fleetdb.Schedule {
 	return fleetdb.Schedule{ID: 9, SessionID: rig.id, Label: "nine"}
 }
 
 func TestScheduleDelivererRestoresAnArchivedChatThenDeliversIt(t *testing.T) {
-	shortenComposerWait(t, time.Millisecond, 5*time.Second)
+	shortenComposerWait(t, time.Second, 5*time.Minute)
 	rig := newArchiveRig(t, true)
-	if err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
+	if err := rig.deliver(t, "msg"); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	if _, err := os.Stat(rig.original); err != nil {
@@ -430,10 +479,10 @@ func TestScheduleDelivererRestoresAnArchivedChatThenDeliversIt(t *testing.T) {
 }
 
 func TestScheduleDelivererUnhidesAnArchivedChatItRestored(t *testing.T) {
-	shortenComposerWait(t, time.Millisecond, 5*time.Second)
+	shortenComposerWait(t, time.Second, 5*time.Minute)
 	rig := newArchiveRig(t, true)
 	rig.hidden = true
-	if err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
+	if err := rig.deliver(t, "msg"); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	if got := strings.Join(rig.events, ","); got != "open,open,call,unhide" || rig.hidden {
@@ -486,7 +535,7 @@ func TestScheduleDelivererNamesAChatInNeitherTheIndexNorTheArchive(t *testing.T)
 	if err := os.Remove(rig.original); err != nil {
 		t.Fatal(err)
 	}
-	err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg")
+	err := rig.deliver(t, "msg")
 	if err == nil || !strings.Contains(err.Error(), "resolve chat "+rig.id+" (nine)") ||
 		!strings.Contains(err.Error(), "is not indexed") || !strings.Contains(err.Error(), "not in the archive") ||
 		len(rig.called) != 0 || rig.stdout.Len() != 0 {
@@ -501,10 +550,10 @@ func TestScheduleDelivererLeavesTheArchiveAloneUnlessTheChatIsNotIndexed(t *test
 		"indexed":      nil,
 	} {
 		t.Run(name, func(t *testing.T) {
-			shortenComposerWait(t, time.Millisecond, 5*time.Second)
+			shortenComposerWait(t, time.Second, 5*time.Minute)
 			rig := newArchiveRig(t, true)
 			rig.openErr, rig.indexed = openErr, openErr == nil
-			err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg")
+			err := rig.deliver(t, "msg")
 			if (openErr != nil) != (err != nil) {
 				t.Fatalf("err = %v for open error %v", err, openErr)
 			}
@@ -524,10 +573,10 @@ func TestScheduleDelivererLeavesTheArchiveAloneUnlessTheChatIsNotIndexed(t *test
 // and the next fire finds the chat back in place and delivers without
 // restoring it a second time.
 func TestScheduleDelivererRestoredButUnopenedChatDeliversOnTheNextFire(t *testing.T) {
-	shortenComposerWait(t, time.Millisecond, 5*time.Second)
+	shortenComposerWait(t, time.Second, 5*time.Minute)
 	rig := newArchiveRig(t, true)
 	rig.reopen = errors.New("open the fleet database: database is locked")
-	err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg")
+	err := rig.deliver(t, "msg")
 	restored := "restored archived chat " + rig.id + " but it still cannot be opened"
 	if err == nil || !strings.Contains(err.Error(), restored) ||
 		!strings.Contains(err.Error(), "database is locked") || len(rig.called) != 0 {
@@ -537,7 +586,7 @@ func TestScheduleDelivererRestoredButUnopenedChatDeliversOnTheNextFire(t *testin
 		t.Fatalf("the restore was not kept at %s: %v", rig.original, statErr)
 	}
 	rig.reopen = nil
-	if err := rig.deliverer(t).Deliver(context.Background(), rig.schedule(), "msg"); err != nil {
+	if err := rig.deliver(t, "msg"); err != nil {
 		t.Fatalf("next fire: %v", err)
 	}
 	if rig.opens != 3 || len(rig.called) != 1 || rig.stdout.String() != "restored archived chat "+rig.id+"\n" {

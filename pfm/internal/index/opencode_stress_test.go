@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // seedOpenCodeStress builds a large, hostile session store: hundreds of
@@ -281,12 +283,20 @@ func TestStressOpenCodeReadWhileWriterActive(t *testing.T) {
 	const (
 		count      = 100
 		liveWrites = 2000
+		burstSize  = 100
+		reads      = 5
 	)
 	root := t.TempDir()
 	seedOpenCodeStress(t, root, count)
 
 	dbPath := filepath.Join(root, "opencode.db")
 	stop := make(chan struct{})
+	// The reader hands the write lock back: it signals after each read, and the
+	// writer waits for that signal between bursts, so after the last read the
+	// writer parks with exactly one burst per read plus its first.
+	readDone := make(chan struct{}, reads)
+	var written atomic.Int64
+	const handedOff = (reads + 1) * burstSize
 	writerDone := make(chan error, 1)
 	go func() {
 		// A zero-timeout fixture can fail while SQLite performs ordinary WAL
@@ -340,9 +350,17 @@ func TestStressOpenCodeReadWhileWriterActive(t *testing.T) {
 				writerErr = err
 				return
 			}
+			written.Add(1)
 			// Yield the write lock: OpenCode writes in bursts between turns,
-			// never as a zero-gap spin, and a spin starves the snapshot.
-			time.Sleep(2 * time.Millisecond)
+			// never as a zero-gap spin, and a spin starves the snapshot. The
+			// next burst starts when the reader has finished a read.
+			if (round+1)%burstSize == 0 {
+				select {
+				case <-readDone:
+				case <-stop:
+					return
+				}
+			}
 		}
 		// Keep the writer connection live after the bounded write burst. An
 		// unbounded producer makes the fixture itself grow faster than a reader
@@ -351,9 +369,8 @@ func TestStressOpenCodeReadWhileWriterActive(t *testing.T) {
 		<-stop
 	}()
 
-	reads := 0
-	deadline := 5
-	for round := 0; round < deadline; round++ {
+	completed := 0
+	for round := 0; round < reads; round++ {
 		sessions, err := ReadOpenCodeSessions(context.Background(), root)
 		if err != nil {
 			close(stop)
@@ -363,13 +380,21 @@ func TestStressOpenCodeReadWhileWriterActive(t *testing.T) {
 			close(stop)
 			t.Fatalf("concurrent read %d saw %d sessions, want %d", round, len(sessions), count)
 		}
-		reads++
+		completed++
+		readDone <- struct{}{}
 	}
+	parked := fmt.Sprintf("the writer to park after %d writes, waiting for a read", handedOff)
+	testwait.Until(t, parked, func() (bool, string) {
+		return written.Load() == handedOff, fmt.Sprintf("%d writes", written.Load())
+	})
 	close(stop)
 	if err := <-writerDone; err != nil {
 		t.Fatalf("writer failed: %v", err)
 	}
-	if reads != deadline {
-		t.Fatalf("completed %d reads, want %d", reads, deadline)
+	if got := written.Load(); got != handedOff {
+		t.Fatalf("writer made %d writes, want %d: one burst of %d per read and its first", got, handedOff, burstSize)
+	}
+	if completed != reads {
+		t.Fatalf("completed %d reads, want %d", completed, reads)
 	}
 }

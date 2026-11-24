@@ -150,7 +150,7 @@ func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
 	}
 	check(os.Getenv(paths.EnvHome), os.Getenv(paths.EnvConfig), nil)
 	for _, builder := range []struct {
-		build func(*testing.T) string
+		build func(testing.TB) string
 		extra map[string]any
 	}{{Fleet, nil}, {InstalledHome, map[string]any{}}} {
 		root := builder.build(t)
@@ -425,5 +425,13 @@ func TestRunClearsTheLoginDefault(t *testing.T) {
 		if value := os.Getenv(name); value != "" {
 			t.Errorf("%s=%q survived testjail.Run", name, value)
 		}
+	}
+}
+
+// BenchmarkInstalledHome builds the installed fleet a benchmark of an installed home stands on:
+// Fleet and InstalledHome take a testing.TB.
+func BenchmarkInstalledHome(b *testing.B) {
+	for b.Loop() {
+		InstalledHome(b)
 	}
 }

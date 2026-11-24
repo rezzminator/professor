@@ -6,7 +6,8 @@
 #   bash infra/fence/journey/run.sh --ci-linux|--ci-mac [--ci-linux|--ci-mac]
 # --ci-linux and --ci-mac boot no machine here: ci-run.sh runs the suite of that OS on GitHub Actions over the
 # checkout as it is on disk, from a temporary branch it pushes and deletes.
-# Prints the go test output as it comes and ends with `RUN DIR: {path}`; exits with the suite's status.
+# Prints the go test output as it comes, then budget.sh's verdict on the tree's wall time, and ends with
+# `RUN DIR: {path}`; exits with the suite's status, else the budget's.
 # Every run, green or red, is profiled and its coverage of pfm's source measured (pfm/journey's TestMain
 # writes steps.tsv, waits.tsv, summary.md and the coverage-* files into the artifacts, the raw counters in
 # covdata/): the artifacts land in {tree}/tmp/journey/{run id}, `latest` linking the newest; the last
@@ -165,4 +166,8 @@ rc=0
 docker exec "${session[@]}" -e JOURNEY_ARTIFACTS=/artifacts "$NAME" \
   go -C "$ROOT/pfm" test -tags journey -count=1 -v -timeout 20m ./journey/ "$@" || rc=$?
 stage suite
-exit "$rc"
+
+# 6. The tree's time budget, judged here from the steps.tsv it recorded, never inside the test.
+budget=0
+bash "$HERE/budget.sh" "$RUN_DIR/artifacts" || budget=$?
+exit "$((rc != 0 ? rc : budget))"

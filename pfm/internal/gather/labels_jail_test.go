@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The claude half of window naming against a REAL tmux server on a scratch
@@ -29,7 +30,7 @@ func TestClaudeWindowNameConvergesOnARealServer(t *testing.T) {
 	command := jail.command(
 		"-f", "/dev/null", "-L", socket,
 		"new-session", "-d", "-s", socket, "-n", "zsh",
-		"printf '🥇 acct  🔖 FLEET_LABEL │ 42%%\\n'; sleep 120",
+		"printf '🥇 acct  🔖 FLEET_LABEL │ 42%%\\n'; "+testwait.Hold,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed server: %v: %s", err, output)

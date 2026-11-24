@@ -9,17 +9,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type killTmuxJail struct {
@@ -133,7 +136,19 @@ func (jail *killTmuxJail) startReader(
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.TrimSpace(string(output))
+	paneID := strings.TrimSpace(string(output))
+	// The finisher judges the pane's composer off its first idle captures; a
+	// blank pane reads as idle with no composer, so the reader is handed over
+	// only once its shell has drawn the box.
+	testwait.Until(t, "pane "+paneID+" on "+socket+" drew its empty composer", func() (bool, string) {
+		screen, err := jail.command("-L", socket, "capture-pane", "-p", "-t", paneID).Output()
+		if err != nil {
+			return false, fmt.Sprintf("capture pane %s: %v", paneID, err)
+		}
+		capture := string(screen)
+		return pfmcall.LastComposerLine(capture) != "" && pfmcall.ComposerBoxEmpty(capture), capture
+	})
+	return paneID
 }
 
 func shellQuote(value string) string {
@@ -227,17 +242,27 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 		t.Fatalf("spawn args = %#v", spawner.args)
 	}
 
+	waits := newTmuxExitWaits(t)
 	finisher, err := NewFinisher(database, Dependencies{
-		Tmux:         TmuxKiller{},
-		Delay:        10 * time.Millisecond,
-		PollEvery:    10 * time.Millisecond,
-		PollAttempts: 200,
+		Tmux:   TmuxKiller{},
+		Screen: waits,
+		Clock:  waits,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := finisher.Run(ctx, spawner.args[0]); err != nil {
 		t.Fatal(err)
+	}
+	// The chat exited on the typed /exit, flushing its last prompt, never by
+	// the fallback kill once the grace window ran out.
+	body, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("read transcript %s: %v", transcriptPath, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if want := `{"type":"user","cwd":"/work/exit","message":{"content":"goodbye flush"}}`; lines[len(lines)-1] != want {
+		t.Fatalf("transcript %s last line = %q, want %q", transcriptPath, lines[len(lines)-1], want)
 	}
 	if exists, err := (TmuxKiller{}).PaneExists(ctx, socketPath, paneID); err != nil {
 		t.Fatalf("probe pane after kill-exit: %v", err)
@@ -260,8 +285,7 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 func TestStressTenSimultaneousKillExits(t *testing.T) {
 	testjail.TmuxServer(t)
 	jail := newKillTmuxJail(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -314,17 +338,16 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 			PaneID:     paneID,
 		})
 	}
+	waits := newTmuxExitWaits(t)
 	finisher, err := NewFinisher(database, Dependencies{
-		Tmux:         TmuxKiller{},
-		Refresher:    refreshFunc(func(context.Context) error { return nil }),
-		Delay:        5 * time.Millisecond,
-		PollEvery:    5 * time.Millisecond,
-		PollAttempts: 200,
+		Tmux:      TmuxKiller{},
+		Refresher: refreshFunc(func(context.Context) error { return nil }),
+		Screen:    waits,
+		Clock:     waits,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	started := time.Now()
 	var group sync.WaitGroup
 	errorsByIndex := make([]error, len(args))
 	for position := range args {
@@ -336,7 +359,6 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		}()
 	}
 	group.Wait()
-	elapsed := time.Since(started)
 	for position, runErr := range errorsByIndex {
 		if runErr != nil {
 			t.Fatalf("finisher %d: %v", position, runErr)
@@ -363,9 +385,65 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		}
 	}
 	t.Logf(
-		"STRESS kill-exit panes=%d dead=%d crumbs_remaining=0 elapsed=%s",
+		"STRESS kill-exit panes=%d dead=%d crumbs_remaining=0",
 		count,
 		count,
-		elapsed,
 	)
+}
+
+// tmuxExitWaits is the finisher's screen and clock against real tmux panes.
+// The screen is the real pane door, recording each pane Enter was pressed in.
+// A wait with no such pane still open steps at once, as a fake pane would; a
+// wait while one is open holds until every such pane has closed, so the poll
+// after it reads the pane's real end, never a count of real polls.
+type tmuxExitWaits struct {
+	pfmcall.Screen
+	*finisherStepClock
+	mu      sync.Mutex
+	entered []pfmcall.Target
+}
+
+func newTmuxExitWaits(t *testing.T) *tmuxExitWaits {
+	t.Helper()
+	screen, err := pfmcall.New(pfmcall.Dependencies{})
+	if err != nil {
+		t.Fatalf("pane door: %v", err)
+	}
+	return &tmuxExitWaits{Screen: screen, finisherStepClock: newFinisherStepClock()}
+}
+
+func (waits *tmuxExitWaits) SendKey(ctx context.Context, target pfmcall.Target, key string) error {
+	err := waits.Screen.SendKey(ctx, target, key)
+	if err == nil && key == "Enter" {
+		waits.mu.Lock()
+		waits.entered = append(waits.entered, target)
+		waits.mu.Unlock()
+	}
+	return err
+}
+
+func (waits *tmuxExitWaits) Sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	waits.mu.Lock()
+	entered := slices.Clone(waits.entered)
+	waits.mu.Unlock()
+	err := testwait.UntilErr("every pane Enter was pressed in to close", func() (bool, string) {
+		for index := range entered {
+			target := &entered[index]
+			exists, probeErr := (TmuxKiller{}).PaneExists(ctx, target.SocketPath, target.Pane)
+			if probeErr != nil {
+				return false, fmt.Sprintf("probe pane %s: %v", target.Pane, probeErr)
+			}
+			if exists {
+				return false, "pane " + target.Pane + " still open"
+			}
+		}
+		return true, fmt.Sprintf("%d entered panes closed", len(entered))
+	})
+	if err != nil {
+		return err
+	}
+	return waits.finisherStepClock.Sleep(ctx, d)
 }

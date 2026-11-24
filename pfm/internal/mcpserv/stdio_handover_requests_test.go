@@ -14,6 +14,7 @@ const (
 // cancelled request goes to the process that took it, never to the one serving
 // now, and a retired child it held then ends its input.
 func TestStdioHandoverCarriesACancellationToTheProcessHoldingItsRequest(t *testing.T) {
+	probeClock(t)
 	t.Run("a retired installed pfm", func(t *testing.T) {
 		first, second := newHandoverChild("first", "result", nil), newHandoverChild("second", "result", nil)
 		runner := &handoverRunner{children: []*handoverChildScript{first, second}}
@@ -36,6 +37,10 @@ func TestStdioHandoverCarriesACancellationToTheProcessHoldingItsRequest(t *testi
 		})
 		wantFirst := []string{handoverTestInitialize, handoverTestHold, handoverTestCancel}
 		wantSecond := []string{handoverTestInitialize, handoverTestCallAgain}
+		// A carried frame returns once the child's reader took its bytes, before the child records the line.
+		waitHandover(t, "the second installed pfm to record the call carried to it", func() bool {
+			return len(second.frames()) >= len(wantSecond)
+		})
 		if got := first.frames(); !slices.Equal(got, wantFirst) {
 			t.Fatalf("first installed pfm received %q, want %q", got, wantFirst)
 		}
@@ -72,6 +77,7 @@ func TestStdioHandoverCarriesACancellationToTheProcessHoldingItsRequest(t *testi
 // TestStdioHandoverAnswersARequestTheInstalledPfmCouldNotTake: a request whose
 // write to the child fails is answered with an error, so the client never waits.
 func TestStdioHandoverAnswersARequestTheInstalledPfmCouldNotTake(t *testing.T) {
+	probeClock(t)
 	child := newHandoverChild("new", "result", nil)
 	runner := &handoverRunner{children: []*handoverChildScript{child}}
 	handover, output, _, binary := newTestHandover(t, runner)

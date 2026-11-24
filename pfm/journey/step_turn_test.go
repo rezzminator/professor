@@ -4,7 +4,6 @@ package journey
 
 import (
 	"encoding/json"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -22,8 +21,8 @@ func turn(c *harness.Ctx, s State) State {
 func typedTurn(c *harness.Ctx, s State, words, directive, reply string) {
 	term := c.Terminal(s.Term)
 	term.Type(words + " mock-engine: " + directive + "\r")
-	term.WaitFor("⏺ "+reply, 20*time.Second)
-	c.Poll("chat "+s.Chat.Session+" idle in pfm's status", stepBound, func() (bool, string) {
+	term.WaitFor("⏺ " + reply)
+	c.Poll("chat "+s.Chat.Session+" idle in pfm's status", func() (bool, string) {
 		r := c.Read("pfm", "chat", "status", s.Chat.Session, "--json")
 		var status struct {
 			State string `json:"state"`

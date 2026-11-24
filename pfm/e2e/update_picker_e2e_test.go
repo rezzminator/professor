@@ -14,10 +14,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
@@ -122,12 +122,13 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		// non-empty file and must never read it between the two writes.
 		"{ printf 'cwd=%s\\n' \"$PWD\"; printf 'args=%s\\n' \"$*\"; } > \"$PFM_UPDATE_LAUNCH_PROOF.tmp\"\n" +
 		"mv \"$PFM_UPDATE_LAUNCH_PROOF.tmp\" \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
-		"sleep 2\n"
+		testwait.Hold + "\n"
 	if err := testjail.WriteExecutable(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, engine := range []string{"opencode"} {
-		stub := "#!/bin/sh\nprintf 'unexpected engine=" + engine + "\\n' > \"$PFM_UPDATE_LAUNCH_PROOF\"\nsleep 2\n"
+		stub := "#!/bin/sh\nprintf 'unexpected engine=" + engine + "\\n' > \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
+			testwait.Hold + "\n"
 		if err := testjail.WriteExecutable(filepath.Join(binDir, engine), []byte(stub), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -204,20 +205,14 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	if strings.Contains(first, "PROFESSOR UPDATE") {
 		t.Fatalf("first invocation consumed its own background result:\n%s", first)
 	}
-	select {
-	case <-lookupStarted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("detached update lookup never reached the controlled release server")
-	}
+	testwait.Receive(t, "the detached update lookup to reach the controlled release server", lookupStarted)
 	if err := sendUpdatePickerKey(firstSocket, environment, "Escape"); err != nil {
 		t.Fatal(err)
 	}
 	close(releaseLookup)
 	lookupReleased = true
 	cache := filepath.Join(state, "update-check.json")
-	if !waitForUpdateE2EFile(cache, 10*time.Second) {
-		t.Fatal("background update lookup did not persist the next-invocation cache")
-	}
+	waitForUpdateE2EFile(t, "the background update lookup to persist the next-invocation cache", cache)
 
 	startUpdatePickerE2E(t, secondSocket, oldPFM, environment)
 	second := waitForUpdatePickerScreen(t, secondSocket, environment, func(screen string) bool {
@@ -242,9 +237,7 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	if err := sendUpdatePickerKey(secondSocket, environment, "Enter"); err != nil {
 		t.Fatal(err)
 	}
-	if !waitForUpdateE2EFile(proof, 10*time.Second) {
-		t.Fatal("clicking the update banner did not launch the selected engine")
-	}
+	waitForUpdateE2EFile(t, "the update banner click to launch the selected engine", proof)
 	launched, err := os.ReadFile(proof)
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +263,7 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 func startUpdatePickerE2E(t *testing.T, socket, pfm string, environment []string) {
 	t.Helper()
 	commandLine := updateE2EShellQuote(pfm) + " ls --no-sky; " +
-		"rc=$?; printf '\\nPFM_RC=%s\\n' \"$rc\"; sleep 60"
+		"rc=$?; printf '\\nPFM_RC=%s\\n' \"$rc\"; " + testwait.Hold
 	command := exec.Command(
 		"tmux", "-L", socket, "-f", "/dev/null",
 		"new-session", "-d", "-x", "150", "-y", "30", "-s", "picker", commandLine,
@@ -283,22 +276,20 @@ func startUpdatePickerE2E(t *testing.T, socket, pfm string, environment []string
 
 func waitForUpdatePickerScreen(t *testing.T, socket string, environment []string, ready func(string) bool) string {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
 	var last string
-	for time.Now().Before(deadline) {
+	testwait.Until(t, "the picker screen to reach the expected state", func() (bool, string) {
 		command := exec.Command("tmux", "-L", socket, "capture-pane", "-p", "-J", "-S", "-200", "-t", "picker")
 		command.Env = environment
 		output, err := command.Output()
 		if err == nil {
 			last = string(output)
 			if ready(last) {
-				return last
+				return true, last
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("picker screen did not reach expected state; last:\n%s", last)
-	return ""
+		return false, "last screen:\n" + last
+	})
+	return last
 }
 
 func sendUpdatePickerKey(socket string, environment []string, key string) error {
@@ -310,15 +301,15 @@ func sendUpdatePickerKey(socket string, environment []string, key string) error 
 	return nil
 }
 
-func waitForUpdateE2EFile(path string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if info, err := os.Stat(path); err == nil && info.Size() != 0 {
-			return true
+func waitForUpdateE2EFile(t *testing.T, condition, path string) {
+	t.Helper()
+	testwait.Until(t, condition, func() (bool, string) {
+		info, err := os.Stat(path)
+		if err != nil {
+			return false, path + ": " + err.Error()
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return false
+		return info.Size() != 0, path + " is empty"
+	})
 }
 
 func replaceUpdateE2EEnv(base []string, values map[string]string) []string {

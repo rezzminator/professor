@@ -286,6 +286,7 @@ func runRun(
 		Settle:   time.Duration(*settle) * time.Second,
 		Timeout:  time.Duration(*timeout) * time.Second,
 		Progress: progressOut,
+		Clock:    clk,
 	}
 	if birth.Backend == spawn.BackendHerdr {
 		born, code := pfmchat.BirthHerdr(

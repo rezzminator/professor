@@ -34,6 +34,7 @@ func TestHostSettingsProbe(t *testing.T) {
 			names,
 			[]string{
 				fmt.Sprintf("hook %q", home+"/.local/bin/pfm internal launcher-repair"),
+				fmt.Sprintf("hook %q", home+"/.local/bin/pfm internal reload-intercept"),
 				`hook "pfm internal clear-hide"`,
 				"statusLine",
 			},

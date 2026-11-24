@@ -18,3 +18,12 @@ func TestMachineBinaryRefusesAHostEvenArmed(t *testing.T) {
 		t.Fatalf("runsHere(unitBinary=%v, armed, host, %s) = true, want false", unitBinary, absent)
 	}
 }
+
+// TestMachineBinaryArmsNoRealWaitTripwire: the real-wait tripwire is the unit tier's alone; a binary
+// built with the jail tag arms none, PFM_TEST_REAL_WAIT set or not.
+func TestMachineBinaryArmsNoRealWaitTripwire(t *testing.T) {
+	t.Setenv(realWaitEnv, t.TempDir())
+	if wire := armRealWait(); wire != nil {
+		t.Fatalf("armRealWait in a machine binary = %+v, want nil", wire)
+	}
+}

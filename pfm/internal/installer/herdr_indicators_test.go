@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -105,7 +106,7 @@ func TestInstallRefreshesStaleHerdrIndicators(t *testing.T) {
 	dependencies := restart.Deps{
 		Procs: kernel, Kernel: kernel, Probe: kernel.probe, Runner: runner,
 		Install: gather.Install{Mark: indicatorInstallMark, Binary: binary},
-		Clock:   clock.Real, EffectiveUID: uint32(os.Geteuid()), Executable: binary,
+		Clock:   clock.NewFake(time.Now()), EffectiveUID: uint32(os.Geteuid()), Executable: binary,
 	}
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
@@ -164,7 +165,7 @@ func TestInstallHerdrIndicatorConvergenceNoopsAndErrors(t *testing.T) {
 			dependencies := restart.Deps{
 				Procs: kernel, Kernel: kernel, Probe: kernel.probe, Runner: runner,
 				Install: gather.Install{Mark: indicatorInstallMark, Binary: binary},
-				Clock:   clock.Real, EffectiveUID: uint32(os.Geteuid()), Executable: binary,
+				Clock:   clock.NewFake(time.Now()), EffectiveUID: uint32(os.Geteuid()), Executable: binary,
 			}
 			var output bytes.Buffer
 			_, err = Run(context.Background(), Options{

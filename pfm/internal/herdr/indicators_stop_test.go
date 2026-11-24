@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // Pfm's Herdr theme off always wins. A run that meets the theme off's stop
@@ -78,6 +81,10 @@ func TestARunThatBeganBeforeThemeOffLeavesTheStopMarker(t *testing.T) {
 // write (they share the stop lock), then clears what it wrote. The injected
 // step is the theme off itself, started inside the paint's first write.
 func TestThemeOffAfterAPaintReadsNoMarkerStillClearsItsWrite(t *testing.T) {
+	// The stop lock's poll runs on the process clock: a parked poll is the
+	// theme off waiting on the lock.
+	polls := clock.NewFake(time.Now())
+	testwait.ProcessClock(t, polls)
 	server := blockedHerdr()
 	painter, _, _ := newTestPainter(t, server, phaseOn)
 	if err := painter.record(context.Background()); err != nil {
@@ -97,13 +104,18 @@ func TestThemeOffAfterAPaintReadsNoMarkerStillClearsItsWrite(t *testing.T) {
 			go func() {
 				themeOff <- clearRecordedIndicators(context.Background(), painter.lockDir, io.Discard, serve, allowPaneProof)
 			}()
-			// Time for the theme off to write its marker and clear, if nothing orders it after this write.
-			deadline := time.Now().Add(300 * time.Millisecond)
-			for time.Now().Before(deadline) {
+			// The theme off must wait on the stop lock this write holds: it is
+			// parked on its lock poll, or it wrote its marker past the lock.
+			marked := false
+			testwait.Until(t, "the theme off to wait on the paint's stop lock", func() (bool, string) {
 				if _, err := os.Stat(painter.stopPath()); err == nil {
-					break
+					marked = true
+					return true, "the stop marker is written"
 				}
-				time.Sleep(5 * time.Millisecond)
+				return polls.Pending() > 0, polls.String()
+			})
+			if marked {
+				t.Fatal("the theme off wrote its stop marker while the paint held the stop lock")
 			}
 		}
 		return serve(ctx, socket, lines...)
@@ -111,7 +123,12 @@ func TestThemeOffAfterAPaintReadsNoMarkerStillClearsItsWrite(t *testing.T) {
 	if _, _, err := painter.paint(context.Background()); err != nil {
 		t.Fatalf("paint = %v", err)
 	}
-	if err := <-themeOff; err != nil {
+	if !started {
+		t.Fatal("the paint sent no report_metadata write")
+	}
+	// The paint released the stop lock: the theme off's next poll takes it.
+	polls.Advance(time.Minute)
+	if err, _ := testwait.Receive(t, "the theme off to end after the paint's write", themeOff); err != nil {
 		t.Fatalf("theme off = %v", err)
 	}
 	if len(server.panes[0].Tokens) != 0 || len(server.spaces[0].Tokens) != 0 {
@@ -237,13 +254,9 @@ func TestStopPathsRefuseAFIFOOrADirectory(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() { done <- painter.run(context.Background()) }()
-			select {
-			case err := <-done:
-				if got := strings.ReplaceAll(fmt.Sprint(err), painter.lockDir, "{dir}"); got != tc.what {
-					t.Fatalf("run = %q, want %q", got, tc.what)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatalf("run hung on %s", tc.name)
+			err, _ := testwait.Receive(t, "run refused "+tc.name, done)
+			if got := strings.ReplaceAll(fmt.Sprint(err), painter.lockDir, "{dir}"); got != tc.what {
+				t.Fatalf("run = %q, want %q", got, tc.what)
 			}
 			if len(server.writes) != 0 {
 				t.Fatalf("a run refused at its %s painted %v", tc.what, server.writes)

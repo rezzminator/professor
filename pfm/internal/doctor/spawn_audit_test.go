@@ -355,7 +355,7 @@ func TestPrintSpawnAuditCountsUndecodableSeats(t *testing.T) {
 				paths.Values{Home: home},
 				machine,
 				1,
-				clock.Real,
+				clock.NewFake(time.Now()),
 			)
 			if got := rooted(out.String(), filepath.Dir(home)); warnings != 1 || got != test.want {
 				t.Errorf("warnings=%d output = %q, want %q", warnings, got, test.want)
@@ -855,7 +855,14 @@ func TestPrintSpawnAuditUnknownAccountStaysUnverified(t *testing.T) {
 			}, nil, nil
 		}
 		var out bytes.Buffer
-		warnings := printSpawnAuditDoctorWithClock(t.Context(), &out, paths.Values{Home: home}, machine, 1, clock.Real)
+		warnings := printSpawnAuditDoctorWithClock(
+			t.Context(),
+			&out,
+			paths.Values{Home: home},
+			machine,
+			1,
+			clock.NewFake(time.Now()),
+		)
 		fmt.Fprintf(&got, "%d %s", warnings, rooted(out.String(), filepath.Dir(home)))
 	}
 	if got, want := got.String(), "1 doctor: spawn-audit: UNVERIFIED cc-unknown pid=22 — account environment unreadable; policy unverified\ndoctor: spawn-audit: policy=per-account chats=1 injected=0 predates-layer=0 violations=0 undecodable=0 unverified=1 (age signal: 2023-11-14T22:13:20Z, the later of mtime of {root}/001/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/002/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/002/.local/share/pfm/install/source-repo: no such file or directory))\n1 doctor: spawn-audit: UNVERIFIED cc-unknown pid=22 — account unmatched; policy unverified\ndoctor: spawn-audit: policy=per-account chats=1 injected=0 predates-layer=0 violations=0 undecodable=0 unverified=1 (age signal: 2023-11-14T22:13:20Z, the later of mtime of {root}/001/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/002/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/002/.local/share/pfm/install/source-repo: no such file or directory))\n1 doctor: spawn-audit: UNVERIFIED cc-unknown pid=22 — account unmatched; policy unverified\ndoctor: spawn-audit: policy=per-account chats=1 injected=0 predates-layer=0 violations=0 undecodable=0 unverified=1 (age signal: 2023-11-14T22:13:20Z, the later of mtime of {root}/001/pfm (unreadable: prompt layer: resolve generated harness prompt: read source repository marker {root}/002/.local/share/pfm/install/source-repo: no source repository recorded: open {root}/002/.local/share/pfm/install/source-repo: no such file or directory))\n"; got != want {

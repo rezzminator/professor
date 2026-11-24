@@ -7,13 +7,19 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestRestoreSharedStateReturnsTheDatabaseANewerBuildMigrated(t *testing.T) {
+	// The backup before a migration bounds its WAL checkpoint on the process
+	// clock: on a fake one that bound arms no real timer.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(1_800_000_000, 0)))
 	newer := SchemaVersion + 1
 	tests := []struct {
 		name     string

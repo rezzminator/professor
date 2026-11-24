@@ -639,6 +639,16 @@ checks_templates_theme_glyphs() {
   node_test_suite "theme tab glyphs" "$TMP_BASE/templates/theme-glyphs.tap" scripts/theme-glyphs.test.mjs
 }
 
+# The shell tests' clock check (scripts/shtest-clock-check.sh, no list of exceptions): no shell test sleeps,
+# times out or measures the real clock outside the one wait door, scripts/shtest-wait.sh. The door's and the
+# check's own self-tests run first; the check's broken state is `ERROR shtest-clock` and rc 2, never a PASS.
+checks_templates_shtest_clock() {
+  head_ "templates — shell-test clock check"
+  run "templates: shell wait door self-test" -- bash "$REPO_ROOT/scripts/test-shtest-wait.sh"
+  run "templates: shell-test clock check self-test" -- bash "$REPO_ROOT/scripts/test-shtest-clock-check.sh"
+  run "templates: shell-test clock check" -- bash "$REPO_ROOT/scripts/shtest-clock-check.sh"
+}
+
 checks_templates_engine_sync_action_tests() {
   head_ "templates — CI engine-sync action tests"
   node_test_suite "engine-sync action" "$TMP_BASE/templates/engine-sync-action.tap" scripts/engine-sync-action.test.mjs
@@ -781,7 +791,7 @@ checks_templates_steps() { # <callback>: callback <step name> <command> [args...
   local add="$1" name
   checks_named_template_steps "$add" mirrors clone leak plugin-logs plugin-lab placeholders scratch-paths descriptions \
     generated-agents release-check refresh-scope plugin-workflows worktree-script dev-report \
-    format-md theme-glyphs || return 1
+    format-md theme-glyphs shtest-clock || return 1
   for name in test unit-path; do
     "$add" "templates.$name-tests" checks_templates_unit_script "$name" || return 1
   done
@@ -813,8 +823,6 @@ checks_pfm_verify() {
   # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
   # is rc 2 (an enumerator or grep that could not run), never a PASS.
   run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh"
-  # The flow matrix: every test and file TESTPLAN.md cites must exist.
-  run "pfm: flow-matrix citations" -- bash "$d/scripts/testplan-check.sh"
   # The gate scripts' own fixture suites: a ratchet nobody tests is trusted
   # on faith. Each prints "N passed, M failed" and is non-zero on any FAIL.
   run "pfm: gate-script self-tests" -- bash -c 'for t in "$1"/scripts/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$d"
@@ -861,7 +869,7 @@ checks_gate_fixture() {
       return ;;
     go-fail) mode=fail; timeout=2m ;;
     go-hang) mode=hang; timeout=20s ;;
-    go-slow) mode=slow; timeout=5m; local -x PFM_PROFILE_FIXTURE_SLOW_S=120 ;;
+    go-slow) mode=slow; timeout=5m ;;
     *) fail_step "fixture: unknown kind '$kind'"; return ;;
   esac
   json="$run_dir/fixture-$kind.json"
@@ -928,7 +936,8 @@ internal/store TestClearNameReservationsAreUniqueAcrossCaches'
 # checks_pfm_unit_proof <pfm dir> <run dir>: the unit tier in place, as on any host, under
 # scripts/unit-proof.sh's hostile ambient and syscall trace, its out directory {run dir}/unit-proof.
 # Its FAIL (a failing test, a reach row, a missing-tool skip) or ERROR (it could not look) fails the
-# step with the verdict line and the first 40 reach rows.
+# step with the verdict line, the first 40 reach rows and every `--- FAIL {package} {test}` block of
+# the proof's log, so the step log names the failing test where the run directory is gone.
 checks_pfm_unit_proof() {
   local d="$1" run_dir="$2" out="$2/unit-proof" rc=0 verdict
   head_ "pfm — unit proof (scripts/unit-proof.sh)"
@@ -940,6 +949,7 @@ checks_pfm_unit_proof() {
   fi
   info "first 40 reach rows of $out/reach.tsv (package, kind, target, count):"
   head -n 40 "$out/reach.tsv" 2>&1 | cut -f1-4
+  awk '/^--- FAIL / { on = 1 } /^(UNIT-PROOF |… )/ { on = 0 } on' "$run_dir/unit-proof.log" 2>&1
   fail_step "pfm: unit proof exit $rc — $verdict (log $run_dir/unit-proof.log)"
 }
 
@@ -1265,7 +1275,6 @@ gate_run() { # pfm, templates, or all
     steps_add_heavy pfm.vet run 'pfm: go vet' -- bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
     steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
       bash -c 'go -C "$1" vet ./... && go -C "$1" vet -tags jail ./...' _ "$d" || return 1
-    steps_add pfm.testplan run 'pfm: flow-matrix citations' -- bash "$d/scripts/testplan-check.sh" || return 1
     steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh" || return 1
   fi
   if [[ "$target" == templates || "$target" == all ]]; then

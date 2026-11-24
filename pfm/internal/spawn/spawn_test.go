@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // fakeCodex is a Codex TUI as far as this package can tell: it draws a
@@ -295,12 +296,16 @@ func collapseClears(keys []string) []string {
 	return collapsed
 }
 
+// testTimings bound every wait by a count of polls: each run gets its own
+// stepping clock, so a bound runs out after so many polls, never after so much
+// host time.
 func testTimings() Timings {
 	return Timings{
 		Poll:  time.Millisecond,
 		Boot:  200 * time.Millisecond,
 		Step:  200 * time.Millisecond,
 		Typed: time.Nanosecond,
+		Clock: newSpawnStepClock(),
 	}
 }
 
@@ -636,23 +641,15 @@ func TestChatCancellationWinsKilledBootCapture(t *testing.T) {
 		runDone <- err
 	}()
 
-	select {
-	case <-fake.started:
-		cancel()
-	case <-time.After(time.Second):
-		t.Fatal("boot capture did not start")
-	}
+	testwait.Receive(t, "the boot capture started", fake.started)
+	cancel()
 
-	select {
-	case err := <-runDone:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("Run() error = %v, want context.Canceled", err)
-		}
-		if strings.Contains(err.Error(), "died at birth") {
-			t.Fatalf("Run() misclassified cancellation as chat death: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Run() did not return after cancellation")
+	err, _ := testwait.Receive(t, "Run returned after cancellation", runDone)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "died at birth") {
+		t.Fatalf("Run() misclassified cancellation as chat death: %v", err)
 	}
 }
 

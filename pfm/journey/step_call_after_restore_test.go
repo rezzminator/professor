@@ -4,7 +4,6 @@ package journey
 
 import (
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -16,13 +15,13 @@ func callAfterRestore(c *harness.Ctx, s State) State {
 	cli := c.Terminal(s.Term + "-cli")
 	reply := c.Unique("pong")
 	command := "clear && pfm chat call --allow-unsigned " + s.Name + ` 'ping mock-engine: {"type":"turn","reply":"` + reply + `"}'`
-	if code := shellRun(cli, "call-"+reply, command, 30*time.Second); code != 0 {
+	if code := shellRun(cli, "call-"+reply, command); code != 0 {
 		c.Failf("pfm chat call %s exited %d:\n%s", s.Name, code, cli.Screen())
 	}
 	if want := `called LIVE into "` + s.Pane + `"`; !strings.Contains(unwrapped(cli.Screen()), want) {
 		c.Failf("pfm chat call printed no %q:\n%s", want, cli.Screen())
 	}
-	c.Poll(s.Name+" answered "+reply, 20*time.Second, func() (bool, string) {
+	c.Poll(s.Name+" answered "+reply, func() (bool, string) {
 		r := c.Read("pfm", "chat", "last", s.Name)
 		return r.Code == 0 && r.Stdout == reply+"\n", r.Stdout + r.Stderr
 	})

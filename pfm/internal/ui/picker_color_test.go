@@ -6,9 +6,10 @@ import (
 	"io"
 	"regexp"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/colorprofile"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestInteractiveColorProfileIgnoresNoninteractiveColorOptOuts pins the
@@ -95,8 +96,7 @@ func TestBubblePickerRendererStaysColoredWhenParentDisablesColor(t *testing.T) {
 	t.Setenv("CLICOLOR", "0")
 
 	terminal := &pickerTestTerminal{input: bytes.NewReader([]byte{'\x1b'})}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	outcome, err := (BubblePicker{
 		OpenTTY: func() (ReadWriteCloser, error) { return terminal, nil },
 	}).Pick(ctx, fixtureSnapshot(80))

@@ -18,11 +18,18 @@ import (
 type Severity string
 
 const (
-	Block              Severity = "BLOCK"
-	Warn               Severity = "WARN"
-	Accepted           Severity = "ACCEPTED"
-	checkThirdPartyMCP          = "third-party-mcp"
-	classUnclassified           = "unclassified"
+	Block    Severity = "BLOCK"
+	Warn     Severity = "WARN"
+	Accepted Severity = "ACCEPTED"
+	// Skipped is a check that did not look, because where pfm runs it cannot see
+	// its subject: the row names what was not checked and how to check it, and
+	// counts as neither a warning nor a block.
+	Skipped Severity = "SKIPPED"
+)
+
+const (
+	checkThirdPartyMCP = "third-party-mcp"
+	classUnclassified  = "unclassified"
 )
 
 type Row struct {

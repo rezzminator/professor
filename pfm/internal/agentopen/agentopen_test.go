@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -278,15 +278,11 @@ func TestOpenPerUUIDMutexHasOneWinner(t *testing.T) {
 	var resultsSeen []error
 	closed := false
 	for len(resultsSeen) < 2 {
-		select {
-		case err := <-results:
-			resultsSeen = append(resultsSeen, err)
-			if errors.Is(err, ErrBusy) && !closed {
-				close(commands.continueRun)
-				closed = true
-			}
-		case <-time.After(time.Second):
-			t.Fatal("mutex contenders did not settle")
+		err, _ := testwait.Receive(t, "a mutex contender to return", results)
+		resultsSeen = append(resultsSeen, err)
+		if errors.Is(err, ErrBusy) && !closed {
+			close(commands.continueRun)
+			closed = true
 		}
 	}
 	if !closed {

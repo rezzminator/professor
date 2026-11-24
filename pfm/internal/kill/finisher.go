@@ -2,6 +2,7 @@ package kill
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -141,6 +142,7 @@ func NewFinisher(
 		delay:        delay,
 		pollEvery:    pollEvery,
 		pollAttempts: pollAttempts,
+		clock:        dependencies.Clock,
 		paths: resolvedPaths{
 			home:       resolved.Home,
 			sidDir:     resolved.SIDDir,
@@ -199,7 +201,7 @@ func (finisher *Finisher) Run(
 	if native {
 		ratchet.address = client.(herdrKiller).screenTarget
 	}
-	if err := waitContext(ctx, finisher.delay); err != nil {
+	if err := waitContext(ctx, finisher.clock, finisher.delay); err != nil {
 		return err
 	}
 	var frame string
@@ -234,7 +236,7 @@ func (finisher *Finisher) Run(
 		if probeErr == nil {
 			sendErr := ratchet.screenTypeLine(ctx, command)
 			landed, probeErr, err = pollPaneGone(
-				ctx, client, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,
+				ctx, client, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery, finisher.clock,
 				ratchet.answerExitDialog(args),
 			)
 			probeErr = errors.Join(sendErr, probeErr)
@@ -340,7 +342,7 @@ func (finisher *Finisher) turnEnded(ctx context.Context, args ExitArgs) (string,
 			quiet = 0
 		}
 		if attempt < finisher.idleAttempts-1 {
-			if err := waitContext(ctx, finisher.pollEvery); err != nil {
+			if err := waitContext(ctx, finisher.clock, finisher.pollEvery); err != nil {
 				return "", turnRunning, err
 			}
 		}
@@ -657,8 +659,10 @@ func readChildFile(path string) (values []string, returnErr error) {
 	return values, nil
 }
 
-func waitContext(ctx context.Context, duration time.Duration) error {
-	return clock.Real.Sleep(ctx, duration)
+// waitContext waits duration on waits, or on clock.Real, read at the call, when
+// waits is nil.
+func waitContext(ctx context.Context, waits clock.Clock, duration time.Duration) error {
+	return cmp.Or(waits, clock.Real).Sleep(ctx, duration)
 }
 
 // pollPaneGone asks tmux up to attempts times, waiting every between checks,
@@ -676,6 +680,7 @@ func pollPaneGone(
 	socketPath, paneID string,
 	attempts int,
 	every time.Duration,
+	waits clock.Clock,
 	alive func(context.Context) error,
 ) (landed bool, probeErr, waitErr error) {
 	var aliveErr error
@@ -692,7 +697,7 @@ func pollPaneGone(
 			}
 		}
 		if attempt < attempts-1 {
-			if err := waitContext(ctx, every); err != nil {
+			if err := waitContext(ctx, waits, every); err != nil {
 				return false, probeErr, err
 			}
 		}

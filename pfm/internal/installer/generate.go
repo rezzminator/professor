@@ -45,6 +45,7 @@ func Generate(ctx context.Context, options Options) (report Report, err error) {
 		installer.say("MODE: plan — nothing will change")
 	}
 	installer.say("")
+	installer.deferRetiredListsFailure()
 	return installer.finish(installer.generate())
 }
 
@@ -61,13 +62,9 @@ func (installer *engine) generate() error {
 	if err := installer.generateHarnessPrompts(); err != nil {
 		return fmt.Errorf("generate harness prompts: %w", err)
 	}
-	assets, err := assetFiles(installer.options.jobScheduler())
-	if err != nil {
-		return fmt.Errorf("enumerate embedded install assets: %w", err)
-	}
 	installer.deferFailure(namedStep("global commands", installer.wireGlobalCommands()))
 	installer.deferFailure(namedStep("engine-sync policy", installer.wireEngineSyncConfig()))
-	installer.deferFailure(namedStep("engine-sync global agents", installer.wireEngineSyncGlobal(assets)))
+	installer.deferFailure(namedStep("engine-sync global agents", installer.wireEngineSyncGlobal()))
 	if len(installer.codexHomes()) != 0 {
 		installer.deferFailure(
 			namedStep("Codex config defaults and developer_instructions", installer.wireCodexDefaults()),

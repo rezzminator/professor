@@ -292,7 +292,7 @@ func (reporter *herdrReporter) unsettled(session string) (uint64, error) {
 // settleActivity re-sends the native Claude's recorded state to the panes it
 // last reached, unless a newer event has recorded its own.
 func (reporter *herdrReporter) settleActivity(session string, seq uint64) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	ctx, cancel := reporter.deadlineContext()
 	defer cancel()
 	unlock, err := reporter.lock(ctx, reporter.activityKey(session))
 	if err != nil {
@@ -317,7 +317,7 @@ func (reporter *herdrReporter) settleActivity(session string, seq uint64) (bool,
 // settleTmux replays the undelivered event at its own seq: the stored state
 // fences it, so a newer event's state stays.
 func (reporter *herdrReporter) settleTmux(payload herdrPayload) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	ctx, cancel := reporter.deadlineContext()
 	defer cancel()
 	session := reporter.options.session
 	unlock, err := reporter.lock(ctx, session)
@@ -364,7 +364,7 @@ func (reporter *herdrReporter) parseSettled(args []string) (uint64, herdrStored,
 // nothing is sent from here, so no pane proof is needed. A newer event
 // supersedes it as it would the hook.
 func (reporter *herdrReporter) recordEvent(payload herdrPayload) error {
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	ctx, cancel := reporter.deadlineContext()
 	defer cancel()
 	unlock, err := reporter.lock(ctx, reporter.activityKey(payload.SessionID))
 	if err != nil {
@@ -378,7 +378,7 @@ func (reporter *herdrReporter) recordEvent(payload herdrPayload) error {
 // against the hook's recorded ancestry, then replays the event as settleTmux.
 func (reporter *herdrReporter) settleUnproved(payload herdrPayload) (bool, error) {
 	if reporter.options.session == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+		ctx, cancel := reporter.deadlineContext()
 		defer cancel()
 		session, panePID, err := reporter.tmuxSession(ctx)
 		if err != nil {

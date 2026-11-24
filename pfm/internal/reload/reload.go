@@ -1,8 +1,9 @@
 // Package reload reboots one Claude seat in its existing tmux pane.
 //
-// arguments.go: the /reload flags, their cache-spelling normalization and the worker's parse.
+// arguments.go: the /pfm:reload flags, their cache-spelling normalization and the worker's parse.
 // owner_exit.go: the pane mutex, the exit mark and the yield to an owner's /exit.
-// after_reboot.go: once the reborn chat is up, its native --then turn and the "(before --new)" label.
+// after_reboot.go: once the reborn chat is up, its native --then turn and the "(before --new)" label;
+// the --then message stored before /exit, which the reborn chat's first prompt claims when it was not typed.
 // ready.go: the native chat's idle-and-empty-composer wait, before /exit and before --then.
 package reload
 
@@ -40,10 +41,8 @@ import (
 // the command finds the CALLER'S OWN pane by itself, so asking for it is the
 // unusual case, not the normal one.
 //
-// It is exported (not a cmd/pfm local const) because the installer folds it
-// verbatim into the `/reload` slash command's own description — the picker
-// shows the human exactly the flags this package's Run understands, never a
-// hand-maintained restatement that can drift from them.
+// The typed /pfm:reload shows it when the chat reload front refuses its words,
+// so the human reads exactly the flags this package's Run understands.
 const Usage = "usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then \"prompt\"] [--sock socket]\n" +
 	"       with no --sock, the calling chat's own pane is detected automatically;\n" +
 	"       --hide (with --new) hides the conversation left behind from the picker"

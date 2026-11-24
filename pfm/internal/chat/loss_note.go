@@ -141,11 +141,14 @@ func lossClaude(line []byte, pending map[string]bool, unanswered *bool) error {
 	if len(content) == 0 || bytes.Equal(content, []byte("null")) {
 		return errors.New("message content is unavailable")
 	}
+	// Only a prompt someone sent awaits an answer; a plugin's or the harness's
+	// user-role entry leaves the turn as it was.
+	prompt := kind == transcript.RoleUser && record.IsPrompt()
 	if _, ok := pyvalue.String(content); ok {
-		if kind == transcript.RoleUser {
-			*unanswered = true
-		} else {
+		if kind == transcript.RoleAssistant {
 			*unanswered = false
+		} else if prompt {
+			*unanswered = true
 		}
 		return nil
 	}
@@ -197,7 +200,7 @@ func lossClaude(line []byte, pending map[string]bool, unanswered *bool) error {
 			damage = errors.Join(damage, errors.New("message content contains an unsupported block type"))
 		}
 	}
-	if kind == transcript.RoleUser && human {
+	if prompt && human {
 		*unanswered = true
 	}
 	return damage

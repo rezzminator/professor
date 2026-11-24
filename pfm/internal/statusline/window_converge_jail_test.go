@@ -4,6 +4,7 @@ package statusline
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // tmuxExecs counts the internal/tmux invocations a render recorded, keyed by
@@ -52,7 +54,7 @@ func TestRenderConvergesTheWindowNameOnAProbeSocket(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "sleep 120",
+		"new-session", "-d", "-s", socket, "-n", "before", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -152,7 +154,7 @@ func TestRenderLeavesASharedWindowAlone(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "SHARED", "sleep 120",
+		"new-session", "-d", "-s", socket, "-n", "SHARED", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -163,7 +165,7 @@ func TestRenderLeavesASharedWindowAlone(t *testing.T) {
 		kill.Env = append(os.Environ(), "TMUX=")
 		_ = kill.Run()
 	})
-	split := exec.Command("tmux", "-S", socketPath, "split-window", "-d", "sleep 120")
+	split := exec.Command("tmux", "-S", socketPath, "split-window", "-d", testwait.Hold)
 	split.Env = append(os.Environ(), "TMUX=")
 	if output, err := split.CombinedOutput(); err != nil {
 		t.Fatalf("split the window: %v: %s", err, output)
@@ -247,7 +249,7 @@ func TestRenderConvergesToTheSameClipNameSyncUses(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "sleep 120",
+		"new-session", "-d", "-s", socket, "-n", "before", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -301,7 +303,7 @@ func TestRenderRenamesWhenOnlyTheExactNameChangesPastTheClip(t *testing.T) {
 	socketPath := filepath.Join(tmuxDir, socket)
 	start := exec.Command(
 		"tmux", "-S", socketPath, "-f", "/dev/null",
-		"new-session", "-d", "-s", socket, "-n", "before", "sleep 120",
+		"new-session", "-d", "-s", socket, "-n", "before", testwait.Hold,
 	)
 	start.Env = append(os.Environ(), "TMUX=")
 	if output, err := start.CombinedOutput(); err != nil {
@@ -352,18 +354,15 @@ func TestRenderRenamesWhenOnlyTheExactNameChangesPastTheClip(t *testing.T) {
 	}
 	hookRuns := func(want []string) {
 		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			logged, _ := os.ReadFile(hookLog)
-			got := strings.Fields(string(logged))
-			if strings.Join(got, "\n") == strings.Join(want, "\n") {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("window-renamed hook runs saw @pfm_chat_name %q, want %q", got, want)
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
+		testwait.Until(
+			t,
+			fmt.Sprintf("the window-renamed hook runs to have seen @pfm_chat_name %q", want),
+			func() (bool, string) {
+				logged, _ := os.ReadFile(hookLog)
+				got := strings.Fields(string(logged))
+				return strings.Join(got, "\n") == strings.Join(want, "\n"), fmt.Sprintf("%q", got)
+			},
+		)
 	}
 
 	render(first)

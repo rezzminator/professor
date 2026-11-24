@@ -3,6 +3,7 @@ package hookentry
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -85,6 +86,49 @@ func TestSeatEngineEnded(t *testing.T) {
 					stored,
 					tc.stored,
 				)
+			}
+		})
+	}
+}
+
+// TestFailedSeatNoteKeepsTheRestoreNote: a failed start's note leads with its
+// cause and keeps the note the seat held before (a restore's loss note), the
+// same one across repeated failures; a start that succeeds keeps only that.
+func TestFailedSeatNoteKeepsTheRestoreNote(t *testing.T) {
+	restore := "your last message was not answered — re-send it"
+	first := "the engine exited 1 after 300ms, inside its 10s start window: Error: fixture"
+	for _, row := range []struct {
+		name    string
+		seat    fleetdb.Seat
+		cause   string
+		failed  string
+		started string
+	}{
+		{
+			name: "restored seat fails", seat: fleetdb.Seat{State: "lost", LostNote: restore}, cause: first,
+			failed: first + " — before the failed start: " + restore, started: restore,
+		},
+		{
+			name:  "failed seat fails again",
+			seat:  fleetdb.Seat{State: "failed", LostNote: first + " — before the failed start: " + restore},
+			cause: "open pane terminal: fixture", failed: "open pane terminal: fixture — before the failed start: " + restore,
+			started: restore,
+		},
+		{
+			name: "seat with no note fails", seat: fleetdb.Seat{State: "live"}, cause: first, failed: first,
+		},
+		{
+			name: "failed seat with no kept note fails again", seat: fleetdb.Seat{State: "failed", LostNote: first},
+			cause: "retry failed: fixture", failed: "retry failed: fixture",
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			failed := failedSeatNote(errors.New(row.cause), row.seat)
+			if failed != row.failed {
+				t.Fatalf("failedSeatNote = %q, want %q", failed, row.failed)
+			}
+			if started := startedSeatNote(failed); started != row.started {
+				t.Fatalf("startedSeatNote(%q) = %q, want %q", failed, started, row.started)
 			}
 		})
 	}

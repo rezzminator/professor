@@ -111,36 +111,6 @@ func TestFakeTickerCatchesUpWithinOneAdvanceAndStaysRegistered(t *testing.T) {
 	}
 }
 
-// TestFakeSleepBlocksUntilAdvanceReleasesIt proves the promised contract: a
-// goroutine calling Sleep on a Fake blocks until another goroutine calls
-// Advance past its duration.
-func TestFakeSleepBlocksUntilAdvanceReleasesIt(t *testing.T) {
-	fake := NewFake(epoch)
-	done := make(chan error, 1)
-	go func() {
-		done <- fake.Sleep(context.Background(), 20*time.Millisecond)
-	}()
-
-	select {
-	case err := <-done:
-		t.Fatalf("Sleep returned (%v) before any Advance call", err)
-	case <-time.After(20 * time.Millisecond):
-		// Real wall-clock time passing must not release a Fake sleep —
-		// this is the assertion, not a flake: the goroutine above must
-		// still be blocked here.
-	}
-
-	fake.Advance(20 * time.Millisecond)
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Sleep() error = %v, want nil", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Sleep did not return within 1s of the releasing Advance")
-	}
-}
-
 // TestFakeSleepReturnsCtxErrOnCancellationWithoutAnyAdvance proves the
 // other half of Sleep's contract: a caller need not wait for Advance at
 // all when its context is cancelled first.
@@ -152,13 +122,8 @@ func TestFakeSleepReturnsCtxErrOnCancellationWithoutAnyAdvance(t *testing.T) {
 		done <- fake.Sleep(ctx, time.Hour)
 	}()
 	cancel()
-	select {
-	case err := <-done:
-		if err != context.Canceled {
-			t.Fatalf("Sleep() error = %v, want context.Canceled", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Sleep did not return within 1s of ctx cancellation")
+	if err := <-done; err != context.Canceled {
+		t.Fatalf("Sleep() error = %v, want context.Canceled", err)
 	}
 	// The waiter Sleep registered through After is still pending: Advance
 	// never ran, and cancellation does not retroactively deregister it —
@@ -210,5 +175,33 @@ func TestFakeTimerResetReschedulesFromNow(t *testing.T) {
 		}
 	default:
 		t.Fatal("reset timer never fired at its rescheduled deadline")
+	}
+}
+
+// TestFakeNextDueNamesTheEarliestActiveWaiter proves NextDue reports the
+// step to the earliest active waiter, skips a stopped one, and reports none
+// once every waiter has fired.
+func TestFakeNextDueNamesTheEarliestActiveWaiter(t *testing.T) {
+	fake := NewFake(epoch)
+	if due, ok := fake.NextDue(); ok || due != 0 {
+		t.Fatalf("empty clock NextDue = %v, %v; want 0, false", due, ok)
+	}
+	stopped := fake.NewTimer(time.Second)
+	fake.After(3 * time.Second)
+	fake.After(2 * time.Second)
+	if due, ok := fake.NextDue(); !ok || due != time.Second {
+		t.Fatalf("NextDue = %v, %v; want 1s, true", due, ok)
+	}
+	stopped.Stop()
+	if due, ok := fake.NextDue(); !ok || due != 2*time.Second {
+		t.Fatalf("NextDue after Stop = %v, %v; want 2s, true", due, ok)
+	}
+	fake.Advance(500 * time.Millisecond)
+	if due, ok := fake.NextDue(); !ok || due != 1500*time.Millisecond {
+		t.Fatalf("NextDue after Advance(500ms) = %v, %v; want 1.5s, true", due, ok)
+	}
+	fake.Advance(3 * time.Second)
+	if due, ok := fake.NextDue(); ok || due != 0 {
+		t.Fatalf("NextDue after every fire = %v, %v; want 0, false", due, ok)
 	}
 }

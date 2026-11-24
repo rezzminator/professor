@@ -5,15 +5,16 @@ package codexappendix
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The subject is the real helper's process group: a cancelled exchange must
@@ -22,7 +23,10 @@ func TestRPCCancelKillsTheHelpersProcessGroup(t *testing.T) {
 	root := t.TempDir()
 	pidFile := filepath.Join(root, "pids")
 	binary := filepath.Join(root, "fake-codex")
-	script := "#!/bin/sh\nsleep 60 &\necho \"$$ $!\" > '" + pidFile + ".tmp' && mv '" + pidFile + ".tmp' '" + pidFile + "'\n" +
+	// The descendant's output leaves the helper's pipe: a tail writing to a
+	// closed pipe ends by itself, which would pass for the group kill.
+	script := "#!/bin/sh\n" + testwait.Hold + " </dev/null >/dev/null 2>&1 &\n" +
+		"echo \"$$ $!\" > '" + pidFile + ".tmp' && mv '" + pidFile + ".tmp' '" + pidFile + "'\n" +
 		"while IFS= read -r line; do :; done\n"
 	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -40,41 +44,38 @@ func TestRPCCancelKillsTheHelpersProcessGroup(t *testing.T) {
 		_, err := rpc(ctx, binary, root, "hooks/list", map[string]any{})
 		returned <- err
 	}()
-	deadline := time.Now().Add(10 * time.Second)
-	for len(pids) == 0 {
-		if raw, err := os.ReadFile(pidFile); err == nil {
-			for _, field := range strings.Fields(string(raw)) {
-				pid, convErr := strconv.Atoi(field)
-				if convErr != nil {
-					t.Fatalf("parse pid %q from %s: %v", field, pidFile, convErr)
-				}
-				pids = append(pids, pid)
+	testwait.Until(t, "the fake app-server to write "+pidFile, func() (bool, string) {
+		raw, err := os.ReadFile(pidFile)
+		if err != nil {
+			return false, err.Error()
+		}
+		for _, field := range strings.Fields(string(raw)) {
+			pid, convErr := strconv.Atoi(field)
+			if convErr != nil {
+				t.Fatalf("parse pid %q from %s: %v", field, pidFile, convErr)
 			}
+			pids = append(pids, pid)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the fake app-server never wrote %s", pidFile)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return len(pids) > 0, "no pids yet"
+	})
 	if len(pids) != 2 {
 		t.Fatalf("%s holds pids %v, want the app-server and its descendant", pidFile, pids)
 	}
-	cancel()
-	select {
-	case err := <-returned:
-		if want := "native hook API: context canceled"; err == nil || err.Error() != want {
-			t.Fatalf("rpc after cancel = %v, want %q", err, want)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("rpc did not return within 10s of its cancellation")
-	}
-	deadline = time.Now().Add(250*time.Millisecond + time.Second)
 	for _, pid := range pids {
-		for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
-			if time.Now().After(deadline) {
-				t.Fatalf("pid %d of the helper's group survived the cancelled exchange", pid)
-			}
-			time.Sleep(20 * time.Millisecond)
+		if err := syscall.Kill(pid, 0); err != nil {
+			t.Fatalf("pid %d of the helper's group before the cancel: %v, want alive", pid, err)
 		}
+	}
+	cancel()
+	err, _ := testwait.Receive(t, "the rpc to return after its cancellation", returned)
+	if want := "native hook API: context canceled"; err == nil || err.Error() != want {
+		t.Fatalf("rpc after cancel = %v, want %q", err, want)
+	}
+	for _, pid := range pids {
+		testwait.Until(t, fmt.Sprintf("pid %d of the helper's group to die after the cancelled exchange", pid),
+			func() (bool, string) {
+				killErr := syscall.Kill(pid, 0)
+				return errors.Is(killErr, syscall.ESRCH), fmt.Sprint(killErr)
+			})
 	}
 }

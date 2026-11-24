@@ -12,11 +12,11 @@ import (
 	"sync"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 var (
@@ -55,7 +55,9 @@ func newWatchLadder(t *testing.T) *watchLadder {
 		configDir: filepath.Join(jail.root, "cc"),
 		scenario:  filepath.Join(jail.root, "scenario.json"),
 	}
-	for _, directory := range []string{filepath.Join(ladder.configDir, "projects"), filepath.Join(jail.root, "holds")} {
+	for _, directory := range []string{
+		filepath.Join(ladder.configDir, "projects"), filepath.Join(jail.root, "holds"), filepath.Join(jail.root, "control"),
+	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -65,8 +67,9 @@ func newWatchLadder(t *testing.T) *watchLadder {
 			"sid_dir":   filepath.Join(jail.root, "sid"),
 			"proc_root": filepath.Join(jail.root, "proc"),
 		},
-		"model": "claude-fixture",
-		"pane":  map[string]string{"busy": "Working (1s · esc to interrupt) · esc interrupt"},
+		"model":   "claude-fixture",
+		"pane":    map[string]string{"busy": "Working (1s · esc to interrupt) · esc interrupt"},
+		"control": ladder.controlPath(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -498,12 +501,8 @@ func TestWatchLadderCancelEndsTheWatchWithoutAnEvent(t *testing.T) {
 	watch := ladder.watch("lad-*", "--transitions")
 	watch.expect("SEEN lad-a idle idle_seconds=0")
 	watch.cancel()
-	select {
-	case watch.code = <-watch.done:
-		watch.ended = true
-	case <-time.After(5 * time.Second):
-		t.Fatal("watch did not return within 5s of its context ending")
-	}
+	watch.code, _ = testwait.Receive(t, "watch to return once its context ended", watch.done)
+	watch.ended = true
 	watch.expect()
 	if watch.code == 0 || watch.stderr.String() != "pfm chat watch: context canceled\n" {
 		t.Fatalf("cancelled watch rc %d stderr %q, want a non-zero rc naming the cancellation",

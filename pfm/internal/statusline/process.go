@@ -21,8 +21,8 @@ import (
 // SpawnDetached starts one refresher as a new session and releases the child,
 // args following its flag (the paced worker's chat key). The render path never
 // waits for credentials, networks, or App Server startup, and a caller killed
-// mid-render never reaches the child. runner is the deps.Runner seam
-// (pfm/TESTPLAN.md § Seams); nil defaults to obs.Runner(deps.RealRunner{}).
+// mid-render never reaches the child. runner is the deps.Runner seam; nil
+// defaults to obs.Runner(deps.RealRunner{}).
 func SpawnDetached(kind RefreshKind, runner deps.Runner, args ...string) (returnErr error) {
 	executable, err := os.Executable()
 	if err != nil {

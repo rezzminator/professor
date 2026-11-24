@@ -11,6 +11,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestCodexRefresherWritesRecordedRateLimitsAtomically(t *testing.T) {
@@ -49,7 +50,18 @@ func TestCodexRefresherWritesRecordedRateLimitsAtomically(t *testing.T) {
 func TestRenderSchedulesStaleRefreshersWithoutWaiting(t *testing.T) {
 	root := t.TempDir()
 	spawned := make(chan RefreshKind, 2)
-	started := time.Now()
+	// The only Codex on PATH marks that it ran and fails: a refresh run inline
+	// would leave the mark.
+	bin := t.TempDir()
+	ran := filepath.Join(bin, "codex.ran")
+	if err := testjail.WriteExecutable(
+		filepath.Join(bin, "codex"),
+		[]byte("#!/bin/sh\n: > \"$0.ran\"\nexit 1\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
 	_, err := Render(context.Background(), []byte(`{"model":{"display_name":"Claude"}}`), Runtime{
 		Now:          func() time.Time { return time.Unix(1_786_838_400, 0) },
 		Home:         root,
@@ -70,8 +82,10 @@ func TestRenderSchedulesStaleRefreshersWithoutWaiting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
-		t.Fatalf("render blocked for %v", elapsed)
+	// The refresh is handed to the spawned refresher, never run inline: render
+	// ran no Codex.
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Fatalf("render blocked on the Codex refresh inline: %s exists (%v)", ran, err)
 	}
 	select {
 	case kind := <-spawned:

@@ -5,33 +5,48 @@ package gather
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
-// stoppedProbeTimeout is the probe bound these tests carry on the context of
-// every call they point at a stopped server (probeTimeoutKey): production's
-// two seconds would only make them wait longer for the same answer.
-const stoppedProbeTimeout = 200 * time.Millisecond
-
-// stoppedBound is how long one bounded call on a stopped server may take:
-// the probe bound, plus the tmux door's half second for a killed client whose
-// stdout the stopped server still holds, plus slack. A scan that probed four
-// stopped servers one after another would take near three seconds.
-const stoppedBound = stoppedProbeTimeout + time.Second
-
-// stoppedProbe is ctx carrying stoppedProbeTimeout as its probe bound.
-func stoppedProbe(ctx context.Context) context.Context {
-	return context.WithValue(ctx, probeTimeoutKey{}, stoppedProbeTimeout)
+// endAtProbeBound runs call, whose probes arm `armed` bounds on fake, and ends
+// them by moving fake to ProbeTimeout once every ready condition holds: a
+// moment before it every bound still waits, at it call returns its error.
+func endAtProbeBound(
+	t *testing.T, fake *clock.Fake, armed int, call func() error, ready ...func() (bool, string),
+) error {
+	t.Helper()
+	returned := make(chan error, 1)
+	go func() { returned <- call() }()
+	testwait.Until(t, fmt.Sprintf("%d probe bounds to be armed", armed), func() (bool, string) {
+		return fake.Pending() == armed, fake.String()
+	})
+	for _, condition := range ready {
+		testwait.Until(t, "the probed clients to block on their servers", condition)
+	}
+	fake.Advance(ProbeTimeout - time.Nanosecond)
+	if pending := fake.Pending(); pending != armed {
+		t.Fatalf(
+			"%d of %d probe bounds fired %s before %s: %s",
+			armed-pending, armed, time.Nanosecond, ProbeTimeout, fake,
+		)
+	}
+	fake.Advance(time.Nanosecond)
+	err, _ := testwait.Receive(t, "the probes to end at their bound", returned)
+	return err
 }
 
-// within runs every call at once and fails the test when any does not return
-// inside bound — the hang the picker showed on stopped servers; it returns
-// each call's error by name.
-func within(t *testing.T, bound time.Duration, calls map[string]func() error) map[string]error {
+// within runs every call at once and fails the test when any never returns —
+// the hang the picker showed on stopped servers; it returns each call's error
+// by name.
+func within(t *testing.T, calls map[string]func() error) map[string]error {
 	t.Helper()
 	type returned struct {
 		name string
@@ -41,21 +56,16 @@ func within(t *testing.T, bound time.Duration, calls map[string]func() error) ma
 	for name, call := range calls {
 		go func() { done <- returned{name, call()} }()
 	}
-	timeout := time.After(bound)
 	errs := make(map[string]error, len(calls))
 	for len(errs) < len(calls) {
-		select {
-		case call := <-done:
-			errs[call.name] = call.err
-		case <-timeout:
-			var pending []string
-			for name := range calls {
-				if _, ended := errs[name]; !ended {
-					pending = append(pending, name)
-				}
+		var pending []string
+		for name := range calls {
+			if _, ended := errs[name]; !ended {
+				pending = append(pending, name)
 			}
-			t.Fatalf("%v on a stopped tmux server did not return within %s", pending, bound)
 		}
+		call, _ := testwait.Receive(t, fmt.Sprintf("%v on a stopped tmux server to return", pending), done)
+		errs[call.name] = call.err
 	}
 	return errs
 }
@@ -79,25 +89,41 @@ func TestProbeCallsOnStoppedServersReturnInOneBoundAndLeaveNoClient(t *testing.T
 		jail.stopServer(t, socket)
 	}
 	client := TmuxProbe{TmuxTmpDir: jail.root}
-	ctx := stoppedProbe(context.Background())
+	// The scan's probes are timed on a fake: one move past the bound ends all
+	// four, so N stopped servers cost one bound.
+	fake := clock.NewFake(time.Unix(0, 0))
 	var probe TmuxSnapshot
-	errs := within(t, stoppedBound, map[string]func() error{
-		"ProbeTmux": func() error {
-			var err error
-			probe, err = ProbeTmux(ctx, jail.tmuxDir, client, time.Now())
-			return err
-		},
-		"ServerPID": func() error {
-			_, err := client.ServerPID(ctx, sockets[0])
-			return err
-		},
-		"CapturePane": func() error {
-			_, err := client.CapturePane(ctx, sockets[1], "%0")
-			return err
-		},
-	})
-	if err := errs["ProbeTmux"]; err != nil {
+	if err := endAtProbeBound(t, fake, len(sockets), func() error {
+		var err error
+		probe, err = ProbeTmux(WithProbeClock(context.Background(), fake), jail.tmuxDir, client, time.Now())
+		return err
+	}); err != nil {
 		t.Fatalf("ProbeTmux over stopped servers = %v, want each named unreadable", err)
+	}
+	// The pid read and the pane capture are bounded inside the tmux door, timed
+	// on a second fake: both clients are proven blocked on their stopped
+	// servers, then one move to the bound ends them together.
+	callClock := clock.NewFake(time.Unix(0, 0))
+	ctx := pfmtmux.WithBoundClock(context.Background(), callClock)
+	var errs map[string]error
+	ended := endAtProbeBound(t, callClock, 2, func() error {
+		errs = within(t, map[string]func() error{
+			"ServerPID": func() error {
+				_, err := client.ServerPID(ctx, sockets[0])
+				return err
+			},
+			"CapturePane": func() error {
+				_, err := client.CapturePane(ctx, sockets[1], "%0")
+				return err
+			},
+		})
+		return nil
+	}, func() (bool, string) {
+		left := jail.clientsLeft(t)
+		return len(left) == 2, fmt.Sprintf("clients blocked: %v", left)
+	})
+	if ended != nil {
+		t.Fatalf("the stopped calls ended with %v, want their errors by name", ended)
 	}
 	for _, name := range []string{"ServerPID", "CapturePane"} {
 		if err := errs[name]; !errors.Is(err, ErrServerUnresponsive) {
@@ -105,7 +131,7 @@ func TestProbeCallsOnStoppedServersReturnInOneBoundAndLeaveNoClient(t *testing.T
 		}
 	}
 	for _, socket := range sockets {
-		want := ErrServerUnresponsive.Error() + " within " + stoppedProbeTimeout.String() + ": " + socket
+		want := "tmux server did not answer within 2s: " + socket
 		if reason, unread := probe.Unreadable[socket]; !unread || reason != want {
 			t.Fatalf("stopped server %s: unreadable %v (%q), want %q", socket, unread, reason, want)
 		}

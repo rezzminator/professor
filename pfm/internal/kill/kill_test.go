@@ -170,7 +170,7 @@ func TestFinisherUsesResolvedClaudeRoots(t *testing.T) {
 	database := jail.open(t)
 
 	claudeRoot := filepath.Join(jail.home, ".claude", "projects")
-	finisher, err := NewFinisher(database, Dependencies{Paths: paths.Values{
+	finisher, err := NewFinisher(database, Dependencies{Clock: newFinisherStepClock(), Paths: paths.Values{
 		Home:    jail.home,
 		SIDDir:  jail.sidDir,
 		Roots:   map[pfmengine.ID][]string{pfmengine.Claude: {claudeRoot}, pfmengine.Codex: {jail.codexHome}},
@@ -698,6 +698,7 @@ func TestFinisherChoreographyAndTeammateReaping(t *testing.T) {
 		})
 	})
 	finisher, err := NewFinisher(database, Dependencies{
+		Clock:        newFinisherStepClock(),
 		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Screen:       tmux,
@@ -784,6 +785,7 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 	paneID := "%9"
 	tmux := &fakeTmux{existsFor: 1}
 	finisher, err := NewFinisher(database, Dependencies{
+		Clock:        newFinisherStepClock(),
 		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Screen:       tmux,

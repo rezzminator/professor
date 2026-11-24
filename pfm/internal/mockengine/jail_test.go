@@ -1,15 +1,16 @@
 package mockengine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestJailBindingsAreWhatGatherAndReloadRead(t *testing.T) {
@@ -51,16 +52,12 @@ func TestJailBindingsAreWhatGatherAndReloadRead(t *testing.T) {
 	if code := session.waitExit(); code != 0 {
 		t.Fatalf("exit = %d", code)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, err := os.Stat(filepath.Join(fix.procRoot, strconv.Itoa(pid))); os.IsNotExist(err) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the proc entry outlived the engine — a dead chat would keep looking alive")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	entry := filepath.Join(fix.procRoot, strconv.Itoa(pid))
+	gone := "the proc entry to go with the engine — a dead chat would keep looking alive"
+	testwait.Until(t, gone, func() (bool, string) {
+		_, err := os.Stat(entry)
+		return os.IsNotExist(err), fmt.Sprintf("stat %s: %v", entry, err)
+	})
 }
 
 func TestCodexJailEntryLinksTheRolloutAsAnOpenDescriptor(t *testing.T) {

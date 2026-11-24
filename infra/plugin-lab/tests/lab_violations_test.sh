@@ -62,17 +62,18 @@ pid=$(cat "$RUN/fake/pid" 2>/dev/null || echo none)
 expect_eq 'fake claude killed' "$(kill -0 "$pid" 2>/dev/null && echo alive || echo gone)" gone
 expect_eq 'tmux server gone' "$(tmux -S "$RUN/t.sock" ls >/dev/null 2>&1 && echo alive || echo gone)" gone
 # a stale claude.pid the OS gave to a live chat on the same binary: lab stop leaves it running
-bash -c 'exec -a "$0" sleep 300' "$FAKES/claude --setting-sources project --settings $T/live/settings.json" & decoy=$!
+bash -c 'exec -a "$0" tail -f /dev/null 2>/dev/null' "$FAKES/claude --setting-sources project --settings $T/live/settings.json" & decoy=$!
 printf '%s\n' "$decoy" > "$RUN/claude.pid"
 "$LAB_DIR/lab" stop "$RUN" >/dev/null 2>&1
 expect_eq 'live chat on the same binary survives lab stop' "$(kill -0 "$decoy" 2>/dev/null && echo alive || echo gone)" alive
-ps -o args= -p "$decoy" | grep -qF "$FAKES/claude --setting-sources project --settings $T/live/settings.json 300" && kill "$decoy"
+ps -o args= -p "$decoy" | grep -qF "$FAKES/claude --setting-sources project --settings $T/live/settings.json -f /dev/null" && kill "$decoy"
 
 # D9: a run interrupted after boot is in the ledger at its cap (its own ledger: a run id from another root's run
 # in the same second is refused in a shared one)
 ILEDGER=$T/flight/interrupted.tsv
 FAKE_MODE=slow LAB_ROOT=$T/r1 "$LAB_DIR/lab" run fake/hello --plugin "$T/plugin" --auth-from "$T/live" --claude "$FAKES/claude" --ledger "$ILEDGER" >/dev/null 2>&1 & labpid=$!
-for _ in $(seq 1 100); do compgen -G "$T/r1/*/claude.pid" >/dev/null && break; sleep 0.1; done
+claude_booted() { compgen -G "$T/r1/*/claude.pid" >/dev/null; }
+shtest_wait_until 'the interrupted run boots its claude' claude_booted
 ps -o args= -p "$labpid" | grep -qF "run fake/hello --plugin $T/plugin" && kill -TERM "$labpid"
 wait "$labpid" 2>/dev/null
 expect_eq 'interrupted run leaves one ledger row' "$(wc -l < "$ILEDGER" | tr -d ' ')" 1

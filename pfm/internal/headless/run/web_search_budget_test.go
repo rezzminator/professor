@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestRunUsesScriptedRunnerStartBoundary(t *testing.T) {
@@ -43,25 +44,30 @@ func TestRunUsesScriptedRunnerStartBoundary(t *testing.T) {
 	if len(calls) != 1 || len(calls[0].Argv) == 0 || calls[0].Argv[0] != binary {
 		t.Fatalf("Runner starts = %#v, want one call beginning with %q", calls, binary)
 	}
-	if !calls[0].Opts.ProcessGroup || calls[0].Opts.WaitDelay != processWaitAfterCancel || calls[0].Opts.Stdin == nil ||
-		calls[0].Opts.Stdout == nil ||
-		calls[0].Opts.Stderr == nil {
+	opts := calls[0].Opts
+	wantOpts := deps.StartOptions{
+		ProcessGroup: true, WaitDelay: processWaitAfterCancel,
+		Env: opts.Env, Dir: opts.Dir, Stdin: opts.Stdin, Stdout: opts.Stdout, Stderr: opts.Stderr,
+	}
+	if opts.Stdin == nil || opts.Stdout == nil || opts.Stderr == nil || !reflect.DeepEqual(opts, wantOpts) {
 		t.Fatalf(
 			"Runner options = %#v, want process group, WaitDelay=%s, and all streams",
-			calls[0].Opts,
+			opts,
 			processWaitAfterCancel,
 		)
 	}
 }
 
 type delayedWaitProcess struct {
-	waited chan struct{}
+	killed  chan struct{}
+	release chan struct{}
+	waited  chan struct{}
 }
 
 func (process delayedWaitProcess) Pid() int { return 42 }
 
 func (process delayedWaitProcess) Wait() error {
-	time.Sleep(20 * time.Millisecond)
+	<-process.release
 	close(process.waited)
 	return errors.New("wait completed after cancellation")
 }
@@ -78,12 +84,17 @@ func (delayedWaitProcess) StdoutPipe() (io.ReadCloser, error) {
 
 func (delayedWaitProcess) Kill() error { return nil }
 
-func (delayedWaitProcess) KillGroup() error { return nil }
+func (process delayedWaitProcess) KillGroup() error {
+	close(process.killed)
+	return nil
+}
 
 func (delayedWaitProcess) SignalGroup(syscall.Signal) error { return nil }
 
 type blockedWaitRunner struct {
 	started chan struct{}
+	killed  chan struct{}
+	release chan struct{}
 	waited  chan struct{}
 }
 
@@ -95,26 +106,37 @@ func (runner *blockedWaitRunner) LookPath(name string) (string, error) { return 
 
 func (runner *blockedWaitRunner) Start(context.Context, []string, deps.StartOptions) (deps.Process, error) {
 	close(runner.started)
-	return delayedWaitProcess{waited: runner.waited}, nil
+	return delayedWaitProcess{killed: runner.killed, release: runner.release, waited: runner.waited}, nil
 }
 
 func TestRunProcessWaitsForProcessAfterCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	runner := &blockedWaitRunner{started: make(chan struct{}), waited: make(chan struct{})}
+	ctx, cancel := context.WithCancel(testwait.Context(t))
+	runner := &blockedWaitRunner{
+		started: make(chan struct{}), killed: make(chan struct{}),
+		release: make(chan struct{}), waited: make(chan struct{}),
+	}
 	done := make(chan error, 1)
 	go func() {
 		done <- runProcess(ctx, runner, []string{"engine"}, deps.StartOptions{ProcessGroup: true, WaitDelay: processWaitAfterCancel})
 	}()
-	<-runner.started
+	testwait.Receive(t, "the runner to start the process", runner.started)
 	cancel()
-
+	testwait.Receive(t, "runProcess to kill the process group after the cancellation", runner.killed)
+	testwait.Until(t, "runProcess to block on process.Wait after the kill, or to return", func() (bool, string) {
+		if len(done) != 0 {
+			return true, ""
+		}
+		return testwait.Blocked("run.runProcess")
+	})
 	select {
 	case err := <-done:
-		if got, want := fmt.Sprint(err), "wait completed after cancellation"; got != want {
-			t.Fatalf("runProcess() error = %q, want %q", got, want)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("runProcess() did not wait for process.Wait after cancellation")
+		t.Fatalf("runProcess() returned %v before process.Wait completed", err)
+	default:
+	}
+	close(runner.release)
+	err, _ := testwait.Receive(t, "runProcess to return once process.Wait completed", done)
+	if got, want := fmt.Sprint(err), "wait completed after cancellation"; got != want {
+		t.Fatalf("runProcess() error = %q, want %q", got, want)
 	}
 	select {
 	case <-runner.waited:

@@ -392,7 +392,7 @@ func (watch *herdrWatch) claim() error {
 	if err != nil {
 		return fmt.Errorf("claim the transcript watch record: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	ctx, cancel := watch.reporter.deadlineContext()
 	defer cancel()
 	unlock, err := reporter.lock(ctx, reporter.activityKey(watch.sessionID))
 	if err != nil {
@@ -452,7 +452,7 @@ func (watch *herdrWatch) counts(at time.Time, offset int64) bool {
 // the activity lock the hooks keep it under, so the session's next working
 // event starts a new watch.
 func (watch *herdrWatch) retire() error {
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	ctx, cancel := watch.reporter.deadlineContext()
 	defer cancel()
 	unlock, err := watch.reporter.lock(ctx, watch.reporter.activityKey(watch.sessionID))
 	if err != nil {
@@ -587,7 +587,7 @@ func (watch *herdrWatch) report(at time.Time) error {
 		return reporter.spawnSettle(herdrSettleEvent, reporter.plan(payload).stored, payload,
 			string(herdr.EventIdle))
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), herdrDeadline)
+	ctx, cancel := watch.reporter.deadlineContext()
 	defer cancel()
 	unlock, err := reporter.lock(ctx, reporter.activityKey(watch.sessionID))
 	if err != nil {

@@ -129,3 +129,9 @@ func readPluginLogDir(path string) (string, bool, error) {
 	}
 	return value, false, nil
 }
+
+// pluginLogDirDefault is the plugin log folder pfm sets when pfm.config's
+// claude.env names none: pfm's own, holding nothing but plugin logs.
+func pluginLogDirDefault(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "plugin-logs")
+}

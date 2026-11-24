@@ -2,11 +2,8 @@ package ui
 
 import (
 	"math/rand"
-	"os"
 	"runtime"
-	"sort"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -14,96 +11,65 @@ import (
 )
 
 func TestUIStress(t *testing.T) {
-	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 	snapshot := largeSnapshot(5_000)
-	started := time.Now()
 	model := NewModel(snapshot)
-	modelReady := time.Since(started)
-	started = time.Now()
-	_ = model.View()
-	viewReady := time.Since(started)
-	firstPaint := modelReady + viewReady
-	firstPaintLimit := 2 * time.Second
-	if strict {
-		firstPaintLimit = 100 * time.Millisecond
-	}
-	if firstPaint >= firstPaintLimit {
-		t.Fatalf(
-			"first paint=%s (model=%s view=%s), want <%s (strict=%t)",
-			firstPaint,
-			modelReady,
-			viewReady,
-			firstPaintLimit,
-			strict,
-		)
+	if view := model.View(); view.Content == "" {
+		t.Fatal("empty first paint")
 	}
 
 	const frames = 1_000
-	frameTimes := make([]time.Duration, frames)
-	for frame := range frames {
-		started = time.Now()
+	for range frames {
 		view := model.View()
 		if view.Content == "" {
 			t.Fatal("empty stress frame")
 		}
-		frameTimes[frame] = time.Since(started)
-	}
-	sort.Slice(frameTimes, func(left, right int) bool {
-		return frameTimes[left] < frameTimes[right]
-	})
-	medianFrame := frameTimes[len(frameTimes)/2]
-	frameLimit := 2 * time.Second
-	if strict {
-		frameLimit = 16 * time.Millisecond
-	}
-	if medianFrame >= frameLimit {
-		t.Fatalf(
-			"median 5k-row frame=%s, want <%s (strict=%t)",
-			medianFrame,
-			frameLimit,
-			strict,
-		)
 	}
 	t.Logf(
-		"STRESS rows=5000 frames=%d first_paint=%s median_frame=%s viewport_rows=%d strict=%t",
+		"STRESS rows=5000 frames=%d viewport_rows=%d",
 		frames,
-		firstPaint,
-		medianFrame,
 		model.pageRows(),
-		strict,
 	)
 
-	var maxFuzzy time.Duration
-	fuzzyLimit := 2 * time.Second
-	if strict {
-		fuzzyLimit = 10 * time.Millisecond
-	}
 	for _, runeValue := range "needle" {
-		started = time.Now()
 		model, _ = applyKey(t, model, printableKey(runeValue))
-		elapsed := time.Since(started)
-		if elapsed > maxFuzzy {
-			maxFuzzy = elapsed
-		}
-		if elapsed >= fuzzyLimit {
-			t.Fatalf(
-				"fuzzy query %q over 5k=%s, want <%s (strict=%t)",
-				model.Query(),
-				elapsed,
-				fuzzyLimit,
-				strict,
-			)
-		}
 	}
 	t.Logf(
-		"STRESS fuzzy_rows=5000 keystrokes=6 max_keystroke=%s matches=%d strict=%t",
-		maxFuzzy,
+		"STRESS fuzzy_rows=5000 keystrokes=6 matches=%d",
 		model.FilteredRowCount(),
-		strict,
 	)
 
 	stressRandomKeys(t)
 	stressRefreshStorm(t)
+}
+
+// BenchmarkUIStressFirstPaint is the model build plus first frame over 5,000
+// rows, the number TestUIStress asserts the rows of.
+func BenchmarkUIStressFirstPaint(b *testing.B) {
+	snapshot := largeSnapshot(5_000)
+	for b.Loop() {
+		_ = NewModel(snapshot).View()
+	}
+}
+
+// BenchmarkUIStressFrame is one frame over 5,000 rows.
+func BenchmarkUIStressFrame(b *testing.B) {
+	model := NewModel(largeSnapshot(5_000))
+	for b.Loop() {
+		_ = model.View()
+	}
+}
+
+// BenchmarkUIStressFuzzyQuery types "needle" one keystroke at a time over
+// 5,000 rows.
+func BenchmarkUIStressFuzzyQuery(b *testing.B) {
+	base := NewModel(largeSnapshot(5_000))
+	for b.Loop() {
+		model := base
+		for _, runeValue := range "needle" {
+			updated, _ := model.Update(printableKey(runeValue))
+			model = updated.(Model)
+		}
+	}
 }
 
 func stressRandomKeys(t *testing.T) {

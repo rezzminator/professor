@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,40 +15,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
-
-// driveFakeClock runs fn to completion, advancing clk whenever it has a
-// pending sleep, so a loop of real sleeps inside fn resolves in however
-// long the scheduler takes to hand control back — never the real duration
-// each sleep names. It fails the test if fn does not finish inside a
-// generous real wall-clock bound (a genuine hang, never the fake clock
-// running slow).
-func driveFakeClock(t *testing.T, clk *clock.Fake, fn func()) {
-	t.Helper()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		fn()
-	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		select {
-		case <-done:
-			return
-		default:
-		}
-		if clk.Pending() > 0 {
-			clk.Advance(time.Hour)
-		} else {
-			runtime.Gosched()
-		}
-		if time.Now().After(deadline) {
-			t.Fatal(
-				"driveFakeClock: fn did not finish before the real wall-clock bound — a genuine hang, not the fake clock",
-			)
-		}
-	}
-}
 
 // This file pins deliverThen's paste-placeholder proof (issue #12): a --then
 // prompt must be proven delivered from the ACTIVE composer only, a stale
@@ -101,7 +68,7 @@ func TestDeliverThenAcceptsAComposerPastePlaceholderAsProofOfDelivery(t *testing
 		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
 	}
 	then := strings.Repeat("a very large pasted paragraph Claude Code collapses in the composer. ", 20)
-	err := deliverThen(
+	err := deliverThenOnFake(t,
 		context.Background(),
 		Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-paste-then", Pane: "%7",
@@ -156,7 +123,7 @@ func TestDeliverThenRefusesAStalePlaceholderLeftInScrollback(t *testing.T) {
 	}
 	fakeClk := clock.NewFake(time.Unix(0, 0))
 	var err error
-	driveFakeClock(t, fakeClk, func() {
+	testwait.Drive(t, "reload to run through its waits", fakeClk, func() {
 		err = deliverThen(
 			context.Background(),
 			Request{
@@ -244,7 +211,7 @@ func TestDeliverThenRefusesWhenTheBaselineCaptureFailed(t *testing.T) {
 			}
 			fakeClk := clock.NewFake(time.Unix(0, 0))
 			var err error
-			driveFakeClock(t, fakeClk, func() {
+			testwait.Drive(t, "reload to run through its waits", fakeClk, func() {
 				err = deliverThen(
 					context.Background(),
 					Request{
@@ -312,7 +279,7 @@ func TestRunReturnsAnErrorAndSavesTheSentinelWhenSubmitIsNeverConfirmed(t *testi
 	socket := "/tmp/tmux-1000/probe-stuck-submit"
 	fakeClk := clock.NewFake(time.Unix(0, 0))
 	var err error
-	driveFakeClock(t, fakeClk, func() {
+	testwait.Drive(t, "reload to run through its waits", fakeClk, func() {
 		_, err = Run(
 			context.Background(),
 			Request{

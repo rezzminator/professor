@@ -18,6 +18,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A grown clear-kill that cannot be expired, because the delete fails or
@@ -219,8 +220,7 @@ func TestConcurrentKilledWritesAcrossProcesses(t *testing.T) {
 	readyA := filepath.Join(root, "ready-a")
 	readyB := filepath.Join(root, "ready-b")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	processes := []*helperCommand{
 		newHelperCommand(ctx, "a", readyA, gate),
 		newHelperCommand(ctx, "b", readyB, gate),
@@ -237,14 +237,7 @@ func TestConcurrentKilledWritesAcrossProcesses(t *testing.T) {
 		})
 	}
 
-	if err := waitForPaths(ctx, readyA, readyB); err != nil {
-		t.Fatalf(
-			"wait for helpers: %v\n%s\n%s",
-			err,
-			processes[0].output.String(),
-			processes[1].output.String(),
-		)
-	}
+	waitForPaths(t, readyA, readyB)
 	if err := os.WriteFile(gate, []byte("go"), 0o600); err != nil {
 		t.Fatalf("release helper gate: %v", err)
 	}

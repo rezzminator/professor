@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestChatWhoamiReportsIdentityOrStatesItsAbsence covers chat.sh:482-484 over
@@ -123,7 +123,7 @@ func TestChatCaptureBoundsAreAppliedAfterTheCapture(t *testing.T) {
 		}
 	}()
 	client := connectInMemory(t, service.Server())
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(testwait.Context(t))
 	defer cancel()
 	for _, input := range []CaptureInput{
 		{Target: "missing-target", MaxBytes: captureInt(maxCaptureBytes + 1)},

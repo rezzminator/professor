@@ -4,7 +4,6 @@ package journey
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -14,8 +13,8 @@ import (
 func end(c *harness.Ctx, s State) State {
 	term := c.Terminal(s.Term)
 	term.Type("/exit\r")
-	term.WaitFor("New chat", 20*time.Second)
-	c.Poll("chat "+s.Chat.Session+" gone from the chats, the seats and the engines", stepBound,
+	term.WaitFor("New chat")
+	c.Poll("chat "+s.Chat.Session+" gone from the chats, the seats and the engines",
 		func() (bool, string) {
 			rows, _ := liveChats(c, herdrSocket(s))
 			seats := liveSeats(c, herdrSocket(s))

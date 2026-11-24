@@ -10,8 +10,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // OpenCode takes no prompt file on its command line and runs no appendix
@@ -433,9 +436,15 @@ func TestOpenCodeOwnershipExcludesConcurrentPublisher(t *testing.T) {
 		},
 	}
 	var competingErr error
+	fake := clock.NewFake(time.Now())
+	testwait.ProcessClock(t, fake)
 	writer := &storeMutationWriter{
-		match:  "  change  rewrite " + config,
-		mutate: func() { competingErr = competing.editOpenCodeInstructions(true) },
+		match: "  change  rewrite " + config,
+		mutate: func() {
+			testwait.Drive(t, "the competing publisher to give up on the busy account lock", fake, func() {
+				competingErr = competing.editOpenCodeInstructions(true)
+			})
+		},
 	}
 	e := &engine{
 		apply:   true,

@@ -15,7 +15,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
@@ -25,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func reloadWorkerAccountFixture(t *testing.T) (string, string, string) {
@@ -79,6 +79,7 @@ func reloadWorkerAccountFixture(t *testing.T) (string, string, string) {
 		t.Fatalf("start probe socket: %v: %s", err, output)
 	}
 	cleanupProbeReloadSocket(t, socket)
+	waitProbePaneText(t, socket, "❯")
 	paneOutput, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_id}").Output()
 	if err != nil {
 		t.Fatalf("read probe pane: %v", err)
@@ -109,17 +110,16 @@ func reloadWorkerAccountFixture(t *testing.T) (string, string, string) {
 
 func reloadWorkerCapturedAccount(t *testing.T, captured string) string {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
+	var account string
+	testwait.Until(t, "reborn claude to record its account in "+captured, func() (bool, string) {
 		data, err := os.ReadFile(captured)
-		if err == nil && len(data) > 0 {
-			return strings.TrimSpace(string(data))
+		if err != nil {
+			return false, err.Error()
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("reborn claude did not record its account: %v", err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		account = strings.TrimSpace(string(data))
+		return len(data) > 0, "empty file"
+	})
+	return account
 }
 
 func TestChatReloadWorkerFailureReachesThePaneAndLog(t *testing.T) {
@@ -334,6 +334,15 @@ func TestChatReloadWorkerContinuesAccountAfterNew(t *testing.T) {
 	if got := reloadWorkerCapturedAccount(t, captured); !strings.HasSuffix(got, "/account-2") {
 		t.Fatalf("continued account=%q stderr=%q", got, stderr.String())
 	}
+	// The pane's breadcrumb still names the conversation the --new reload left
+	// behind, so the account this queued reload keeps is the one the reload
+	// before it booted, read from its handoff, and both lines name it.
+	const kept = "pfm chat reload: no account given — keeping the chat's current account 2\n" +
+		"pfm chat reload: reloading this chat to account 2 IN PLACE — it reboots right here under the new account\n" +
+		"pfm chat reload: no transcript yet — rebooted FRESH\n"
+	if stdout.String() != kept {
+		t.Fatalf("queued reload stdout=%q, want %q", stdout.String(), kept)
+	}
 }
 
 func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
@@ -402,6 +411,7 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		t.Fatalf("start Codex probe socket: %v: %s", err, output)
 	}
 	cleanupProbeReloadSocket(t, socket)
+	waitProbePaneText(t, socket, "›")
 	paneOutput, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_id}").Output()
 	if err != nil {
 		t.Fatal(err)

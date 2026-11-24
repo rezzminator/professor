@@ -5,13 +5,13 @@ description: Governs how pfm (the Go fleet engine) is tested — tiers, test hom
 
 # pfm testing manual
 
-Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `pfm/TESTPLAN.md` and `docs/dev/testing/`; this file states what a change owes. How to write a test is the `testing` rule's (`~/.claude/rules/testing.md`); this manual holds pfm's facts and how its tests run.
+Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `pfm/internal/mockengine/README.md` and `docs/dev/testing/`; this file states what a change owes. How to write a test is the flights testing rule's (`plugins/flights/plugins/flights/rules/testing.md`); this manual holds pfm's facts and how its tests run.
 
 ## Tiers
 
 - Unit: a package test beside its package, no real tmux server, no real engine process, no network: it injects its resolver and HTTP client. Plain `go test ./...` in `pfm/` is this tier: it compiles no `*_jail_test.go` and runs in place on any machine inside testjail's unit net (`pfm/internal/testjail/unitnet.go`): a test starts no process and looks up no host tool (`UNIT-NET REFUSED start: {argv}` / `UNIT-NET REFUSED lookup: {name}`), inherits only the allowlisted names (`unitNetKeep`), runs under umask 022 and `TZ=UTC`, and finds `HOME`, the XDG directories, `PATH` and `TMUX_TMPDIR` as empty net directories, `TMPDIR` its binary's own `u{N}` directory; its proof is the gate step `pfm.unit-proof` (§ Gates and floors). The const `unitNetArmed` is the rollback: set false, a unit binary re-runs in the fence as a jail binary does. A tagged binary on a host still re-runs in the fence or refuses.
 - Jail: every `*_jail_test.go` starts with `//go:build jail` (arch-check C34 `jail-tag`); `go test -tags jail` adds this tier. A jail, e2e or journey binary runs only in the fence or on a GitHub-hosted runner and re-runs its package in the fence from anywhere else (`pfm/internal/testjail/fence.go`).
-- `JAIL`, `JAIL+tmux`, `JAIL+sh`, `LIVE-READ`, `UNPLAYED`: `pfm/TESTPLAN.md` § Legend. The boundary that decides: whether the test needs a real tmux server (a scratch socket inside the jail's `TMUX_TMPDIR`); a flow the fake engine cannot play is `UNPLAYED`, named in `TESTPLAN.md` § "Flows the fake engine does not yet play".
+- A jail test that needs tmux runs a real tmux server on a scratch socket inside the jail's `TMUX_TMPDIR`, never a live fleet socket; a flow the fake engine cannot play is `UNPLAYED`, named in `pfm/internal/mockengine/README.md` § Flows the fake engine does not yet play.
 - e2e: the tagged suite under `pfm/e2e/` (build tag `e2e`, `PFM_DEV_FENCE=1`), run only inside the fence.
 - Journey, the live tier: the tagged suite under `pfm/journey/` (build tag `journey`), one tree of owner steps (`pfm/journey/tree_test.go`, a `step_{name}_test.go` file per step) typed through a real terminal on a disposable machine; design `docs/design/integration-suite/journey-tree.md`.
 - CI: `.github/workflows/ci.yml` runs on a pull request into `main` and by hand on any branch (`gh workflow run ci.yml --ref {branch} -f exclude='{jobs}'`). Its Linux jobs `gate ({unit|e2e|race|mirrors|rest})` run the fence gate's own step list (`infra/fence/checks.sh` `gate_run`) natively on ubuntu-latest through `dev.sh gate all`, each a slice by `PFM_GATE_ONLY` / `PFM_GATE_SKIP` (extended regexes matched against whole step names); `PFM_GATE_ONLY='pfm\.unit' .claude/scripts/dev.sh iso gate` runs that slice in the fence. `macos ({unit|e2e})` (macos-15, `.github/actions/macos-suite/`: the refresh-scope fixture, the unit tier of only the packages whose Go files differ on darwin (`go list` file lists under `GOOS=linux` against native, the gate running the whole unit tier once, on Linux) and `go -C pfm test -tags jail ./...`, then the tagged `pfm/e2e/` suite with the Darwin installer and release-upgrade e2e) and `fresh-install ({ubuntu-latest|macos-15})` (`scripts/fresh-install-test.sh`, system Bash 3.2 on macOS) run what the fence cannot; `journey ({linux|macos})` runs the whole journey tree, on Linux through `infra/fence/journey/run.sh`, on macos-15 as the runner's owner after `infra/fence/journey/prepare.sh`, each uploading the run's profile and evidence as `journey-{os}`, green or red, the Linux job its coverage too (raw counters included); the macOS job measures no coverage, its clock too coarse for Go's coverage meta-file names; `-f exclude='gate journey fresh-install build scan release'` runs the `macos` jobs alone. Nothing local proves a macOS job.
@@ -32,7 +32,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - Shared-core files with one editor per flight: `pfm/journey/tree_test.go`, `pfm/journey/harness/`, `pfm/journey/doors_test.go`, `pfm/journey/doors_cells_test.go`, `pfm/scripts/known-skips.tsv`.
 - The most coverage with the fewest steps: a new check is an assertion in the step that already walks the path.
 - A step needing only its parent's state hangs beside its siblings, never at a chain's end.
-- The whole tree stays at 90 s or under on its profile's `wall` line, herdr-mesh at 40 s or under; the runner fails a run only past `budget` (`pfm/journey/journey_test.go`).
+- The tree's time (500 s) and each pfm process's CPU share (20 % of the tree's time) are judged outside the test, by `infra/fence/journey/budget.sh` over the run's `steps.tsv` and `cpu.tsv`: `run.sh` calls it on Linux, `ci.yml` on macOS; the suite fails no step for its speed.
 - A step reads machine-wide state (schedules, the picker's rows, the chats list) only through an id it created: every branch of the day shares one machine.
 - A picker step moves to its row and reads it as the owner does (`newChatSelected`, `rowIs`), never assuming the cursor: a chat whose schedule fired unseen is pinned above "New chat" with the cursor on it.
 - Every chat function is played through both doors, `pfm chat {verb}` and the chat MCP tool, from inside a live Claude chat by the cells in `pfm/journey/doors_cells_test.go`; a new chat verb or MCP tool lands with its cells.
@@ -89,6 +89,20 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 - none beyond the gate's own check ids.
 
+**Highest-risk joins.** Ranked by identity resolution across resume/store/fork edges, kill-store integrity, and live-vs-indexed disagreement.
+
+| # | flow | why it catches bugs |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | **Live codex → indexed row join** (`compose/compose.go`) | The join walks path → resolver ThreadID (`liveCodexID`); a process neither resolves is still a guess. Every Codex row bug passes through here. |
+| 2 | **Store-only thread lineage** (`index/codexstate.go`) | A resumed store-only thread is given itself as its lineage root, so it can never merge with the conversation it continues. Kills, names and prompt counts all split. |
+| 3 | **Codex name precedence across two writers** (`index/index.go`, `naming/naming.go`) | Name provenance (`cx_names.source`/`renamed_at`, schema v4) settles store-vs-file, but three walkers still differ on lineage breadth, and `reloadCxNames` still wipes and re-folds in two transactions. |
+| 4 | **Agent-row identity** (`gather/agents.go` → `compose/compose.go` → `kill/manager.go`) | An agent row is the only kind whose ID can exist with no index row behind it. Every id-keyed operation must vouch an engine for it; a new call site that forgets recreates the silent-refusal bug. |
+| 5 | **Codex thread ↔ pane pairing** (`resolve/codex.go`, `gather/codexproc.go`) | The argv `resume <uuid>` rung leads and the ±120s window only backstops fresh threads — but a resumed thread with a scrubbed argv still falls to the window. |
+| 6 | **Live-vs-indexed refresh race in the picker** (`internal/picker/pipeline.go`, `ui/model.go`) | Three snapshots stream into an open TUI while the user is toggling kills. A row that changes identity between frames takes the pending kill with it. |
+| 7 | **`collapseLiveServers` + `ServerCount`** (`compose/compose.go`) | Silently merges rows by `engine+ID`. Two genuinely different chats that resolve to the same id (see #1) disappear into one row; the loser is unreachable. |
+| 8 | **`--exit` finisher choreography** (`kill/finisher.go`, `Finisher.Run`) | Detached, delayed, and it re-asserts a kill AFTER an index refresh. It races the engine's own transcript flush and reaps teammates by an id that may already have been canonicalized. |
+| 9 | **Primary-account round trip** (`internal/picker/pipeline.go`, `fleetdb/fleetdb.go`, `internal/installer/assets/shim/pfm.zsh`) | The store and launcher must enforce the same account roster. |
+
 ## Tricks and traps
 
 - A long `TMUX_TMPDIR` fails with "File name too long" and reads as a tmux bug: keep scratch socket paths short (`testjail.ShortRoot`).
@@ -98,7 +112,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - A probe that launches an engine closes stdin (`</dev/null`) or it hangs.
 - The e2e harness refuses to run without `PFM_DEV_FENCE=1`: that red on a host is the fence law, not a defect; suites and provisioning scripts gate on `scripts/platform.sh` `platform_in_fence` (the variable AND `/.dockerenv`), never the variable alone.
 - `internal/hookentry` (socket path length) is red on a macOS host and green in the fence.
-- A shell poll counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten.
+- How a test waits, in Go, shell, a fixture, the mock engine or the journey, and the three checks holding it: `.claude/rules/pfm-test-waits.md`.
 - A closed listener keeps accepting while a parallel test's fork holds its fd until exec: a test expecting a refused dial on a closed port stays serial.
 - A closed `gather.AcquireAccountGuard` keeps its flock while a parallel test's fork holds the open file description until exec: `AcquireAccountGuard(dir, false)` retries a busy lock for `accountBusyGrace` before it refuses, and a test that expects the busy refusal calls `acquireAccountGuardWithin(dir, false, 0)` (in `gather`) or holds the guard for longer than the grace.
 - A file a test writes then runs goes through `testjail.WriteExecutable` (`C26-exec-write` fails a bare exec-mode `os.WriteFile`: a parallel test's fork mid-write makes it ETXTBSY), and in `internal/deps` and `internal/config`, which testjail imports, through their local `writeExecutableUnderForkLock`; a file the code under test only resolves, stats or hashes, and nothing runs, through `testjail.WriteExecutableNeverRun`, never a plain write plus an exec-bit `os.Chmod` or a link to the test executable; a scripted engine child plays its output through `deps.FakeRunner.ScriptStartOutput` (`deps.StartOutput`: stdout, stderr, exit code, an `AtStart` hook).
@@ -112,4 +126,4 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 - A model's words: a step asserts from pfm's own report or the pane.
 - A value one run printed about its data (a count, an id).
-- That an event did not happen (a network call, a DNS query, a sleep, a fork): the egress verdict and the fenced measurements prove those, never a test.
+- That an event did not happen (a network call, a DNS query, a sleep, a fork): the egress verdict, the real-wait tripwire and the fenced measurements prove those, never a test.

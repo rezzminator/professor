@@ -63,7 +63,7 @@ func HookTemplates(home string) []Hook {
 		},
 		{Event: "SubagentStart", Matcher: HookRRDirMatcher, Command: binary + " internal rr-dir", Name: "rr-dir"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal epic-inject", Name: "epic-inject"},
-		{Event: HookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},
+		{Event: HookEventUserPromptSubmit, Command: binary + " internal command-intercept", Name: "command-intercept"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal exit-intercept", Name: "exit-intercept"},
 		{Event: "SessionStart", Command: herdrCommand(binary, herdr.EventStart), Name: "herdr-start"},
 		{

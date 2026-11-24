@@ -25,6 +25,7 @@ func TestManagerConfirmExitFailsWhenPaneOutlivesEscalation(t *testing.T) {
 	database := jail.open(t)
 	tmux := &fakeTmux{existsFor: 1_000_000, panesByTTY: map[string]string{"/dev/pts/9": "%9"}} // never reports gone
 	manager, err := New(database, Dependencies{
+		Clock:        newFinisherStepClock(),
 		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Spawner:      &captureSpawner{},
@@ -63,6 +64,7 @@ func TestManagerConfirmExitSucceedsOncePaneGone(t *testing.T) {
 	database := jail.open(t)
 	tmux := &fakeTmux{existsFor: 0}
 	manager, err := New(database, Dependencies{
+		Clock:        newFinisherStepClock(),
 		Paths:        jail.resolved(),
 		Tmux:         tmux,
 		Spawner:      &captureSpawner{},
@@ -94,7 +96,10 @@ func TestConfirmExitDoesNotKillSiblingPanes(t *testing.T) {
 		killPaneErr: errors.New("kill-pane failed"),
 		panesByTTY:  map[string]string{"/dev/pts/4": "%4", "/dev/pts/5": "%5"},
 	}
-	manager, err := New(jail.open(t), Dependencies{Paths: jail.resolved(), Tmux: tmux, ConfirmEvery: time.Millisecond})
+	manager, err := New(
+		jail.open(t),
+		Dependencies{Clock: newFinisherStepClock(), Paths: jail.resolved(), Tmux: tmux, ConfirmEvery: time.Millisecond},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +198,7 @@ func TestConfirmExitMovedSeatLookupFailureKeepsExplicitTmux(t *testing.T) {
 	var warnings bytes.Buffer
 	tmux := &fakeTmux{}
 	manager, err := New(database, Dependencies{
+		Clock:           newFinisherStepClock(),
 		Paths:           jail.resolved(),
 		Tmux:            tmux,
 		Screen:          tmux,

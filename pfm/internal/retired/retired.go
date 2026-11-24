@@ -65,20 +65,35 @@ type Lists struct {
 	// HookShimHints are substrings of shell-script hooks that predate the binary.
 	HookShimHints []HookShimHint `json:"hookShimHints"`
 	// ClaudePlugins are plugin ids once ours, keyed by their successor's bare
-	// name: doctor flags an enabled one; install disables it.
+	// name: doctor flags an enabled one; install disables it. The key
+	// ClaudePluginsNoSuccessor never reaches it: ParseLists lifts its ids into
+	// ClaudePluginsRemoved.
 	ClaudePlugins map[string][]string `json:"claudePlugins"`
+	// ClaudePluginsRemoved are plugin ids once ours retired with no successor,
+	// each name@marketplace, filed under claudePlugins[ClaudePluginsNoSuccessor]:
+	// install removes every trace of each from every Claude config dir it
+	// covers, doctor reports one still there.
+	ClaudePluginsRemoved []string `json:"-"`
 	// GlobalAgents are global Claude agent names a rename retired, removed
 	// from {config}/agents/ when the file is still Professor's.
 	GlobalAgents []string `json:"globalAgents"`
 	// Units are systemd user units pfm renamed away from; install disables and unlinks each.
 	Units []string `json:"units"`
-	// ConfigFiles are files under the Claude config dir install removes; a
-	// path may be a filepath.Match glob.
+	// ConfigFiles are files under the Claude config dir install removes, a
+	// regular file backed up first; a path may be a filepath.Match glob.
 	ConfigFiles []ConfigFile `json:"configFiles"`
 	// Commands are retired executables install removes, a customised regular
 	// file backed up first.
 	Commands Commands `json:"commands"`
 }
+
+// ClaudePluginsNoSuccessor is the claudePlugins key filing the ids retired
+// with no successor. They live under a key the file already has because the
+// previous release's binary still loads this file (`pfm update`'s own project
+// report) with a decoder that refuses an unknown top-level key; that binary
+// reads them as retired in favour of a plugin named "(none)", which no install
+// plans.
+const ClaudePluginsNoSuccessor = "(none)"
 
 // Name is one retired project-file name.
 type Name struct {
@@ -193,6 +208,17 @@ func ParseLists(raw []byte) (Lists, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Lists{}, errors.New("decode: trailing data after the object")
 	}
+	if ids, filed := lists.ClaudePlugins[ClaudePluginsNoSuccessor]; filed {
+		if len(ids) == 0 {
+			return Lists{}, fmt.Errorf("claudePlugins[%q]: want a successor name and at least one retired id",
+				ClaudePluginsNoSuccessor)
+		}
+		lists.ClaudePluginsRemoved = ids
+		delete(lists.ClaudePlugins, ClaudePluginsNoSuccessor)
+		if len(lists.ClaudePlugins) == 0 {
+			lists.ClaudePlugins = nil
+		}
+	}
 	return lists, lists.validate()
 }
 
@@ -243,6 +269,25 @@ func (lists Lists) validate() error {
 		for index, id := range ids {
 			if !strings.Contains(id, "@") {
 				bad("claudePlugins[%q][%d]: want a name@marketplace id, got %q", successor, index, id)
+			}
+		}
+	}
+	removed := map[string]bool{}
+	for index, id := range lists.ClaudePluginsRemoved {
+		name, marketplace, ok := strings.Cut(id, "@")
+		switch {
+		case !ok || !baseName(name) || !baseName(marketplace) || strings.Contains(marketplace, "@"):
+			bad("claudePlugins[%q][%d]: want a name@marketplace id, got %q", ClaudePluginsNoSuccessor, index, id)
+		case removed[id]:
+			bad("claudePlugins[%q][%d]: %q is listed twice", ClaudePluginsNoSuccessor, index, id)
+		}
+		removed[id] = true
+	}
+	for successor, ids := range lists.ClaudePlugins {
+		for _, id := range ids {
+			if removed[id] {
+				bad("claudePlugins[%q]: %q is also retired by claudePlugins[%q]; keep one",
+					ClaudePluginsNoSuccessor, id, successor)
 			}
 		}
 	}

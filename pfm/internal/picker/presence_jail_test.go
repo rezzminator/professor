@@ -6,13 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
@@ -25,9 +26,9 @@ import (
 func TestParkedPickerPublishesAChatThatLaunchesWithoutAKeystroke(t *testing.T) {
 	testjail.TmuxServer(t)
 	root, _ := presenceJail(t)
-	updates := parkedPresenceStream(t)
+	stream := parkedPresenceStream(t)
 	startCodexStatusPane(t, root, "cx-1800000021-1-1", `  NEW_CHAT · /work/example · Full Access\n`)
-	awaitFullPass(t, updates, 5*time.Second, "a new chat's socket appeared")
+	stream.awaitFullPass(t, "a new chat's socket appeared")
 }
 
 // TestParkedPickerPublishesAChatThatDiesWithoutAKeystroke is the same law for a
@@ -39,14 +40,14 @@ func TestParkedPickerPublishesAChatThatDiesWithoutAKeystroke(t *testing.T) {
 	// The chat exists before the picker opens, so the picker parks WITH it.
 	const socket = "cx-1800000022-1-1"
 	startCodexStatusPane(t, root, socket, `  DOOMED · /work/example · Full Access\n`)
-	updates := parkedPresenceStream(t)
+	stream := parkedPresenceStream(t)
 
 	kill := exec.Command(tmuxBinary, "-L", socket, "kill-server")
 	kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
 	if output, err := kill.CombinedOutput(); err != nil {
 		t.Fatalf("kill chat server: %v: %s", err, output)
 	}
-	awaitFullPass(t, updates, 5*time.Second, "a chat's server died")
+	stream.awaitFullPass(t, "a chat's server died")
 }
 
 func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
@@ -66,7 +67,7 @@ func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 		socket,
 		"-n",
 		"codex",
-		"printf '"+statusLine+"'; sleep 120",
+		"printf '"+statusLine+"'; "+testwait.Hold,
 	)
 	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -78,36 +79,29 @@ func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 		_ = killCommand.Run()
 	})
 	want := strings.TrimSpace(strings.TrimSuffix(statusLine, `\n`))
-	waitForTmuxPaneText(t, socket, command.Env, want, 5*time.Second)
+	waitForTmuxPaneText(t, socket, command.Env, want)
 }
 
-func waitForTmuxPaneText(t *testing.T, socket string, environment []string, want string, timeout time.Duration) {
+func waitForTmuxPaneText(t *testing.T, socket string, environment []string, want string) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var last string
-	for time.Now().Before(deadline) {
+	testwait.Until(t, "the tmux pane to paint "+strconv.Quote(want), func() (bool, string) {
 		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-p")
 		capture.Env = environment
 		output, err := capture.CombinedOutput()
-		last = string(output)
-		if err == nil && strings.Contains(last, want) {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("tmux pane did not paint %q within %s; last capture=%q", want, timeout, last)
+		return err == nil && strings.Contains(string(output), want), "last capture " + strconv.Quote(string(output))
+	})
 }
 
 func TestParkedPickerPublishesThemeWithoutLiveRowsOrFacts(t *testing.T) {
 	presenceJail(t)
-	updates := parkedPresenceStream(t)
+	stream := parkedPresenceStream(t)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	variant := pickerThemeVariant(true)
 	writePickerTheme(t, home, themesync.Applied{Primary: variant}, themesync.Light, true)
-	snapshot := awaitFullPass(t, updates, 5*time.Second, "the theme changed without live rows or a facts reader")
+	snapshot := stream.awaitFullPass(t, "the theme changed without live rows or a facts reader")
 	if got := ui.NewModel(snapshot).
 		View().
 		BackgroundColor; !reflect.DeepEqual(

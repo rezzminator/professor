@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -27,7 +26,7 @@ func chatNew(c *harness.Ctx, s State) State {
 	// Written aside and moved in: a pfm another branch runs meanwhile reads the old config or the new one,
 	// never a half-written file.
 	if code := shellRun(owner, "auto", `cp -p `+config+` `+config+`.mesh && jq '.claude.permissionMode = "auto"' `+
-		config+`.mesh >`+config+`.auto && mv `+config+`.auto `+config, stepBound); code != 0 {
+		config+`.mesh >`+config+`.auto && mv `+config+`.auto `+config); code != 0 {
 		c.Failf("setting claude.permissionMode to auto in %s exited %d:\n%s", config, code, owner.Screen())
 	}
 	s = meshCaller(c, s, "mesh", "demo")
@@ -37,7 +36,7 @@ func chatNew(c *harness.Ctx, s State) State {
 		c.Failf("engine %d of %s started without `--permission-mode auto` from the config: %s",
 			s.Chat.Engine, s.Name, strings.Join(argv, " "))
 	}
-	if code := shellRun(owner, "restore", "mv "+config+".mesh "+config, stepBound); code != 0 {
+	if code := shellRun(owner, "restore", "mv "+config+".mesh "+config); code != 0 {
 		c.Failf("restoring %s exited %d:\n%s", config, code, owner.Screen())
 	}
 	fleetConsistent(c, s)
@@ -60,7 +59,7 @@ func meshCaller(c *harness.Ctx, s State, label, dir string) State {
 	sock := herdrSocket(s)
 	term.Type("cd $HOME/work/" + dir + " && pfm chat new --engine cc --name " + s.Name + "\r")
 	var pane string
-	term.WaitScreen("pfm chat new's line for "+s.Name, 20*time.Second, func(screen string) bool {
+	term.WaitScreen("pfm chat new's line for "+s.Name, func(screen string) bool {
 		for _, line := range strings.Split(screen, "\n") {
 			if f := strings.Fields(
 				paneText(line),
@@ -73,7 +72,7 @@ func meshCaller(c *harness.Ctx, s State, label, dir string) State {
 		return false
 	})
 	awaitTopTab(term, "idle", s.Name)
-	c.Poll("one live Claude chat named "+s.Name+" with a live seat on "+pane, 20*time.Second, func() (bool, string) {
+	c.Poll("one live Claude chat named "+s.Name+" with a live seat on "+pane, func() (bool, string) {
 		rows := namedChats(c, sock)
 		seats := liveSeats(c, sock)
 		seen := fmt.Sprintf("chats %v, seats %v", rows, seats)

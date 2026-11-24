@@ -45,7 +45,7 @@ type TmuxSpawner struct {
 	// applyTheme puts the theme on a born server; nil is themesync.ApplyTmuxServer.
 	// A test injects a recorder here.
 	applyTheme func(ctx context.Context, servers themesync.TmuxServers, stateDir, socket string) error
-	// Env is the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env)
+	// Env is the host-environment seam (paths.Env)
 	// chatServerCommand reads INVOCATION_ID through; nil defaults to
 	// paths.OSEnv{}.
 	Env paths.Env

@@ -1,18 +1,23 @@
 // Package restart owns `pfm restart`: it finds every live chat, every helper a
 // chat carries, Herdr, every service pfm installs or relies on and every other
 // pfm process on this host, stops them downstream first, then starts back up,
-// upstream first, only what was running before: never a chat, never a unit
-// found stopped. Every step is verified and reported on its own line; a
-// failed step is named and the rest still run.
+// upstream first, only what was running before, never a unit found stopped.
+// A chat in a Herdr pane comes back with Herdr's own restore, its pane, split
+// and conversation as they were; every other chat, and every chat under
+// --no-restore, is ended and named. Every step is verified and reported on its
+// own line; a failed step is named and the rest still run.
 //
 // Entry points: Main and Worker (launch.go) run it; BuildPlan (discover.go) finds what it stops;
 // StaleHerdrIndicators and ConvergeHerdrIndicators (herdr_indicators.go) serve doctor and install.
 // Files:
-//   - discover.go: the plan, family by family: chats, helpers, services, the MCP daemon, pfm.
+//   - discover.go: the plan, family by family: helpers, services, the MCP daemon, pfm.
+//   - chats.go: the chats family: which chat comes back with Herdr's restore.
+//   - chats_wait.go: the verification that each such chat is live again, within one shared deadline.
 //   - herdr.go: the Herdr server family: its status, stop and start.
 //   - herdr_tree.go: what one Herdr session's server runs, and the outlivers its stop proves gone.
 //   - herdr_indicators.go: the stale Herdr indicator painters.
 //   - launch.go: the front that launches the detached worker and follows its log.
+//   - live.go: the host's real doors, the fleet scan and the chat verbs among them.
 //   - processes.go: the process table and the stops of the processes found in it.
 //   - services.go: the service managers (systemd, launchd) and their units.
 package restart
@@ -39,11 +44,13 @@ const (
 // worker stops following the log when it reads it.
 const ExitMarker = "restart: exit "
 
-// EndedChat is one chat the restart ended, as its closing report names it.
-type EndedChat struct {
+// ChatReport is one chat as the closing report names it; NotBack is why a
+// restart that brings chats back ends this one.
+type ChatReport struct {
 	Engine    string
 	Name      string
 	SessionID string
+	NotBack   string
 }
 
 // Unit is one process or service the restart stops and, unless Start is nil,
@@ -57,7 +64,7 @@ type Unit struct {
 	StartHow string
 	Stop     func(context.Context) (string, error)
 	Start    func(context.Context) (string, error)
-	Chat     *EndedChat
+	Chat     *ChatReport
 	// Before is the unit's state when the plan was built, as its manager
 	// answered it.
 	Before string
@@ -90,12 +97,20 @@ type Plan struct {
 	Units    []Unit
 	// Last names the process that carries the restart to its end.
 	Last string
+	// Restore marks a plan that brings each chat in a Herdr pane back.
+	Restore bool
 }
 
 // Print writes the whole ordered plan and changes nothing.
 func (plan Plan) Print(w io.Writer) {
-	fmt.Fprintln(w, "restart plan: stop downstream first, then start upstream first only what was running before; "+
-		"chats are not brought back")
+	chats := "chats are not brought back"
+	if plan.Restore {
+		chats = "a chat in a Herdr pane comes back with Herdr's restore, every other chat is ended"
+	}
+	fmt.Fprintln(
+		w,
+		"restart plan: stop downstream first, then start upstream first only what was running before; "+chats,
+	)
 	for _, finding := range plan.Findings {
 		if finding.Err != nil {
 			fmt.Fprintf(w, "find   %-14s FAILED  %v\n", finding.Family, finding.Err)
@@ -142,7 +157,7 @@ func (plan Plan) Print(w io.Writer) {
 
 // Execute runs the plan: every stop in order, then every start in reverse,
 // one result line each, one line per unit that stays stopped, untouched, then
-// the chats it ended and the exit marker. It
+// the chats it ended, brought back or lost, and the exit marker. It
 // returns 1 when any finding or step failed, 0 otherwise.
 func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 	failed := 0
@@ -152,7 +167,7 @@ func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 			fmt.Fprintf(w, "find   %-14s FAILED  %v\n", finding.Family, finding.Err)
 		}
 	}
-	var ended []EndedChat
+	var ended, back, lost []ChatReport
 	for index := range plan.Units {
 		unit := &plan.Units[index]
 		if unit.StaysStopped {
@@ -163,7 +178,7 @@ func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 			failed++
 			continue
 		}
-		if unit.Chat != nil {
+		if unit.Chat != nil && !unit.restarts() {
 			ended = append(ended, *unit.Chat)
 		}
 	}
@@ -173,8 +188,15 @@ func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 			continue
 		}
 		detail, err := unit.Start(ctx)
-		if !plan.report(w, "start", unit, detail, err) {
+		started := plan.report(w, "start", unit, detail, err)
+		if !started {
 			failed++
+		}
+		switch {
+		case unit.Chat != nil && started:
+			back = append(back, *unit.Chat)
+		case unit.Chat != nil:
+			lost = append(lost, *unit.Chat)
 		}
 	}
 	for index := range plan.Units {
@@ -183,10 +205,7 @@ func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 			fmt.Fprintf(w, "keep   %-14s %s  %s\n", unit.Family, unit.Name, unit.staysStopped())
 		}
 	}
-	fmt.Fprintf(w, "restart: ended %d chat(s)\n", len(ended))
-	for _, chat := range ended {
-		fmt.Fprintf(w, "  ended  %-8s %-24s %s\n", chat.Engine, chat.Name, chat.SessionID)
-	}
+	plan.reportChats(w, ended, back, lost)
 	fmt.Fprintf(w, "last   %-14s %s\n", FamilyPFM, plan.Last)
 	code := 0
 	if failed > 0 {
@@ -197,6 +216,40 @@ func (plan Plan) Execute(ctx context.Context, w io.Writer) int {
 	}
 	fmt.Fprintf(w, "%s%d\n", ExitMarker, code)
 	return code
+}
+
+// reportChats names every chat the restart ended (with why it does not come
+// back), brought back, or promised and lost, with the command that reopens it.
+func (plan Plan) reportChats(w io.Writer, ended, back, lost []ChatReport) {
+	fmt.Fprintf(w, "restart: ended %d chat(s)\n", len(ended))
+	for _, chat := range ended {
+		line := fmt.Sprintf("  ended  %-8s %-24s %s", chat.Engine, chat.Name, chat.SessionID)
+		if chat.NotBack != "" {
+			line += "  not brought back: " + chat.NotBack
+		}
+		fmt.Fprintln(w, line)
+	}
+	if !plan.Restore {
+		return
+	}
+	fmt.Fprintf(w, "restart: brought back %d chat(s)\n", len(back))
+	for _, chat := range back {
+		fmt.Fprintf(w, "  back   %-8s %-24s %s\n", chat.Engine, chat.Name, chat.SessionID)
+	}
+	if len(lost) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "restart: %d chat(s) did not come back; reopen each by hand\n", len(lost))
+	for _, chat := range lost {
+		fmt.Fprintf(
+			w,
+			"  lost   %-8s %-24s %s  pfm chat open %s\n",
+			chat.Engine,
+			chat.Name,
+			chat.SessionID,
+			chat.SessionID,
+		)
+	}
 }
 
 // report writes one step's result line and says whether it succeeded.

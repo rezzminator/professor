@@ -19,9 +19,9 @@ func accountSettingsFixture(home string) ([]byte, settingsHookCounts) {
     {"type":"command","command":%q},
     {"type":"command","command":"pfm internal clear-hide"},
     {"type":"command","command":"operator-hook"}
-  ]}]},
+  ]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":%q}]}]},
   "statusLine":{"type":"command","command":%q}
-}`, owned, template, claudelaunch.StatusLineCommand(home))),
+}`, owned, template, home+"/.local/bin/pfm internal reload-intercept", claudelaunch.StatusLineCommand(home))),
 		settingsHookCounts{{Event: "SessionStart", Matcher: "", Command: owned}: 1}
 }
 
@@ -31,6 +31,7 @@ func TestAccountSettingsLeftovers(t *testing.T) {
 	got, err := accountSettingsLeftovers(fixtureRetiredHooks, raw, home, owned, true)
 	want := []string{
 		fmt.Sprintf("hook %q", home+"/.local/bin/pfm internal launcher-repair"),
+		fmt.Sprintf("hook %q", home+"/.local/bin/pfm internal reload-intercept"),
 		`hook "pfm internal clear-hide"`,
 		"statusLine",
 	}

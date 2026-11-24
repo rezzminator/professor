@@ -347,6 +347,7 @@ func TestHerdrFinisherReusesComposerRatchet(t *testing.T) {
 			finisher, err := NewFinisher(
 				database,
 				Dependencies{
+					Clock:        newFinisherStepClock(),
 					Paths:        jail.resolved(),
 					Tmux:         tmux,
 					Refresher:    refreshFunc(func(context.Context) error { return nil }),
@@ -445,7 +446,13 @@ func TestHerdrConfirmDistinguishesAbsenceFromProbeFailure(t *testing.T) {
 			tmux := &fakeTmux{}
 			manager, err := New(
 				database,
-				Dependencies{Paths: jail.resolved(), Tmux: tmux, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1},
+				Dependencies{
+					Clock:           newFinisherStepClock(),
+					Paths:           jail.resolved(),
+					Tmux:            tmux,
+					ConfirmEvery:    time.Nanosecond,
+					ConfirmAttempts: 1,
+				},
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -497,7 +504,13 @@ func TestHerdrConfirmUnreachableIsNotGone(t *testing.T) {
 	}
 	manager, err := New(
 		database,
-		Dependencies{Paths: jail.resolved(), Tmux: &fakeTmux{}, ConfirmEvery: time.Nanosecond, ConfirmAttempts: 1},
+		Dependencies{
+			Clock:           newFinisherStepClock(),
+			Paths:           jail.resolved(),
+			Tmux:            &fakeTmux{},
+			ConfirmEvery:    time.Nanosecond,
+			ConfirmAttempts: 1,
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -547,6 +560,7 @@ func TestHerdrFinisherProtectsGoneOrReownedPane(t *testing.T) {
 			finisher, err := NewFinisher(
 				database,
 				Dependencies{
+					Clock:        newFinisherStepClock(),
 					Paths:        jail.resolved(),
 					Tmux:         tmux,
 					Refresher:    refreshFunc(func(context.Context) error { return nil }),
@@ -638,6 +652,7 @@ func TestHerdrDegradedSeatStoreKeepsExplicitTmux(t *testing.T) {
 			}
 			spawner := &captureSpawner{}
 			dependencies := Dependencies{
+				Clock:           newFinisherStepClock(),
 				Paths:           jail.resolved(),
 				Tmux:            tmux,
 				Screen:          tmux,

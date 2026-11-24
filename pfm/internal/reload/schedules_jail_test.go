@@ -33,7 +33,7 @@ func TestRunNewCarriesTheChatsSchedulesToTheRebornSession(t *testing.T) {
 	request.New, request.LeftBehind = true, scheduleOldID
 	tmux := &fakeReloadTmux{}
 	var stderr bytes.Buffer
-	result, err := Run(context.Background(), request,
+	result, err := runOnFake(t, context.Background(), request,
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, &stderr)
 	if err != nil {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
@@ -54,7 +54,7 @@ func TestRunInPlaceKeepsTheSchedulesOnTheResumedSession(t *testing.T) {
 	request.SessionID, request.LeftBehind = scheduleOldID, scheduleOldID
 	tmux := &fakeReloadTmux{}
 	var stderr bytes.Buffer
-	if _, err := Run(context.Background(), request,
+	if _, err := runOnFake(t, context.Background(), request,
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, &stderr); err != nil {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}
@@ -88,7 +88,7 @@ func TestRunQueuedNewCarriesSchedulesFromTheHandoffSession(t *testing.T) {
 	}
 	tmux := &fakeReloadTmux{}
 	var stderr bytes.Buffer
-	result, err := Run(context.Background(), request,
+	result, err := runOnFake(t, context.Background(), request,
 		Options{SIDDir: dir, Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, &stderr)
 	if err != nil {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
@@ -116,7 +116,7 @@ func TestRunNewTellsWhenTheSchedulesCannotMove(t *testing.T) {
 	request.New, request.LeftBehind = true, scheduleOldID
 	tmux := &fakeReloadTmux{}
 	var stderr bytes.Buffer
-	if _, err := Run(context.Background(), request,
+	if _, err := runOnFake(t, context.Background(), request,
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, &stderr); err != nil {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}

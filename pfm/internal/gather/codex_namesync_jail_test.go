@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
@@ -125,7 +126,7 @@ func convergeCodexProbeWindow(
 		}
 		return strings.TrimSpace(string(output))
 	}
-	probeTmux("-f", "/dev/null", "new-session", "-d", "-s", socket, "-n", "before", "sleep 120")
+	probeTmux("-f", "/dev/null", "new-session", "-d", "-s", socket, "-n", "before", testwait.Hold)
 	t.Cleanup(func() {
 		kill := exec.Command("tmux", "-L", socket, "kill-server")
 		kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)

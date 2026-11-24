@@ -62,8 +62,8 @@ func TestShellClaudeEnvInsideAChatReportsNotChecked(t *testing.T) {
 	env := fixtureEnv(t)
 	env.Environ = []string{"CLAUDECODE=1", betasVar + "=1"}
 	row := onlyRow(t, detect(t, "shell-claude-env", env))
-	if row.Severity != Warn {
-		t.Fatalf("row=%+v, want WARN", row)
+	if row.Severity != Skipped {
+		t.Fatalf("row=%+v, want SKIPPED", row)
 	}
 	assertContains(t, "problem", row.Problem, "not checked", "CLAUDECODE")
 	assertContains(t, "fix", row.Fix, "terminal")

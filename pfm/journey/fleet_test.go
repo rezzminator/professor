@@ -22,11 +22,16 @@ const prompt = "owner %"
 
 // shellRun types command into term followed by an echo of its exit code under label, waits for that
 // line and returns the code: the owner reads the result off the screen.
-func shellRun(term *harness.Terminal, label, command string, within time.Duration) int {
+func shellRun(term *harness.Terminal, label, command string) int {
 	term.Type(command + `; echo "` + label + ` exit=$?"` + "\r")
+	return shellExit(term, label)
+}
+
+// shellExit waits for the exit line of the command shellRun's label typed and returns its code.
+func shellExit(term *harness.Terminal, label string) int {
 	marker := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(label) + ` exit=(\d+)$`)
 	var code int
-	term.WaitScreen(label+"'s exit line", within, func(screen string) bool {
+	term.WaitScreen(label+"'s exit line", func(screen string) bool {
 		m := marker.FindStringSubmatch(screen)
 		if m != nil {
 			code, _ = strconv.Atoi(m[1])
@@ -495,7 +500,7 @@ func evidence(c *harness.Ctx, records []string) {
 // jobsAtRest waits for pfm's name-sync and schedule jobs to be at rest before a step installs or
 // uninstalls: either is refused beside a running job, and the timed name-sync job starts on its own.
 func jobsAtRest(c *harness.Ctx, before string) {
-	c.Poll("pfm's name-sync and schedule jobs at rest before "+before, 20*time.Second, func() (bool, string) {
+	c.Poll("pfm's name-sync and schedule jobs at rest before "+before, func() (bool, string) {
 		running := jobsRunning(c)
 		return running == "", running
 	})

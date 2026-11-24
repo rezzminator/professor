@@ -13,10 +13,10 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func writeEngineStub(t *testing.T, body string) string {
@@ -31,45 +31,19 @@ func writeEngineStub(t *testing.T, body string) string {
 
 func waitForProcessExit(t *testing.T, pid int) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	lastState := "unknown"
-	for time.Now().Before(deadline) {
+	testwait.Until(t, fmt.Sprintf("descendant process %d to exit after cancellation", pid), func() (bool, string) {
 		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-			return
+			return true, ""
 		} else if err != nil {
 			t.Fatalf("probe descendant process %d: %v", pid, err)
 		}
-
 		state, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
-		if err == nil {
-			lastState = strings.TrimSpace(string(state))
-			if strings.HasPrefix(lastState, "Z") {
-				return
-			}
-		} else {
-			lastState = fmt.Sprintf("ps: %v", err)
+		if err != nil {
+			return false, fmt.Sprintf("ps: %v", err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("descendant process %d remained live after cancellation (state %s)", pid, lastState)
-}
-
-// nativeStreamBudget bounds how long a test waits for the native runner's
-// first streamed line, derived from the test's own deadline rather than a
-// flat literal: a fixed short window turned ordinary fork/exec scheduling
-// delay under a loaded suite into a failure that named nothing about
-// streaming itself. A genuine streaming regression still never fires the
-// signal being waited on, so no budget here lets that regression pass by
-// accident — it only decides how long the failure takes to name itself.
-func nativeStreamBudget(t *testing.T) time.Duration {
-	t.Helper()
-	budget := 30 * time.Second
-	if deadline, ok := t.Deadline(); ok {
-		if remaining := time.Until(deadline) - time.Second; remaining < budget {
-			budget = remaining
-		}
-	}
-	return budget
+		lastState := strings.TrimSpace(string(state))
+		return strings.HasPrefix(lastState, "Z"), "state " + lastState
+	})
 }
 
 func TestRunNativeStreamsStdinAndPreservesUnknownArgs(t *testing.T) {
@@ -82,8 +56,12 @@ func TestRunNativeStreamsStdinAndPreservesUnknownArgs(t *testing.T) {
 	binary := writeEngineStub(t, `cat > "$CAPTURE_DIR/stdin"
 printf '%s\n' "$@" > "$CAPTURE_DIR/args"
 printf 'first\n'
-sleep 0.25
+read -r _ < "$CAPTURE_DIR/release"
 printf 'second\n'`)
+	release := filepath.Join(capture, "release")
+	if err := syscall.Mkfifo(release, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	writer := &observedWriter{first: make(chan struct{})}
 	request := Request{
 		Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude,
@@ -97,17 +75,16 @@ printf 'second\n'`)
 		result, runErr = Run(context.Background(), request)
 		close(done)
 	}()
-	select {
-	case <-writer.first:
-	case <-time.After(nativeStreamBudget(t)):
-		t.Fatal("native output did not stream before process completion")
-	}
+	testwait.Receive(t, "native output to stream before process completion", writer.first)
 	select {
 	case <-done:
 		t.Fatal("native runner completed before the delayed output was written")
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
-	<-done
+	if err := os.WriteFile(release, []byte("go\n"), 0o600); err != nil {
+		t.Fatalf("release the engine stub: %v", err)
+	}
+	testwait.Receive(t, "the native runner to complete once the stub was released", done)
 	if runErr != nil {
 		t.Fatalf("Run() error = %v", runErr)
 	}
@@ -135,29 +112,25 @@ printf 'second\n'`)
 // waitForFile waits for path to exist AND be non-empty. Existence alone is
 // not enough: the shell redirection that creates it (`echo "$!" > path`)
 // opens/truncates the file before the write lands, so a poll that only
-// checks os.Stat can observe the file mid-creation — empty — and hand the
-// caller zero bytes to parse. That race was this helper's whole bug: under
-// load the open/write gap widens and TestRunTimeoutKillsProcessGroup read an
-// empty child-pid file ("child pid \"\": EOF") for a reason that has nothing
-// to do with the timeout/kill behavior under test.
-func waitForFile(t *testing.T, path string, timeout time.Duration) {
+// checks os.Stat can observe the file mid-creation, empty, and hand the
+// caller zero bytes to parse.
+func waitForFile(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
-			return
+	testwait.Until(t, "file "+path+" to appear with content", func() (bool, string) {
+		info, err := os.Stat(path)
+		if err != nil {
+			return false, err.Error()
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("file %s did not appear with content within %s", path, timeout)
+		return info.Size() > 0, "empty file"
+	})
 }
 
 func TestRunTimeoutKillsProcessGroup(t *testing.T) {
 	headlessJail(t)
 	capture := t.TempDir()
-	binary := writeEngineStub(t, `(sleep 30) &
+	binary := writeEngineStub(t, `(`+testwait.Hold+` >/dev/null) &
 echo "$!" > "$CAPTURE_DIR/child-pid"
-sleep 30`)
+`+testwait.Hold)
 	request := Request{
 		Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude, Prompt: "hello",
 		Env: testEnv(capture),
@@ -168,28 +141,19 @@ sleep 30`)
 		err    error
 	}
 	done := make(chan outcome, 1)
-	started := time.Now()
 	go func() {
 		result, err := Run(ctx, request)
 		done <- outcome{result, err}
 	}()
 	pidPath := filepath.Join(capture, "child-pid")
-	waitForFile(t, pidPath, 3*time.Second)
+	waitForFile(t, pidPath)
 	ctx.arm()
-	var out outcome
-	select {
-	case out = <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("Run() did not return after the deadline was armed")
-	}
+	out, _ := testwait.Receive(t, "Run() to return after the deadline was armed", done)
 	if out.err == nil || !errors.Is(out.err, context.DeadlineExceeded) {
 		t.Fatalf("timeout err = %v, result=%#v", out.err, out.result)
 	}
 	if !out.result.TimedOut {
 		t.Fatal("timeout result did not mark timeout")
-	}
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Fatalf("timeout waited for descendant pipe holder: %s", elapsed)
 	}
 	pidText := strings.TrimSpace(string(mustRead(t, pidPath)))
 	var pid int

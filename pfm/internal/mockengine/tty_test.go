@@ -5,7 +5,8 @@ import (
 	"io"
 	"reflect"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestReadKeysStopsWhenTheContextEnds is L2-F33: readKeys' comment promised
@@ -22,13 +23,9 @@ func TestReadKeysStopsWhenTheContextEnds(t *testing.T) {
 	if _, err := writer.Write([]byte("a")); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case event := <-keys:
-		if event.kind != keyRune || event.r != 'a' {
-			t.Fatalf("first event = %+v, want rune 'a'", event)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("readKeys never delivered the first key")
+	event, _ := testwait.Receive(t, "readKeys to deliver the first key", keys)
+	if event.kind != keyRune || event.r != 'a' {
+		t.Fatalf("first event = %+v, want rune 'a'", event)
 	}
 
 	cancel()
@@ -37,13 +34,8 @@ func TestReadKeysStopsWhenTheContextEnds(t *testing.T) {
 	if _, err := writer.Write([]byte("\x1b[A")); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case event, open := <-keys:
-		if open {
-			t.Fatalf("readKeys kept pumping after its context ended: %+v", event)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("readKeys did not stop after its context ended")
+	if event, open := testwait.Receive(t, "readKeys to stop after its context ended", keys); open {
+		t.Fatalf("readKeys kept pumping after its context ended: %+v", event)
 	}
 }
 

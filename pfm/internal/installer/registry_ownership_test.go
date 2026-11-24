@@ -179,14 +179,6 @@ func TestInspectRegistryOwnershipClasses(t *testing.T) {
 			want: []string{"ORPHAN .agents/skills/stale", "ORPHAN .claude/skills/nomd"},
 		},
 		{
-			name: "embedded command asset is planned",
-			setup: func(t *testing.T, h ownershipHome) {
-				managed := managedRootForHome(h.home)
-				writeFixture(t, filepath.Join(managed, "reload.command.md"), "reload")
-				symlinkFixture(t, filepath.Join(managed, "reload.command.md"), filepath.Join(h.store, "commands", "reload.md"))
-			},
-		},
-		{
 			name: "a regular skill directory is judged by its SKILL.md link",
 			setup: func(t *testing.T, h ownershipHome) {
 				old := filepath.Join(h.clone, "templates", "global", "skills", "old", "SKILL.md")
@@ -527,6 +519,33 @@ func TestRulesDoctorRows(t *testing.T) {
 	rows, warnings, failures = report(h)
 	if !reflect.DeepEqual(rows, []string{"doctor: rules ok (2 linked)"}) || warnings != 0 || failures != 0 {
 		t.Fatalf("rows=%q warnings=%d failures=%d, want the healthy row", rows, warnings, failures)
+	}
+
+	// The flights plugin's own rule links, into its cached copy (one dangling) and into the clone's
+	// checkout of it: no rules row, no registry finding, no warning.
+	cached := filepath.Join(h.home, ".claude", "plugins", "cache", "professor", "flights", "2.1.0", "rules")
+	writeFixture(t, filepath.Join(cached, "testing.md"), "testing")
+	checkout := filepath.Join(h.clone, "plugins", "flights", "plugins", "flights", "rules")
+	writeFixture(t, filepath.Join(checkout, "life-cycle.md"), "life cycle")
+	for name, target := range map[string]string{
+		"flights-testing.md":    filepath.Join(cached, "testing.md"),
+		"flights-coding.md":     filepath.Join(cached, "coding.md"),
+		"flights-life-cycle.md": filepath.Join(checkout, "life-cycle.md"),
+	} {
+		symlinkFixture(t, target, filepath.Join(h.store, "rules", name))
+	}
+	var output bytes.Buffer
+	warnings, failures = ReportGlobalRegistries(
+		&output, h.home, true,
+		&paths.MapEnv{Values: map[string]string{enginesync.EnvBin: testjail.EngineSyncBin()}},
+		nil, nil, ownershipRetired, nil, nil,
+	)
+	rows, registry := rulesRows(output.String()), registryRows(output.String())
+	if !reflect.DeepEqual(rows, []string{"doctor: rules ok (2 linked)"}) ||
+		!reflect.DeepEqual(registry, []string{"doctor: registry-ownership ok (5 entries in 1 registries)"}) ||
+		warnings != 0 || failures != 0 {
+		t.Fatalf("with flights rule links: rows=%q registry=%q warnings=%d failures=%d, want the healthy rows",
+			rows, registry, warnings, failures)
 	}
 
 	// An operator's own file under a shipped name: a warning whose fix is not a

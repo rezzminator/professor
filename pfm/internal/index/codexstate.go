@@ -131,6 +131,11 @@ func codexStoreRollout(
 	if thread.Prompted {
 		promptCount = 1
 	}
+	// A store-only row is its own lineage root: the store carries no parent
+	// link, so a resumed store-only thread never merges with the conversation
+	// it continues, and its kills, names and prompt counts split. To spot one,
+	// group same-cwd rows with the same first message. A distinct parent-link
+	// shape is UNPLAYED (internal/mockengine/README.md).
 	return store.Rollout{
 		ID:          thread.ID,
 		Path:        path,

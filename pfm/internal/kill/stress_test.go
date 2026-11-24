@@ -1,13 +1,12 @@
 package kill
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 const (
@@ -52,18 +51,11 @@ func TestKillStressProcessHelper(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	for {
-		if _, err := os.Stat(os.Getenv(killStressGateEnv)); err == nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
+	ctx := testwait.Context(t)
+	testwait.Until(t, "the stress gate file to appear", func() (bool, string) {
+		_, err := os.Stat(os.Getenv(killStressGateEnv))
+		return err == nil, fmt.Sprint(err)
+	})
 	for offset := 0; offset < killStressIDs; offset++ {
 		keep := fmt.Sprintf("keep-%02d-%02d", index, offset)
 		drop := fmt.Sprintf("drop-%02d-%02d", index, offset)

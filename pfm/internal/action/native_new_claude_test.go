@@ -299,7 +299,8 @@ func TestHerdrPickerOpensInItsOwnPane(t *testing.T) {
 			machine.Claude.Binary, machine.Codex.Binary, machine.OpenCode.Binary = binary, binary, binary
 			var stderr strings.Builder
 			executor, err := New(Dependencies{
-				Tmux: &fakeActionTmux{alive: map[string]bool{}}, Stderr: &stderr,
+				Clock: newLaunchStepClock(),
+				Tmux:  &fakeActionTmux{alive: map[string]bool{}}, Stderr: &stderr,
 				Place: func(ctx context.Context, door, requested string) (seatspawn.BackendChoice, error) {
 					choice, err := seatspawn.Place(ctx, door, requested, "", false, resolve.Identity{
 						Backend:        "herdr",
@@ -557,7 +558,8 @@ func TestPickerRefusesAnUnreadableHerdrServer(t *testing.T) {
 	server := seatspawn.HerdrServer{Socket: "/env/herdr.sock", Up: func(context.Context, string) error { return mute }}
 	tmux := &fakeActionTmux{alive: map[string]bool{}, panes: map[string][]ActionPane{}}
 	executor, err := New(Dependencies{
-		Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
+		Clock: newLaunchStepClock(),
+		Tmux:  tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
 		Place: func(ctx context.Context, door, requested string) (seatspawn.BackendChoice, error) {
 			return seatspawn.Place(ctx, door, requested, "", false, resolve.Identity{}, failure, server)
 		},

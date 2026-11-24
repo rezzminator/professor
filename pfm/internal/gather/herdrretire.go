@@ -57,14 +57,14 @@ func herdrBirthPending(seat fleetdb.Seat) bool {
 }
 
 // herdrReservationErr judges a seat with no saved supervisor that Herdr lists no pane for: a reservation that
-// names no pane yet is mid-birth inside its birth window (errHerdrSeatUnbound) and a failed birth past it
+// names no pane yet is mid-birth inside its birth window (herdr.ErrSeatUnbound) and a failed birth past it
 // (errHerdrBirthFailed); nil for a seat that once named a pane, which its pane's absence judges.
 func herdrReservationErr(seat fleetdb.Seat) error {
 	switch {
 	case seat.HerdrPane != "":
 		return nil
 	case herdrBirthPending(seat):
-		return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+		return fmt.Errorf("seat %s %w", seat.SeatID, herdr.ErrSeatUnbound)
 	}
 	return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrBirthFailed)
 }
@@ -88,24 +88,20 @@ func retireFailedHerdrBirth(ctx context.Context, db *fleetdb.Store, seat fleetdb
 	return nil
 }
 
-// herdrSupervisorUnproved is a seat whose pane runs no seat-host of it: errHerdrSeatUnbound, a birth whose
+// herdrSupervisorUnproved is a seat whose pane runs no seat-host of it: herdr.ErrSeatUnbound, a birth whose
 // seat-host has not started yet, while the row changed inside the birth window; past it, a listing failure,
 // since a chat whose supervisor is gone from its pane is never hidden as "not a chat yet".
 func herdrSupervisorUnproved(seat fleetdb.Seat) error {
 	if clock.Real.Now().Sub(time.Unix(seat.UpdatedAt, 0)) < herdrBirthGrace {
-		return fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatUnbound)
+		return fmt.Errorf("seat %s %w", seat.SeatID, herdr.ErrSeatUnbound)
 	}
 	return fmt.Errorf("seat %s supervisor ownership unproved: its pane runs no seat-host past the %s birth window",
 		seat.SeatID, herdrBirthGrace)
 }
 
-// errHerdrSeatGone marks a seat ended, replaced or moved off Herdr while it
+// ErrHerdrSeatGone marks a seat ended, replaced or moved off Herdr while it
 // was read: no longer a live native seat of that read, and never its failure.
-var errHerdrSeatGone = errors.New("ownership changed or disappeared")
-
-// errHerdrSeatUnbound: a Herdr chat mid-birth — a reservation that names no pane
-// yet, or whose pane shell runs no `pfm internal seat-host` yet.
-var errHerdrSeatUnbound = errors.New("supervisor ownership unproved")
+var ErrHerdrSeatGone = errors.New("ownership changed or disappeared")
 
 // errHerdrBirthFailed: a reservation that named no pane within its birth window, a birth that never finished.
 var errHerdrBirthFailed = errors.New("birth failed: no pane within the birth window")
@@ -138,10 +134,10 @@ func herdrShellGone(proc ProcFS, seat fleetdb.Seat, answered bool) error {
 // processes, or for a pane id a move replaced; the listing asks once more.
 var errHerdrShellUnread = errors.New("its supervisor still runs")
 
-// errHerdrPaneAbsent: Herdr lists no pane holding the seat's pane or terminal.
-var errHerdrPaneAbsent = errors.New("terminal not present in pane.list")
+// ErrHerdrPaneAbsent: Herdr lists no pane holding the seat's pane or terminal.
+var ErrHerdrPaneAbsent = errors.New("terminal not present in pane.list")
 
-// currentHerdrSeat re-reads seat's durable row: errHerdrSeatGone when it is
+// currentHerdrSeat re-reads seat's durable row: ErrHerdrSeatGone when it is
 // gone or no longer the same engine's native seat.
 func currentHerdrSeat(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat) (fleetdb.Seat, error) {
 	current, found, err := db.Seat(ctx, seat.SeatID)
@@ -149,13 +145,29 @@ func currentHerdrSeat(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat)
 		return seat, fmt.Errorf("read current ownership: %w", err)
 	}
 	if !found || current.Backend != nativeHerdrBackend || current.Engine != seat.Engine {
-		return seat, fmt.Errorf("seat %s %w", seat.SeatID, errHerdrSeatGone)
+		return seat, fmt.Errorf("seat %s %w", seat.SeatID, ErrHerdrSeatGone)
 	}
 	return current, nil
 }
 
+// herdrProofWriteRefused judges a refused write of a proved seat by its row after
+// the refusal: a row deleted since is ErrHerdrSeatGone, the seat ended during
+// the proof; a row that still stands, or a re-read that fails, keeps the
+// persistence failure with its context.
+func herdrProofWriteRefused(ctx context.Context, db *fleetdb.Store, seat fleetdb.Seat, refused error) error {
+	failure := fmt.Errorf("persist proved seat %s: %w", seat.SeatID, errors.Join(ErrHerdrProofPersistence, refused))
+	_, found, err := db.Seat(ctx, seat.SeatID)
+	switch {
+	case err != nil:
+		return errors.Join(failure, fmt.Errorf("re-read seat %s: %w", seat.SeatID, err))
+	case !found:
+		return fmt.Errorf("seat %s %w", seat.SeatID, ErrHerdrSeatGone)
+	}
+	return failure
+}
+
 // settleHerdrProof proves seat and judges a failed proof against the seat's row as it stands after it: a
-// row deleted or taken by another engine is errHerdrSeatGone, never the listing's failure; a row a
+// row deleted or taken by another engine is ErrHerdrSeatGone, never the listing's failure; a row a
 // concurrent writer changed (a birth stamping its supervisor, an end recording its intent) made the proof
 // stale, so the current row is proved once more; an unchanged row keeps the failure.
 func settleHerdrProof(
@@ -165,12 +177,12 @@ func settleHerdrProof(
 	prove func(fleetdb.Seat) (fleetdb.Seat, bool, error),
 ) (fleetdb.Seat, bool, error) {
 	canonical, owned, err := prove(seat)
-	if err == nil || errors.Is(err, errHerdrSeatGone) {
+	if err == nil || errors.Is(err, ErrHerdrSeatGone) {
 		return canonical, owned, err
 	}
 	current, readErr := currentHerdrSeat(ctx, db, seat)
 	switch {
-	case errors.Is(readErr, errHerdrSeatGone):
+	case errors.Is(readErr, ErrHerdrSeatGone):
 		return seat, false, readErr
 	case readErr != nil:
 		return seat, false, errors.Join(err, readErr)
@@ -201,7 +213,7 @@ func settleHerdrRow(
 	prove func(fleetdb.Seat) (fleetdb.Seat, bool, error),
 ) (fleetdb.Seat, bool, error) {
 	canonical, owned, err := settleHerdrProof(ctx, db, row.Seat, prove)
-	if !errors.Is(err, errHerdrPaneAbsent) && !errors.Is(err, errHerdrShellUnread) && !herdr.PaneGone(err) {
+	if !errors.Is(err, ErrHerdrPaneAbsent) && !errors.Is(err, errHerdrShellUnread) && !herdr.PaneGone(err) {
 		return canonical, owned, err
 	}
 	directories, snapshot, probeErr := probeHerdrPanes(ctx, row.Seat.HerdrSocket)

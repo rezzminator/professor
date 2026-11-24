@@ -16,6 +16,19 @@ import (
 func TestLossNoteUsesProducerIDsAndNeverQuotesPrompts(t *testing.T) {
 	const unanswered = "your last message was not answered — re-send it"
 	const agent = "a sub-agent was running and ended"
+	// The record shapes Claude writes: a prompt the owner typed carries a human
+	// origin, a program's prompt (pfm chat new) an sdk promptSource; a plugin's
+	// or the harness's entry carries another origin, or neither.
+	const (
+		typed    = `{"type":"user","origin":{"kind":"human"},"promptSource":"typed","message":{"content":"PRIVATE PROMPT"}}`
+		answer   = `{"type":"assistant","message":{"content":[{"type":"text","text":"answer"}]}}`
+		plugin   = `{"type":"user","origin":{"kind":"plugin","name":"fixture-plugin"},"message":{"content":"<command-name>/reload-plugins</command-name>"}}` + "\n" + `{"type":"system","subtype":"local_command","content":"<local-command-stdout>Reloaded</local-command-stdout>"}`
+		frontier = `{"type":"user","session_id":"0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0","message":{"content":"[forward-compaction: frontier] Below is the frontier"}}`
+		skill    = `{"type":"user","isMeta":true,"sourceToolUseID":"toolu_fixture","message":{"content":[{"type":"text","text":"Base directory for this skill: /fixture"}]}}`
+		command  = `{"type":"user","message":{"content":"<command-name>/clear</command-name>"}}`
+		notified = `{"type":"user","origin":{"kind":"task-notification","producer":"session-task"},"promptSource":"system","message":{"content":"<task-notification>done</task-notification>"}}`
+		hook     = `{"type":"user","origin":{"kind":"plugin","name":"fixture-plugin"},"promptSource":"system","message":{"content":"keep the cache warm"}}`
+	)
 	cases := []struct {
 		name       string
 		engine     pfmengine.ID
@@ -27,7 +40,7 @@ func TestLossNoteUsesProducerIDsAndNeverQuotesPrompts(t *testing.T) {
 		{
 			name:    "truncated trailing line",
 			engine:  pfmengine.Claude,
-			body:    `{"type":"user","message":{"content":"PRIVATE PROMPT"}}` + "\n" + `{"type":"assistant"`,
+			body:    typed + "\n" + `{"type":"assistant"`,
 			want:    unanswered + "; restart loss unknown",
 			wantErr: true,
 		},
@@ -43,16 +56,36 @@ func TestLossNoteUsesProducerIDsAndNeverQuotesPrompts(t *testing.T) {
 			want:    agent + "; restart loss unknown",
 			wantErr: true,
 		},
+		{name: "unanswered", engine: pfmengine.Claude, body: typed, want: unanswered},
 		{
-			name:   "unanswered",
+			name:   "unanswered program prompt",
 			engine: pfmengine.Claude,
-			body:   `{"type":"user","message":{"content":"PRIVATE PROMPT"}}`,
+			body:   `{"type":"user","promptSource":"sdk","message":{"content":"PRIVATE PROMPT"}}`,
 			want:   unanswered,
 		},
+		{name: "answered", engine: pfmengine.Claude, body: typed + "\n" + answer},
+		{name: "plugin command after an answer", engine: pfmengine.Claude, body: typed + "\n" + answer + "\n" + plugin},
 		{
-			name:   "answered",
+			name:   "plugin command after no answer",
 			engine: pfmengine.Claude,
-			body:   `{"type":"user","message":{"content":"PRIVATE PROMPT"}}` + "\n" + `{"type":"assistant","message":{"content":[{"type":"text","text":"answer"}]}}`,
+			body:   typed + "\n" + plugin,
+			want:   unanswered,
+		},
+		{name: "frontier after an answer", engine: pfmengine.Claude, body: typed + "\n" + answer + "\n" + frontier},
+		{name: "frontier after no answer", engine: pfmengine.Claude, body: typed + "\n" + frontier, want: unanswered},
+		{name: "skill body after an answer", engine: pfmengine.Claude, body: typed + "\n" + answer + "\n" + skill},
+		{name: "local command after an answer", engine: pfmengine.Claude, body: typed + "\n" + answer + "\n" + command},
+		{
+			name:   "task notification after an answer",
+			engine: pfmengine.Claude,
+			body:   typed + "\n" + answer + "\n" + notified,
+		},
+		{name: "plugin prompt after an answer", engine: pfmengine.Claude, body: typed + "\n" + answer + "\n" + hook},
+		{
+			name:   "typed prompt after a plugin command",
+			engine: pfmengine.Claude,
+			body:   plugin + "\n" + typed,
+			want:   unanswered,
 		},
 		{
 			name:   "unfinished Agent",
@@ -74,7 +107,7 @@ func TestLossNoteUsesProducerIDsAndNeverQuotesPrompts(t *testing.T) {
 		{
 			name:   "both",
 			engine: pfmengine.Claude,
-			body:   `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Agent"}]}}` + "\n" + `{"type":"user","message":{"content":"PRIVATE PROMPT"}}`,
+			body:   `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Agent"}]}}` + "\n" + typed,
 			want:   unanswered + "; " + agent,
 		},
 		{

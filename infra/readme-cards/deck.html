@@ -909,7 +909,7 @@
       <div class="prob"><span class="k">Problem</span><p>You learn the 5-hour window is gone when the chat dies mid-step.</p></div>
       <div class="what"><span class="k"><b>Professor</b></span><p>Every seat's 5-hour and 7-day windows, every engine, one tab, confirmed against the provider every 2 s.</p></div>
       <div class="why"><span class="k">Why</span><p>You see 96% before it becomes 100%, and you know which seat still has room.</p></div>
-      <div class="how"><span class="k">How</span><p><code>pfm</code> → <code>tab</code> to Limits; the usage hook and <code>/reload --account</code> read the same numbers.</p></div>
+      <div class="how"><span class="k">How</span><p><code>pfm</code> → <code>tab</code> to Limits; the usage hook and <code>/pfm:reload --account</code> read the same numbers.</p></div>
     </div>
     <div class="tui" id="lim">
       <div class="tuibar"><span class="tb-hl"> pfm  🥇 account 1 · ⚡ 1h · 17 rows · 3 hidden · 0 empty </span><span class="tb-sky">·  ✦ ·</span></div>
@@ -1025,9 +1025,9 @@
       <div class="prob"><span class="k">Problem</span><p>The limit hits, the conversation is gone, and you start over on another account.</p></div>
       <div class="what"><span class="k"><b>Professor</b></span><p>One conversation moves to another seat — same transcript, same place, same pane.</p></div>
       <div class="why"><span class="k">Why</span><p>Several accounts become one continuous session instead of several broken ones.</p></div>
-      <div class="how"><span class="k">How</span><p><code>/reload --account 2 --then "…"</code> — or the usage hook warns the model and it moves itself.</p></div>
+      <div class="how"><span class="k">How</span><p><code>/pfm:reload --account 2 --then "…"</code> — or the usage hook warns the model and it moves itself.</p></div>
     </div>
-    <div class="cue">type <code>/reload --account 2 --then "continue from step 4"</code> in the chat yourself — or let the usage hook warn the model and it moves itself; <code>⏎</code> on the picker's ✦ row chooses the seat of a new chat</div>
+    <div class="cue">type <code>/pfm:reload --account 2 --then "continue from step 4"</code> in the chat yourself — or let the usage hook warn the model and it moves itself; <code>⏎</code> on the picker's ✦ row chooses the seat of a new chat</div>
     <div class="seats" id="seats">
       <div class="seat on" data-a="1"><span>🥇</span><b>account 1</b><i><u class="sfill" style="width:96%;background:#e07a62"></u></i><em>5h 96% · resets 16:00</em></div>
       <div class="seat" data-a="2"><span>🥈</span><b>account 2</b><i><u class="sfill" style="width:4%;background:#6fc3a5"></u></i><em>5h 4%</em></div>
@@ -1723,7 +1723,7 @@
     async function play() {
       var my = sc.next(); reset();
       if (!(await sc.wait(800, my))) return;
-      ln(box, 'hook', null, '<b>🔴 USAGE LIMIT IMMINENT — account 1:</b> 5h 96% (resets 16:00) · 7d 41% (resets Mon 09:00) · 7d-fable 38%. The 5-hour window is nearly exhausted: finish the in-flight step, then /reload to another account (or pause until the reset).');
+      ln(box, 'hook', null, '<b>🔴 USAGE LIMIT IMMINENT — account 1:</b> 5h 96% (resets 16:00) · 7d 41% (resets Mon 09:00) · 7d-fable 38%. The 5-hour window is nearly exhausted: finish the in-flight step, then /pfm:reload to another account (or pause until the reset).');
       if (!(await sc.wait(1600, my))) return;
       var d0 = ln(box, 'say', '⏺', ''), t0 = d0.querySelector('.t');
       if (!(await typeInto(box, t0, 'Step 3 landed, nothing in flight. Moving this conversation to account 2 — fresh budget, same history.', sc, my, 64))) return;
@@ -2058,7 +2058,7 @@
     var cache = document.getElementById('slCache'), tm = document.getElementById('slTime'), clock = document.getElementById('cbClock');
     var cw5 = document.getElementById('cw5'), cw1 = document.getElementById('cw1'), f5 = document.getElementById('cwf5'), f1 = document.getElementById('cwf1'), log = document.getElementById('cwLog');
     var TOUR = [
-      ['acct', 'account seat', '🥇 🥈 🥉 — which configured account this chat runs on. Change it with /reload --account N; ⏎ on the picker\'s ✦ row chooses it for a new chat.'],
+      ['acct', 'account seat', '🥇 🥈 🥉 — which configured account this chat runs on. Change it with /pfm:reload --account N; ⏎ on the picker\'s ✦ row chooses it for a new chat.'],
       ['model', 'model', '✦ Fable · ◆ Opus · ◇ Sonnet · ○ Haiku — the glyph reads at a glance across a wall of tmux panes.'],
       ['name', 'chat name', 'The same name as in the picker and the tmux window — pfm keeps all three converged.'],
       ['effort', 'effort', '🔹 low · 🔶 medium · 💠 high · 💎 xhigh · 👑 max; 💤 when thinking is off.'],
@@ -2096,7 +2096,7 @@
         if (step === 20) row('you come back after 6 minutes: an idle chat is normal work');
         if (!dead5 && t5 <= 0) { dead5 = true; row('✗ default cache went cold at 5m — the next turn re-reads the whole context at full price', 'x'); }
         if (step === 34) { row('❯ next prompt at 34m idle', 'u'); row('⚡ 1h window still warm — served from cache, pennies', 'ok'); t5 = 300; t1 = 3600; dead5 = false; }
-        if (step === 50) { row('⚡ pfm chat reload --cache 1h|5m · /reload --cache 1h|5m — the choice is per chat, and the timer is how you see it', 'ok'); }
+        if (step === 50) { row('⚡ pfm chat reload --cache 1h|5m · /pfm:reload --cache 1h|5m — the choice is per chat, and the timer is how you see it', 'ok'); }
         if (!(await sc.wait(600, my))) return;
         idle += 60; t5 -= 60; t1 -= 60; paint();
       }

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestChatNewCacheChoiceAndValidation(t *testing.T) {
@@ -431,7 +431,7 @@ func TestChatNewWorkbenchReservations(t *testing.T) {
 
 	t.Run("concurrent", func(t *testing.T) {
 		root, dir := chatNewWorkbenchFixture(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithCancel(testwait.Context(t))
 		defer cancel()
 		firstStarted := make(chan struct{})
 		releaseFirst := make(chan struct{})

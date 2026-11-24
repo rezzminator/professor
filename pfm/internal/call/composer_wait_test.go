@@ -80,7 +80,8 @@ func newSplashEngine(t *testing.T, fake *splashTmux) *Engine {
 	t.Helper()
 	engine := newTestEngine(t, "cx-splash", fake.fakeTmux)
 	engine.tmux = fake
-	engine.options.ComposerWait = 50 * time.Millisecond
+	// A count of polls on the stepping clock the rig carries, never host time.
+	engine.options.ComposerWait = 50 * engine.options.Poll
 	return engine
 }
 
@@ -162,15 +163,17 @@ func TestCodexCallOnEndlessSplashFailsNamingIt(t *testing.T) {
 func TestAwaitComposerRowTellsAFailedReadFromTheSplash(t *testing.T) {
 	dead := errors.New("can't find pane %1")
 	capture, err := AwaitComposerRow(context.Background(), ComposerWait{
-		Read: func(context.Context) (string, error) { return "", dead },
-		Poll: time.Nanosecond,
+		Read:  func(context.Context) (string, error) { return "", dead },
+		Clock: newSteppingClock(),
+		Poll:  time.Nanosecond,
 	})
 	if !errors.Is(err, dead) || errors.Is(err, ErrStartupSplash) || capture != "" {
 		t.Fatalf("failed read: capture=%q err=%v, want the read's own error", capture, err)
 	}
 	capture, err = AwaitComposerRow(context.Background(), ComposerWait{
 		Read:  func(context.Context) (string, error) { return codexHeaderSplash, nil },
-		Bound: time.Millisecond,
+		Clock: newSteppingClock(),
+		Bound: 10 * time.Nanosecond,
 		Poll:  time.Nanosecond,
 	})
 	if !errors.Is(err, ErrStartupSplash) || capture != codexHeaderSplash {

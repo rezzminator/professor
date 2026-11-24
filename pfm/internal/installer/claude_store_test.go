@@ -90,6 +90,8 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"daemon.status.json",
 		".claude.json.lock",
 		"tmp",
+		".oauth_refresh.lock",
+		".oauth_refresh.lock.owner",
 		"chrome",
 		"dev-mods",
 		"keybindings.json",

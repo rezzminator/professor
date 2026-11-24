@@ -2,14 +2,18 @@ package installer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -49,12 +53,23 @@ func RetireHerdrShieldHook(store herdr.ClaudeStore, home string, env paths.Env) 
 	}
 	if retiredShieldShell(status.Value) {
 		verdict.Skip = fmt.Sprintf(
-			"herdr claude integration in %s: Herdr's default_shell in %s still names %s, so its guarded hook stays"+
-				" — end the chats in Herdr, remove default_shell = %q from %s, restart Herdr, then run pfm install --yes again",
-			store.Settings, status.Path, retiredShieldProgram, status.Value, status.Path,
+			"herdr claude integration in %s: Herdr's default_shell in %s still names %s, so its guarded hook stays — %s",
+			store.Settings,
+			status.Path,
+			retiredShieldProgram,
+			retiredShieldShellRepair(status),
 		)
 	}
 	return verdict
+}
+
+// retiredShieldShellRepair is the owner's steps off a default_shell that still
+// runs herdr-shield, the hook's and the plugin's skip alike.
+func retiredShieldShellRepair(status HerdrShellStatus) string {
+	return fmt.Sprintf(
+		"end the chats in Herdr, remove default_shell = %q from %s, restart Herdr, then run pfm install --yes again",
+		status.Value, status.Path,
+	)
 }
 
 // retiredShieldShell reports whether a default_shell value runs herdr-shield.
@@ -121,4 +136,70 @@ func jsonStringLiteral(value string) ([]byte, error) {
 		return nil, fmt.Errorf("encode Claude hook command %q: %w", value, err)
 	}
 	return bytes.TrimRight(out.Bytes(), "\n"), nil
+}
+
+// herdrShieldUnlinkBound caps one `herdr plugin unlink herdr-shield` run; a
+// variable so a test can bound a hung Herdr in milliseconds.
+var herdrShieldUnlinkBound = 30 * time.Second
+
+// retireHerdrShieldPlugin unlinks the herdr-shield plugin its own installer
+// registered in Herdr: a registry (herdr.PluginLinked) that lists it gets
+// `herdr plugin unlink herdr-shield`; one that does not gets nothing. A
+// registry that cannot be read or parsed, a Herdr whose default_shell still
+// runs herdr-shield (the hook step's own gate, RetireHerdrShieldHook), no herdr
+// on PATH, none with a server up to answer, or a herdr that does not answer
+// within herdrShieldUnlinkBound (a hung server), leaves the entry and says so; a
+// Herdr config that cannot be read fails, as it fails the hook step.
+func (installer *engine) retireHerdrShieldPlugin(ctx context.Context) error {
+	command := "herdr plugin unlink " + retiredShieldProgram
+	stays := "herdr plugin " + retiredShieldProgram + " stays registered until `" + command + "` runs: "
+	linked, err := herdr.PluginLinked(installer.options.Home, installer.env(), retiredShieldProgram)
+	if err != nil {
+		// The step only retires a plugin: a registry it cannot judge is named, never an install failure.
+		installer.skip(stays + err.Error())
+		return nil
+	}
+	if !linked {
+		return nil
+	}
+	status, err := InspectHerdrShell(installer.options.Home, installer.env())
+	if err != nil {
+		return installer.fail(fmt.Errorf("herdr plugin %s: read Herdr's default_shell: %w", retiredShieldProgram, err))
+	}
+	if retiredShieldShell(status.Value) {
+		installer.skip(stays + "Herdr's default_shell in " + status.Path + " still names " + retiredShieldProgram +
+			" — " + retiredShieldShellRepair(status))
+		return nil
+	}
+	runner := installer.processRunner()
+	binary, lookErr := runner.LookPath(herdr.HostBinary(installer.env().Get))
+	if lookErr != nil {
+		installer.skip(stays + "herdr is not on PATH")
+		return nil
+	}
+	if !installer.apply {
+		return installer.change(command, nil)
+	}
+	bounded, cancel := context.WithTimeout(ctx, herdrShieldUnlinkBound)
+	defer cancel()
+	result, err := runner.Run(bounded, []string{binary, "plugin", "unlink", retiredShieldProgram}, deps.RunOptions{})
+	if errors.Is(bounded.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		installer.skip(fmt.Sprintf("%sherdr did not answer within %s, so its server may be hung; restart Herdr",
+			stays, herdrShieldUnlinkBound))
+		return nil
+	}
+	if err != nil {
+		return installer.fail(fmt.Errorf("%s: %w", command, err))
+	}
+	text := strings.TrimSpace(string(result.Stderr) + " " + string(result.Stdout))
+	switch {
+	case result.ExitCode == 0:
+		return installer.change(command, nil)
+	case herdr.ServerNotRunning(text):
+		// Herdr's own words ride along: the markers are server-down texts, so a
+		// different failure they happen to match still shows what it was.
+		installer.skip(stays + "no Herdr server is up (herdr said: " + text + ")")
+		return nil
+	}
+	return installer.fail(fmt.Errorf("%s exited %d: %s", command, result.ExitCode, text))
 }

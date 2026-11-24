@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
@@ -712,7 +713,7 @@ func reannounceOn(ctx context.Context, socket string, deps herdrDeps) ([]string,
 // client pass (adopt, re-bind, release) and then the state and the name to
 // every live client. It returns the panes the state reached.
 func (reporter *herdrReporter) reannounceSession(ctx context.Context, session string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, herdrDeadline)
+	ctx, cancel := clock.WithTimeout(ctx, reporter.clock(), herdrDeadline)
 	defer cancel()
 	reporter.session = session
 	unlock, err := reporter.lock(ctx, session)

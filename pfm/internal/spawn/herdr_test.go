@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -21,16 +22,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/place"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestHerdrSpawnReservesStructuredRecipeAndCleansRefusal(t *testing.T) {
 	for _, mode := range []string{"tab", "same-pane", "refused", "malformed", "occupied-pane", "occupied-bind"} {
 		t.Run(mode, func(t *testing.T) {
 			testjail.Fleet(t)
-			oldClock := clock.Real
-			fakeNow := oldClock.Now()
-			clock.Real = clock.NewFake(fakeNow)
-			t.Cleanup(func() { clock.Real = oldClock })
+			fakeNow := time.Unix(1700000000, 0)
+			testwait.ProcessClock(t, clock.NewFake(fakeNow))
 			values, err := paths.Resolve()
 			if err != nil {
 				t.Fatal(err)

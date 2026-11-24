@@ -148,10 +148,11 @@ const snapshot = (name) => ({
   settingsTarget: require(path.join(path.dirname(extensionPath), 'theme.js')).settingsTarget(), // the one Global/Workspace choice theme.js and native.js write through
 });
 // A fired configuration change reaches the extension's own listener, which queues its own sync;
-// the driver calls none, and waits for the ack that run rewrites.
+// the driver calls none, and waits for the ack that run rewrites: its work is promises and
+// synchronous file calls, so a few event-loop turns without the ack changing mean none is coming.
 const settled = async (before) => {
-  for (let waited = 0; waited < 1500; waited += 10) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  for (let quiet = 0; quiet < 4; quiet++) {
+    await new Promise((resolve) => setImmediate(resolve));
     if (JSON.stringify(readJSONFile('vscode-ack.json')) !== before) return;
   }
 };

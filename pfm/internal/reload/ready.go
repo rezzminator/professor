@@ -13,14 +13,19 @@ import (
 
 // ready waits until the native chat in the pane is idle with an empty
 // composer: before /exit (stash parks a draft), and once the reborn chat runs
-// (reborn) before its --then turn.
+// (reborn, its new process proven by wait) before its --then turn. The reborn
+// chat's frame is judged by rebornComposerDrawn, and a draft on it is polled
+// to the bound: only one still there at the last read refuses the turn.
 func (n *nativeReload) ready(ctx context.Context, stash, reborn bool) error {
 	stable := 0
 	pane := n.pane()
 	// agentUnread is the last Herdr agent read that told nothing: it waits
 	// without reading the screen and names itself if the tries run out.
 	var agentUnread error
+	// draftLeft is the reborn chat's draft the last read showed.
+	var draftLeft error
 	for attempt := 0; attempt < n.options.IdleTries; attempt++ {
+		draftLeft = nil
 		screen, err := pane.capture(ctx)
 		if err != nil {
 			return err
@@ -89,7 +94,11 @@ func (n *nativeReload) ready(ctx context.Context, stash, reborn bool) error {
 				continue
 			}
 		}
-		if !composerDrawn(screen) || pfmcall.IsFooterBusy(n.request.Engine, screen) {
+		drawn := composerDrawn(screen)
+		if reborn {
+			drawn = rebornComposerDrawn(n.request.Engine, screen)
+		}
+		if !drawn || pfmcall.IsFooterBusy(n.request.Engine, screen) {
 			stable = 0
 		} else {
 			empty, draft, err := reloadComposerEmpty(screen, pane.styled(ctx))
@@ -97,13 +106,17 @@ func (n *nativeReload) ready(ctx context.Context, stash, reborn bool) error {
 				return err
 			}
 			if !empty {
-				if !stash {
+				switch {
+				case reborn:
+					draftLeft = composerDraftError(draft)
+				case !stash:
 					return fmt.Errorf("native reload: %w", composerDraftError(draft))
+				default:
+					if err := pane.key(ctx, "C-s"); err != nil {
+						return fmt.Errorf("stash native reload draft: %w", err)
+					}
+					stash = false
 				}
-				if err := pane.key(ctx, "C-s"); err != nil {
-					return fmt.Errorf("stash native reload draft: %w", err)
-				}
-				stash = false
 				stable = 0
 			} else {
 				stable++
@@ -115,6 +128,9 @@ func (n *nativeReload) ready(ctx context.Context, stash, reborn bool) error {
 		if err := n.options.Clock.Sleep(ctx, n.options.Poll); err != nil {
 			return err
 		}
+	}
+	if draftLeft != nil {
+		return fmt.Errorf("native reload: %w", draftLeft)
 	}
 	notSent := "/exit was not typed"
 	if reborn {

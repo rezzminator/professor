@@ -81,7 +81,7 @@ func TestRunNewCodexTellsTheSchedulesStayBehind(t *testing.T) {
 	}
 	tmux := &fakeReloadTmux{}
 	var stderr bytes.Buffer
-	if _, err := Run(context.Background(), request,
+	if _, err := runOnFake(t, context.Background(), request,
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, &stderr); err != nil {
 		t.Fatalf("run: %v stderr=%q", err, stderr.String())
 	}

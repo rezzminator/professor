@@ -115,6 +115,27 @@ func primaryFromDatabase(ctx context.Context, path string) (int, bool, error) {
 			obs.Logger(ctx).Warn("fleet.primary.close", "path", path, obs.FieldErr, err.Error())
 		}
 	}()
+	// One statement reads, from one snapshot, whether meta exists and the
+	// schema version. A database another pfm is still creating stays at
+	// user_version 0 until its migration stamps it, and until its schema
+	// statement has run it may lack meta: it records no primary account yet.
+	// Two separate looks (the meta query failing, then a table count) could
+	// straddle that creation and read a database being made as a broken one.
+	// pfm never drops meta, so once this look finds it the query below can
+	// fail only for a real reason; a migrated database without meta is broken
+	// and its query failure is returned.
+	const schemaQuery = "SELECT (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='meta')," +
+		" (SELECT user_version FROM pragma_user_version)"
+	schema := obs.SQL(ctx, kind, schemaQuery)
+	var metaTables, version int
+	err = db.QueryRowContext(ctx, schemaQuery).Scan(&metaTables, &version)
+	schema.End(-1, err)
+	if err != nil {
+		return 0, false, fmt.Errorf("read shared fleet database %s schema: %w", path, err)
+	}
+	if metaTables == 0 && version == 0 {
+		return 0, false, nil
+	}
 	var value string
 	const primaryQuery = "SELECT val FROM meta WHERE key=?"
 	// Absence is a successful statement: sql.ErrNoRows means nothing is set
@@ -122,18 +143,6 @@ func primaryFromDatabase(ctx context.Context, path string) (int, bool, error) {
 	// both the activity record and the caller.
 	read := obs.SQL(ctx, kind, primaryQuery)
 	err = db.QueryRowContext(ctx, primaryQuery, PrimaryAccountKey).Scan(&value)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		// A database another process has created and not yet given its schema
-		// holds no table at all, so it records no primary account yet.
-		const tablesQuery = "SELECT count(*) FROM sqlite_master WHERE type='table'"
-		tables := obs.SQL(ctx, kind, tablesQuery)
-		var count int
-		countErr := db.QueryRowContext(ctx, tablesQuery).Scan(&count)
-		tables.End(-1, countErr)
-		if countErr == nil && count == 0 {
-			err = sql.ErrNoRows
-		}
-	}
 	if errors.Is(err, sql.ErrNoRows) {
 		read.End(-1, nil)
 	} else {

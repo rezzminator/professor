@@ -21,17 +21,26 @@ import (
 // credentials and a jailed home. No provider override bypasses the cache.
 func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex} {
-		for _, scenario := range []string{"confirmation-age", "future", "empty"} {
-			t.Run(string(engine)+"/"+scenario, func(t *testing.T) {
+		// age is how long before the first Sample the cache was confirmed;
+		// fresh is whether that Sample reads through it without a request.
+		// The TTL is the first stale age: one step inside it is still fresh.
+		for _, scenario := range []struct {
+			name  string
+			age   time.Duration
+			fresh bool
+		}{
+			{"confirmation-age", LiveLimitsTTL - 4*time.Second, true},
+			{"future", -time.Minute, false},
+			{"empty", LiveLimitsTTL - 4*time.Second, true},
+			{"one-step-inside-ttl", LiveLimitsTTL - time.Nanosecond, true},
+			{"at-ttl", LiveLimitsTTL, false},
+			{"one-step-past-ttl", LiveLimitsTTL + time.Nanosecond, false},
+		} {
+			t.Run(string(engine)+"/"+scenario.name, func(t *testing.T) {
 				home := t.TempDir()
 				t.Setenv(paths.EnvHome, home)
 				now := time.Unix(1_800_000_000, 0)
-				// Just short of the live TTL, so the first Sample must read
-				// through the shared cache and the second, past it, refetches.
-				confirmed := now.Add(4*time.Second - LiveLimitsTTL)
-				if scenario == "future" {
-					confirmed = now.Add(time.Minute)
-				}
+				confirmed := now.Add(-scenario.age)
 				account := LimitAccount{
 					ID:        21,
 					Engine:    engine,
@@ -42,7 +51,7 @@ func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 				account.CodexAuthPath = writeCodexAuth(t, home, "fixture-access", "fixture-account")
 				claudeUsage := liveClaudeUsage(now, 54)
 				codexPayload := liveCodexUsage(now, 54)
-				if scenario == "empty" {
+				if scenario.name == "empty" {
 					claudeUsage, codexPayload = usagehook.Usage{}, codexUsage{}
 				}
 				var err error
@@ -84,15 +93,15 @@ func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 				limits, warnings := sampler.Sample(context.Background())
 				// A stamped answer with no window (an account on credits) is
 				// as fresh as one with windows: no request inside the TTL.
-				if scenario == "empty" && (hits.Load() != 0 || len(warnings) != 0 ||
+				if scenario.name == "empty" && (hits.Load() != 0 || len(warnings) != 0 ||
 					len(limits[0].Windows) != 0 || limits[0].Status != noLimitWindows) {
 					t.Fatalf("fresh no-window answer: hits=%d limits=%#v warnings=%v", hits.Load(), limits, warnings)
 				}
-				if scenario == "confirmation-age" &&
+				if scenario.fresh && scenario.name != "empty" &&
 					(hits.Load() != 0 || len(warnings) != 0 || limits[0].Windows[0].UsedPct != 54) {
 					t.Fatalf("fresh shared cache: hits=%d limits=%#v warnings=%v", hits.Load(), limits, warnings)
 				}
-				if scenario != "future" {
+				if scenario.fresh {
 					now = now.Add(6 * time.Second)
 					limits, warnings = sampler.Sample(context.Background())
 				}

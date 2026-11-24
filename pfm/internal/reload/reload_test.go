@@ -7,15 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 type fakeReloadTmux struct {
@@ -341,7 +344,7 @@ func TestRunRefusesAnOverlappingPaneReload(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Run(
+	_, err = runOnFake(t,
 		context.Background(),
 		Request{
 			Engine:     pfmengine.Claude,
@@ -375,7 +378,7 @@ func (tmux *queuedThenTmux) SendKey(ctx context.Context, target pfmcall.Target, 
 func TestRunMarksSelectorRefusalOnlyWhenPaneWasTold(t *testing.T) {
 	for _, displayErr := range []error{nil, errors.New("display failed")} {
 		tmux := &fakeReloadTmux{selector: true, displayErr: displayErr}
-		_, err := Run(context.Background(), Request{
+		_, err := runOnFake(t, context.Background(), Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
 			SessionID: "11111111-1111-4111-8111-111111111111", Account: 1,
 			AccountIDs: []int{1}, Machine: reloadTestMachine("", t.TempDir()),
@@ -444,7 +447,7 @@ func TestOpenCodeRunIsNotMisroutedToClaude(t *testing.T) {
 
 func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 	tmux := &fakeReloadTmux{}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		Request{
 			Engine: pfmengine.OpenCode, SocketPath: "/tmp/ox-session", Pane: "%7",
@@ -460,7 +463,7 @@ func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 
 func TestRunWaitsForExitTextToRenderBeforeSubmitting(t *testing.T) {
 	tmux := &delayedExitRenderTmux{}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		Request{
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-reload-render", Pane: "%7",
@@ -483,25 +486,73 @@ func TestRunWaitsForExitTextToRenderBeforeSubmitting(t *testing.T) {
 	}
 }
 
+// deadlineSignal is a context whose deadline passes when the test says so: Err
+// is context.DeadlineExceeded from then on, as for a caller whose deadline ran
+// out while the code waits, with no timer to wait out.
+type deadlineSignal struct {
+	context.Context
+	passed chan struct{}
+	once   sync.Once
+}
+
+func newDeadlineSignal(parent context.Context) *deadlineSignal {
+	return &deadlineSignal{Context: parent, passed: make(chan struct{})}
+}
+
+func (signal *deadlineSignal) pass() { signal.once.Do(func() { close(signal.passed) }) }
+
+func (signal *deadlineSignal) Done() <-chan struct{} { return signal.passed }
+
+func (signal *deadlineSignal) Err() error {
+	select {
+	case <-signal.passed:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
 func TestRunRefusesBlindExitWhenTextNeverRenders(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	tmux := &neverExitRenderTmux{}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	_, err := Run(
-		ctx,
-		Request{
-			Engine: pfmengine.Codex, SocketPath: filepath.Join(t.TempDir(), "fake-codex-socket"), Pane: "%7",
-			SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
-			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
-		},
-		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
-		tmux,
-		nil,
-		nil,
-	)
+	fake := clock.NewFake(time.Unix(0, 0))
+	caller := newDeadlineSignal(testwait.Context(t))
+	type outcome struct{ err error }
+	done := make(chan outcome, 1)
+	go func() {
+		_, err := runOnFake(t,
+			caller,
+			Request{
+				Engine: pfmengine.Codex, SocketPath: filepath.Join(t.TempDir(), "fake-codex-socket"), Pane: "%7",
+				SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
+				Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
+			},
+			Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1, Clock: fake},
+			tmux,
+			nil,
+			nil,
+		)
+		done <- outcome{err}
+	}()
+	// The run is parked on its next look at the composer: /exit is typed and
+	// has not rendered, so the caller's deadline now passes.
+	testwait.Until(t, "the run to wait for /exit to render", func() (bool, string) {
+		select {
+		case result := <-done:
+			done <- result
+			return true, "the run returned"
+		default:
+		}
+		return fake.Pending() > 0, fake.String()
+	})
+	caller.pass()
+	result, _ := testwait.Receive(t, "the run to return after the deadline", done)
+	err := result.err
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("never-rendered /exit error=%v, want context deadline while waiting for visible text", err)
+	}
+	if tmux.literal != "/exit" {
+		t.Fatalf("the run never typed /exit before its caller's deadline: literal=%q", tmux.literal)
 	}
 	if tmux.enterCount != 0 || tmux.respawn != "" {
 		t.Fatalf("blind exit mutation: enters=%d respawn=%q", tmux.enterCount, tmux.respawn)
@@ -510,7 +561,7 @@ func TestRunRefusesBlindExitWhenTextNeverRenders(t *testing.T) {
 
 func TestRunWaitsForTheRebornPromptBeforeCheckingClaudeAndSubmittingThen(t *testing.T) {
 	tmux := &delayedThenTmux{}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		Request{
 			Engine:     pfmengine.Claude,
@@ -551,7 +602,7 @@ func TestRunWaitsForTheRebornPromptBeforeCheckingClaudeAndSubmittingThen(t *test
 // six-hour stall. So /exit is typed only once the pane has been idle twice.
 func TestRunWaitsForTheCallerTurnToEndBeforeTypingExit(t *testing.T) {
 	tmux := &busyThenIdleTmux{busyCaptures: 3, typedAfter: -1}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-idle"),
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, IdleTries: 10},
@@ -570,12 +621,12 @@ func TestRunWaitsForTheCallerTurnToEndBeforeTypingExit(t *testing.T) {
 	}
 }
 
-// A mid-turn /reload used to hold /exit with the wait logged only to the
+// A mid-turn /pfm:reload used to hold /exit with the wait logged only to the
 // worker's own stderr; the pane itself must announce the wait, then the reboot.
 func TestRunAnnouncesTheHoldAndTheRebootOnThePane(t *testing.T) {
 	tmux := &busyThenIdleTmux{busyCaptures: 3, typedAfter: -1}
 	options := Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, IdleTries: 10}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(), reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-announce"), options, tmux, nil, nil,
 	)
 	if err != nil {
@@ -590,7 +641,7 @@ func TestRunAnnouncesTheHoldAndTheRebootOnThePane(t *testing.T) {
 
 func TestRunRefusesToTypeExitIntoAChatThatStaysBusy(t *testing.T) {
 	tmux := &busyThenIdleTmux{busyCaptures: 1 << 30, typedAfter: -1}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-busy"),
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, IdleTries: 3},
@@ -616,7 +667,7 @@ func TestRunRefusesToTypeExitIntoAChatThatStaysBusy(t *testing.T) {
 // says so — "chat left running" alone would hide a poisoned input box.
 func TestRunClearsTheTypedExitWhenTheChatDoesNotDie(t *testing.T) {
 	tmux := &stuckExitTmux{}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-stuck"),
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
@@ -691,7 +742,7 @@ func countKey(keys []string, want string) int {
 
 func TestRunConfirmsTheBackgroundWorkExitDialog(t *testing.T) {
 	tmux := &exitDialogTmux{confirms: true}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-dialog"),
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 3},
@@ -713,7 +764,7 @@ func TestRunConfirmsTheBackgroundWorkExitDialog(t *testing.T) {
 
 func TestRunDismissesAnExitDialogThatWillNotConfirm(t *testing.T) {
 	tmux := &exitDialogTmux{confirms: false}
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-dialog-stuck"),
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},

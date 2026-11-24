@@ -138,11 +138,11 @@ func testOptions(t *testing.T, endpoint string, clk clock.Clock) Options {
 	config, market := filepath.Join(root, "claude"), filepath.Join(root, "market")
 	for path, content := range map[string]string{
 		filepath.Join(config, "settings.json"): `{"enabledPlugins":{"flights@professor":true,"harvester@professor":true,` +
-			`"secret@professor":true,"flights@other":true,"buddy@professor":false}}`,
+			`"secret@professor":true,"flights@other":true,"callmeter@professor":false}}`,
 		filepath.Join(config, "plugins", "known_marketplaces.json"): `{"professor":{"source":{"source":"directory",` +
 			`"path":"` + market + `"},"installLocation":"` + market + `"}}`,
 		filepath.Join(market, ".claude-plugin", "marketplace.json"): `{"name":"professor","plugins":[` +
-			`{"name":"flights"},{"name":"harvester"},{"name":"buddy"}]}`,
+			`{"name":"flights"},{"name":"harvester"},{"name":"callmeter"}]}`,
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -154,7 +154,7 @@ func testOptions(t *testing.T, endpoint string, clk clock.Clock) Options {
 	return Options{
 		Env: &paths.MapEnv{Values: map[string]string{}}, StateDir: filepath.Join(root, "state"),
 		ClaudeConfigDir: config, Version: "0.42.0-alpha", OS: "linux", Arch: "arm64", Endpoint: endpoint,
-		Client: obs.WrapClient(&http.Client{Timeout: Timeout}), Clock: clk,
+		Client: obs.WrapClient(&http.Client{}), Clock: clk,
 	}
 }
 

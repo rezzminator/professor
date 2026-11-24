@@ -6,6 +6,7 @@ import (
 	"time"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
@@ -137,6 +138,9 @@ type Dependencies struct {
 	// window this one blocks the interactive/MCP kill call.
 	ConfirmEvery    time.Duration
 	ConfirmAttempts int
+	// Clock waits the finisher's delay and polls and ConfirmExit's polls; nil
+	// is clock.Real, read at each wait.
+	Clock clock.Clock
 }
 
 // Manager performs public kill operations.
@@ -152,6 +156,7 @@ type Manager struct {
 	paths           resolvedPaths
 	confirmEvery    time.Duration
 	confirmAttempts int
+	clock           clock.Clock // nil is clock.Real, read at each wait
 }
 
 // Finisher performs the detached graceful-exit phase.
@@ -169,6 +174,7 @@ type Finisher struct {
 	pollEvery    time.Duration
 	pollAttempts int
 	idleAttempts int
+	clock        clock.Clock // nil is clock.Real, read at each wait
 	log          io.Writer
 	paths        resolvedPaths
 }

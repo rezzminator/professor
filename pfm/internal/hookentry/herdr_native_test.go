@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // A native Claude pane Herdr detects is Herdr's own: its screen detection reads
@@ -261,6 +262,7 @@ func TestNativeRetirementSerializesAfterInflightBaselinePublication(t *testing.T
 	server := newFakeHerdr(t)
 	jail := newHerdrJail(t)
 	now := int64(time.Second)
+	fake := jail.fakeClock()
 	deps := jail.deps(herdrPaneEnv(server, "w1:p1"), &now)
 	old := &herdrReporter{deps: deps, seq: 10, nativeSeatReport: true}
 	migration := &herdrReporter{deps: deps}
@@ -276,8 +278,7 @@ func TestNativeRetirementSerializesAfterInflightBaselinePublication(t *testing.T
 	}
 	// An old executable has already read the target under the activity lock.
 	// Start migration while that publication is still allowed to finish.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := testwait.Context(t)
 	unlock, err := old.lock(ctx, old.activityKey("s1"))
 	if err != nil {
 		t.Fatal(err)
@@ -294,6 +295,9 @@ func TestNativeRetirementSerializesAfterInflightBaselinePublication(t *testing.T
 		finished <- err
 	}()
 	<-started
+	testwait.Until(t, "the migration to wait on the held activity lock", func() (bool, string) {
+		return lockRetryArmed(fake), fake.String()
+	})
 	bridge, err := old.lockBridge(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -309,13 +313,14 @@ func TestNativeRetirementSerializesAfterInflightBaselinePublication(t *testing.T
 	}
 	unlock()
 	unlock = nil
-	select {
-	case err := <-finished:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal("migration did not finish after old publication unlocked")
+	// The migration retries its lock once a retry passes: it is parked on one now.
+	fake.Advance(herdrLockPoll)
+	if err, _ := testwait.Receive(
+		t,
+		"the migration to finish after the old publication unlocked",
+		finished,
+	); err != nil {
+		t.Fatal(err)
 	}
 	lines = server.requests()
 	if len(lines) != 2 || !strings.Contains(lines[1], `"method":"pane.release_agent"`) ||

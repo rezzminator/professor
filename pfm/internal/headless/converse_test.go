@@ -13,9 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // conversation is a chat whose transcript a test writes by hand, plus the
@@ -116,61 +118,81 @@ func fastOptions() AwaitOptions {
 	}
 }
 
-type toolProgressSignal struct {
-	once sync.Once
-	seen chan struct{}
+// fakeAwait is one Await on a fake clock, on a goroutine of its own. The test
+// writes the transcript only while Await is parked on its next poll, then moves
+// the clock one Poll, so every look Await takes is one the test chose: no
+// writer races Settle, on a loaded host as on an idle one.
+type fakeAwait struct {
+	clock *clock.Fake
+	poll  time.Duration
+	done  chan awaitResult
 }
 
-func (signal *toolProgressSignal) Write(content []byte) (int, error) {
-	if bytes.HasPrefix(content, []byte("T ")) {
-		signal.once.Do(func() { close(signal.seen) })
-	}
-	return len(content), nil
+type awaitResult struct {
+	turn Turn
+	err  error
 }
 
-// entryProgressGate orders a test's writes behind Await's own report of what
-// it has already read. Settle is a race between the writer and a timer, and a
-// wall-clock sleep only makes the writer PROBABLY win it: under suite load a
-// 20ms sleep stretches past the 60ms Settle, Await correctly returns the answer
-// it had, and a healthy implementation reads as a broken one. Gating on the
-// progress stream — Await's own account of the entries it has consumed — makes
-// the ordering a fact instead of a bet. TestAwaitWaitsThroughToolWork
-// established this technique here for a single checkpoint; this carries it to
-// an ordering that needs several.
-type entryProgressGate struct {
-	mutex sync.Mutex
-	text  strings.Builder
+func startAwait(resolve func(context.Context) (Chat, bool, error), options AwaitOptions) *fakeAwait {
+	fake := clock.NewFake(time.Unix(1_760_000_000, 0))
+	options.Clock = fake
+	run := &fakeAwait{clock: fake, poll: options.orDefaults().Poll, done: make(chan awaitResult, 1)}
+	go func() {
+		turn, err := Await(context.Background(), resolve, options)
+		run.done <- awaitResult{turn, err}
+	}()
+	return run
 }
 
-func (gate *entryProgressGate) Write(content []byte) (int, error) {
-	gate.mutex.Lock()
-	defer gate.mutex.Unlock()
-	gate.text.Write(content)
-	return len(content), nil
-}
-
-func (gate *entryProgressGate) seen() string {
-	gate.mutex.Lock()
-	defer gate.mutex.Unlock()
-	return gate.text.String()
-}
-
-// await blocks until Await reports the given condensed line and returns false
-// when it never does. It runs on a writer goroutine, so it reports with Errorf
-// and hands the decision back rather than calling FailNow off the test
-// goroutine, and it says what Await actually read so a failure names the
-// entries observed instead of only the one missing.
-func (gate *entryProgressGate) await(t *testing.T, want string) bool {
+// parked waits until Await is parked on its next poll, or has returned.
+func (run *fakeAwait) parked(t *testing.T) (awaitResult, bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(gate.seen(), want) {
-		if time.Now().After(deadline) {
-			t.Errorf("Await never reported %q in its progress stream; it read: %q", want, gate.seen())
-			return false
+	var result awaitResult
+	returned := false
+	testwait.Until(t, "Await to park on its next poll or return", func() (bool, string) {
+		select {
+		case result = <-run.done:
+			returned = true
+			return true, ""
+		default:
 		}
-		time.Sleep(2 * time.Millisecond)
+		return run.clock.Pending() > 0, run.clock.String()
+	})
+	return result, returned
+}
+
+// step runs between two of Await's looks: write (nil for a quiet poll) runs
+// while Await is parked, then the clock moves one Poll. Await returning first
+// fails the test.
+func (run *fakeAwait) step(t *testing.T, write func()) {
+	t.Helper()
+	if result, returned := run.parked(t); returned {
+		t.Fatalf("Await returned %+v, %v before the test's next step", result.turn, result.err)
 	}
-	return true
+	if write != nil {
+		write()
+	}
+	run.clock.Advance(run.poll)
+}
+
+// quiet takes polls steps with no write.
+func (run *fakeAwait) quiet(t *testing.T, polls int) {
+	t.Helper()
+	for range polls {
+		run.step(t, nil)
+	}
+}
+
+// result moves the clock poll by poll until Await returns, and gives back
+// what it returned.
+func (run *fakeAwait) result(t *testing.T) (Turn, error) {
+	t.Helper()
+	for {
+		if result, returned := run.parked(t); returned {
+			return result.turn, result.err
+		}
+		run.clock.Advance(run.poll)
+	}
 }
 
 // TestAwaitReturnsTheAnswerToTheQuestionJustAsked is the two-way contract: the
@@ -184,16 +206,14 @@ func TestAwaitReturnsTheAnswerToTheQuestionJustAsked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		talk.say(user("the new question"))
-		time.Sleep(20 * time.Millisecond)
-		talk.say(assistant("the new answer"))
-	}()
-
 	options := fastOptions()
 	options.Offset = frontier
-	turn, err := Await(context.Background(), talk.resolve, options)
+	run := startAwait(talk.resolve, options)
+	run.quiet(t, 4)
+	run.step(t, func() { talk.say(user("the new question")) })
+	run.quiet(t, 4)
+	run.step(t, func() { talk.say(assistant("the new answer")) })
+	turn, err := run.result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -214,18 +234,13 @@ func TestAwaitReturnsTheAnswerToTheQuestionJustAsked(t *testing.T) {
 func TestAwaitWaitsThroughToolWork(t *testing.T) {
 	talk := newConversation(t)
 	talk.say(user("do the thing"), assistant("let me look"), tool("Bash"))
-	progress := &toolProgressSignal{seen: make(chan struct{})}
-	go func() {
-		// Await's own progress stream is the proof it observed the tool turn.
-		// Releasing the final answer from that event keeps the ordering under
-		// arbitrary container load; wall-clock sleeps let Settle win the race.
-		<-progress.seen
-		talk.say(assistant("done, it was the firewall"))
-	}()
-
 	options := fastOptions()
-	options.Progress = progress
-	turn, err := Await(context.Background(), talk.resolve, options)
+	run := startAwait(talk.resolve, options)
+	// Twice the Settle of quiet polls with tool work newest: Await looked at it
+	// every time and still holds.
+	run.quiet(t, int(2*options.Settle/options.Poll))
+	run.step(t, func() { talk.say(assistant("done, it was the firewall")) })
+	turn, err := run.result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -246,7 +261,7 @@ func TestAwaitTimesOutWithDeliveryIntact(t *testing.T) {
 
 	options := fastOptions()
 	options.Timeout = 80 * time.Millisecond
-	turn, err := Await(context.Background(), talk.resolve, options)
+	turn, err := startAwait(talk.resolve, options).result(t)
 	if !errors.Is(err, ErrAwaitTimeout) {
 		t.Fatalf("Await() error = %v, want ErrAwaitTimeout", err)
 	}
@@ -260,11 +275,10 @@ func TestAwaitTimesOutWithDeliveryIntact(t *testing.T) {
 
 func TestAwaitReportsAChatThatDies(t *testing.T) {
 	talk := newConversation(t)
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		talk.vanish()
-	}()
-	_, err := Await(context.Background(), talk.resolve, fastOptions())
+	run := startAwait(talk.resolve, fastOptions())
+	run.quiet(t, 4)
+	run.step(t, talk.vanish)
+	_, err := run.result(t)
 	if !errors.Is(err, ErrChatGone) {
 		t.Fatalf("Await() error = %v, want ErrChatGone", err)
 	}
@@ -274,15 +288,14 @@ func TestAwaitReportsAChatThatDies(t *testing.T) {
 // went away is a real answer and must not be thrown out with the corpse.
 func TestAwaitKeepsWhatADyingChatManagedToSay(t *testing.T) {
 	talk := newConversation(t)
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		talk.say(user("last words?"), assistant("goodbye"))
-		time.Sleep(10 * time.Millisecond)
-		talk.die()
-	}()
 	options := fastOptions()
 	options.Settle = 5 * time.Second
-	turn, err := Await(context.Background(), talk.resolve, options)
+	run := startAwait(talk.resolve, options)
+	run.quiet(t, 2)
+	run.step(t, func() { talk.say(user("last words?"), assistant("goodbye")) })
+	run.quiet(t, 2)
+	run.step(t, talk.die)
+	turn, err := run.result(t)
 	if !errors.Is(err, ErrChatGone) {
 		t.Fatalf("Await() error = %v, want ErrChatGone", err)
 	}
@@ -299,14 +312,15 @@ func TestAwaitKeepsWhatADyingChatManagedToSay(t *testing.T) {
 func TestAwaitWaitsOutTheGraceForAChatBeingBorn(t *testing.T) {
 	talk := newConversation(t)
 	talk.vanish()
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		talk.say(user("hello"), assistant("hello back"))
-		talk.appear()
-	}()
 	options := fastOptions()
 	options.Grace = 5 * time.Second
-	turn, err := Await(context.Background(), talk.resolve, options)
+	run := startAwait(talk.resolve, options)
+	run.quiet(t, 6)
+	run.step(t, func() {
+		talk.say(user("hello"), assistant("hello back"))
+		talk.appear()
+	})
+	turn, err := run.result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -319,14 +333,13 @@ func TestAwaitWaitsOutTheGraceForAChatBeingBorn(t *testing.T) {
 // the model was ASKED, and must not sit through the whole answer to learn it.
 func TestAwaitStopsAtDeliveryWhenAskedTo(t *testing.T) {
 	talk := newConversation(t)
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		talk.say(user("the launch prompt"))
-	}()
 	options := fastOptions()
 	options.StopOnDelivery = true
 	options.Settle = time.Minute
-	turn, err := Await(context.Background(), talk.resolve, options)
+	run := startAwait(talk.resolve, options)
+	run.quiet(t, 2)
+	run.step(t, func() { talk.say(user("the launch prompt")) })
+	turn, err := run.result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -339,29 +352,13 @@ func TestAwaitStopsAtDeliveryWhenAskedTo(t *testing.T) {
 // makes everything said before it the answer to something else.
 func TestAwaitAnswersTheLatestQuestion(t *testing.T) {
 	talk := newConversation(t)
-	// This is the one test in this file whose answer exists early enough for
-	// Settle to expire against it: "answer to first" is readable immediately,
-	// so the 60ms Settle starts running while the second question is still
-	// being written. Two sleeps totalling 40ms left 20ms of margin, and under
-	// `go test ./...` on macOS that margin is not there. The gate supplies the
-	// ordering and the widened Settle supplies the margin; every assertion
-	// below is unchanged.
-	gate := &entryProgressGate{}
-	go func() {
-		talk.say(user("first"), assistant("answer to first"))
-		if !gate.await(t, "A answer to first") {
-			return
-		}
-		talk.say(user("second"))
-		if !gate.await(t, "U second") {
-			return
-		}
-		talk.say(assistant("answer to second"))
-	}()
-	options := fastOptions()
-	options.Progress = gate
-	options.Settle = 250 * time.Millisecond
-	turn, err := Await(context.Background(), talk.resolve, options)
+	// "answer to first" is read a poll before the second question lands, one
+	// poll of the Settle that could end the wait on it.
+	run := startAwait(talk.resolve, fastOptions())
+	run.step(t, func() { talk.say(user("first"), assistant("answer to first")) })
+	run.step(t, func() { talk.say(user("second")) })
+	run.step(t, func() { talk.say(assistant("answer to second")) })
+	turn, err := run.result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -373,12 +370,11 @@ func TestAwaitAnswersTheLatestQuestion(t *testing.T) {
 func TestAwaitStreamsProgress(t *testing.T) {
 	talk := newConversation(t)
 	var progress bytes.Buffer
-	go func() {
-		talk.say(user("go"), tool("Read"), assistant("read it"))
-	}()
 	options := fastOptions()
 	options.Progress = &progress
-	if _, err := Await(context.Background(), talk.resolve, options); err != nil {
+	run := startAwait(talk.resolve, options)
+	run.step(t, func() { talk.say(user("go"), tool("Read"), assistant("read it")) })
+	if _, err := run.result(t); err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
 	if got, want := progress.String(), "U go\nT Read|{}\nA read it\n"; got != want {
@@ -392,14 +388,13 @@ func TestAwaitStreamsProgress(t *testing.T) {
 // SAYING so would be the dishonest one.
 func TestAwaitFlagsAnAnswerSomebodyElseMayOwn(t *testing.T) {
 	talk := newConversation(t)
-	go func() {
-		talk.say(user("my question"))
-		time.Sleep(20 * time.Millisecond)
-		talk.say(user("somebody else's question"))
-		time.Sleep(20 * time.Millisecond)
-		talk.say(assistant("one answer for both"))
-	}()
-	turn, err := Await(context.Background(), talk.resolve, fastOptions())
+	run := startAwait(talk.resolve, fastOptions())
+	run.step(t, func() { talk.say(user("my question")) })
+	run.quiet(t, 4)
+	run.step(t, func() { talk.say(user("somebody else's question")) })
+	run.quiet(t, 4)
+	run.step(t, func() { talk.say(assistant("one answer for both")) })
+	turn, err := run.result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -434,11 +429,10 @@ func TestAwaitReadsOneTranscriptOnceThroughTwoSpellings(t *testing.T) {
 		return chat, found, err
 	}
 	talk.say(user("my question"))
-	go func() {
-		time.Sleep(40 * time.Millisecond)
-		talk.say(assistant("the answer"))
-	}()
-	turn, err := Await(context.Background(), resolve, fastOptions())
+	run := startAwait(resolve, fastOptions())
+	run.quiet(t, 8)
+	run.step(t, func() { talk.say(assistant("the answer")) })
+	turn, err := run.result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -484,13 +478,12 @@ func TestAwaitKeepsTheFrontierAcrossARolloutDecompressedToResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	talk.say(user("my question"))
-	go func() {
-		time.Sleep(40 * time.Millisecond)
-		talk.say(assistant("the answer"))
-	}()
 	options := fastOptions()
 	options.Offset = frontier
-	turn, err := Await(context.Background(), resolve, options)
+	run := startAwait(resolve, options)
+	run.quiet(t, 8)
+	run.step(t, func() { talk.say(assistant("the answer")) })
+	turn, err := run.result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -563,34 +556,33 @@ func TestAwaitHoldsACodexTurnUntilItsEndRecord(t *testing.T) {
 			talk := newConversation(t)
 			talk.chat.Engine = testCase.engine
 			options := fastOptions()
-			done := make(chan Turn, 1)
-			go func() {
-				turn, err := Await(context.Background(), talk.resolve, options)
-				if err != nil {
-					t.Errorf("Await() error = %v", err)
-				}
-				done <- turn
-			}()
-			talk.say(testCase.turn...)
-			quiet := time.NewTimer(8 * options.Settle)
-			defer quiet.Stop()
+			run := startAwait(talk.resolve, options)
+			run.step(t, func() { talk.say(testCase.turn...) })
 			var turn Turn
-			select {
-			case turn = <-done:
-				if testCase.end != "" {
-					t.Fatalf("Await() returned %q mid-turn with answer %q, want it waiting for the turn's end record",
-						turn.State, turn.Answer)
+			var err error
+			returned := false
+			// Eight Settles of quiet polls: an answer returns within them, a
+			// turn waiting on its end record outlasts them.
+			for range int(8 * options.Settle / options.Poll) {
+				var result awaitResult
+				if result, returned = run.parked(t); returned {
+					turn, err = result.turn, result.err
+					break
 				}
-			case <-quiet.C:
-				if testCase.end == "" {
-					t.Fatalf("Await() still waiting after %v of quiet, want the answer", 8*options.Settle)
-				}
-				talk.say(testCase.end)
-				select {
-				case turn = <-done:
-				case <-time.After(5 * time.Second):
-					t.Fatal("Await() still waiting after the turn's end record")
-				}
+				run.clock.Advance(run.poll)
+			}
+			switch {
+			case returned && testCase.end != "":
+				t.Fatalf("Await() returned %q mid-turn with answer %q, want it waiting for the turn's end record",
+					turn.State, turn.Answer)
+			case !returned && testCase.end == "":
+				t.Fatalf("Await() still waiting after %v of quiet, want the answer", 8*options.Settle)
+			case !returned:
+				run.step(t, func() { talk.say(testCase.end) })
+				turn, err = run.result(t)
+			}
+			if err != nil {
+				t.Errorf("Await() error = %v", err)
 			}
 			if turn.State != StateIdle || turn.Answer != testCase.answer || !turn.Delivered || turn.Superseded {
 				t.Fatalf("turn = %#v, want delivered idle with answer %q, not superseded", turn, testCase.answer)
@@ -613,14 +605,13 @@ func TestAwaitStopsAtTheFirstReplyAndNamesAnAPIError(t *testing.T) {
 		t.Run(reply.name, func(t *testing.T) {
 			talk := newConversation(t)
 			talk.say(user("the launch prompt"))
-			go func() {
-				time.Sleep(10 * time.Millisecond)
-				talk.say(reply.line)
-			}()
 			options := fastOptions()
 			options.StopOnReply = true
 			options.Settle = time.Minute
-			turn, err := Await(context.Background(), talk.resolve, options)
+			run := startAwait(talk.resolve, options)
+			run.quiet(t, 2)
+			run.step(t, func() { talk.say(reply.line) })
+			turn, err := run.result(t)
 			if err != nil {
 				t.Fatalf("Await() error = %v", err)
 			}
@@ -636,8 +627,7 @@ func TestAwaitStopsAtTheFirstReplyAndNamesAnAPIError(t *testing.T) {
 func TestAwaitClearsAnErrorARealAnswerFollows(t *testing.T) {
 	talk := newConversation(t)
 	talk.say(user("the question"), claudeAPIErrorLine, assistant("answered after a retry"))
-	options := fastOptions()
-	turn, err := Await(context.Background(), talk.resolve, options)
+	turn, err := startAwait(talk.resolve, fastOptions()).result(t)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)
 	}
@@ -677,7 +667,7 @@ func TestAwaitRidesOutAFailedChatLookup(t *testing.T) {
 				}
 				return Chat{}, false, scanFailed
 			}
-			turn, err := Await(context.Background(), resolve, fastOptions())
+			turn, err := startAwait(resolve, fastOptions()).result(t)
 			gotErrorText := ""
 			if err != nil {
 				gotErrorText = err.Error()

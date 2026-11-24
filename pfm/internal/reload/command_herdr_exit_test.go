@@ -13,7 +13,7 @@ import (
 func TestRunHerdrClearsAnUnrenderedExit(t *testing.T) {
 	f := newReloadHerdrFixture(t)
 	f.mode = "exit-unrendered"
-	_, err := RunHerdr(context.Background(), f.request, f.options, io.Discard)
+	_, err := runHerdrOnFake(t, context.Background(), f.request, f.options, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "refusing blind Enter") {
 		t.Fatalf("RunHerdr error = %v, want the blind-Enter refusal", err)
 	}

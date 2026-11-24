@@ -98,7 +98,9 @@ while [ "$#" -gt 0 ]; do
   if [ "$1" = -w ]; then pcap="$2"; shift 2; else shift; fi
 done
 case "$STUB_MODE" in
-  silent) sleep 1; exit 0 ;;
+  # silent: alive and mute until egress.sh gives up and INTs it (an async child starts with INT ignored,
+  # which perl resets; a shell cannot)
+  silent) exec perl -MPOSIX -e '$SIG{INT} = sub { exit 0 }; POSIX::pause() while 1' ;;
   no-listen) echo 'recorder unavailable' >&2; exit 1 ;;
 esac
 echo 'tcpdump: listening on any, link-type LINUX_SLL2' >&2

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -84,6 +85,10 @@ type ProbeOptions struct {
 	// production callers hand in obs.Runner(deps.RealRunner{}) themselves so
 	// the door is still observed end to end.
 	Runner Runner
+	// Clock times every probe bound (Timeout, SelfDoctorTimeout): a test hands
+	// its fake here and moves it past the bound of a child that never answers.
+	// Nil is the real context timeout, read through context.WithTimeout itself.
+	Clock clock.Clock
 }
 
 // selfDoctorTimeout resolves the effective self-doctor bound: an explicit
@@ -166,7 +171,7 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) (result Re
 	}
 	if len(entry.VersionArgs) != 0 {
 		output, runErr := boundedOutputWithEnvironment(
-			ctx, options.Timeout, versionEnvironment, options.Runner, path, entry.VersionArgs...)
+			ctx, options.Clock, options.Timeout, versionEnvironment, options.Runner, path, entry.VersionArgs...)
 		result.Raw = string(output)
 		if verboseErr := writeVerbose(options.VerboseDir, entry.Name+"-version", output); verboseErr != nil {
 			result.VerboseErr = verboseErr.Error()
@@ -216,6 +221,7 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) (result Re
 			selfDoctorTimeout(options),
 			selfDoctorEnvironment,
 			options.Runner,
+			options.Clock,
 		)
 		if err != nil {
 			result.VerboseErr = err.Error()
@@ -257,9 +263,10 @@ func probeSelfDoctor(
 	timeout time.Duration,
 	environment []string,
 	runner Runner,
+	bound clock.Clock,
 ) (string, string, error) {
 	helpArgs := []string{entry.SelfDoctorArgs[0], "--help"}
-	help, helpErr := boundedOutputWithEnvironment(ctx, timeout, environment, runner, path, helpArgs...)
+	help, helpErr := boundedOutputWithEnvironment(ctx, bound, timeout, environment, runner, path, helpArgs...)
 	if err := writeVerbose(verboseDir, entry.Name+"-self-doctor-help", help); err != nil {
 		return "", "", err
 	}
@@ -278,6 +285,7 @@ func probeSelfDoctor(
 	}
 	output, err := boundedOutputWithEnvironment(
 		ctx,
+		bound,
 		timeout,
 		environment,
 		runner,
@@ -375,57 +383,6 @@ func selfDoctorFailureLine(output string, accountChecks []string) string {
 	return ""
 }
 
-// effectiveTimeout is the single truth for the bound a probe actually ran
-// under, so the duration named in a timeout report is the one enforced rather
-// than the one requested.
-func effectiveTimeout(timeout time.Duration) time.Duration {
-	if timeout <= 0 {
-		return ProbeTimeout
-	}
-	return timeout
-}
-
-// boundedOutputWithEnvironment runs path+args through runner (nil defaults to
-// a bare RealRunner{} — see ProbeOptions.Runner's doc comment for why this
-// package cannot default to the observed door itself) and joins stdout with
-// stderr, the same shape exec.Cmd.CombinedOutput gave every caller before
-// this crossed the Runner seam. runner.Run folds an ordinary non-zero exit
-// into RunResult.ExitCode rather than an error (deps.Runner's documented
-// contract), so a completed-but-failing command is reported back here as a
-// runnerExitStatus — the *exec.ExitError-shaped signal probeOne and
-// probeSelfDoctor already classify on.
-func boundedOutputWithEnvironment(
-	parent context.Context,
-	timeout time.Duration,
-	environment []string,
-	runner Runner,
-	path string,
-	args ...string,
-) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(parent, effectiveTimeout(timeout))
-	defer cancel()
-	if runner == nil {
-		runner = RealRunner{}
-	}
-	result, err := runner.Run(ctx, append([]string{path}, args...), RunOptions{Env: environment})
-	output := make([]byte, 0, len(result.Stdout)+len(result.Stderr))
-	output = append(output, result.Stdout...)
-	output = append(output, result.Stderr...)
-	if ctx.Err() != nil {
-		if parentErr := parent.Err(); parentErr != nil {
-			return output, probeContextError{err: parentErr}
-		}
-		return output, probeContextError{err: context.DeadlineExceeded, ownTimeout: true}
-	}
-	if err != nil {
-		return output, err
-	}
-	if result.ExitCode != 0 {
-		return output, runnerExitStatus{exitCode: result.ExitCode}
-	}
-	return output, nil
-}
-
 // runnerExitStatus is a completed command's non-zero exit, carried back
 // through the Runner seam the same way probeOne and probeSelfDoctor already
 // read one off a bare exec.CommandContext's *exec.ExitError — via ExitCode(),
@@ -450,26 +407,6 @@ func (status runnerExitStatus) ExitCode() int { return status.exitCode }
 // the same two methods.
 func ExitStatus(code int) error {
 	return runnerExitStatus{exitCode: code}
-}
-
-type probeContextError struct {
-	err        error
-	ownTimeout bool
-}
-
-func (err probeContextError) Error() string { return err.err.Error() }
-
-func (err probeContextError) Unwrap() error { return err.err }
-
-func parentContextError(err error) string {
-	switch {
-	case errors.Is(err, context.Canceled):
-		return "cancelled by parent context"
-	case errors.Is(err, context.DeadlineExceeded):
-		return "parent context deadline exceeded before probe timeout"
-	default:
-		return fmt.Sprintf("probe stopped by parent context: %v", err)
-	}
 }
 
 // terminalEnvironment gives interactive engine doctors a real terminal

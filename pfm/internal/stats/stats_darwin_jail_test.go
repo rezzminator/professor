@@ -3,8 +3,10 @@
 package stats
 
 import (
+	"fmt"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestSamplerSampleResourcesUsesDarwinHostCounters(t *testing.T) {
@@ -25,25 +27,18 @@ func TestSamplerSampleResourcesUsesDarwinHostCounters(t *testing.T) {
 	// behaved exactly as documented. Sampling until a valid interval appears
 	// keeps the assertion strict — a sampler that never reports a delta still
 	// fails — while removing the load sensitivity.
-	deadline := time.Now().Add(5 * time.Second)
 	var second Snapshot
-	for {
-		time.Sleep(25 * time.Millisecond)
+	testwait.Until(t, "a Darwin resource sample to report a CPU delta", func() (bool, string) {
 		second, err = sampler.SampleResources(nil)
 		if err != nil {
-			t.Fatalf("later Darwin resource sample: %v", err)
+			return true, err.Error()
 		}
-		if !second.Ready {
-			t.Fatalf("later Darwin resource sample not ready: %#v", second)
-		}
-		if second.Header.CPUValid {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf(
-				"no Darwin resource sample reported a CPU delta within 5s: %#v",
-				second.Header,
-			)
-		}
+		return !second.Ready || second.Header.CPUValid, fmt.Sprintf("%#v", second.Header)
+	})
+	if err != nil {
+		t.Fatalf("later Darwin resource sample: %v", err)
+	}
+	if !second.Ready {
+		t.Fatalf("later Darwin resource sample not ready: %#v", second)
 	}
 }

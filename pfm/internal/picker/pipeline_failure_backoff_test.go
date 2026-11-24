@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -104,7 +105,7 @@ func testRefreshFailureBackoff(t *testing.T, native bool) {
 			// moment that timer is due, so every wake is exact.
 			observed.Advance(time.Unix(0, observed.dueNS.Load()).Sub(observed.Fake.Now()))
 			close(resume)
-		case <-time.After(20 * time.Second):
+		case <-testwait.Context(t).Done():
 			t.Fatalf("refresh stream never returned to its select boundary at %v", observed.Fake.Now().Sub(start))
 		}
 	}

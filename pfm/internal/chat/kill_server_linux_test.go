@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // The initiating helper owns a real PTY session. The same binary also executes
@@ -71,10 +72,14 @@ func init() {
 	if code != 0 {
 		os.Exit(code)
 	}
-	// Keep the initiating session alive until Herdr closes it, even when scheduling returns.
-	for {
-		time.Sleep(time.Second)
+	// Keep the initiating session alive until Herdr closes it, even when scheduling returns:
+	// this read ends only when the process is killed, the write end held open below it.
+	hold, keep, err := os.Pipe()
+	if err != nil {
+		panic(err)
 	}
+	_, _ = hold.Read(make([]byte, 1))
+	runtime.KeepAlive(keep)
 }
 
 func TestScheduleHerdrEndRejectsUnsafeLog(t *testing.T) {
@@ -139,27 +144,23 @@ func TestScheduleHerdrEndRejectsUnsafeLog(t *testing.T) {
 				return
 			}
 			runtime.Paths.SIDDir = dir
+			if kind == "fifo" {
+				// No reader holds the FIFO, so an open that waits for one never returns and the receive
+				// below reports a hung test; this reader lets that blocked writer leave afterwards.
+				t.Cleanup(func() {
+					reader, openErr := os.OpenFile(leaf, os.O_RDWR|unix.O_NONBLOCK, 0)
+					if openErr != nil {
+						t.Errorf("open the read end of FIFO %s: %v", leaf, openErr)
+						return
+					}
+					_ = reader.Close()
+				})
+			}
 			done := make(chan error, 1)
 			go func() {
 				done <- ScheduleHerdrEnd(context.Background(), headless.Chat{ID: seat.SessionID, SeatID: seat.SeatID}, runtime)
 			}()
-			var err error
-			select {
-			case err = <-done:
-			case <-time.After(time.Second):
-				t.Error("end worker log open blocked on FIFO while holding conversation lock")
-				// Unstick the unfixed writer so this regression fails on an assertion, not a suite timeout.
-				reader, openErr := os.OpenFile(leaf, os.O_RDWR|unix.O_NONBLOCK, 0)
-				if openErr != nil {
-					t.Fatal(openErr)
-				}
-				defer func() { _ = reader.Close() }()
-				select {
-				case err = <-done:
-				case <-time.After(time.Second):
-					t.Fatal("blocked schedule did not leave after FIFO reader")
-				}
-			}
+			err, _ := testwait.Receive(t, "ScheduleHerdrEnd to refuse the unsafe end worker log", done)
 			if err == nil || !strings.Contains(err.Error(), "end worker log") {
 				t.Errorf("unsafe %s accepted: %v", kind, err)
 			}
@@ -170,9 +171,8 @@ func TestScheduleHerdrEndRejectsUnsafeLog(t *testing.T) {
 			if _, readErr := db.ReadSeatRun(seat.SeatID); readErr != nil {
 				t.Fatal(readErr)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			unlock, lockErr := fleetdb.LockSeat(ctx, runtime.Paths, seat.SessionID)
+			// An expired context still takes a free lock on its first try and refuses a held one.
+			unlock, lockErr := fleetdb.LockSeat(testwait.Expired(), runtime.Paths, seat.SessionID)
 			if lockErr != nil {
 				t.Fatal(errors.New("log refusal retained conversation lock: " + lockErr.Error()))
 			}

@@ -567,7 +567,7 @@ func (installer *engine) linkableStore(name, store string) bool {
 }
 
 // runSkillGit runs one git call outside every repository — its working
-// directory is the store root's parent, and runSkillGitWith stops discovery
+// directory is the store root's parent, and runSkillGitContext stops discovery
 // there — under both skillGitTimeout and the source's deadline, returning
 // trimmed stdout.
 func (installer *engine) runSkillGit(deadline time.Time, args ...string) (string, error) {

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -36,12 +35,12 @@ func herdrReturns(c *harness.Ctx, s State) State {
 		return ok && seat[1] == chat.Pane && rows[chat.Session][0] == "live-claude" && len(listed) == 1,
 			fmt.Sprintf("chats %v, seats %v, ls rows of %s %q", rows, seats, chat.Session, listed)
 	}
-	c.Poll(s.Chats[0].Name+" live again by itself under "+s.Chats[0].Session, 30*time.Second, func() (bool, string) {
+	c.Poll(s.Chats[0].Name+" live again by itself under "+s.Chats[0].Session, func() (bool, string) {
 		return live(s.Chats[0])
 	})
 	s.Chats[0].Seat = liveSeats(c, sock)[s.Chats[0].Session][0]
 	reloadInGrace(c, s, s.Chats[0])
-	c.Poll("every chat live again by itself on its own pane", 30*time.Second, func() (bool, string) {
+	c.Poll("every chat live again by itself on its own pane", func() (bool, string) {
 		for _, chat := range s.Chats {
 			if ok, seen := live(chat); !ok {
 				return false, chat.Name + " not yet: " + seen
@@ -62,20 +61,27 @@ func herdrReturns(c *harness.Ctx, s State) State {
 				s.Chats[i].Engine, chat.Name, env["CLAUDE_CONFIG_DIR"], err, chat.Account)
 		}
 		term.Press(harness.Ctrl('b'), harness.Key(fmt.Sprint(i+1)))
-		c.Poll("tab "+chat.Name+" focused", stepBound, func() (bool, string) {
+		c.Poll("tab "+chat.Name+" focused", func() (bool, string) {
 			got := focusedPane(c, s)
 			return got == chat.Pane, "focused pane " + got
 		})
 		// Herdr's server focuses the tab before its client draws it: the tab is drawn once the screen
-		// shows this chat's own status line under its composer.
-		term.WaitScreen("tab "+chat.Name+" drawn with its chat", stepBound, func(screen string) bool {
-			return strings.Contains(screen, "🔖 "+chat.Name+" ") && strings.Contains(screen, "❯")
+		// shows this chat's own status line under its composer. The resumed fake Claude re-runs its
+		// statusline on its refresh tick, which moves on a signal: each look short of the name fires it.
+		engine := engineControl(s.Chats[i].Engine)
+		c.Poll("tab "+chat.Name+" drawn with its chat", func() (bool, string) {
+			screen := term.Screen()
+			if strings.Contains(screen, "🔖 "+chat.Name+" ") && strings.Contains(screen, "❯") {
+				return true, ""
+			}
+			tickEngine(c, engine)
+			return false, "the screen:\n" + screen
 		})
 		if screen := term.Screen(); strings.Contains(screen, "find ›") || strings.Contains(screen, "↻ ") {
 			c.Failf("tab %s shows pfm's picker after Herdr resumed its chat:\n%s", chat.Name, screen)
 		}
 	}
-	c.Poll("each restored tab under its chat's name", stepBound, func() (bool, string) {
+	c.Poll("each restored tab under its chat's name", func() (bool, string) {
 		got := paneTabs(c, s)
 		return fmt.Sprint(got) == fmt.Sprint(want), fmt.Sprintf("tabs %v, want %v", got, want)
 	})
@@ -117,10 +123,10 @@ func reloadInGrace(c *harness.Ctx, s State, chat Chat) {
 		}
 	}
 	command := "pfm chat reload --sock " + herdrSocket(s) + " --pane " + chat.Pane
-	if code := shellRun(c.Terminal(s.Term+"-cli"), "grace-reload", command, 30*time.Second); code != 0 {
+	if code := shellRun(c.Terminal(s.Term+"-cli"), "grace-reload", command); code != 0 {
 		c.Failf("%s right after the resume exited %d, want 0", command, code)
 	}
-	c.Poll("a new engine for "+chat.Session, 20*time.Second, func() (bool, string) {
+	c.Poll("a new engine for "+chat.Session, func() (bool, string) {
 		for pid, session := range engines(processes(c)) {
 			if session == chat.Session && pid != before {
 				return true, ""

@@ -7,11 +7,34 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
+
+// logNow is the fixed instant every fixture record and fake clock starts at.
+var logNow = time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+
+// lockedBuffer is a buffer the follow goroutine writes while the test reads.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // fixtureLog writes a small activity file and returns its path.
 func fixtureLog(t *testing.T, lines ...string) string {
@@ -32,7 +55,7 @@ func logLine(stamp time.Time, level, message, command, chat string) string {
 }
 
 func TestReadActivityFiltersBySinceLevelChatAndCmd(t *testing.T) {
-	now := time.Now()
+	now := logNow
 	path := fixtureLog(t,
 		logLine(now.Add(-time.Hour), "INFO", "old.record", "reload", "cc-1"),
 		logLine(now.Add(-time.Minute), "INFO", "recent.info", "reload", "cc-1"),
@@ -71,7 +94,7 @@ func TestReadActivityFiltersBySinceLevelChatAndCmd(t *testing.T) {
 				&stdout,
 				&stderr,
 				path,
-				clock.Real,
+				clock.NewFake(logNow),
 			); code != 0 {
 				t.Fatalf("ReadActivity = %d, want 0; stderr = %q", code, stderr.String())
 			}
@@ -91,47 +114,59 @@ func TestReadActivityFiltersBySinceLevelChatAndCmd(t *testing.T) {
 
 // TestRunLogFollowReadsRecordsAppendedAfterItStarted is the follow-once proof.
 func TestReadActivityFollowReadsRecordsAppendedAfterItStarted(t *testing.T) {
-	now := time.Now()
+	now := logNow
 	path := fixtureLog(t, logLine(now, "INFO", "before.follow", "reload", "cc-1"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var stdout, stderr bytes.Buffer
+	var stdout lockedBuffer
+	var stderr bytes.Buffer
+	fake := clock.NewFake(logNow)
 	done := make(chan int, 1)
-	go func() { done <- ReadActivity(ctx, []string{"--follow"}, &stdout, &stderr, path, clock.Real) }()
+	go func() { done <- ReadActivity(ctx, []string{"--follow"}, &stdout, &stderr, path, fake) }()
+	testwait.Until(t, "follow parked on its poll timer", func() (bool, string) {
+		return fake.Pending() > 0, fmt.Sprintf("pending=%d", fake.Pending())
+	})
 
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.WriteString(logLine(now, "INFO", "after.follow", "reload", "cc-1") + "\n"); err != nil {
+	// The record lands in two writes: the reader holds the torn first half
+	// until the rest arrives and never prints half of it.
+	record := logLine(now, "INFO", "after.follow", "reload", "cc-1") + "\n"
+	half := len(record) / 2
+	if _, err := file.WriteString(record[:half]); err != nil {
+		t.Fatal(err)
+	}
+	fake.Advance(followPoll)
+	testwait.Until(t, "follow parked again on its poll timer after reading the torn half", func() (bool, string) {
+		return fake.Pending() > 0, fmt.Sprintf("pending=%d", fake.Pending())
+	})
+	if got, want := stdout.String(), logLine(now, "INFO", "before.follow", "reload", "cc-1")+"\n"; got != want {
+		t.Fatalf("stdout after the torn half = %q, want only the first record %q", got, want)
+	}
+	if _, err := file.WriteString(record[half:]); err != nil {
 		t.Fatal(err)
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(10 * time.Second)
-	for !strings.Contains(stdout.String(), "after.follow") {
-		select {
-		case <-deadline:
-			t.Fatalf("--follow never printed the appended record:\n%s", stdout.String())
-		case <-time.After(followPoll):
-		}
-	}
+	testwait.Until(t, "--follow printed the appended record", func() (bool, string) {
+		fake.Advance(followPoll)
+		out := stdout.String()
+		return strings.Contains(out, "after.follow"), out
+	})
 	cancel()
-	select {
-	case code := <-done:
-		if code != 0 {
-			t.Fatalf("ReadActivity --follow = %d, want 0; stderr = %q", code, stderr.String())
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("ReadActivity --follow did not return after its context was cancelled")
+	code, _ := testwait.Receive(t, "ReadActivity --follow returned after its context was cancelled", done)
+	if code != 0 {
+		t.Fatalf("ReadActivity --follow = %d, want 0; stderr = %q", code, stderr.String())
 	}
 }
 
 func TestReadActivitySeparatesAnAbsentLogFromAnUnreadableOne(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	missing := filepath.Join(t.TempDir(), "pfm.jsonl")
-	if code := ReadActivity(context.Background(), nil, &stdout, &stderr, missing, clock.Real); code != 0 {
+	if code := ReadActivity(context.Background(), nil, &stdout, &stderr, missing, clock.NewFake(logNow)); code != 0 {
 		t.Fatalf("an absent log exited %d, want 0", code)
 	}
 	if !strings.Contains(stderr.String(), "no activity log at") {
@@ -139,15 +174,22 @@ func TestReadActivitySeparatesAnAbsentLogFromAnUnreadableOne(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := ReadActivity(context.Background(), nil, &stdout, &stderr, t.TempDir(), clock.Real); code != 1 {
+	if code := ReadActivity(
+		context.Background(),
+		nil,
+		&stdout,
+		&stderr,
+		t.TempDir(),
+		clock.NewFake(logNow),
+	); code != 1 {
 		t.Fatalf("an unreadable log exited %d, want 1 — absence is not the same as a failed read", code)
 	}
 }
 
 func TestReadActivityPrintsAnUndecodableRecordAndCountsIt(t *testing.T) {
-	path := fixtureLog(t, "{not json}", logLine(time.Now(), "INFO", "good.record", "ls", ""))
+	path := fixtureLog(t, "{not json}", logLine(logNow, "INFO", "good.record", "ls", ""))
 	var stdout, stderr bytes.Buffer
-	if code := ReadActivity(context.Background(), nil, &stdout, &stderr, path, clock.Real); code != 0 {
+	if code := ReadActivity(context.Background(), nil, &stdout, &stderr, path, clock.NewFake(logNow)); code != 0 {
 		t.Fatalf("ReadActivity = %d, want 0", code)
 	}
 	if !strings.Contains(stdout.String(), "{not json}") {
@@ -159,7 +201,7 @@ func TestReadActivityPrintsAnUndecodableRecordAndCountsIt(t *testing.T) {
 }
 
 func TestReadActivityRefusesAnUnknownLevelAndExtraArguments(t *testing.T) {
-	path := fixtureLog(t, logLine(time.Now(), "INFO", "record", "ls", ""))
+	path := fixtureLog(t, logLine(logNow, "INFO", "record", "ls", ""))
 	var stdout, stderr bytes.Buffer
 	if code := ReadActivity(
 		context.Background(),
@@ -167,12 +209,19 @@ func TestReadActivityRefusesAnUnknownLevelAndExtraArguments(t *testing.T) {
 		&stdout,
 		&stderr,
 		path,
-		clock.Real,
+		clock.NewFake(logNow),
 	); code != 2 {
 		t.Fatalf("an unknown --level exited %d, want 2", code)
 	}
 	stderr.Reset()
-	if code := ReadActivity(context.Background(), []string{"extra"}, &stdout, &stderr, path, clock.Real); code != 2 {
+	if code := ReadActivity(
+		context.Background(),
+		[]string{"extra"},
+		&stdout,
+		&stderr,
+		path,
+		clock.NewFake(logNow),
+	); code != 2 {
 		t.Fatalf("a positional argument exited %d, want 2", code)
 	}
 }
@@ -188,7 +237,7 @@ func compLine(stamp time.Time, message, comp string) string {
 // TestReadActivityFiltersByComp: `pfm log --comp mcp` keeps one component's
 // records; an unregistered name is the registry's error, exit 2.
 func TestReadActivityFiltersByComp(t *testing.T) {
-	now := time.Now()
+	now := logNow
 	path := fixtureLog(t,
 		compLine(now, "mcp.record", "mcp"),
 		compLine(now, "db.record", "db"),
@@ -196,7 +245,7 @@ func TestReadActivityFiltersByComp(t *testing.T) {
 	)
 	var stdout, stderr bytes.Buffer
 	ctx := context.Background()
-	if code := ReadActivity(ctx, []string{"--comp", "mcp"}, &stdout, &stderr, path, clock.Real); code != 0 {
+	if code := ReadActivity(ctx, []string{"--comp", "mcp"}, &stdout, &stderr, path, clock.NewFake(logNow)); code != 0 {
 		t.Fatalf("ReadActivity --comp mcp = %d; stderr = %q", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "mcp.record") {
@@ -208,7 +257,14 @@ func TestReadActivityFiltersByComp(t *testing.T) {
 		}
 	}
 	stdout.Reset()
-	if code := ReadActivity(ctx, []string{"--comp", "database"}, &stdout, &stderr, path, clock.Real); code != 2 {
+	if code := ReadActivity(
+		ctx,
+		[]string{"--comp", "database"},
+		&stdout,
+		&stderr,
+		path,
+		clock.NewFake(logNow),
+	); code != 2 {
 		t.Fatalf("an unknown --comp exited %d, want 2", code)
 	}
 	if !strings.Contains(stderr.String(), `"database"`) ||
@@ -223,21 +279,35 @@ func TestReadActivityFiltersByComp(t *testing.T) {
 // TestReadActivityLevelUsesTheOneParser: `warning` and `off` are read by the
 // same parser as every other level surface.
 func TestReadActivityLevelUsesTheOneParser(t *testing.T) {
-	now := time.Now()
+	now := logNow
 	path := fixtureLog(t,
 		logLine(now, "INFO", "info.record", "chat", ""),
 		logLine(now, "WARN", "warn.record", "chat", ""),
 	)
 	var stdout, stderr bytes.Buffer
 	ctx := context.Background()
-	if code := ReadActivity(ctx, []string{"--level", "warning"}, &stdout, &stderr, path, clock.Real); code != 0 {
+	if code := ReadActivity(
+		ctx,
+		[]string{"--level", "warning"},
+		&stdout,
+		&stderr,
+		path,
+		clock.NewFake(logNow),
+	); code != 0 {
 		t.Fatalf("--level warning = %d; stderr = %q", code, stderr.String())
 	}
 	if strings.Contains(stdout.String(), "info.record") || !strings.Contains(stdout.String(), "warn.record") {
 		t.Fatalf("--level warning printed:\n%s", stdout.String())
 	}
 	stdout.Reset()
-	if code := ReadActivity(ctx, []string{"--level", "chatty"}, &stdout, &stderr, path, clock.Real); code != 2 {
+	if code := ReadActivity(
+		ctx,
+		[]string{"--level", "chatty"},
+		&stdout,
+		&stderr,
+		path,
+		clock.NewFake(logNow),
+	); code != 2 {
 		t.Fatalf("--level chatty = %d, want 2", code)
 	}
 	if !strings.Contains(stderr.String(), strings.Join(LevelNames, ", ")) {
@@ -251,7 +321,7 @@ func TestReadActivityLevelUsesTheOneParser(t *testing.T) {
 // whose last write is older than it, and reaches into the archive for one
 // that is not.
 func TestReadActivityReadsTheKeptArchiveTheSegmentsAndTheCurrentInTimeOrder(t *testing.T) {
-	now := time.Now()
+	now := logNow
 	path := fixtureLog(t, logLine(now, "INFO", "current", "ls", ""))
 	files := []struct {
 		name, line string
@@ -289,7 +359,14 @@ func TestReadActivityReadsTheKeptArchiveTheSegmentsAndTheCurrentInTimeOrder(t *t
 		{[]string{"--since", "1h", "--level", "warn"}, files[1].line + "\n"},
 	} {
 		var stdout, stderr bytes.Buffer
-		if code := ReadActivity(context.Background(), tc.args, &stdout, &stderr, path, clock.Real); code != 0 {
+		if code := ReadActivity(
+			context.Background(),
+			tc.args,
+			&stdout,
+			&stderr,
+			path,
+			clock.NewFake(logNow),
+		); code != 0 {
 			t.Fatalf("%v: ReadActivity = %d; stderr %q", tc.args, code, stderr.String())
 		}
 		if stdout.String() != tc.want {

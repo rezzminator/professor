@@ -264,7 +264,7 @@ func idleDoors(c *harness.Ctx, term *harness.Terminal, s *State, hold, queued st
 		mcpJSON("last", map[string]any{"target": child}, map[string]any{"target": child, "text": called}),
 	)
 	// Herdr marks a turn over once its hook lands; a pane out of view whose turn ended reads done.
-	c.Poll("Herdr status idle or done for "+pane, stepBound, func() (bool, string) {
+	c.Poll("Herdr status idle or done for "+pane, func() (bool, string) {
 		got := herdrStatus(c, *s, pane)
 		return got == "idle" || got == "done", "status " + got
 	})
@@ -383,7 +383,7 @@ func startedDoors(c *harness.Ctx, term *harness.Terminal, s *State) {
 		cliMatch("pfm chat new --engine cc --name "+victim, 0, fmt.Sprintf(born, "cc", victim)),
 	)
 	ids := map[string]string{}
-	c.Poll(claude+", "+codex+" and "+victim+" idle", stepBound, func() (bool, string) {
+	c.Poll(claude+", "+codex+" and "+victim+" idle", func() (bool, string) {
 		var seen []string
 		for _, name := range []string{claude, codex, victim} {
 			r := c.Read("pfm", "chat", "status", name, "--json")
@@ -507,7 +507,7 @@ func startedDoors(c *harness.Ctx, term *harness.Terminal, s *State) {
 		},
 	)
 	notLive(c, claude)
-	c.Poll("the panes and engines of the killed "+codex+" and "+victim+" gone", stepBound, func() (bool, string) {
+	c.Poll("the panes and engines of the killed "+codex+" and "+victim+" gone", func() (bool, string) {
 		panes, table := herdrPanes(c, *s), processes(c)
 		var alive []string
 		for _, pane := range []string{cxPane, victimPane} {

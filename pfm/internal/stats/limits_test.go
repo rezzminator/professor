@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmstatusline "github.com/rezzminator/professor/pfm/internal/statusline"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -888,12 +889,7 @@ func TestLimitsSamplerLiveRefreshDoesNotBlockOtherAccounts(t *testing.T) {
 		limits, warnings := sampler.SampleLive(ctx)
 		result <- sampleResult{limits, warnings}
 	}()
-	var initial sampleResult
-	select {
-	case initial = <-result:
-	case <-time.After(time.Second):
-		t.Fatal("live sampling blocked behind a provider")
-	}
+	initial, _ := testwait.Receive(t, "live sampling to return behind a blocked provider", result)
 	limits, warnings := initial.limits, initial.warnings
 	if len(limits) != 2 || len(warnings) != 0 {
 		t.Fatalf("initial live sample limits=%#v warnings=%v, want two immediate cards", limits, warnings)
@@ -949,21 +945,13 @@ func TestLimitsSamplerLiveRefreshUsesSingleFlightPerAccount(t *testing.T) {
 	}
 
 	sampler.SampleLive(ctx)
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("first live refresh did not start")
-	}
+	testwait.Receive(t, "first live refresh to start", started)
 	sampler.SampleLive(ctx)
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("duplicate live workers=%d, want single-flight account refresh", got)
 	}
 	close(release)
-	select {
-	case <-completed:
-	case <-time.After(time.Second):
-		t.Fatal("single live refresh did not complete")
-	}
+	testwait.Receive(t, "single live refresh to complete", completed)
 }
 
 func TestLimitsSamplerLiveTTLDoesNotExtendProviderConfirmationAge(t *testing.T) {
@@ -1032,11 +1020,7 @@ func TestLimitsSamplerLiveRecoversFutureAndEmptyCacheEntries(t *testing.T) {
 		if len(limits) != 1 || len(limits[0].Windows) != 1 || limits[0].Windows[0].UsedPct != 99 {
 			t.Fatalf("future cache card=%#v, want visible last-good payload while refreshing", limits)
 		}
-		select {
-		case <-started:
-		case <-time.After(time.Second):
-			t.Fatal("future cache did not trigger recovery refresh")
-		}
+		testwait.Receive(t, "future cache to trigger recovery refresh", started)
 		close(release)
 		waitForCachedWindow(t, sampler, 5, 55)
 	})
@@ -1098,11 +1082,7 @@ func TestLimitsSamplerCanceledLiveWorkerDoesNotBackoffAndCanRetry(t *testing.T) 
 		t.Fatalf("first worker=%d, want 1", got)
 	}
 	cancel()
-	select {
-	case <-completed:
-	case <-time.After(time.Second):
-		t.Fatal("canceled worker did not stop")
-	}
+	testwait.Receive(t, "canceled worker to stop", completed)
 	waitForNoCachedEntry(t, sampler, 7)
 
 	sampler.SampleLive(context.Background())
@@ -1292,65 +1272,50 @@ func liveClaudeUsage(now time.Time, used float64) usagehook.Usage {
 
 func waitForLimitSignal[T any](t *testing.T, signals <-chan T) T {
 	t.Helper()
-	select {
-	case signal := <-signals:
-		return signal
-	case <-time.After(time.Second):
-		var zero T
-		t.Fatal("timed out waiting for live limits worker")
-		return zero
-	}
+	signal, _ := testwait.Receive(t, "live limits worker signal", signals)
+	return signal
 }
 
 func waitForCachedWindow(t *testing.T, sampler *LimitsSampler, accountID int, used float64) {
 	t.Helper()
 	key := limitTestAccountKey(t, sampler, accountID)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	testwait.Until(t, fmt.Sprintf("account %d cache to reach %.0f%%", accountID, used), func() (bool, string) {
 		sampler.mu.Lock()
 		entry, found := sampler.cache[key]
 		_, running := sampler.flights[key]
 		sampler.mu.Unlock()
-		if !running && found && len(entry.limits.Windows) > 0 && entry.limits.Windows[0].UsedPct == used {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("account %d cache never reached %.0f%%", accountID, used)
+		return !running && found && len(entry.limits.Windows) > 0 && entry.limits.Windows[0].UsedPct == used,
+			fmt.Sprintf("running=%v found=%v limits=%#v", running, found, entry.limits)
+	})
 }
 
 func waitForCachedStatus(t *testing.T, sampler *LimitsSampler, accountID int, fragment string) {
 	t.Helper()
 	key := limitTestAccountKey(t, sampler, accountID)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	testwait.Until(t, fmt.Sprintf("account %d cache status to contain %q", accountID, fragment), func() (bool, string) {
 		sampler.mu.Lock()
 		entry, found := sampler.cache[key]
 		_, running := sampler.flights[key]
 		sampler.mu.Unlock()
-		if !running && found && strings.Contains(entry.limits.Status, fragment) {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("account %d cache status never contained %q", accountID, fragment)
+		return !running && found && strings.Contains(entry.limits.Status, fragment),
+			fmt.Sprintf("running=%v found=%v status=%q", running, found, entry.limits.Status)
+	})
 }
 
 func waitForNoCachedEntry(t *testing.T, sampler *LimitsSampler, accountID int) {
 	t.Helper()
 	key := limitTestAccountKey(t, sampler, accountID)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		sampler.mu.Lock()
-		_, found := sampler.cache[key]
-		_, running := sampler.flights[key]
-		sampler.mu.Unlock()
-		if !found && !running {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("account %d retained a canceled worker cache entry", accountID)
+	testwait.Until(
+		t,
+		fmt.Sprintf("account %d to drop its canceled worker cache entry", accountID),
+		func() (bool, string) {
+			sampler.mu.Lock()
+			_, found := sampler.cache[key]
+			_, running := sampler.flights[key]
+			sampler.mu.Unlock()
+			return !found && !running, fmt.Sprintf("found=%v running=%v", found, running)
+		},
+	)
 }
 
 func limitTestAccountKey(t *testing.T, sampler *LimitsSampler, accountID int) string {

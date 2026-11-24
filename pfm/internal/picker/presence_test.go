@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -33,12 +35,88 @@ func presenceJail(t *testing.T) (string, string) {
 	return root, tmuxBinary
 }
 
-// parkedPresenceStream runs the real refresh loop until it is parked: the two
-// passes the transition into park allows have published and the loop has gone
-// quiet. It returns the stream's updates.
-func parkedPresenceStream(t *testing.T) <-chan ui.Snapshot {
+// parkedPresence is a running refresh stream and the fake clock it waits on.
+type parkedPresence struct {
+	updates <-chan ui.Snapshot
+	clock   *parkBoundaryClock
+	stderr  *bytes.Buffer
+}
+
+// parkedQuietPolls is how many consecutive finished park polls that publish
+// nothing make a parked stream quiet.
+const parkedQuietPolls = 6
+
+// startParkedStream runs the real refresh loop on a fake clock and returns
+// once it is parked: the two passes the transition into park allows have
+// published. dependencies carries the test's own indexer; the stream's clock
+// and activity clock are the fake's.
+func startParkedStream(
+	t *testing.T,
+	ctx context.Context,
+	database *store.Store,
+	warn func(*bytes.Buffer) fleet.Warn,
+	dependencies refreshDependencies,
+) *parkedPresence {
 	t.Helper()
-	shortenRefreshIntervals(t)
+	epoch := time.Unix(1_800_000_000, 0)
+	updates := make(chan ui.Snapshot, 8)
+	stream := &parkedPresence{
+		updates: updates,
+		clock:   &parkBoundaryClock{Fake: clock.NewFake(epoch), boundary: make(chan struct{}, 64)},
+		stderr:  &bytes.Buffer{},
+	}
+	dependencies.activity = ui.NewActivityClock(epoch)
+	dependencies.clock = stream.clock
+	t.Cleanup(func() {
+		for range updates {
+		}
+	})
+	go streamFleetRefreshesWith(ctx, database, scanRequest{}, warn(stream.stderr), stream.stderr, updates, dependencies)
+	completed := 0
+	stream.await(t, "the stream to park", func(snapshot ui.Snapshot) {
+		if !snapshot.Refreshing {
+			completed++
+		}
+	}, func() bool { return completed >= 2 })
+	return stream
+}
+
+// await receives the stream's snapshots, each handed to seen, until done
+// reports true. A stream that waits only on its own timers has each one it
+// arms pass at once on the fake clock when nothing is waiting to be read:
+// every wait on it is the stream's pause between polls, and what the test
+// waits for is there already or made by the stream itself.
+func (stream *parkedPresence) await(t *testing.T, what string, seen func(ui.Snapshot), done func() bool) {
+	t.Helper()
+	testwait.Until(t, what, func() (bool, string) {
+		for {
+			select {
+			case snapshot, ok := <-stream.updates:
+				if !ok {
+					t.Fatalf("refresh stream closed while waiting for %s: %s", what, stream.stderr.String())
+				}
+				seen(snapshot)
+				continue
+			case <-stream.clock.boundary:
+				continue
+			default:
+			}
+			break
+		}
+		if done() {
+			return true, ""
+		}
+		if step, due := stream.clock.NextDue(); due {
+			stream.clock.Advance(step)
+		}
+		return false, stream.clock.String()
+	})
+}
+
+// parkedPresenceStream runs the real refresh loop until it is parked and has
+// gone quiet. It returns the stream.
+func parkedPresenceStream(t *testing.T) *parkedPresence {
+	t.Helper()
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -48,81 +126,65 @@ func parkedPresenceStream(t *testing.T) <-chan ui.Snapshot {
 			t.Errorf("close database: %v", err)
 		}
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	updates := make(chan ui.Snapshot, 1)
-	var stderr bytes.Buffer
-	t.Cleanup(func() {
-		cancel()
-		for range updates {
-		}
+	ctx, cancel := context.WithCancel(testwait.Context(t))
+	t.Cleanup(cancel)
+	stream := startParkedStream(t, ctx, database, func(stderr *bytes.Buffer) fleet.Warn {
+		return fleet.PrintWarn(stderr)
+	}, refreshDependencies{
+		newIndexer: func(*store.Store) (indexRunner, error) { return &immediateIndexRunner{}, nil },
 	})
-	go streamFleetRefreshesWith(
-		ctx,
-		database,
-		scanRequest{},
-		fleet.PrintWarn(&stderr),
-		&stderr,
-		updates,
-		refreshDependencies{
-			newIndexer: func(*store.Store) (indexRunner, error) { return &immediateIndexRunner{}, nil },
-			activity:   ui.NewActivityClock(time.Now()),
-		},
-	)
-	completed := 0
-	for completed < 2 {
-		select {
-		case snapshot, ok := <-updates:
-			if !ok {
-				t.Fatalf("refresh stream closed before parking: %s", stderr.String())
-			}
-			if !snapshot.Refreshing {
-				completed++
-			}
-		case <-time.After(20 * time.Second):
-			t.Fatalf("refresh stream never parked: %s", stderr.String())
-		}
-	}
-	settleParked(t, updates, &stderr)
-	return updates
+	stream.settle(t)
+	return stream
 }
 
-// settleParked drains the stream until it has been silent for 300ms: a parked
-// fleet whose pane pids the jail's proc root cannot see owes exactly one fresh
-// pass before it is quiet, and a test must start from the quiet.
-func settleParked(t *testing.T, updates <-chan ui.Snapshot, stderr *bytes.Buffer) {
+// settle runs park polls until parkedQuietPolls in a row publish nothing: a
+// parked fleet whose pane pids the jail's proc root cannot see owes exactly
+// one fresh pass before it is quiet, and a test must start from the quiet. A
+// poll is over when the stream is back at its select (one boundary).
+func (stream *parkedPresence) settle(t *testing.T) {
 	t.Helper()
-	deadline := time.After(20 * time.Second)
-	for {
-		select {
-		case _, ok := <-updates:
-			if !ok {
-				t.Fatalf("refresh stream closed while settling: %s", stderr.String())
+	for quiet := 0; quiet < parkedQuietPolls; {
+		stream.clock.Advance(fleetRefreshParkPollInterval)
+		published := false
+		testwait.Until(t, "a parked poll to finish", func() (bool, string) {
+			select {
+			case _, ok := <-stream.updates:
+				if !ok {
+					t.Fatalf("refresh stream closed while settling: %s", stream.stderr.String())
+				}
+				published = true
+				return false, "publishing"
+			case <-stream.clock.boundary:
+				return true, ""
+			default:
+				return false, stream.clock.String()
 			}
-		case <-time.After(300 * time.Millisecond):
-			return
-		case <-deadline:
-			t.Fatal("parked stream never went quiet")
+		})
+		for len(stream.updates) > 0 {
+			<-stream.updates
+			published = true
+		}
+		if published {
+			quiet = 0
+		} else {
+			quiet++
 		}
 	}
 }
 
-// awaitFullPass waits for a snapshot of a completed pass.
-func awaitFullPass(t *testing.T, updates <-chan ui.Snapshot, within time.Duration, why string) ui.Snapshot {
+// awaitFullPass waits for a snapshot of a completed pass, advancing the
+// stream's park polls one at a time: the change the test made before the call
+// is already there for the poll to find.
+func (stream *parkedPresence) awaitFullPass(t *testing.T, why string) ui.Snapshot {
 	t.Helper()
-	deadline := time.After(within)
-	for {
-		select {
-		case snapshot, ok := <-updates:
-			if !ok {
-				t.Fatalf("refresh stream closed while %s", why)
-			}
-			if !snapshot.Refreshing && snapshot.RefreshFailure == nil {
-				return snapshot
-			}
-		case <-deadline:
-			t.Fatalf("no snapshot within %s while parked and %s: the picker froze at the moment it parked", within, why)
+	var found ui.Snapshot
+	got := false
+	stream.await(t, "a completed pass while parked and "+why, func(snapshot ui.Snapshot) {
+		if !snapshot.Refreshing && snapshot.RefreshFailure == nil {
+			found, got = snapshot, true
 		}
-	}
+	}, func() bool { return got })
+	return found
 }
 
 // presenceEnv is a fleet whose socket and crumb directories are empty scratch

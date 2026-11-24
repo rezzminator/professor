@@ -925,7 +925,7 @@ const ASSET_ROOT = "pfm/internal/installer/assets/";
 // own and the listed plugins' that pluginRoles cannot read as `/p:n` from a
 // plugin's commands/ (their trees live in the submodules' own repositories);
 // a new one joins this list in the same change as its README line.
-const README_EXTERNAL = new Set(["/reload-plugins", "/buddy", "/cache", "/keepwarm"]);
+const README_EXTERNAL = new Set(["/reload-plugins", "/cache", "/keepwarm"]);
 
 // `git grep` at a commit: [{path, line, text}]; exit 1 with no stderr is no hit.
 function grepAt(cwd, head, args) {

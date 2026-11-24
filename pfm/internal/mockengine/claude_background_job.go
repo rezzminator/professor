@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,15 +24,16 @@ import (
 // {config}/sessions/{pid}.json), and the old transcript gets a continued-in record naming the successor. The
 // host pane keeps the id it launched with: its statusline goes on naming the old segment.
 const (
-	claudeBGSpare        = "bg-spare"
-	claudeContinuedIn    = "continued-in"
-	envBGStage           = "MOCK_ENGINE_BG_STAGE"
-	envBGSession         = "MOCK_ENGINE_BG_SESSION"
-	envBGHost            = "MOCK_ENGINE_BG_HOST"
-	envBGConfig          = "MOCK_ENGINE_BG_CONFIG"
-	bgStageLaunch        = "launch"
-	bgStageServe         = "serve"
-	backgroundJobPolling = 250 * time.Millisecond
+	claudeBGSpare     = "bg-spare"
+	claudeContinuedIn = "continued-in"
+	envBGStage        = "MOCK_ENGINE_BG_STAGE"
+	envBGSession      = "MOCK_ENGINE_BG_SESSION"
+	envBGConfig       = "MOCK_ENGINE_BG_CONFIG"
+	bgStageLaunch     = "launch"
+	bgStageServe      = "serve"
+	// bgHostLink is the descriptor each bg-spare stage gets the read end of its host's link on: the host
+	// alone holds the write end, so the read ends the moment the host process is gone, on either kernel.
+	bgHostLink = 3
 )
 
 // claudeJob is the host pane's own identity after its chat moved to a background job: what its statusline names.
@@ -81,15 +83,27 @@ func (session *claudeSession) continueInBackground() error {
 // of its own and exits: the daemon is reparented away from the pane, with no tmux in its environment.
 func spawnBackgroundJob(proc *process, configDir, successor string) error {
 	command, err := bgSpareCommand(proc.ctx, append(withoutTmux(os.Environ()),
-		envBGStage+"="+bgStageLaunch, envBGSession+"="+successor,
-		envBGHost+"="+strconv.Itoa(os.Getpid()), envBGConfig+"="+configDir))
+		envBGStage+"="+bgStageLaunch, envBGSession+"="+successor, envBGConfig+"="+configDir))
 	if err != nil {
 		return err
 	}
-	command.Dir = proc.cwd
-	if output, err := command.CombinedOutput(); err != nil {
+	link, hold, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("open the host link of claude %s: %w", claudeBGSpare, err)
+	}
+	command.Dir, command.ExtraFiles = proc.cwd, []*os.File{link}
+	output, err := command.CombinedOutput()
+	if closeErr := link.Close(); closeErr != nil {
+		warn(proc.stderr, "close the host link of claude %s: %v", claudeBGSpare, closeErr)
+	}
+	if err != nil {
+		if closeErr := hold.Close(); closeErr != nil {
+			warn(proc.stderr, "close the host link of claude %s: %v", claudeBGSpare, closeErr)
+		}
 		return fmt.Errorf("start claude %s: %w: %s", claudeBGSpare, err, strings.TrimSpace(string(output)))
 	}
+	// The write end lives as long as this process: kept here, it is never collected and closed early.
+	proc.hostLinks = append(proc.hostLinks, hold)
 	return nil
 }
 
@@ -126,6 +140,7 @@ func serveBGSpare(proc *process) int {
 			return ExitUsage
 		}
 		command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		command.ExtraFiles = []*os.File{os.NewFile(bgHostLink, "host link")}
 		if err := command.Start(); err != nil {
 			warn(proc.stderr, "start claude %s: %v", claudeBGSpare, err)
 			return ExitUsage
@@ -135,11 +150,11 @@ func serveBGSpare(proc *process) int {
 		}
 		return 0
 	case bgStageServe:
-		host, err := strconv.Atoi(proc.env(envBGHost))
-		if err != nil {
-			warn(proc.stderr, "claude %s host pid %q: %v", claudeBGSpare, proc.env(envBGHost), err)
+		if err := syscall.SetNonblock(bgHostLink, true); err != nil {
+			warn(proc.stderr, "claude %s host link: %v", claudeBGSpare, err)
 			return ExitUsage
 		}
+		host := os.NewFile(bgHostLink, "host link")
 		if err := serveBackgroundJob(proc.ctx, proc.env(envBGConfig), proc.env(envBGSession), host); err != nil {
 			warn(proc.stderr, "%v", err)
 			return ExitUsage
@@ -151,8 +166,9 @@ func serveBGSpare(proc *process) int {
 }
 
 // serveBackgroundJob writes this process's record of the job's session (pid, sessionId, kind "bg", procStart
-// as pfm reads a process start) and holds it until ctx ends or host exits, then removes it.
-func serveBackgroundJob(ctx context.Context, configDir, session string, host int) error {
+// as pfm reads a process start) and holds it until ctx ends or host, its host's link, reads to its end (the host
+// exited), then removes it.
+func serveBackgroundJob(ctx context.Context, configDir, session string, host *os.File) error {
 	pid := os.Getpid()
 	stat, err := gather.NewProcFS(paths.SystemProcRoot()).Stat(pid)
 	if err != nil {
@@ -174,21 +190,21 @@ func serveBackgroundJob(ctx context.Context, configDir, session string, host int
 	if err := os.WriteFile(path, append(record, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	ticker := time.NewTicker(backgroundJobPolling)
-	defer ticker.Stop()
+	gone := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, host)
+		gone <- err
+	}()
 	var probeErr error
-	for ctx.Err() == nil {
-		alive, err := gather.ProcessAlive(host)
+	select {
+	case <-ctx.Done():
+	case err := <-gone:
 		if err != nil {
-			probeErr = fmt.Errorf("claude %s probe of host %d: %w", claudeBGSpare, host, err)
+			probeErr = fmt.Errorf("claude %s read of its host link: %w", claudeBGSpare, err)
 		}
-		if !alive || err != nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-		case <-ticker.C:
-		}
+	}
+	if err := host.Close(); err != nil {
+		probeErr = errors.Join(probeErr, fmt.Errorf("close the host link of claude %s: %w", claudeBGSpare, err))
 	}
 	if err := os.Remove(path); err != nil {
 		return errors.Join(probeErr, fmt.Errorf("remove %s: %w", path, err))

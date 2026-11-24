@@ -24,7 +24,7 @@ func TestNormalizedInstallerSleepErrorIsReportedWithoutPanic(t *testing.T) {
 	var output bytes.Buffer
 	options, err := normalizeInstallerOptions(Options{
 		Home:   t.TempDir(),
-		Clock:  failingInstallerClock{Clock: clock.Real},
+		Clock:  failingInstallerClock{Clock: clock.NewFake(time.Now())},
 		Stdout: &output,
 	})
 	if err != nil {

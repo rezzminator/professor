@@ -7,11 +7,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestClaudeMCPLocksReclaimOnlyStaleDirectories(t *testing.T) {
 	for _, state := range []string{"stale", "fresh", "stale nonempty", "stale file"} {
 		t.Run(state, func(t *testing.T) {
+			testwait.ProcessClock(t, clock.NewFake(time.Now()))
 			path := filepath.Join(t.TempDir(), ".claude.json")
 			lock := path + ".lock"
 			if state == "stale file" {

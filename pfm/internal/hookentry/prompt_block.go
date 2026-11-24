@@ -63,10 +63,11 @@ func blockPromptQuietly(stdout io.Writer) int {
 // exitWords are the prompts exit-intercept turns into the end of the chat.
 var exitWords = map[string]bool{"e": true, "/e": true}
 
-// isReloadPrompt reports whether reload-intercept takes prompt as a /reload.
-func isReloadPrompt(prompt string) bool {
+// isCommandPrompt reports whether command-intercept takes prompt as the
+// typed command: the command word alone or followed by a space.
+func isCommandPrompt(prompt, command string) bool {
 	trimmed := strings.TrimSpace(prompt)
-	return trimmed == "/reload" || strings.HasPrefix(trimmed, "/reload ")
+	return trimmed == command || strings.HasPrefix(trimmed, command+" ")
 }
 
 // isExitPrompt reports whether exit-intercept takes prompt as an exit word.
@@ -74,10 +75,10 @@ func isExitPrompt(prompt string) bool {
 	return exitWords[strings.TrimSpace(prompt)]
 }
 
-// interceptedPrompt reports whether reload-intercept or exit-intercept blocks
+// interceptedPrompt reports whether command-intercept or exit-intercept blocks
 // prompt — on success and on refusal alike — so it never starts a turn.
 func interceptedPrompt(prompt string) bool {
-	return isReloadPrompt(prompt) || isExitPrompt(prompt)
+	return isCommandPrompt(prompt, reloadCommand) || isCommandPrompt(prompt, spaceCommand) || isExitPrompt(prompt)
 }
 
 // interceptedSubmit reports whether a Claude prompt submission is one its

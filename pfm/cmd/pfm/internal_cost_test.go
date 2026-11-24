@@ -6,32 +6,40 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
-// fakeClaude records its pid, environment and open descriptors, then waits for a stop file, the
-// way a chat lives while its sink serves it.
+// fakeClaude records its pid, environment and open descriptors, then lives until the test closes
+// its stdin, the way a chat lives while its sink serves it: it reads to end of file and exits.
 const fakeClaude = `#!/bin/sh
 out="$1"
 echo $$ > "$out/pid"
 env > "$out/env"
 for f in /proc/$$/fd/*; do readlink "$f"; done > "$out/fds"
 : > "$out/ready"
-while [ ! -e "$out/stop" ]; do sleep 0.05; done
+while read -r _; do :; done
 `
 
 type costLaunch struct {
 	home, out string
 	cmd       *exec.Cmd
 	stderr    *bytes.Buffer
+	// release is the write end of fakeClaude's stdin: closing it ends the chat.
+	release *os.File
+	// exited closes once the chat is reaped, exitErr then holding its Wait error.
+	exited  chan struct{}
+	exitErr error
 }
 
 func (l *costLaunch) stop(t *testing.T) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(l.out, "stop"), nil, 0o600); err != nil {
+	if err := l.release.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.cmd.Wait(); err != nil {
-		t.Fatalf("launched chat exit: %v\n%s", err, l.stderr.String())
+	testwait.Receive(t, "the launched chat to exit once its stdin closed", l.exited)
+	if l.exitErr != nil {
+		t.Fatalf("launched chat exit: %v\n%s", l.exitErr, l.stderr.String())
 	}
 }
 

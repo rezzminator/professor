@@ -13,12 +13,13 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestInternalLaunchNoTTYCreatesListedSessionAndPropagatesExit(t *testing.T) {
@@ -48,13 +49,23 @@ func TestInternalLaunchNoTTYCreatesListedSessionAndPropagatesExit(t *testing.T) 
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "caller-config"))
 
 	ready := filepath.Join(root, "ready")
+	// The fixture blocks reading this FIFO until the test releases it; the test holds
+	// it open read-write, so a release written before the fixture opens it still waits there.
 	release := filepath.Join(root, "release")
+	if err := syscall.Mkfifo(release, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	releaseFIFO, err := os.OpenFile(release, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = releaseFIFO.Close() })
 	evidence := filepath.Join(root, "evidence")
 	transcript := filepath.Join(root, "claude", "project", "11111111-1111-4111-8111-111111111111.jsonl")
 	realBinary := filepath.Join(root, "bin", "claude")
 	writeExecutable(t, realBinary, `#!/bin/sh
 set -eu
-/bin/bash -c 'exec -a claude /bin/sleep 30' &
+/bin/bash -c '`+testwait.HoldAs("claude")+`' &
 claude_child=$!
 trap 'kill "$claude_child" 2>/dev/null || true; wait "$claude_child" 2>/dev/null || true' EXIT
 socket=$(basename "${TMUX%%,*}")
@@ -72,7 +83,7 @@ printf '%s' "$CC_LAUNCH_TRANSCRIPT" > "$PFM_SID_DIR/$socket"
   printf 'endpoint=%s\n' "${ANTHROPIC_BASE_URL-unset}"
 } > "$CC_LAUNCH_EVIDENCE"
 : > "$CC_LAUNCH_READY"
-while [ ! -e "$CC_LAUNCH_RELEASE" ]; do sleep 0.02; done
+read -r _ < "$CC_LAUNCH_RELEASE"
 exit 3
 `)
 	t.Setenv("CC_LAUNCH_READY", ready)
@@ -96,37 +107,27 @@ exit 3
 			return
 		default:
 		}
-		_ = os.WriteFile(release, []byte("cleanup\n"), 0o600)
+		_, _ = releaseFIFO.WriteString("cleanup\n")
 		kill := exec.Command("tmux", "-S", filepath.Join(tmuxDir, socket), "kill-server")
 		kill.Env = os.Environ()
 		_ = kill.Run()
-		select {
-		case <-finished:
-		case <-time.After(2 * time.Second):
-		}
+		testwait.Receive(t, "the launcher to return after cleanup", finished)
 	})
 	waitForPath(t, ready)
 
 	var listOut, listErr bytes.Buffer
-	liveDeadline := time.Now().Add(10 * time.Second)
-	for {
+	testwait.Until(t, "pfm ls --plain to observe the fake Claude as live", func() (bool, string) {
 		listOut.Reset()
 		listErr.Reset()
-		if code := runWithTestTimeout(t, 10*time.Second, "pfm ls --plain", func() int {
+		if code := runWithTestTimeout(t, "pfm ls --plain", func() int {
 			return run([]string{"ls", "--plain"}, &listOut, &listErr)
 		}); code != 0 {
 			t.Fatalf("pfm ls --plain code=%d stderr=%q", code, listErr.String())
 		}
-		if strings.Contains(listOut.String(), "● fixture") {
-			break
-		}
-		if time.Now().After(liveDeadline) {
-			t.Fatalf("pfm ls --plain did not observe the fake Claude as live before timeout:\n%s", listOut.String())
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return strings.Contains(listOut.String(), "● fixture"), listOut.String()
+	})
 	var tsvOut, tsvErr bytes.Buffer
-	if code := runWithTestTimeout(t, 10*time.Second, "pfm ls --tsv", func() int {
+	if code := runWithTestTimeout(t, "pfm ls --tsv", func() int {
 		return run([]string{"ls", "--tsv"}, &tsvOut, &tsvErr)
 	}); code != 0 {
 		t.Fatalf("pfm ls --tsv code=%d stderr=%q", code, tsvErr.String())
@@ -134,21 +135,16 @@ exit 3
 	if !strings.Contains(tsvOut.String(), "\t"+socket+"\n") {
 		t.Fatalf("live TSV omitted launch socket %q:\n%s", socket, tsvOut.String())
 	}
-	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+	if _, err := releaseFIFO.WriteString("release\n"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case code := <-done:
-		if code != 3 {
-			t.Fatalf(
-				"internal launch code=%d, want fake Claude status 3; stdout=%q stderr=%q",
-				code,
-				stdout.String(),
-				stderr.String(),
-			)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("internal launch did not return after its pane exited")
+	if code, _ := testwait.Receive(t, "internal launch to return after its pane exited", done); code != 3 {
+		t.Fatalf(
+			"internal launch code=%d, want fake Claude status 3; stdout=%q stderr=%q",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	if got, want := stdout.String(), "pfm launch: "+socket+" "+socket+"\n"; got != want {
 		t.Fatalf("stdout=%q, want one socket line %q", got, want)
@@ -195,27 +191,21 @@ exit 3
 
 func waitForPath(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return
+	testwait.Until(t, "the fixture to create "+path, func() (bool, string) {
+		_, err := os.Stat(path)
+		if err != nil {
+			return false, err.Error()
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", path)
+		return true, ""
+	})
 }
 
-func runWithTestTimeout(t *testing.T, timeout time.Duration, name string, run func() int) int {
+func runWithTestTimeout(t *testing.T, name string, run func() int) int {
 	t.Helper()
 	result := make(chan int, 1)
 	go func() { result <- run() }()
-	select {
-	case code := <-result:
-		return code
-	case <-time.After(timeout):
-		t.Fatalf("%s did not return within %s", name, timeout)
-		return -1
-	}
+	code, _ := testwait.Receive(t, name+" to return", result)
+	return code
 }
 
 // Jail: the subject is the launcher exec-ing a real child (a re-executed test binary runs it).

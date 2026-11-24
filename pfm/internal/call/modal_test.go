@@ -4,8 +4,6 @@ import (
 	"context"
 	"reflect"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 func TestDenyModalNativeOrderedKeys(t *testing.T) {
@@ -14,7 +12,7 @@ func TestDenyModalNativeOrderedKeys(t *testing.T) {
 			socket := newNativeSocket(t, func(nativeRequest) (any, string) { return map[string]any{"type": "ok"}, "" })
 			target := Target{Backend: HerdrBackend, SocketPath: socket.path, Pane: "w1:p2", Engine: "cc"}
 			seedNativeOwner(t, target)
-			if err := DenyModal(context.Background(), target, down, clock.Real); err != nil {
+			if err := DenyModal(context.Background(), target, down, newSteppingClock()); err != nil {
 				t.Fatal(err)
 			}
 			calls := socket.calls()

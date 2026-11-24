@@ -42,8 +42,13 @@ expect_eq 'unknown spend counts at its cap' "$(lab_ledger_sum "$ledger")" 0.25
 expect_eq 'no ledger sums to zero' "$(lab_ledger_sum "$T/none.tsv")" 0.00
 printf 'a\ts\tp\tr\td\tRUNNING\t?\t0.25\tt\t?\tx\na\ts\tp\tr\td\tPASS\t0.10\t0.25\tt\t1\tx\nb\ts\tp\tr\td\tRUNNING\t?\t0.25\tt\t?\tx\n' > "$ledger"
 expect_eq 'a final row stands in for its RUNNING row; an open RUNNING row counts at its cap' "$(lab_ledger_sum "$ledger")" 0.35
-mkdir "$ledger.lock"; (sleep 0.3; rmdir "$ledger.lock") &
-lab_ledger_lock "$ledger"; rc=$?; wait
+# the holder releases only once the waiter has found the lock held: a mkdir first on PATH logs each failed attempt
+holdbin=$T/holdbin; mkdir -p "$holdbin"
+printf '#!/usr/bin/env bash\n%q "$@"; rc=$?\n[[ $rc != 0 && ${1-} == %q ]] && echo held >> %q\nexit $rc\n' \
+  "$(command -v mkdir)" "$ledger.lock" "$T/lock.attempts" > "$holdbin/mkdir"
+chmod +x "$holdbin/mkdir"
+mkdir "$ledger.lock"; ( shtest_wait_until 'the ledger lock waiter found the lock held' test -s "$T/lock.attempts" && rmdir "$ledger.lock" ) &
+PATH=$holdbin:$PATH lab_ledger_lock "$ledger"; rc=$?; wait
 expect_eq 'a held ledger lock is waited for' "$rc $([[ -d $ledger.lock ]] && echo held)" '0 held'
 lab_ledger_unlock "$ledger"
 # the holder's rmdir lands between mkdir's EEXIST and the recheck: retried, never an error

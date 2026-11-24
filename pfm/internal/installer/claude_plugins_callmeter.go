@@ -90,7 +90,9 @@ func (installer *engine) ensureGoPluginBinary(ctx context.Context, target *Claud
 		"-o", built, "./cmd/" + target.Name,
 	}
 	options := deps.RunOptions{Dir: module, Env: callmeterBuildEnvironment()}
-	if err := runPluginCommandWithin(ctx, installer.processRunner(), argv, options, callmeterBuildTimeout); err != nil {
+	if err := runPluginCommandWithin(
+		ctx, installer.claudePluginTimer, installer.processRunner(), argv, options, callmeterBuildTimeout,
+	); err != nil {
 		return fmt.Errorf("build "+target.Name+" %s in %s: %w", version, module, err)
 	}
 	fresh, err := os.ReadFile(built)

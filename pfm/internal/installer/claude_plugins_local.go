@@ -437,12 +437,12 @@ func disableInstallOnly(document map[string]any, target *ClaudePluginTarget) boo
 // compares again before its rename, and its document; nil for both when the
 // file is absent.
 func readSettingsForEdit(path string) ([]byte, map[string]any, error) {
-	raw, err := os.ReadFile(path)
+	raw, _, err := atomicfile.ReadRegular(path) // never blocks on a FIFO
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, nil, err // names path
 	}
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {

@@ -13,10 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
@@ -273,7 +275,19 @@ func TestDoctorLedgerBoundsAProjectThatNeverAnswers(t *testing.T) {
 	openProjectDeadline = 2 * time.Second
 	t.Cleanup(func() { openProjectDeadline = previous })
 
-	rows := buildOpenProjectRows([]string{open, stuck}, stageRetiredLists(t, t.TempDir(), waveRetired))
+	fake := clock.NewFake(time.Now())
+	t.Cleanup(swapOpenProjectTimer(fake))
+	home := stageRetiredLists(t, t.TempDir(), waveRetired)
+	built := make(chan []string, 1)
+	go func() { built <- buildOpenProjectRows([]string{open, stuck}, home) }()
+	// The deadline fires only once the answering project's row is in: its
+	// worker has exited and the ledger is parked on the stuck one alone. A
+	// clock stepped while the answering worker still waits on git or a read
+	// would time out a project that answers.
+	testwait.Until(t, "the answering project's row to be in and the ledger parked on the stuck project",
+		ledgerParkedOnOneWorker)
+	fake.Advance(openProjectDeadline)
+	rows, _ := testwait.Receive(t, "the ledger to give up on the stuck project", built)
 	want := "doctor: warning project_updates root=" + open + " unresolved=2 — NEW project/commands/added.md · " +
 		"RETIRED-NAME scripts/legacy.sh×1 — close each with a pfm update verb: pfm doctor --project-updates --root " +
 		open + "\n"
@@ -314,11 +328,16 @@ func TestDoctorUpdateHealthSkipsOnlyTheHostLedger(t *testing.T) {
 
 type ledgerDeadlineRunner struct {
 	deps.Runner
+	entered   chan struct{}
 	cancelled chan error
 	release   chan struct{}
 }
 
 func (runner *ledgerDeadlineRunner) Run(ctx context.Context, _ []string, _ deps.RunOptions) (deps.RunResult, error) {
+	select {
+	case runner.entered <- struct{}{}:
+	default:
+	}
 	select {
 	case <-ctx.Done():
 		runner.cancelled <- ctx.Err()
@@ -330,22 +349,83 @@ func (runner *ledgerDeadlineRunner) Run(ctx context.Context, _ []string, _ deps.
 
 func TestDoctorLedgerCancelsGitWithItsDeadline(t *testing.T) {
 	root := scaffoldAdopter(t, newProjectUpdatesStore(t))
-	runner := &ledgerDeadlineRunner{cancelled: make(chan error, 1), release: make(chan struct{})}
+	runner := &ledgerDeadlineRunner{
+		entered: make(chan struct{}, 1), cancelled: make(chan error, 1), release: make(chan struct{}),
+	}
 	t.Cleanup(func() { close(runner.release) })
 	t.Cleanup(update.StubRunnerForTest(runner))
 	previous := openProjectDeadline
 	openProjectDeadline = 100 * time.Millisecond
 	t.Cleanup(func() { openProjectDeadline = previous })
-	rows := buildOpenProjectRows([]string{root}, stageRetiredLists(t, t.TempDir(), `{}`))
-	if len(rows) != 1 || !strings.Contains(rows[0], "UNREADABLE") {
-		t.Fatalf("ledger rows=%q, want an unreadable timed-out project", rows)
+	fake := clock.NewFake(time.Now())
+	t.Cleanup(swapOpenProjectTimer(fake))
+	home := stageRetiredLists(t, t.TempDir(), `{}`)
+	built := make(chan []string, 1)
+	go func() { built <- buildOpenProjectRows([]string{root}, home) }()
+	// The deadline fires once the ledger's git is running: fired earlier, the
+	// worker would skip the project and never reach git.
+	testwait.Receive(t, "the ledger to start the project's git", runner.entered)
+	fake.Advance(openProjectDeadline)
+	rows, _ := testwait.Receive(t, "the ledger to give up on the project whose git never answers", built)
+	want := "doctor: warning project_updates root=" + root + " UNREADABLE: report not built within 100ms\n"
+	if len(rows) != 1 || rows[0] != want {
+		t.Fatalf("ledger rows=%q, want [%q]", rows, want)
 	}
-	select {
-	case err := <-runner.cancelled:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("git cancellation=%v, want deadline exceeded", err)
+	err, _ := testwait.Receive(t, "the ledger git context to be cancelled with its deadline", runner.cancelled)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("git cancellation=%v, want deadline exceeded", err)
+	}
+}
+
+// ledgerParkedOnOneWorker is true once buildOpenProjectRows has started every
+// worker, the one worker left is parked reading the stuck project's baseline,
+// and the ledger is parked: the worker that left sent its row and the ledger
+// took it. A worker still short of the FIFO would miss the cleanup's release
+// and outlive the test. Its state names what each look saw.
+func ledgerParkedOnOneWorker() (bool, string) {
+	const (
+		ledger     = "/doctor.buildOpenProjectRows"
+		dispatcher = "/doctor.buildOpenProjectRows.func1"
+		worker     = "/doctor.buildOpenProjectRows.func1.1"
+		baseline   = "/professor.Load"
+	)
+	parked := func(g *testwait.Goroutine, function string) bool {
+		if g.Status == "running" || g.Status == "runnable" {
+			return false
 		}
-	case <-time.After(time.Second):
-		t.Fatal("ledger git context was not cancelled with its deadline")
+		for _, frame := range g.Frames {
+			if strings.HasSuffix(frame.Function, function) {
+				return true
+			}
+		}
+		return false
 	}
+	var dispatching int
+	var workers []string
+	ledgerParked, readingBaseline := false, false
+	goroutines := testwait.Goroutines(true)
+	for index := range goroutines {
+		g := &goroutines[index]
+		if len(g.Frames) == 0 {
+			continue
+		}
+		switch function := g.Frames[len(g.Frames)-1].Function; {
+		case strings.HasSuffix(function, worker):
+			workers = append(workers, g.Header)
+			readingBaseline = parked(g, baseline)
+		case strings.HasSuffix(function, dispatcher):
+			dispatching++
+		}
+		ledgerParked = ledgerParked || parked(g, ledger)
+	}
+	return dispatching == 0 && len(workers) == 1 && readingBaseline && ledgerParked,
+		fmt.Sprintf("dispatcher goroutines %d, workers %v (the last parked in %s: %t), ledger parked %t",
+			dispatching, workers, baseline, readingBaseline, ledgerParked)
+}
+
+// swapOpenProjectTimer puts the clock the ledger's deadline runs on and returns the restore.
+func swapOpenProjectTimer(c clock.Clock) func() {
+	previous := openProjectTimer
+	openProjectTimer = c
+	return func() { openProjectTimer = previous }
 }

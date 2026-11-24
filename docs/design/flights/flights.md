@@ -50,7 +50,7 @@ Flight merges over the prior 60 days averaged 1.42 Go test lines per code line, 
 
 | Member | Kind | Model · effort | Does |
 | --- | --- | --- | --- |
-| `flights:foreman-sonnet` | agent | sonnet · high | Foreman for a clear path: the pattern is in the code; the same protocol as `flights:foreman`, in its own file |
+| `flights:foreman-sonnet` | agent | sonnet · medium | Foreman for a clear path: the pattern is in the code; the same protocol as `flights:foreman`, in its own file |
 | `flights:foreman` | agent | opus · medium | Foreman for design choices, ambiguity, unfamiliar code, an unknown cause, several modules |
 | `flights:lander` | agent | opus · medium | Reviews, fixes and gates a worktree change, then returns it for the merge |
 | `flights:speccer` | agent | opus · xhigh | On-demand specification outside the build/land lifecycle; returns a `spec.md` path and token price to its caller |
@@ -74,7 +74,7 @@ flight abandoned without merge -> writers stopped -> main chat -> worktree.sh re
 ```
 
 1. **Settle.** The main chat settles open requirements with the user before any dispatch.
-2. **Place.** The main chat makes the worktree with the repo's `worktree.sh create` where it has one (gitter makes it on a refusal and in a repo without the script), or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree, cut by tier into the fewest foremen and built core first (`templates/global/rules/flights-life-cycle.md` rules 3–5). A flight builds software, program source and its tests; docs and framework files (prompts, rules, commands, agent definitions, config, scripts) are never a flight, whatever judgment they hold: the main chat edits them on the current branch with no worktree, foreman or lander (through the agent a guard reserves the files to, such as `pcm`, else by hand), and gitter commits on the passing check. Size counts the code edits alone, never the file count: code work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count, made by hand on the current branch with no worktree and no lander; code work with judgment left is a flight in `.worktrees/{flight}/` (`templates/global/rules/flights-life-cycle.md` rule 2). Related work joins the open flight's worktree, code or not, small or not; that is the only way non-code work enters a worktree.
+2. **Place.** The main chat makes the worktree with the repo's `worktree.sh create` where it has one (gitter makes it on a refusal and in a repo without the script), or names `develop` or the checkout, and passes the path in the brief. Several foremen may share one worktree, cut by tier into the fewest foremen and built core first (`plugins/flights/plugins/flights/rules/life-cycle.md` rules 3–5). A flight builds software, program source and its tests; docs and framework files (prompts, rules, commands, agent definitions, config, scripts) are never a flight, whatever judgment they hold: the main chat edits them on the current branch with no worktree, foreman or lander (through the agent a guard reserves the files to, such as `pcm`, else by hand), and gitter commits on the passing check. Size counts the code edits alone, never the file count: code work whose every edit is fixed in advance (a rename, a move, a known fix, a spec fixing every line), with no other agent writing its files, is small at any file count, made by hand on the current branch with no worktree and no lander; code work with judgment left is a flight in `.worktrees/{flight}/` (`plugins/flights/plugins/flights/rules/life-cycle.md` rule 2). Related work joins the open flight's worktree, code or not, small or not; that is the only way non-code work enters a worktree.
 3. **Build.** A foreman builds the request by its own hand.
    - **Reads:** what the build needs, in three rounds; see [reading](#reading-and-the-trace-store).
    - **Writes:** the tests and the change in one round, the new tests run on the unchanged code first, then one foreground run of the affected tests and static checks, then one probe script, then the whole unit suite of each project its files sit in, once, before the return.
@@ -118,7 +118,7 @@ In the build/land lifecycle:
   - a tracer run path, when one exists.
 - **A foreman's return:**
   - first line `DONE {name}` or `PARTIAL {name}: {what is left}`;
-  - the fixed block of 25 lines at most: `ACCEPTANCE`, `DECISIONS`, `CRITICAL`, `FILES`, `TESTS`, `PROBES`, `UNTESTED`, `OUTSIDE` ([flights-foreman.md](flights-foreman.md#the-return)).
+  - the fixed block of 25 lines at most: `ACCEPTANCE`, `DECISIONS`, `CRITICAL`, `FILES`, `TESTS`, `PROBES`, `UNTESTED`, `SKIPPED`, `RISK`, `OUTSIDE` ([flights-foreman.md](flights-foreman.md#the-return)).
 - **A lander's return:**
   - first line `PASS`, `FIXED` or `FAIL {worktree}`;
   - then each finding, fixed or listed;
@@ -160,7 +160,7 @@ The `auto-effort` plugin gives an agent whose frontmatter carries `effortControl
 
 | Agent | `effortControl` |
 | --- | --- |
-| `flights:foreman`, `flights:foreman-sonnet` | floor medium, ceiling xhigh; `flights:foreman` starts at medium, `flights:foreman-sonnet` at high |
+| `flights:foreman`, `flights:foreman-sonnet` | floor medium, ceiling xhigh; both start at medium |
 | `documenter` | `on` |
 
 `pcm` does not carry `effortControl`. `flights:lander` and its children carry no `effortControl` and no buttons. Every steered agent but the two foremen lists the three tools in its own `tools:` line under the `mcp__auto-effort__` prefix; the two foremen carry no effort buttons and a `tools:` line without them. The plugin steers a foreman: one step up at a failing test run, home at the next green ([flights-foreman.md](flights-foreman.md#effort)).

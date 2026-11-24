@@ -11,12 +11,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func serveHerdrDoctor(t *testing.T, result string) string {
@@ -209,6 +212,7 @@ func TestHerdrBackendDoctorDiscoveryErrors(t *testing.T) {
 }
 
 func TestHerdrBackendDoctorFollowsConfiguredBackend(t *testing.T) {
+	testwait.ProcessClock(t, clock.NewFake(time.Now()))
 	for _, scenario := range []struct {
 		name, backend, marker, pane, tmux string
 		source                            pfmconfig.Source

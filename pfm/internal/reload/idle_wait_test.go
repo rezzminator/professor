@@ -40,7 +40,7 @@ func (tmux *proseTokensTmux) screen(composer string) string {
 func TestRunDoesNotReadTranscriptProseAsARunningTurn(t *testing.T) {
 	tmux := &proseTokensTmux{}
 	var stderr strings.Builder
-	_, err := Run(
+	_, err := runOnFake(t,
 		context.Background(),
 		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-prose"),
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, IdleTries: 5},

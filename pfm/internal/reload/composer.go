@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // This file is reload's READER of the pane: every question the choreography
@@ -20,6 +21,19 @@ import (
 // that a BOOTING Codex TUI reached its idle composer and footer.)
 func composerDrawn(capture string) bool {
 	return lastReloadComposerLine(capture) != ""
+}
+
+// rebornComposerDrawn is composerDrawn for the chat a native reload has just
+// started, once its process is proven new: a Claude row counts only inside
+// Claude's own input box. When the fullscreen chat the reload ended leaves the
+// alternate screen, the pane shows the shell line that started its seat
+// ("❯ claude --resume <old id>", the line Herdr's restore types) until the
+// reborn Claude draws, and that line read as a composer holding a draft.
+func rebornComposerDrawn(engine pfmengine.ID, capture string) bool {
+	if engine == pfmengine.Claude {
+		return composerDrawn(capture) && pfmcall.ComposerBoxed(capture)
+	}
+	return composerDrawn(capture)
 }
 
 // reloadComposerEmpty also checks continuation rows in a bounded input box:

@@ -6,6 +6,7 @@ package restart
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestTheLaunchingChatsDeathDoesNotCutTheRestartShort plays the chat that
@@ -22,6 +24,10 @@ import (
 // does to a pane. The worker the front spawned must still finish.
 func TestTheLaunchingChatsDeathDoesNotCutTheRestartShort(t *testing.T) {
 	dir := t.TempDir()
+	goPipe := filepath.Join(dir, "go")
+	if err := syscall.Mkfifo(goPipe, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	front := exec.Command(os.Args[0], "-test.run=^$")
 	front.Env = append(os.Environ(), frontRoleEnv+"="+dir)
 	front.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -47,25 +53,44 @@ func TestTheLaunchingChatsDeathDoesNotCutTheRestartShort(t *testing.T) {
 	}
 	_ = syscall.Kill(-group, syscall.SIGKILL)
 	_ = front.Wait()
+	// Release the worker once it waits at the go pipe: the open for writing fails until a reader is there.
+	testwait.Until(t, fmt.Sprintf("worker pid %d to wait at its go pipe after the front's group died", worker),
+		func() (bool, string) {
+			release, err := os.OpenFile(goPipe, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+			if err != nil {
+				return false, err.Error()
+			}
+			_, writeErr := release.WriteString("\n")
+			return writeErr == nil && release.Close() == nil, fmt.Sprintf("write: %v", writeErr)
+		})
 	marker := filepath.Join(dir, "marker")
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		if body, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(body)) == "survived" {
-			break
+	finished := fmt.Sprintf("worker pid %d to finish after the front's group died", worker)
+	testwait.Until(t, finished, func() (bool, string) {
+		body, err := os.ReadFile(marker)
+		if err != nil {
+			return false, err.Error()
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("worker pid %d never finished after the front's group died", worker)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	body, err := os.ReadFile(filepath.Join(dir, "worker.log"))
+		return strings.TrimSpace(string(body)) == "survived", string(body)
+	})
+	// The worker writes its marker before its exit line: the log is read once that line has landed.
+	logPath := filepath.Join(dir, "worker.log")
+	testwait.Until(t, fmt.Sprintf("worker pid %d to write its exit line to %s", worker, logPath),
+		func() (bool, string) {
+			body, err := os.ReadFile(logPath)
+			if err != nil {
+				return false, err.Error()
+			}
+			return strings.Contains(string(body), ExitMarker) && strings.HasSuffix(string(body), "\n"), string(body)
+		})
+	body, err := os.ReadFile(logPath)
 	if err != nil || string(body) != "restart: exit 0\n" {
-		t.Fatalf("worker log = %q, %v", body, err)
+		t.Fatalf("worker log %s = %q, %v; want %q", logPath, body, err, "restart: exit 0\n")
 	}
 }
 
 func TestChildExitedTellsARunningChildFromAFinishedOne(t *testing.T) {
-	child := exec.Command("sleep", "30")
+	hold := testwait.HoldArgv()
+	child := exec.Command(hold[0], hold[1:]...)
 	if err := child.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -75,18 +100,11 @@ func TestChildExitedTellsARunningChildFromAFinishedOne(t *testing.T) {
 	if err := child.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	testwait.Until(t, "a killed child to read exited", func() (bool, string) {
 		exited, err := childExited(child.Process.Pid)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if exited {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("a killed child never read exited")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return exited, "still running"
+	})
 }

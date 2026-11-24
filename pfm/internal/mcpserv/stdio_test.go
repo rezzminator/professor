@@ -31,6 +31,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // newStdioTestService builds a Service with an isolated shared database and
@@ -71,11 +72,7 @@ func TestRunStdioReturnsOnCancelWhileInputStaysOpen(t *testing.T) {
 	go func() { returned <- professor.RunStdio(ctx, input, io.Discard, StdioOptions{Warnings: io.Discard}) }()
 
 	cancel()
-	select {
-	case <-returned:
-	case <-time.After(5 * time.Second):
-		t.Fatal("RunStdio did not return after its context ended while input stayed open")
-	}
+	_, _ = testwait.Receive(t, "RunStdio to return after its context ended while input stayed open", returned)
 }
 
 func stdioTestConfigurePort(t *testing.T, port int) {
@@ -184,15 +181,12 @@ func stdioTestRunInspect(t *testing.T, service *Service, address string, inspect
 		t.Errorf("close stdio test session: %v", err)
 	}
 	cancel()
-	select {
-	case <-returned:
-	case <-time.After(2 * time.Second):
-		t.Fatal("RunStdio did not return after test client closed")
-	}
+	_, _ = testwait.Receive(t, "RunStdio to return after the test client closed", returned)
 	return output
 }
 
 func TestRunStdioFallsBackWhenDaemonRuntimeDiffers(t *testing.T) {
+	probeClock(t)
 	var routeRequests atomic.Int32
 	daemon := proxyTestDaemon(stdioTestService("daemon", io.Discard))
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -235,6 +229,7 @@ func TestRunStdioFallsBackWhenDaemonRuntimeDiffers(t *testing.T) {
 }
 
 func TestRunStdioReturnsMarkerOpenFailureWithoutLocalFallback(t *testing.T) {
+	probeClock(t)
 	var daemonWarnings bytes.Buffer
 	daemon := stdioTestService("daemon", &daemonWarnings)
 	server := httptest.NewServer(proxyTestDaemon(daemon))
@@ -269,6 +264,7 @@ func assertNoProxyMarker(t *testing.T, service *Service) {
 }
 
 func TestRunStdioUsesSelectedDaemonAddress(t *testing.T) {
+	probeClock(t)
 	var ambientWarnings, selectedWarnings bytes.Buffer
 	ambient := httptest.NewServer(proxyTestDaemon(stdioTestService("ambient", &ambientWarnings)))
 	defer ambient.Close()
@@ -284,6 +280,7 @@ func TestRunStdioUsesSelectedDaemonAddress(t *testing.T) {
 }
 
 func TestRunStdioFallsBackWhenChatRouteIsNotMounted(t *testing.T) {
+	probeClock(t)
 	daemon := proxyTestDaemon(stdioTestService("unmounted-route", io.Discard))
 	var routeRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -338,6 +335,7 @@ func TestRunStdioFallsBackWhenDaemonAddressIsMissing(t *testing.T) {
 }
 
 func TestRunStdioNamesAbsentDaemonFallback(t *testing.T) {
+	probeClock(t)
 	probe := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	port := stdioTestPort(t, probe)
 	probe.Close()
@@ -362,7 +360,7 @@ func TestRunStdioNamesAbsentDaemonFallback(t *testing.T) {
 }
 
 func TestRunStdioNamesUnresponsiveDaemonFallback(t *testing.T) {
-	shortenDaemonProbeTimeout(t)
+	fake := probeClock(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -378,6 +376,18 @@ func TestRunStdioNamesUnresponsiveDaemonFallback(t *testing.T) {
 	var warnings bytes.Buffer
 	local := stdioTestService("local", &warnings)
 	address := listener.Addr().String()
+	// The start's probe is the only wait on the process clock before the
+	// fallback: once its deadline is armed, firing it is the unresponsive daemon.
+	go func() {
+		if err := testwait.UntilErr("the start's daemon probe to arm its deadline", func() (bool, string) {
+			step, due := fake.NextDue()
+			return due && step == daemonProbeTimeout, fake.String()
+		}); err != nil {
+			t.Error(err)
+			return
+		}
+		fake.Advance(daemonProbeTimeout)
+	}()
 	if marker := stdioTestRun(t, local, address).Message; marker != "local" {
 		t.Fatalf("unresponsive daemon marker = %q, want in-process local marker", marker)
 	}
@@ -394,7 +404,6 @@ func TestRunStdioNamesUnresponsiveDaemonFallback(t *testing.T) {
 }
 
 func TestSendWithRetryRetriesUnresponsiveReplayProbe(t *testing.T) {
-	shortenDaemonProbeTimeout(t)
 	_, recorder := obs.Test(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -407,6 +416,7 @@ func TestSendWithRetryRetriesUnresponsiveReplayProbe(t *testing.T) {
 	})
 	address := listener.Addr().String()
 	posts := 0
+	fakeClock := clock.NewFake(time.Unix(0, 0))
 	proxy := &stdioProxy{
 		address:  address,
 		endpoint: "http://" + address + pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat),
@@ -415,16 +425,22 @@ func TestSendWithRetryRetriesUnresponsiveReplayProbe(t *testing.T) {
 			posts++
 			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 		})},
-		clock:                   clock.Real,
-		retryWindow:             250 * time.Millisecond,
-		retryDelay:              5 * time.Millisecond,
+		clock:                   fakeClock,
+		retryWindow:             proxyRetryWindow,
+		retryDelay:              proxyRetryDelay,
 		expectedRuntimeIdentity: "opaque",
 	}
-	_, err = proxy.sendWithRetry(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`), true)
+	testwait.Drive(t, "the retry loop to run out its window", fakeClock, func() {
+		_, err = proxy.sendWithRetry(
+			context.Background(),
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`),
+			true,
+		)
+	})
 	if !errors.Is(err, ErrDaemonUnresponsive) || errors.Is(err, ErrDaemonAbsent) {
 		t.Fatalf("replay probe error = %v, want wrapped unresponsive timeout", err)
 	}
-	want := "pfm MCP daemon " + address + " held its port without answering pfm's status probe for 250ms; stop the process listening there ("
+	want := "pfm MCP daemon " + address + " held its port without answering pfm's status probe for 45s; stop the process listening there ("
 	if !strings.HasPrefix(err.Error(), want) ||
 		!strings.Contains(err.Error(), "lsof -iTCP@"+address+" -sTCP:LISTEN") ||
 		strings.Contains(err.Error(), "pfm mcp serve") {
@@ -445,6 +461,7 @@ func TestSendWithRetryRetriesUnresponsiveReplayProbe(t *testing.T) {
 }
 
 func TestRunStdioNamesForeignDaemonFallbackDifferently(t *testing.T) {
+	probeClock(t)
 	foreign := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		http.Error(writer, "foreign", http.StatusTeapot)
 	}))
@@ -493,11 +510,7 @@ func stdioTestSession(t *testing.T, professor *FamilyServers, options StdioOptio
 			t.Errorf("close stdio test session: %v", err)
 		}
 		cancel()
-		select {
-		case <-returned:
-		case <-time.After(2 * time.Second):
-			t.Error("RunStdio did not return after test client closed")
-		}
+		_, _ = testwait.Receive(t, "RunStdio to return after the test client closed", returned)
 	})
 	return session
 }
@@ -518,6 +531,7 @@ func (stdioTestProcessTree) Environ(int) (map[string]string, error) { return map
 // the pfmProxy identity the forwarder adds, and skips the Claude crumb refresh
 // (whose relative breadcrumb directory here would warn).
 func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
+	probeClock(t)
 	previous := proxyWhoami
 	proxyWhoami = resolve.WhoamiDependencies{
 		Environment: &resolve.WhoamiEnvironment{
@@ -584,7 +598,23 @@ func TestRunStdioForwardsCodexCallerMetadataToProfessor(t *testing.T) {
 	}
 }
 
+// stdioAdmissionClock is a fake for a stdio session forwarding through the proxy: a request the client
+// sends on its last answer can still find that one registered, so the proxy opens the request's
+// admission window (registerRequest); the window passes at once, as it does on the real clock, and
+// every other wait stays on the fake until a test moves it.
+type stdioAdmissionClock struct{ *clock.Fake }
+
+func (c stdioAdmissionClock) NewTimer(delay time.Duration) clock.Timer {
+	timer := c.Fake.NewTimer(delay)
+	if delay == proxyRequestAdmissionWindow {
+		c.Advance(delay)
+	}
+	return timer
+}
+
 func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
+	previous := testwait.SwapProcessClock(stdioAdmissionClock{clock.NewFake(time.Unix(0, 0))})
+	t.Cleanup(func() { testwait.SwapProcessClock(previous) })
 	chatFailed := FailedFamily{
 		Family: pfmconfig.MCPServerChat, Tools: ToolNames(),
 		Err: errors.New("chat config broken"), ConfigPath: "/pfm/config.json",
@@ -698,6 +728,7 @@ func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
 }
 
 func TestRunStdioFallsBackWhenDaemonLacksSelectedFamilyRoute(t *testing.T) {
+	probeClock(t)
 	for _, family := range []string{pfmconfig.MCPServerChat} {
 		t.Run(family, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -745,6 +776,7 @@ func TestRunStdioFallsBackWhenDaemonLacksSelectedFamilyRoute(t *testing.T) {
 // a tools/call carries the caller identity the forwarder would have added, so a chat that calls
 // `new` from its own pane is placed beside itself rather than as a caller outside any chat.
 func TestRunStdioAttachesCallerIdentityInProcess(t *testing.T) {
+	probeClock(t)
 	previous := proxyWhoami
 	proxyWhoami = resolve.WhoamiDependencies{
 		Environment: &resolve.WhoamiEnvironment{

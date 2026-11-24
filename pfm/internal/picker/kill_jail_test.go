@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -73,7 +74,7 @@ func startJailServer(t *testing.T, tmuxDir, socket string) {
 	command := exec.Command(
 		"tmux", "-f", "/dev/null",
 		"-S", filepath.Join(tmuxDir, socket),
-		"new-session", "-d", "-s", "chat", "sleep 120",
+		"new-session", "-d", "-s", "chat", testwait.Hold,
 	)
 	command.Env = append(os.Environ(), "TMUX=")
 	if output, err := command.CombinedOutput(); err != nil {
@@ -196,7 +197,14 @@ func TestEndingALiveChatEndsOnlyItsOwnServer(t *testing.T) {
 			wantPanes := "%0\n"
 			if test.shared {
 				split := exec.Command(
-					"tmux", "-S", filepath.Join(tmuxDir, test.socket), "split-window", "-d", "-t", "%0", "sleep 120",
+					"tmux",
+					"-S",
+					filepath.Join(tmuxDir, test.socket),
+					"split-window",
+					"-d",
+					"-t",
+					"%0",
+					testwait.Hold,
 				)
 				split.Env = append(os.Environ(), "TMUX=")
 				if output, err := split.CombinedOutput(); err != nil {

@@ -208,7 +208,7 @@ func (state *openCodeServerState) message(writer http.ResponseWriter, request *h
 		return
 	}
 	reply, busyMS, usage := running.turnReply(step)
-	if !sleepOrCancel(request.Context(), time.Duration(busyMS)*time.Millisecond) {
+	if !state.proc.wait(request.Context(), time.Duration(busyMS)*time.Millisecond) {
 		http.Error(writer, "opencode message cancelled", http.StatusInternalServerError)
 		return
 	}
@@ -309,7 +309,8 @@ func openCodeAttach(proc *process, call openCodeInvocation) int {
 		warn(proc.stderr, "invalid opencode attach address %q", call.attach)
 		return ExitUsage
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	// No timeout of its own: the server answers once its turn ends, and the test's wait is the hang guard.
+	client := &http.Client{}
 	send := func(path string, payload any) ([]byte, int, error) {
 		body, err := json.Marshal(payload)
 		if err != nil {

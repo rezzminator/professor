@@ -6,10 +6,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // TestExecRunsThroughTheContextsRunner: under WithClientRunner a call is the
@@ -60,10 +60,15 @@ func TestExecRunsThroughTheContextsRunner(t *testing.T) {
 // TestExecEndsAHandledHangAtItsDeadline: a handler that waits on the context
 // — a stopped server — makes Run return at the call's deadline, TimedOut.
 func TestExecEndsAHandledHangAtItsDeadline(t *testing.T) {
-	ctx, cancel := context.WithTimeout(WithClientRunner(context.Background(), hangingTmux()), 20*time.Millisecond)
-	defer cancel()
-	command := Exec(ctx, "", "/tmp/s/sock", "list-panes", "-a")
-	if err := command.Run(); !errors.Is(err, context.DeadlineExceeded) || !command.TimedOut() {
+	hanging := hangingTmux()
+	deadline, expire := testwait.Deadline(t)
+	command := Exec(WithClientRunner(deadline, hanging), "", "/tmp/s/sock", "list-panes", "-a")
+	ran := make(chan error, 1)
+	go func() { ran <- command.Run() }()
+	reached(t, hanging)
+	expire()
+	err, _ := testwait.Receive(t, "the hung call to end at its deadline", ran)
+	if !errors.Is(err, context.DeadlineExceeded) || !command.TimedOut() {
 		t.Fatalf("Run() = %v (TimedOut %v), want context.DeadlineExceeded and TimedOut", err, command.TimedOut())
 	}
 }

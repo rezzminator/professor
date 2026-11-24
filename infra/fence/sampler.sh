@@ -271,9 +271,11 @@ sampler_run() {
   sampler_emit "$header" || return 1
   while :; do
     sampler_row || return 1
-    ((SAMPLER_STOP)) && return 0
     sampler_wait
     if ((!SAMPLER_STOP)) && [[ -n $SAMPLER_PARENT ]] && ! sampler_parent_alive; then SAMPLER_STOP=1; fi
+    # The final row is taken here, after the stop is seen: a stop read once right after a row is
+    # missed when the signal lands between that row's write and the read, and no final row follows.
+    if ((SAMPLER_STOP)); then sampler_row || return 1; return 0; fi
   done
 }
 

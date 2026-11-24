@@ -30,19 +30,18 @@ const rolloutColumns = `
 id, path, size, mtime_ns, parsed_offset, cwd, user_thread, session_id,
 parent_thread, lineage_root, first_prompt, prompt_count, is_bg`
 
-// transcriptLabelSQL is naming.DisplayName's precedence in SQL, and
-// labelKilledSQL is naming.LabelKilled over it. Both are built from the
-// naming constants rather than spelled out, so the cached frame cannot drift
-// from compose's applyKill when the prefix changes. upper() is ASCII-only in
-// SQLite, which is exactly the case-folding LabelKilled does.
+// transcriptLabelSQL is naming.DisplayName's precedence in SQL; labelKilledSQL is
+// naming.LabelKilled over it, a parenthesized OR of one test per naming.KillPrefixes
+// entry, so it never drifts from compose's applyKill. upper() folds ASCII, as LabelKilled does.
 const transcriptLabelSQL = `COALESCE(NULLIF(t.custom_title,''), NULLIF(t.ai_title,''), t.first_prompt)`
 
-var labelKilledSQL = fmt.Sprintf(
-	`upper(substr(%s, 1, %d))=%s`,
-	transcriptLabelSQL,
-	len(naming.KillPrefix),
-	"'"+strings.ToUpper(naming.KillPrefix)+"'",
-)
+var labelKilledSQL = func() (sql string) {
+	for _, prefix := range naming.KillPrefixes() {
+		folded := strings.ToUpper(prefix)
+		sql += fmt.Sprintf(` OR upper(substr(%s, 1, %d))='%s'`, transcriptLabelSQL, len(folded), folded)
+	}
+	return "(" + strings.TrimPrefix(sql, " OR ") + ")"
+}()
 
 type rowScanner interface {
 	Scan(...any) error

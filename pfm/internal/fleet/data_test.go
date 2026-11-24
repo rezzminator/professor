@@ -90,6 +90,24 @@ func TestCappedLoadListsTheResumableChatsOfAFullLoad(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Two label-killed chats, the newest of all: one under the legacy "_HIDE"
+	// prefix, one under "_KILL" lowercased. Both are hidden in both frames,
+	// never a resumable candidate nor an eligible chat past the cap.
+	for index, title := range []string{"_HIDE worker 1", "_kill worker 2"} {
+		uuid := fmt.Sprintf("cc-%02d", 34+index)
+		if err := database.UpsertTranscript(ctx, store.Transcript{
+			UUID:        uuid,
+			Path:        "/jail/claude/" + uuid + ".jsonl",
+			Size:        100,
+			PromptCount: 1,
+			MTimeNS:     int64(35 + index),
+			ActivityNS:  int64(35 + index),
+			CWD:         cwd,
+			CustomTitle: title,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for index := range 19 {
 		if err := database.UpsertRollout(ctx, store.Rollout{
 			ID:          fmt.Sprintf("cx-%02d", index),
@@ -177,9 +195,9 @@ func TestCappedLoadListsTheResumableChatsOfAFullLoad(t *testing.T) {
 			if !reflect.DeepEqual(codex, wantCodex) {
 				t.Errorf("resumable Codex chats =\n%v\nwant\n%v", codex, wantCodex)
 			}
-			if output.KilledCount != 0 || output.SuppressedCount != 5 {
+			if output.KilledCount != 2 || output.SuppressedCount != 5 {
 				t.Errorf(
-					"killed, suppressed = %d, %d, want 0, 5 (cc-00, cc-01, cx-00, cx-01 past the caps, oc-empty)",
+					"killed, suppressed = %d, %d, want 2, 5 (cc-34 _HIDE, cc-35 _kill; cc-00, cc-01, cx-00, cx-01 past the caps, oc-empty)",
 					output.KilledCount,
 					output.SuppressedCount,
 				)

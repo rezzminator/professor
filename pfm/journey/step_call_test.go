@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/journey/harness"
 )
@@ -156,6 +157,26 @@ func mcpStep(tool string, input map[string]any) map[string]any {
 
 // shellQuote is text as one single-quoted shell word.
 func shellQuote(text string) string { return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'" }
+
+// composerTail is how many of a draft's last bytes composerEnds matches.
+const composerTail = 128
+
+// composerEnds reports whether the fake Claude's composer on a Herdr screen ends with typed: the pane's
+// rows, each cut of the scrollbar Herdr draws on its right edge (track `▕`, thumb `▐`) once the pane
+// scrolls, joined, spaces dropped (a wrapped row's trailing blank is trimmed from the screen), hold
+// typed's last composerTail bytes right before the rule under the composer. It is TypeDrawn's condition
+// for a draft typed into a chat.
+func composerEnds(typed, screen string) bool {
+	start := max(0, len(typed)-composerTail)
+	for start > 0 && !utf8.RuneStart(typed[start]) {
+		start++
+	}
+	var pane strings.Builder
+	for _, line := range strings.Split(screen, "\n") {
+		pane.WriteString(strings.TrimRight(paneText(line), " ▕▐"))
+	}
+	return strings.Contains(strings.ReplaceAll(pane.String(), " ", ""), strings.ReplaceAll(typed[start:], " ", "")+"─")
+}
 
 // composerLine is the fake Claude's composer line on a Herdr screen: the pane's text after `❯`.
 func composerLine(screen string) string {

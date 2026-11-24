@@ -51,6 +51,7 @@ const TIER1 = [
           "update",
           "updatecheck",
           "installer",
+          "loginshell",
           "enginesync",
           "globallink",
           "codexappendix",

@@ -141,7 +141,14 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		return Launch{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
 	}
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
-	result.Env = append(result.Env, shellEnvThrough(paths.OSEnv{}.Lookup, request.Runner)...)
+	// A persona's env is the base the shell and PATH assignments build on: its value is read first.
+	launchEnv := func(name string) (string, bool) {
+		if value, ok := request.Envs[name]; ok {
+			return value, true
+		}
+		return paths.OSEnv{}.Lookup(name)
+	}
+	result.Env = append(result.Env, shellEnvThrough(launchEnv, request.Runner)...)
 	costLedgerPlan(request, prefs.CostLedger, &result)
 	result.Argv = append(result.Argv, SessionArgs(request.SessionID, request.Resume, request.Fork)...)
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {

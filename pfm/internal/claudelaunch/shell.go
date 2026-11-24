@@ -80,27 +80,31 @@ func shellProblem(value string) string {
 	return ""
 }
 
-// ShellEnv is the CLAUDE_CODE_SHELL assignment a Claude launch adds to the
-// environment lookup reads, so the Bash tool of the chat and, through
+// ShellEnv is the CLAUDE_CODE_SHELL and PATH assignments a Claude launch adds
+// to the environment lookup reads: the shell so the Bash tool of the chat and, through
 // inheritance, of its sub-agents runs under bash rather than the user's login
 // shell: zsh does not word-split an unquoted $VAR the way the bash idioms
 // agents write expect. A usable inherited value yields no assignment and is
 // kept; every refused value and a missing bash is warned to the activity log
-// and shown by `pfm config claude`, and never fails the launch.
+// and shown by `pfm config claude`, and never fails the launch. The PATH is
+// the launch's own with the login shell's missing entries appended
+// (pathEnvThrough), since that bash reads no startup file.
 func ShellEnv(lookup func(string) (string, bool)) []string {
 	return shellEnvThrough(lookup, nil)
 }
 
-// shellEnvThrough is ShellEnv resolving bash through runner; nil is the real one.
+// shellEnvThrough is ShellEnv resolving bash and running the login shell
+// through runner; nil is the real one.
 func shellEnvThrough(lookup func(string) (string, bool), runner deps.Runner) []string {
 	resolved := resolveShell(lookup, runner)
 	for _, problem := range resolved.problems {
 		obs.Logger(context.Background()).Warn("claudelaunch: launch shell", obs.FieldErr, problem)
 	}
+	path := pathEnvThrough(lookup, runner)
 	if resolved.path == "" || resolved.preset {
-		return nil
+		return path
 	}
-	return []string{envShell + "=" + resolved.path}
+	return append([]string{envShell + "=" + resolved.path}, path...)
 }
 
 // shellValue is the `pfm config` view of the shell knob: the shell a launch

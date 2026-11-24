@@ -43,6 +43,7 @@ func unsetShell(t *testing.T) {
 
 func renderShellEnv(t *testing.T, runner deps.Runner) []string {
 	t.Helper()
+	pinLoginPATH(t)
 	home, machine := renderMachine(t)
 	launch, err := Render(Request{Purpose: PurposeInteractive, Home: home, Runner: runner}, machine)
 	if err != nil {
@@ -119,4 +120,59 @@ func recordMessages(records []obs.Record) string {
 		messages = append(messages, record.Message)
 	}
 	return strings.Join(messages, " ")
+}
+
+// A persona's env is the base of the launch's shell and PATH: its PATH is the
+// one the login entries append to, a usable CLAUDE_CODE_SHELL of its own stays.
+func TestRenderPersonaEnvIsTheMergeBase(t *testing.T) {
+	const loginShell = "/login/bin/zsh"
+	personaBash := filepath.Join(t.TempDir(), "bash")
+	if err := testjail.WriteExecutableNeverRun(personaBash, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write persona shell: %v", err)
+	}
+	for _, test := range []struct {
+		name string
+		envs map[string]string
+		want []string
+	}{
+		{
+			name: "persona PATH is the base",
+			envs: map[string]string{"PATH": "/persona/bin"},
+			want: []string{"PATH=/persona/bin:/opt/mise/shims", "CLAUDE_CODE_SHELL=/scripted/bin/bash"},
+		},
+		{
+			name: "persona shell is kept",
+			envs: map[string]string{"CLAUDE_CODE_SHELL": personaBash},
+			want: []string{"CLAUDE_CODE_SHELL=" + personaBash, "PATH=/pfm/own/bin:/persona/bin:/opt/mise/shims"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			unsetShell(t)
+			resetLoginPATH(t)
+			t.Setenv("SHELL", loginShell)
+			t.Setenv("PATH", "/pfm/own/bin")
+			loginPATHCache.Lock()
+			loginPATHCache.byShell[loginShell] = loginPATHResult{entries: []string{"/persona/bin", "/opt/mise/shims"}}
+			loginPATHCache.Unlock()
+			home, machine := renderMachine(t)
+			launch, err := Render(Request{
+				Purpose: PurposeInteractive, Home: home, Envs: test.envs, Runner: bashRunner("/scripted/bin/bash"),
+			}, machine)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			got := []string{}
+			for _, entry := range launch.Env {
+				if strings.HasPrefix(entry, "PATH=") || strings.HasPrefix(entry, "CLAUDE_CODE_SHELL=") {
+					got = append(got, entry)
+				}
+			}
+			slices.Sort(got)
+			want := slices.Clone(test.want)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Fatalf("PATH and shell env = %q, want %q", got, want)
+			}
+		})
+	}
 }

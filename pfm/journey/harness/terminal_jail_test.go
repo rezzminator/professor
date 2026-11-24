@@ -64,6 +64,39 @@ func TestTerminalShowsWhatTheOwnerSees(t *testing.T) {
 	}
 }
 
+func TestTypeDrawnSendsEachPieceOnceTheLastIsDrawn(t *testing.T) {
+	dir := t.TempDir()
+	file := dir + "/typed"
+	// 255 bytes, then a two-byte rune across byte 256, so the first piece ends before it.
+	text := "echo " + strings.Repeat("a", 250) + strings.Repeat("é", 200) + "\r"
+	var asked []int
+	Run(t, Do("root", func(c *Ctx, in int) int {
+		term := c.Terminal("sh")
+		term.WaitFor("READY$")
+		// The quotes keep the echoed command line from reading as the markers its run prints.
+		term.Type(fmt.Sprintf(
+			"stty raw -echo; echo dd-read''y; dd bs=1 count=%d of=%s 2>/dev/null; stty sane; echo dd-don''e\r",
+			len(text),
+			file,
+		))
+		term.WaitFor("dd-ready")
+		term.TypeDrawn(text, func(typed, _ string) bool {
+			if len(asked) == 0 || asked[len(asked)-1] != len(typed) {
+				asked = append(asked, len(typed))
+			}
+			info, err := os.Stat(file)
+			return err == nil && info.Size() == int64(len(typed))
+		})
+		term.WaitFor("dd-done")
+		return in
+	}), 0, bashHooks(t))
+	got, err := os.ReadFile(file)
+	if err != nil || string(got) != text || fmt.Sprint(asked) != "[255 511]" {
+		t.Fatalf("%s holds %q (err %v) after waits on %v typed bytes; want %q after waits on [255 511]",
+			file, got, err, asked, text)
+	}
+}
+
 func TestChildrenShareTheirParentsTerminal(t *testing.T) {
 	pids := map[string]int{}
 	Run(t, Do("root", func(c *Ctx, in int) int {

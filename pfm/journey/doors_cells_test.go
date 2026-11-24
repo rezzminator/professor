@@ -57,7 +57,7 @@ func aloneDoors(c *harness.Ctx, term *harness.Terminal, s *State) {
 	// branches' too, so only their being counted is read.
 	selfListed := func(state string) func(answer) string {
 		return jsonIs(0, "", map[string]any{
-			"count": 1, "elsewhere": idleSeconds, "killed_count": idleSeconds, "matched": 1, "scope": s.Project,
+			"count": 1, "elsewhere": fleetCount, "killed_count": idleSeconds, "matched": 1, "scope": s.Project,
 			"rows": []any{map[string]any{
 				"account": 1, "backend": "herdr", "dir": s.Project, "engine": "cc", "herdr": "native",
 				"herdr_workspace": strings.Split(pane, ":")[0], "id": id, "kind": "live-claude", "name": name,

@@ -1,7 +1,7 @@
-package installer
+package loginshell
 
 import "testing"
 
 func TestLookupLoginShellDarwin(t *testing.T) {
-	checkDarwinLoginShellCases(t, lookupLoginShell)
+	checkDarwinLoginShellCases(t, Lookup)
 }

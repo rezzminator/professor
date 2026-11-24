@@ -1,4 +1,4 @@
-package installer
+package loginshell
 
 import (
 	"context"
@@ -11,7 +11,11 @@ import (
 )
 
 func TestLookupDarwinLoginShell(t *testing.T) {
-	checkDarwinLoginShellCases(t, lookupDarwinLoginShell)
+	checkDarwinLoginShellCases(t, lookupDarwin)
+}
+
+func TestScriptDarwinAnswersLookupDarwin(t *testing.T) {
+	checkScriptedAccount(t, scriptDarwin, lookupDarwin)
 }
 
 func checkDarwinLoginShellCases(t *testing.T, lookup func(context.Context, deps.Runner, int) (string, error)) {

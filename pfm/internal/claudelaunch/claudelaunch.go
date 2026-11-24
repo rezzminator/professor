@@ -14,6 +14,7 @@
 //   - hooks.go is the hook templates a launch registers; mcpfile.go writes the MCP config file.
 //   - configdir.go inspects an account's config dir and the login default's sentinel.
 //   - cost.go arms the cost ledger's OpenTelemetry exporters.
-//   - fullscreen.go, theme.go and shell.go decide the fullscreen, theme pin and launch shell.
+//   - fullscreen.go, theme.go and shell.go decide the fullscreen, theme pin and launch shell; login_path.go
+//     appends the login shell's PATH entries a launch lacks.
 //   - session_env.go is a session's plugin values and shell; probe.go isolates the doctor's capture.
 package claudelaunch

@@ -96,7 +96,7 @@ func callAcross(c *harness.Ctx, s State) State {
 		return strings.Contains(screen, "⏺ "+s.Mesh.Mark)
 	})
 	parentBefore := entries(c, s.Name)
-	term.Type(callAsk + "\r")
+	term.TypeDrawn(callAsk+"\r", composerEnds)
 	term.WaitFor("⏺ " + called)
 	receipt := mcpReceipt(c, s.Name, s.Chat.Session)
 	if want := fmt.Sprintf(

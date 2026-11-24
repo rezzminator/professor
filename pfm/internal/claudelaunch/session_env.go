@@ -55,7 +55,7 @@ func RunEnvironment(environ []string, launch Launch) []string {
 var sessionEnvNames = []string{envFunctionHooks, envAutoCompactWindow, envAnthropicSmallFastModel}
 
 // SessionEnv returns the plugin values, each its effective value under claude (the claude.settings
-// laid over the shipped defaults, EffectiveSettings), and the launch shell (ShellEnv) for a
+// laid over the shipped defaults, EffectiveSettings), and the launch shell and PATH (ShellEnv) for a
 // passthrough Claude session. A variable claude sets to null is left out.
 func SessionEnv(claude map[string]any) []string {
 	env := EffectiveEnv(claude)

@@ -15,7 +15,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
-	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/loginshell"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/themesync"
 )
@@ -189,7 +189,7 @@ func (installer *engine) wireHerdrShell(uninstall bool) (result error) {
 func (installer *engine) herdrRealShell(wrapper string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	shell, err := lookupLoginShell(ctx, installer.processRunner(), os.Getuid())
+	shell, err := loginshell.Lookup(ctx, installer.processRunner(), os.Getuid())
 	if err == nil {
 		err = validateHerdrShell(shell, wrapper)
 	}
@@ -230,17 +230,6 @@ func validateHerdrShell(shell, wrapper string) error {
 		return fmt.Errorf("inspect Herdr wrapper %q: %w", wrapper, statErr)
 	}
 	return nil
-}
-
-func loginShellOutput(ctx context.Context, runner deps.Runner, argv ...string) (string, error) {
-	result, err := runner.Run(ctx, argv, deps.RunOptions{})
-	if err != nil {
-		return "", fmt.Errorf("lookup login shell via %q: %w; stderr: %s", argv, err, result.Stderr)
-	}
-	if result.ExitCode != 0 {
-		return "", fmt.Errorf("lookup login shell via %q: exit %d; stderr: %s", argv, result.ExitCode, result.Stderr)
-	}
-	return strings.TrimSpace(string(result.Stdout)), nil
 }
 
 func (installer *engine) writeHerdrConfig(path string, original, updated []byte, existed bool) error {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 
@@ -53,6 +54,33 @@ func (t *Terminal) Type(text string) {
 	t.c.t.Helper()
 	if _, err := t.s.master.WriteString(text); err != nil {
 		t.c.Failf("type into terminal %s: %v", t.s.name, err)
+	}
+}
+
+// typedPiece is the most bytes TypeDrawn sends before the receiver has drawn what came before it: Herdr
+// forwards each typed key to its pane as one entry of a 1024-entry queue and drops every key that finds it
+// full, so a longer burst typed while the pane's writer lags loses keys mid-text.
+const typedPiece = 256
+
+// TypeDrawn sends text as typed, in pieces of at most typedPiece bytes cut on rune boundaries; before each
+// piece after the first it waits on the wait door until drawn holds for the text sent so far and the
+// screen, so one piece at most is ever on its way. Nothing is awaited after the last piece: a text ending
+// in Enter is submitted by it.
+func (t *Terminal) TypeDrawn(text string, drawn func(typed, screen string) bool) {
+	t.c.t.Helper()
+	for start := 0; start < len(text); {
+		end := min(start+typedPiece, len(text))
+		for end < len(text) && !utf8.RuneStart(text[end]) {
+			end--
+		}
+		if start > 0 {
+			typed := text[:start]
+			t.WaitScreen(fmt.Sprintf("the first %d typed bytes drawn", len(typed)), func(screen string) bool {
+				return drawn(typed, screen)
+			})
+		}
+		t.Type(text[start:end])
+		start = end
 	}
 }
 

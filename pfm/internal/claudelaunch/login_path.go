@@ -1,0 +1,221 @@
+package claudelaunch
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/loginshell"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+)
+
+const (
+	envPATH      = "PATH"
+	envUserShell = "SHELL"
+	// loginPATHStart and loginPATHEnd fence the PATH the login shell prints, so
+	// whatever its startup files write around it is ignored.
+	loginPATHStart = "__PFM_LOGIN_PATH_START__"
+	loginPATHEnd   = "__PFM_LOGIN_PATH_END__"
+	// loginPATHTimeout bounds the login shell; a slower one leaves the launch PATH unchanged.
+	loginPATHTimeout = 3 * time.Second
+	// loginPATHWaitDelay bounds the wait for output a process the startup files left behind still holds.
+	loginPATHWaitDelay = 500 * time.Millisecond
+	// loginBasePATH is the PATH login(1) starts a session with.
+	loginBasePATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+)
+
+// loginPATHScript prints the login shell's PATH between the markers.
+const loginPATHScript = `printf '%s%s%s' '` + loginPATHStart + `' "$PATH" '` + loginPATHEnd + `'`
+
+// loginPATHResult is a login shell's PATH entries, or why it has none.
+type loginPATHResult struct {
+	entries []string
+	problem string
+	// lookupNote is why the account's login shell was not used, when SHELL was probed instead.
+	lookupNote string
+}
+
+// loginPATHCache holds each login shell's answer for the life of the process.
+var loginPATHCache = struct {
+	sync.Mutex
+	byShell map[string]loginPATHResult
+}{byShell: map[string]loginPATHResult{}}
+
+// pathEnvThrough is the PATH assignment a Claude launch adds: the PATH lookup
+// reads, its order kept, with each entry of the user's login-shell PATH it
+// lacks appended. Claude Code runs every Bash call as a non-interactive bash
+// that reads no startup file, so a chat launched from a bare PATH (systemd,
+// Herdr, headless) would otherwise miss the tools the login shell adds (mise,
+// nvm, asdf, brew). Nothing added, or a login shell that gave no PATH, yields
+// no assignment; runner runs the shell, nil the real one.
+func pathEnvThrough(lookup func(string) (string, bool), runner deps.Runner) []string {
+	fallback, _ := lookup(envUserShell)
+	login := loginPATH(context.Background(), clock.Real, fallback, runner)
+	if login.problem != "" {
+		return nil
+	}
+	launch, _ := lookup(envPATH)
+	merged, added := mergePATH(launch, login.entries)
+	if !added {
+		return nil
+	}
+	return []string{envPATH + "=" + merged}
+}
+
+// loginPATH is the user's login PATH, asked at most once per process within
+// parent, timed by c, through runner (nil the real one, which a test process
+// never runs: the answer adds nothing); a failure, or an account lookup that fell back to
+// fallback (the launch's SHELL), is warned to the activity log once, when it is
+// first met. The cache is keyed by fallback, the only input that varies in a
+// process (the uid and the account database do not), so the account lookup
+// runs once per fallback value too.
+func loginPATH(parent context.Context, c clock.Clock, fallback string, runner deps.Runner) loginPATHResult {
+	// A test process asks no real login shell: its startup files would add this
+	// host's folders to every launch a test renders, so the launch is judged on
+	// the host it runs on. A test of the probe passes its runner; nothing is
+	// cached, so no answer a fake gave reaches a launch either.
+	if runner == nil && testing.Testing() {
+		return loginPATHResult{}
+	}
+	loginPATHCache.Lock()
+	defer loginPATHCache.Unlock()
+	if result, found := loginPATHCache.byShell[fallback]; found {
+		return result
+	}
+	result := probeLoginPATH(parent, c, fallback, runner)
+	switch {
+	case result.problem != "":
+		obs.Logger(context.Background()).Warn("claudelaunch: login PATH", obs.FieldErr, result.problem)
+	case result.lookupNote != "":
+		obs.Logger(context.Background()).Warn("claudelaunch: login PATH", obs.FieldErr, result.lookupNote)
+	}
+	loginPATHCache.byShell[fallback] = result
+	return result
+}
+
+// probeLoginPATH runs the user's account login shell, else fallback, as a login interactive shell with no controlling
+// terminal (an interactive shell in a background group of one stops on
+// SIGTTIN) and stdin from /dev/null, and reads the PATH it prints within
+// loginPATHTimeout on c.
+func probeLoginPATH(parent context.Context, c clock.Clock, fallback string, runner deps.Runner) loginPATHResult {
+	if runner == nil {
+		runner = obs.Runner(deps.RealRunner{})
+	}
+	// The account's shell, never SHELL first: Claude Code sets SHELL to bash in
+	// every Bash call and process it spawns, so a chat started from a chat would
+	// otherwise probe bash, whatever the account logs in with. The lookup is
+	// bounded by a kernel deadline on its child (context.WithTimeout, not c): it
+	// runs where no login shell will (SHELL unset and the lookup failing), and a
+	// unit test's fake clock owns the shell probe's wait alone.
+	lookupCtx, cancelLookup := context.WithTimeout(parent, loginPATHTimeout)
+	shell, lookupErr := loginshell.Lookup(lookupCtx, runner, os.Getuid())
+	cancelLookup()
+	lookupNote := ""
+	if lookupErr == nil && shell == "" {
+		lookupErr = errors.New("the account has no login shell")
+	}
+	if lookupErr != nil {
+		shell = fallback
+		lookupNote = fmt.Sprintf("login shell lookup: %v; using %s", lookupErr, envUserShell)
+	}
+	if shell == "" {
+		return loginPATHResult{problem: fmt.Sprintf(
+			"login shell lookup: %v, and %s is unset: the launch PATH is kept as it is", lookupErr, envUserShell,
+		)}
+	}
+	ctx, cancel := clock.WithTimeout(parent, c, loginPATHTimeout)
+	defer cancel()
+	argv := []string{shell, "-l", "-i", "-c", loginPATHScript}
+	result, err := runner.Run(ctx, argv, deps.RunOptions{
+		Setsid: true, WaitDelay: loginPATHWaitDelay, Env: loginEnvironment(os.Environ(), shell),
+	})
+	if ctx.Err() != nil {
+		return loginPATHResult{lookupNote: lookupNote, problem: withNote(fmt.Sprintf(
+			"%s -l -i printed no PATH within %s: the launch PATH is kept as it is", shell, loginPATHTimeout,
+		), lookupNote)}
+	}
+	if err != nil {
+		return loginPATHResult{lookupNote: lookupNote, problem: withNote(
+			fmt.Sprintf("%s -l -i: %v: the launch PATH is kept as it is", shell, err), lookupNote)}
+	}
+	output := string(result.Stdout)
+	value, found := "", false
+	if start := strings.LastIndex(output, loginPATHStart); start >= 0 {
+		value, _, found = strings.Cut(output[start+len(loginPATHStart):], loginPATHEnd)
+	}
+	if !found {
+		return loginPATHResult{lookupNote: lookupNote, problem: withNote(fmt.Sprintf(
+			"%s -l -i exited %d with no PATH between its markers (stdout %q): the launch PATH is kept as it is",
+			shell, result.ExitCode, clipOutput(output),
+		), lookupNote)}
+	}
+	return loginPATHResult{entries: strings.Split(value, string(os.PathListSeparator)), lookupNote: lookupNote}
+}
+
+// withNote is problem followed by the account-lookup note, when there is one.
+func withNote(problem, note string) string {
+	if note == "" {
+		return problem
+	}
+	return problem + " (" + note + ")"
+}
+
+// loginEnvironment is the environment login(1) hands a fresh session, taken
+// from environ: HOME, USER, LOGNAME, LANG, TMPDIR and every LC_* and
+// XDG_* variable it sets, SHELL as shell (the one being probed, never the
+// copied variable), and a system PATH. The probe runs in it so the PATH
+// it prints is the login shell's own, never the one pfm was started with.
+func loginEnvironment(environ []string, shell string) []string {
+	env := []string{}
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		switch name {
+		case "HOME", "USER", "LOGNAME", "LANG", "TMPDIR":
+			env = append(env, entry)
+		default:
+			if strings.HasPrefix(name, "LC_") || strings.HasPrefix(name, "XDG_") {
+				env = append(env, entry)
+			}
+		}
+	}
+	return append(env, envUserShell+"="+shell, envPATH+"="+loginBasePATH)
+}
+
+// clipOutput is output cut to the length a warning carries.
+func clipOutput(output string) string {
+	const limit = 200
+	if len(output) <= limit {
+		return output
+	}
+	return output[:limit] + "…"
+}
+
+// mergePATH is launch, verbatim and first, with each non-empty entry of login
+// it lacks appended once, in login's order; added reports whether any was.
+func mergePATH(launch string, login []string) (merged string, added bool) {
+	separator := string(os.PathListSeparator)
+	seen := map[string]bool{}
+	for _, entry := range strings.Split(launch, separator) {
+		seen[entry] = true
+	}
+	parts := []string{}
+	if launch != "" {
+		parts = append(parts, launch)
+	}
+	for _, entry := range login {
+		if entry == "" || seen[entry] {
+			continue
+		}
+		seen[entry] = true
+		parts = append(parts, entry)
+		added = true
+	}
+	return strings.Join(parts, separator), added
+}

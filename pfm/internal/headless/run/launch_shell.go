@@ -8,9 +8,10 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
-// withLaunchShell adds the Claude launch shell (claudelaunch.ShellEnv) judged
-// against environment itself, which may be the caller's explicit one: a usable
-// inherited value stays, a refused one is replaced.
+// withLaunchShell adds the Claude launch shell and PATH (claudelaunch.ShellEnv)
+// judged against environment itself, which may be the caller's explicit one: a
+// usable inherited shell stays, a refused one is replaced, and a PATH the login
+// shell's adds to replaces the inherited one.
 func withLaunchShell(environment []string) []string {
 	lookup := func(name string) (string, bool) {
 		for index := len(environment) - 1; index >= 0; index-- {

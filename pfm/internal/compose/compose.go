@@ -14,12 +14,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
-const (
-	claudeResumeCap   = 30
-	codexResumeCap    = 15
-	openCodeResumeCap = 10
-)
-
 type composer struct {
 	input Input
 
@@ -98,6 +92,7 @@ func Compose(input Input) Output {
 
 	liveRows = append(liveRows, agentRows...)
 	liveRows = append(liveRows, nativeRows...)
+	resumeKilled, resumeSuppressed := resumeCounters(input, &output)
 	for index := range liveRows {
 		row := liveRows[index]
 		row = current.applyKill(row, EngineForKind(row.Kind))
@@ -116,14 +111,14 @@ func Compose(input Input) Output {
 		}
 		row := current.transcriptRow(transcript, ResumeClaude)
 		row = current.applyKill(row, pfmengine.Claude)
-		countOmitted(row, &output.KilledCount, &output.SuppressedCount)
+		countOmitted(row, resumeKilled, resumeSuppressed)
 		if input.Options.View == DefaultView {
 			if defaultEligible(row) {
 				claudeEligible++
 				claudeResume = insertTopRow(
 					claudeResume,
 					row,
-					claudeResumeCap,
+					ClaudeResumeCap,
 				)
 			}
 		} else {
@@ -131,8 +126,8 @@ func Compose(input Input) Output {
 		}
 	}
 	if input.Options.View == DefaultView {
-		if claudeEligible > claudeResumeCap {
-			output.SuppressedCount += claudeEligible - claudeResumeCap
+		if claudeEligible > ClaudeResumeCap {
+			*resumeSuppressed += claudeEligible - ClaudeResumeCap
 		}
 		for index := range claudeResume {
 			row := claudeResume[index]
@@ -141,7 +136,7 @@ func Compose(input Input) Output {
 	} else {
 		output.Rows = append(
 			output.Rows,
-			current.selectResumeRows(claudeResume, claudeResumeCap, &output.SuppressedCount)...)
+			current.selectResumeRows(claudeResume, ClaudeResumeCap, resumeSuppressed)...)
 	}
 	codexResume := make([]Row, 0)
 	codexEligible := 0
@@ -152,14 +147,14 @@ func Compose(input Input) Output {
 		}
 		row := current.rolloutRow(lineage.Newest, ResumeCodex)
 		row = current.applyKill(row, pfmengine.Codex)
-		countOmitted(row, &output.KilledCount, &output.SuppressedCount)
+		countOmitted(row, resumeKilled, resumeSuppressed)
 		if input.Options.View == DefaultView {
 			if defaultEligible(row) {
 				codexEligible++
 				codexResume = insertTopRow(
 					codexResume,
 					row,
-					codexResumeCap,
+					CodexResumeCap,
 				)
 			}
 		} else {
@@ -167,8 +162,8 @@ func Compose(input Input) Output {
 		}
 	}
 	if input.Options.View == DefaultView {
-		if codexEligible > codexResumeCap {
-			output.SuppressedCount += codexEligible - codexResumeCap
+		if codexEligible > CodexResumeCap {
+			*resumeSuppressed += codexEligible - CodexResumeCap
 		}
 		for index := range codexResume {
 			row := codexResume[index]
@@ -177,7 +172,7 @@ func Compose(input Input) Output {
 	} else {
 		output.Rows = append(
 			output.Rows,
-			current.selectResumeRows(codexResume, codexResumeCap, &output.SuppressedCount)...)
+			current.selectResumeRows(codexResume, CodexResumeCap, resumeSuppressed)...)
 	}
 
 	openCodeResume := make([]Row, 0)
@@ -226,6 +221,7 @@ func Compose(input Input) Output {
 		)
 	}
 
+	output.liveClaims = store.LiveClaims{Transcripts: current.liveTranscripts, Rollouts: current.liveRollouts}
 	output.Rows, output.ProjectOrder = sortProjectRows(output.Rows)
 	output = leadWithCurrentProject(output, input.Options.CurrentDir)
 	output = withWorkbenches(output, input)

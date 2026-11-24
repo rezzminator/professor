@@ -2,6 +2,7 @@
 // binary's cache (schema.sql, migration_v*.sql, migrated here) and the fleet's
 // shared state (internal/fleetdb).
 //
+// candidates.go: DefaultCandidates and LiveClaims, the capped resume candidates of the default first frame.
 // clearname.go: ReserveClearName and SeedClearTranscript, a /clear successor's name across both databases.
 // codexstate.go: CodexThread, a conversation read from the Codex CLI's own SQLite state store.
 // continuation.go: CarryContinuedSchedules and ContinuationTail, schedules that follow a continued chat.
@@ -15,7 +16,7 @@
 // models.go: Transcript, Rollout, CxName, OpenCodeSession and Killed, the row types.
 // ocsessions.go: the oc_sessions mirror of OpenCode's sessions.
 // open.go: Open, OpenContext and OpenMemory, the doors a Store is built through, and their options.
-// queries.go: transcript, rollout, Codex-name and meta queries, and DefaultCandidates.
+// queries.go: transcript, rollout, Codex-name and meta queries.
 // readonly.go: OpenWithoutMigrating, both databases read-only for doctor.
 // rowcache.go: Transcripts and Rollouts, the index tables a Store rereads only where written since its last read.
 // space.go: ChatSpaces, each indexed chat's recorded space under every id its rows carry.

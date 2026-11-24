@@ -73,7 +73,7 @@ func TestContinuedInColumnIsEnsuredOnAnOlderSchema8Database(t *testing.T) {
 
 		// The cached first frame agrees with compose: a superseded segment
 		// is neither a candidate nor counted as killed or suppressed.
-		candidates, _, counts, err := opened.DefaultCandidates(ctx, 30, 15)
+		candidates, _, counts, err := opened.DefaultCandidates(ctx, 30, 15, LiveClaims{})
 		if err != nil {
 			t.Fatal(err)
 		}

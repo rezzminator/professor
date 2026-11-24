@@ -7,6 +7,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const herdrBackend = "herdr"
@@ -76,7 +77,9 @@ func (current *composer) herdrRows() []Row {
 			current.liveTranscripts[session] = struct{}{}
 		case pfmengine.Codex:
 			row = current.rolloutRow(current.rolloutByID[seat.SessionID], LiveCodex)
-			current.liveRollouts[seat.SessionID] = struct{}{}
+			// A seat makes its thread's whole lineage live, as a live Codex
+			// process does: a fork's lineage keeps no resume row beside it.
+			current.liveRollouts[current.lineageRoot(store.Rollout{ID: seat.SessionID})] = struct{}{}
 		case pfmengine.OpenCode:
 			row.Kind = LiveOpenCode
 			for index := range current.input.OpenCodeSessions {

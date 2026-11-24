@@ -336,8 +336,9 @@ func TestNativeReadFailurePreservesLiveTmuxSnapshot(t *testing.T) {
 }
 
 // One seat whose store read fails must cost only that seat's enrichment: the
-// loaded rows and every other seat survive, and the error names the seat.
-func TestEnrichNativeKeepsTheDataPastAnUnreadableSeat(t *testing.T) {
+// loaded rows and every other seat survive, and the error names the seat; a
+// refill that cannot read is named too, and the first composition stays.
+func TestComposeNativeKeepsTheRowsPastAnUnreadableSeat(t *testing.T) {
 	testjail.Fleet(t)
 	database, err := store.Open()
 	if err != nil {
@@ -351,16 +352,38 @@ func TestEnrichNativeKeepsTheDataPastAnUnreadableSeat(t *testing.T) {
 		Transcripts:  []store.Transcript{{UUID: "claude-chat", CustomTitle: "LOADED"}},
 	}
 	native := []gather.HerdrSeat{
-		{Seat: fleetdb.Seat{SeatID: "seat-claude", SessionID: "claude-chat", Engine: "cc"}},
-		{Seat: fleetdb.Seat{SeatID: "seat-codex", SessionID: "codex-thread", Engine: "cx"}},
+		{Seat: fleetdb.Seat{
+			SeatID: "seat-claude", SessionID: "claude-chat", Engine: "cc", Backend: "herdr", State: liveSeat,
+		}},
+		{Seat: fleetdb.Seat{
+			SeatID: "seat-codex", SessionID: "codex-thread", Engine: "cx", Backend: "herdr", State: liveSeat,
+		}},
 	}
-	data, err := EnrichNative(context.Background(), database, loaded, native)
-	want := `native seat seat-codex rollout: query rollout "codex-thread": sql: database is closed`
+	output, err := ComposeNative(
+		context.Background(),
+		database,
+		Env{Config: config.Defaults(t.TempDir(), nil)},
+		compose.DefaultView,
+		loaded,
+		gather.Snapshot{},
+		native,
+	)
+	want := `native seat seat-codex rollout: query rollout "codex-thread": sql: database is closed` + "\n" +
+		`refill default candidates: query shared kills: sql: database is closed`
 	if err == nil || err.Error() != want {
-		t.Fatalf("EnrichNative() error = %v, want %q", err, want)
+		t.Fatalf("ComposeNative() error = %v, want %q", err, want)
 	}
-	if len(data.Transcripts) != 1 || data.Transcripts[0].CustomTitle != "LOADED" || data.CachedCounts == nil {
-		t.Fatalf("EnrichNative() data = %+v, want the loaded transcript and cached counts kept", data)
+	var seats []string
+	for index := range output.Rows {
+		row := output.Rows[index]
+		if row.SeatID != "" {
+			seats = append(seats, row.SeatID+" "+row.Kind.String()+" "+row.Name)
+		}
+	}
+	slices.Sort(seats)
+	wantSeats := []string{"seat-claude live-claude LOADED", "seat-codex live-codex "}
+	if !slices.Equal(seats, wantSeats) {
+		t.Fatalf("ComposeNative() seat rows = %q, want %q", seats, wantSeats)
 	}
 	// The failed read marks only its seat: its record is unknown, never absent.
 	unread := []bool{native[0].TranscriptUnread, native[1].TranscriptUnread}

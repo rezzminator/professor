@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -65,7 +66,12 @@ func LoadData(ctx context.Context, database *store.Store) (Data, error) {
 
 // LoadDefaultData reads the default view's capped resume candidates.
 func LoadDefaultData(ctx context.Context, database *store.Store) (Data, error) {
-	transcripts, rollouts, counts, err := database.DefaultCandidates(ctx, 30, 15)
+	transcripts, rollouts, counts, err := database.DefaultCandidates(
+		ctx,
+		compose.ClaudeResumeCap,
+		compose.CodexResumeCap,
+		store.LiveClaims{},
+	)
 	if err != nil {
 		return Data{}, err
 	}

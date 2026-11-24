@@ -493,7 +493,10 @@ func TestNativeSnapshotsRetainCappedBackgroundMetadata(t *testing.T) {
 		check(t, result.Output.Rows)
 	})
 
-	t.Run("native enrichment preserves capped candidates", func(t *testing.T) {
+	// A chat indexed after the capped read is among the default view's newest
+	// resumable chats: the refresh's refill around the native seats' claims
+	// lists it beside the canonical native rows.
+	t.Run("native enrichment refills capped candidates", func(t *testing.T) {
 		if err := db.UpsertTranscript(
 			ctx,
 			store.Transcript{
@@ -521,10 +524,14 @@ func TestNativeSnapshotsRetainCappedBackgroundMetadata(t *testing.T) {
 		}
 		snapshot := <-updates
 		check(t, snapshot.Rows)
+		var refilled []compose.Kind
 		for _, row := range snapshot.Rows {
 			if row.ID == "unrelated" {
-				t.Fatalf("native enrichment replaced capped candidates with unrelated full-store row: %+v", row)
+				refilled = append(refilled, row.Kind)
 			}
+		}
+		if want := []compose.Kind{compose.ResumeClaude}; !reflect.DeepEqual(refilled, want) {
+			t.Fatalf("rows of the chat indexed after the capped read = %v, want %v", refilled, want)
 		}
 	})
 

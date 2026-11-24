@@ -148,14 +148,14 @@ func sendRefresh(
 			time.Unix(0, environment.NowNS),
 		)
 	}
-	// A seat EnrichNative could not read stays bare beside every other seat's
-	// enrichment; it and any account fault are named in the header.
+	// A seat ComposeNative could not read stays bare beside every other seat's
+	// enrichment; it, a failed refill and any account fault are named in the
+	// header.
 	scanErrors := slices.Clone(environment.Faults)
-	data, err = fleet.EnrichNative(ctx, database, data, native)
+	output, err := fleet.ComposeNative(ctx, database, environment, request.View, data, live, native)
 	if err != nil {
 		scanErrors = append(scanErrors, err.Error())
 	}
-	output := fleet.ComposeFleet(environment, request.View, data, live, native...)
 	snapshot := buildSnapshot(ctx, environment, request, output)
 	snapshot.ScanError = strings.Join(scanErrors, "; ")
 	snapshot.Refreshing = refreshing

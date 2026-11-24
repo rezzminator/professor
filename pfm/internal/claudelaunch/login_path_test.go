@@ -40,6 +40,7 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 		env     *string
 		lookup  error // the account lookup's failure
 		launch  *string
+		home    *string // HOME of pfm's own environment; nil is "/srv/planted"
 		answer  func(ctx context.Context, call deps.RunCall) (deps.RunResult, error)
 		timeout bool
 		want    []string
@@ -115,6 +116,14 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 			want:   []string{"PATH=/c:/d:/a"},
 		},
 		{
+			name:   "empty HOME leaves the probe in pfm's own folder",
+			shell:  shell,
+			home:   new(""),
+			launch: new("/usr/bin"),
+			answer: answer(printed("/c:/usr/bin"), nil),
+			want:   []string{"PATH=/c:/usr/bin"},
+		},
+		{
 			name:   "launch PATH unset",
 			shell:  shell,
 			answer: answer(printed("/c:/d"), nil),
@@ -187,7 +196,11 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Setenv("HOME", "/srv/planted")
+			wantHome := "/srv/planted"
+			if test.home != nil {
+				wantHome = *test.home
+			}
+			t.Setenv("HOME", wantHome)
 			t.Setenv("LC_ALL", "C.UTF-8")
 			t.Setenv("XDG_CONFIG_HOME", "/srv/planted/.config")
 			t.Setenv("PFM_PLANTED_UNRELATED", "leaked")
@@ -248,10 +261,13 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 				t.Fatalf("login shell call = %q setsid=%v, want %q setsid=true",
 					calls[0].Argv, calls[0].Opts.Setsid, wantArgv)
 			}
+			if wantCalls == 1 && calls[0].Opts.Dir != wantHome {
+				t.Fatalf("login shell dir = %q, want %q (the HOME it runs with)", calls[0].Opts.Dir, wantHome)
+			}
 			if wantCalls == 1 {
 				// The jail seeds TMPDIR and XDG_* of its own, so the env is judged name by name.
 				for _, entry := range []string{
-					"HOME=/srv/planted", "LC_ALL=C.UTF-8",
+					"HOME=" + wantHome, "LC_ALL=C.UTF-8",
 					"XDG_CONFIG_HOME=/srv/planted/.config", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "SHELL=" + wantShell,
 				} {
 					if !slices.Contains(calls[0].Opts.Env, entry) {

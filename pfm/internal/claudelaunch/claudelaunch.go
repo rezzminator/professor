@@ -15,6 +15,7 @@
 //   - configdir.go inspects an account's config dir and the login default's sentinel.
 //   - cost.go arms the cost ledger's OpenTelemetry exporters.
 //   - fullscreen.go, theme.go and shell.go decide the fullscreen, theme pin and launch shell; login_path.go
-//     merges in the login shell's PATH entries a launch lacks; login_path_cache.go holds each shell's answer.
+//     merges in the login shell's PATH entries a launch lacks; login_path_cache.go holds each shell's answer;
+//     login_environment.go builds the clean login environment and home folder the probe runs with.
 //   - session_env.go is a session's plugin values and shell; probe.go isolates the doctor's capture.
 package claudelaunch

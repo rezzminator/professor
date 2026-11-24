@@ -132,9 +132,10 @@ func probeLoginPATH(parent context.Context, c clock.Clock, fallback string, runn
 	ctx, cancel := clock.WithTimeout(parent, c, loginPATHTimeout)
 	defer cancel()
 	argv := []string{shell, "-l", "-i", "-c", loginPATHScript}
-	result, err := runner.Run(ctx, argv, deps.RunOptions{
-		Setsid: true, WaitDelay: loginPATHWaitDelay, Env: loginEnvironment(os.Environ(), shell),
-	})
+	// Run from HOME, as login(1) does: mise, direnv or asdf must not report the tools of pfm's own folder.
+	env := loginEnvironment(os.Environ(), shell)
+	options := deps.RunOptions{Setsid: true, WaitDelay: loginPATHWaitDelay, Env: env, Dir: loginHome(env)}
+	result, err := runner.Run(ctx, argv, options)
 	if ctx.Err() != nil {
 		return loginPATHResult{lookupNote: lookupNote, problem: withNote(fmt.Sprintf(
 			"%s -l -i printed no PATH within %s: the launch PATH is kept as it is", shell, loginPATHTimeout,
@@ -167,27 +168,6 @@ func withNote(problem, note string) string {
 		return problem
 	}
 	return problem + " (" + note + ")"
-}
-
-// loginEnvironment is the environment login(1) hands a fresh session, taken
-// from environ: HOME, USER, LOGNAME, LANG, TMPDIR and every LC_* and
-// XDG_* variable it sets, SHELL as shell (the one being probed, never the
-// copied variable), and a system PATH. The probe runs in it so the PATH
-// it prints is the login shell's own, never the one pfm was started with.
-func loginEnvironment(environ []string, shell string) []string {
-	env := []string{}
-	for _, entry := range environ {
-		name, _, _ := strings.Cut(entry, "=")
-		switch name {
-		case "HOME", "USER", "LOGNAME", "LANG", "TMPDIR":
-			env = append(env, entry)
-		default:
-			if strings.HasPrefix(name, "LC_") || strings.HasPrefix(name, "XDG_") {
-				env = append(env, entry)
-			}
-		}
-	}
-	return append(env, envUserShell+"="+shell, envPATH+"="+loginBasePATH)
 }
 
 // clipOutput is output cut to the length a warning carries.

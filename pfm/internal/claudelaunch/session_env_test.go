@@ -73,6 +73,33 @@ func TestSessionEnv(t *testing.T) {
 	}
 }
 
+// A pane command keeps the launch's PATH out and runs the login folders through
+// /bin/sh after the pane shell's own PATH; with no login folders Env is whole.
+func TestLaunchPaneEnv(t *testing.T) {
+	env := []string{"A=1", "PATH=/pfm/bin:/shims", "B=2"}
+	for _, test := range []struct {
+		name      string
+		login     []string
+		wantEnv   []string
+		wantWords string
+	}{
+		{name: "no login folders", wantEnv: env},
+		{
+			name:      "login folders",
+			login:     []string{"/shims", "/opt/x y"},
+			wantEnv:   []string{"A=1", "B=2"},
+			wantWords: ` /bin/sh -c 'PATH="${PATH:+$PATH:}$1"; export PATH; shift; exec "$@"' sh '/shims:/opt/x y'`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gotEnv, gotWords := Launch{Env: env, LoginPATH: test.login}.PaneEnv()
+			if !reflect.DeepEqual(gotEnv, test.wantEnv) || gotWords != test.wantWords {
+				t.Fatalf("PaneEnv = (%q, %q), want (%q, %q)", gotEnv, gotWords, test.wantEnv, test.wantWords)
+			}
+		})
+	}
+}
+
 func TestRunEnvironment(t *testing.T) {
 	launch := Launch{Unset: []string{"CLAUDECODE"}, Env: WithEnvs(
 		map[string]string{"TEAM_MODE": "strict", "API_REGION": "eu", "CLAUDE_CONFIG_DIR": "/adopter/store"},

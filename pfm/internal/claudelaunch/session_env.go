@@ -53,13 +53,19 @@ func RunEnvironment(environ []string, launch Launch) []string {
 	return append(result, launch.Env...)
 }
 
-// PaneEnv is Env as the command a pane shell runs carries it, and the PATH word
-// that follows it, space-led: with LoginPATH set, Env's PATH (pfm's own merged)
-// is left out and the word adds only those folders after the pane shell's own
-// "$PATH", so the pane's order stays first; else Env whole and no word. The word
-// is POSIX shell, read by sh, bash and zsh alike (fish joins a quoted path
-// variable with colons too).
-func (launch Launch) PaneEnv() (env []string, pathWord string) {
+// paneLoginPATHScript is the /bin/sh program PaneEnv's words run: it adds its
+// first argument after the PATH it inherits, with no empty entry when that PATH is
+// empty or unset (an empty entry searches the working directory), and execs the rest.
+const paneLoginPATHScript = `PATH="${PATH:+$PATH:}$1"; export PATH; shift; exec "$@"`
+
+// PaneEnv is Env as the command a pane shell runs carries it, and the words that
+// follow it, space-led: with LoginPATH set, Env's PATH (pfm's own merged) is left
+// out and the words run paneLoginPATHScript in /bin/sh over those folders, so the
+// pane shell's own PATH stays first; else Env whole and no words. The words are
+// literals in single quotes, read alike by every shell tmux can run a pane
+// command in (its default-shell: sh, bash, zsh, fish), so no shell's expansion
+// rules decide the PATH.
+func (launch Launch) PaneEnv() (env []string, pathWords string) {
 	if launch.LoginPATH == nil {
 		return launch.Env, ""
 	}
@@ -68,9 +74,8 @@ func (launch Launch) PaneEnv() (env []string, pathWord string) {
 			env = append(env, assignment)
 		}
 	}
-	separator := string(os.PathListSeparator)
-	added := cmdparse.Quote(separator + strings.Join(launch.LoginPATH, separator))
-	return env, ` ` + envPATH + `="$` + envPATH + `"` + added
+	folders := strings.Join(launch.LoginPATH, string(os.PathListSeparator))
+	return env, ` /bin/sh -c ` + cmdparse.Quote(paneLoginPATHScript) + ` sh ` + cmdparse.Quote(folders)
 }
 
 // sessionEnvNames are the variables a passthrough Claude session carries in its process

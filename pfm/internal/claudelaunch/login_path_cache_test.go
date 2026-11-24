@@ -33,6 +33,7 @@ func probeWaiters() (int, string) {
 func TestLoginPATHMemoProbesEachShellOnce(t *testing.T) {
 	const zsh, bash, callers = "/bin/zsh", "/bin/bash", 4
 	memo := &loginPATHMemo{byShell: map[string]*loginPATHCall{}}
+	fake := clock.NewFake(time.Unix(0, 0))
 	want := loginPATHResult{entries: []string{"/opt/mise/shims"}}
 	started, release := make(chan struct{}, callers), make(chan struct{})
 	var probes atomic.Int32
@@ -43,10 +44,10 @@ func TestLoginPATHMemoProbesEachShellOnce(t *testing.T) {
 		return want
 	}
 	results := make(chan loginPATHResult, callers)
-	go func() { results <- memo.get(zsh, probe) }()
+	go func() { results <- memo.get(zsh, fake, probe) }()
 	testwait.Receive(t, "the first caller's probe starts", started)
 	for range callers - 1 {
-		go func() { results <- memo.get(zsh, probe) }()
+		go func() { results <- memo.get(zsh, fake, probe) }()
 	}
 	testwait.Until(t, "every later caller waits on the running probe", func() (bool, string) {
 		waiting, state := probeWaiters()
@@ -54,7 +55,7 @@ func TestLoginPATHMemoProbesEachShellOnce(t *testing.T) {
 	})
 	other := make(chan loginPATHResult, 1)
 	go func() {
-		other <- memo.get(bash, func() loginPATHResult { return loginPATHResult{problem: "bash probed"} })
+		other <- memo.get(bash, fake, func() loginPATHResult { return loginPATHResult{problem: "bash probed"} })
 	}()
 	answer := bash + " answers while the " + zsh + " probe runs"
 	if got, _ := testwait.Receive(t, answer, other); got.problem != "bash probed" {
@@ -69,12 +70,52 @@ func TestLoginPATHMemoProbesEachShellOnce(t *testing.T) {
 	if got := probes.Load(); got != 1 {
 		t.Fatalf("%s probes = %d, want 1 shared by %d callers", zsh, got, callers)
 	}
-	later := memo.get(zsh, func() loginPATHResult {
+	later := memo.get(zsh, fake, func() loginPATHResult {
 		t.Errorf("%s probed again after its answer was cached", zsh)
 		return loginPATHResult{}
 	})
 	if !reflect.DeepEqual(later, want) {
 		t.Fatalf("%s cached answer = %+v, want %+v", zsh, later, want)
+	}
+}
+
+// A failed probe's answer stands for loginPATHRetry, then the next caller probes
+// again; a successful probe's answer stands for the life of the process.
+func TestLoginPATHMemoRetriesOnlyAFailedProbe(t *testing.T) {
+	const shell = "/bin/zsh"
+	failed := loginPATHResult{problem: "login shell /bin/zsh: no PATH within 3s"}
+	found := loginPATHResult{entries: []string{"/opt/mise/shims"}}
+	again := loginPATHResult{entries: []string{"/probed/again"}}
+	for _, test := range []struct {
+		name       string
+		first      loginPATHResult
+		after      time.Duration
+		want       loginPATHResult
+		wantProbes int
+	}{
+		{"failure inside the retry interval", failed, loginPATHRetry - time.Nanosecond, failed, 0},
+		{"failure at the retry interval", failed, loginPATHRetry, again, 1},
+		{"failure past the retry interval", failed, loginPATHRetry + time.Second, again, 1},
+		{"success a day later", found, 24 * time.Hour, found, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			memo := &loginPATHMemo{byShell: map[string]*loginPATHCall{}}
+			fake := clock.NewFake(time.Unix(0, 0))
+			first := memo.get(shell, fake, func() loginPATHResult { return test.first })
+			if !reflect.DeepEqual(first, test.first) {
+				t.Fatalf("first answer = %+v, want %+v", first, test.first)
+			}
+			fake.Advance(test.after)
+			probes := 0
+			got := memo.get(shell, fake, func() loginPATHResult {
+				probes++
+				return again
+			})
+			if !reflect.DeepEqual(got, test.want) || probes != test.wantProbes {
+				t.Fatalf("answer %s later = %+v after %d probes, want %+v after %d",
+					test.after, got, probes, test.want, test.wantProbes)
+			}
+		})
 	}
 }
 

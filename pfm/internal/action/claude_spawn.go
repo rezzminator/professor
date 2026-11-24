@@ -102,9 +102,9 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	}
 	var command strings.Builder
 	command.WriteString(envStripWords(launch.Unset))
-	env, pathWord := launch.PaneEnv()
+	env, pathWords := launch.PaneEnv()
 	writeAssignments(&command, env)
-	command.WriteString(pathWord)
+	command.WriteString(pathWords)
 	words := append(append(append([]string(nil), launch.Wrapper...), launch.Binary), launch.Argv...)
 	for _, word := range words {
 		command.WriteByte(' ')

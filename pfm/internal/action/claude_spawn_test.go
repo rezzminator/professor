@@ -329,28 +329,33 @@ func TestClaudeSpawnCommandNamesAMissingClaudeBinary(t *testing.T) {
 	}
 }
 
-// A pane shell runs ShellCommand: a PATH whose base is pfm's own adds only the
-// login shell's folders to the pane shell's PATH, whose order stays first; a
-// persona's PATH is written as merged. SeatRun execs with no shell between, so
+// A pane shell runs ShellCommand: a PATH whose base is pfm's own leaves that PATH
+// out and hands only the login shell's folders to the /bin/sh words that add them
+// after the pane shell's PATH (their run: TestLaunchPaneEnvPATHWordsInARealShell);
+// a persona's PATH is written as merged. SeatRun execs with no shell between, so
 // its PATH is pfm's own with the login folders placed as the login PATH orders them.
 func TestClaudeSpawnShellCommandKeepsThePaneShellPATH(t *testing.T) {
-	const loginShell, panePATH = "/login/bin/zsh", "/pane/shims:/usr/bin:/bin"
+	const loginShell = "/login/bin/zsh"
+	const script = `PATH="${PATH:+$PATH:}$1"; export PATH; shift; exec "$@"`
 	t.Setenv("SHELL", loginShell)
 	t.Setenv("PATH", "/usr/bin:/bin")
 	for _, test := range []struct {
-		name               string
-		envs               map[string]string
-		wantPane, wantSeat string
+		name      string
+		envs      map[string]string
+		wantPATH  []string
+		wantLogin []string
+		wantSeat  string
 	}{
 		{
-			name:     "pfm PATH",
-			wantPane: "/pane/shims:/usr/bin:/bin:/shims:/opt/x",
-			wantSeat: "/shims:/usr/bin:/bin:/opt/x",
+			name:      "pfm PATH",
+			wantPATH:  []string{},
+			wantLogin: []string{"/bin/sh", "-c", script, "sh", "/shims:/opt/x"},
+			wantSeat:  "/shims:/usr/bin:/bin:/opt/x",
 		},
 		{
 			name:     "persona PATH",
 			envs:     map[string]string{"PATH": "/persona/bin"},
-			wantPane: "/persona/bin:/shims:/usr/bin:/opt/x",
+			wantPATH: []string{"/persona/bin:/shims:/usr/bin:/opt/x"},
 			wantSeat: "/persona/bin:/shims:/usr/bin:/opt/x",
 		},
 	} {
@@ -375,8 +380,8 @@ func TestClaudeSpawnShellCommandKeepsThePaneShellPATH(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse %q: %v", command, err)
 			}
-			config := &expand.Config{Env: expand.ListEnviron("PATH=" + panePATH)}
-			panePaths := []string{}
+			config := &expand.Config{Env: expand.ListEnviron()}
+			args := []string{}
 			syntax.Walk(file, func(node syntax.Node) bool {
 				call, ok := node.(*syntax.CallExpr)
 				if !ok {
@@ -385,17 +390,28 @@ func TestClaudeSpawnShellCommandKeepsThePaneShellPATH(t *testing.T) {
 				for _, word := range call.Args {
 					value, err := expand.Literal(config, word)
 					if err != nil {
-						t.Fatalf("expand %q under PATH=%s: %v", command, panePATH, err)
+						t.Fatalf("expand %q: %v", command, err)
 					}
-					if path, found := strings.CutPrefix(value, "PATH="); found {
-						panePaths = append(panePaths, path)
-					}
+					args = append(args, value)
 				}
 				return false
 			})
-			if !slices.Equal(panePaths, []string{test.wantPane}) {
-				t.Fatalf("pane PATH under PATH=%s = %q, want [%s]; command %q",
-					panePATH, panePaths, test.wantPane, command)
+			// The words ahead of the login ones are the assignments; the script among
+			// the login words is no PATH assignment of the pane command.
+			var login []string
+			assignments := args
+			if at := slices.Index(args, "/bin/sh"); at >= 0 && at+5 <= len(args) {
+				login, assignments = args[at:at+5], args[:at]
+			}
+			pathArgs := []string{}
+			for _, arg := range assignments {
+				if path, found := strings.CutPrefix(arg, "PATH="); found {
+					pathArgs = append(pathArgs, path)
+				}
+			}
+			if !slices.Equal(pathArgs, test.wantPATH) || !slices.Equal(login, test.wantLogin) {
+				t.Fatalf("pane command PATH= %q and login words %q, want %q and %q; command %q",
+					pathArgs, login, test.wantPATH, test.wantLogin, command)
 			}
 			seat, err := spawn.SeatRun("/work")
 			if err != nil {

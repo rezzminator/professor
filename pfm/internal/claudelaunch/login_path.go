@@ -68,15 +68,14 @@ func pathEnvThrough(
 	return []string{envPATH + "=" + merged}, added
 }
 
-// loginPATH is the user's login PATH within parent, timed by c. With no runner
-// it is asked at most once per process per fallback (loginPATHCache), the only
-// input that varies in a process (the uid and the account database do not),
-// and a test process asks no real login shell: its startup files would add this
-// host's folders to every launch a test renders, so the launch is judged on the
-// host it runs on, and the answer adds nothing. A caller passing its runner
-// bypasses the cache, neither reading nor writing it, so no answer a fake gave
-// reaches another launch. A failure, or an account lookup that fell back to
-// fallback (the launch's SHELL), is warned to the activity log when probed.
+// loginPATH is the user's login PATH within parent, timed by c. With no runner it
+// is asked through loginPATHCache per fallback (the only input that varies in a
+// process): a success once per process, a failure again once loginPATHRetry has
+// passed on c. A test process asks no real login shell: its startup files would
+// add this host's folders to every launch a test renders, so the answer adds
+// nothing. A caller passing its runner bypasses the cache, neither reading nor
+// writing it, so no answer a fake gave reaches another launch. Each probe warns
+// its failure, or an account lookup that fell back to fallback (the launch's SHELL).
 func loginPATH(parent context.Context, c clock.Clock, fallback string, runner deps.Runner) loginPATHResult {
 	if runner != nil {
 		return warnLoginPATH(probeLoginPATH(parent, c, fallback, runner))
@@ -84,7 +83,7 @@ func loginPATH(parent context.Context, c clock.Clock, fallback string, runner de
 	if testing.Testing() {
 		return loginPATHResult{}
 	}
-	return loginPATHCache.get(fallback, func() loginPATHResult {
+	return loginPATHCache.get(fallback, c, func() loginPATHResult {
 		return warnLoginPATH(probeLoginPATH(parent, c, fallback, nil))
 	})
 }

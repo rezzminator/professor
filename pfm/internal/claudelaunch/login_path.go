@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -42,61 +44,59 @@ type loginPATHResult struct {
 	lookupNote string
 }
 
-// loginPATHCache holds each login shell's answer for the life of the process.
-var loginPATHCache = struct {
-	sync.Mutex
-	byShell map[string]loginPATHResult
-}{byShell: map[string]loginPATHResult{}}
-
 // pathEnvThrough is the PATH assignment a Claude launch adds: the PATH lookup
-// reads, its order kept, with each entry of the user's login-shell PATH it
-// lacks appended. Claude Code runs every Bash call as a non-interactive bash
-// that reads no startup file, so a chat launched from a bare PATH (systemd,
-// Herdr, headless) would otherwise miss the tools the login shell adds (mise,
-// nvm, asdf, brew). Nothing added, or a login shell that gave no PATH, yields
-// no assignment; runner runs the shell, nil the real one.
-func pathEnvThrough(lookup func(string) (string, bool), runner deps.Runner) []string {
+// reads, its order kept, with each absolute entry of the user's login-shell
+// PATH it lacks placed where the login PATH puts it (mergePATH). Claude Code
+// runs every Bash call as a non-interactive bash that reads no startup file, so
+// a chat launched from a bare PATH (systemd, Herdr, headless) would otherwise
+// miss the tools the login shell adds (mise, nvm, asdf, brew). added is the
+// login entries it adds, in login order; nothing added, or a login shell that
+// gave no PATH, yields none. c times the probe; runner runs it, nil the real one.
+func pathEnvThrough(
+	lookup func(string) (string, bool), c clock.Clock, runner deps.Runner,
+) (env, added []string) {
 	fallback, _ := lookup(envUserShell)
-	login := loginPATH(context.Background(), clock.Real, fallback, runner)
+	login := loginPATH(context.Background(), c, fallback, runner)
 	if login.problem != "" {
-		return nil
+		return nil, nil
 	}
 	launch, _ := lookup(envPATH)
 	merged, added := mergePATH(launch, login.entries)
-	if !added {
-		return nil
+	if len(added) == 0 {
+		return nil, nil
 	}
-	return []string{envPATH + "=" + merged}
+	return []string{envPATH + "=" + merged}, added
 }
 
-// loginPATH is the user's login PATH, asked at most once per process within
-// parent, timed by c, through runner (nil the real one, which a test process
-// never runs: the answer adds nothing); a failure, or an account lookup that fell back to
-// fallback (the launch's SHELL), is warned to the activity log once, when it is
-// first met. The cache is keyed by fallback, the only input that varies in a
-// process (the uid and the account database do not), so the account lookup
-// runs once per fallback value too.
+// loginPATH is the user's login PATH within parent, timed by c. With no runner
+// it is asked at most once per process per fallback (loginPATHCache), the only
+// input that varies in a process (the uid and the account database do not),
+// and a test process asks no real login shell: its startup files would add this
+// host's folders to every launch a test renders, so the launch is judged on the
+// host it runs on, and the answer adds nothing. A caller passing its runner
+// bypasses the cache, neither reading nor writing it, so no answer a fake gave
+// reaches another launch. A failure, or an account lookup that fell back to
+// fallback (the launch's SHELL), is warned to the activity log when probed.
 func loginPATH(parent context.Context, c clock.Clock, fallback string, runner deps.Runner) loginPATHResult {
-	// A test process asks no real login shell: its startup files would add this
-	// host's folders to every launch a test renders, so the launch is judged on
-	// the host it runs on. A test of the probe passes its runner; nothing is
-	// cached, so no answer a fake gave reaches a launch either.
-	if runner == nil && testing.Testing() {
+	if runner != nil {
+		return warnLoginPATH(probeLoginPATH(parent, c, fallback, runner))
+	}
+	if testing.Testing() {
 		return loginPATHResult{}
 	}
-	loginPATHCache.Lock()
-	defer loginPATHCache.Unlock()
-	if result, found := loginPATHCache.byShell[fallback]; found {
-		return result
-	}
-	result := probeLoginPATH(parent, c, fallback, runner)
+	return loginPATHCache.get(fallback, func() loginPATHResult {
+		return warnLoginPATH(probeLoginPATH(parent, c, fallback, nil))
+	})
+}
+
+// warnLoginPATH warns result's problem, else its lookup note, and returns it.
+func warnLoginPATH(result loginPATHResult) loginPATHResult {
 	switch {
 	case result.problem != "":
 		obs.Logger(context.Background()).Warn("claudelaunch: login PATH", obs.FieldErr, result.problem)
 	case result.lookupNote != "":
 		obs.Logger(context.Background()).Warn("claudelaunch: login PATH", obs.FieldErr, result.lookupNote)
 	}
-	loginPATHCache.byShell[fallback] = result
 	return result
 }
 
@@ -141,7 +141,10 @@ func probeLoginPATH(parent context.Context, c clock.Clock, fallback string, runn
 			"%s -l -i printed no PATH within %s: the launch PATH is kept as it is", shell, loginPATHTimeout,
 		), lookupNote)}
 	}
-	if err != nil {
+	// A shell that exited 0 while a process its startup files left behind still
+	// held stdout past loginPATHWaitDelay ends in exec.ErrWaitDelay: the PATH it
+	// printed is used, and only a missing one is a problem.
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return loginPATHResult{lookupNote: lookupNote, problem: withNote(
 			fmt.Sprintf("%s -l -i: %v: the launch PATH is kept as it is", shell, err), lookupNote)}
 	}
@@ -197,25 +200,41 @@ func clipOutput(output string) string {
 	return output[:limit] + "…"
 }
 
-// mergePATH is launch, verbatim and first, with each non-empty entry of login
-// it lacks appended once, in login's order; added reports whether any was.
-func mergePATH(launch string, login []string) (merged string, added bool) {
+// mergePATH is launch, its entries verbatim and in their order, with each
+// absolute entry of login it lacks added once: placed just before the first
+// launch entry that follows it in login, else appended, so a folder the login
+// shell puts ahead of a launch folder stays ahead of it. A relative or empty
+// login entry is dropped: it would search the chat's working directory. added
+// is the entries added, in login's order.
+func mergePATH(launch string, login []string) (merged string, added []string) {
 	separator := string(os.PathListSeparator)
-	seen := map[string]bool{}
-	for _, entry := range strings.Split(launch, separator) {
-		seen[entry] = true
-	}
-	parts := []string{}
+	launchEntries := []string{}
 	if launch != "" {
-		parts = append(parts, launch)
+		launchEntries = strings.Split(launch, separator)
 	}
+	inLaunch := map[string]bool{}
+	for _, entry := range launchEntries {
+		inLaunch[entry] = true
+	}
+	before := map[string][]string{}
+	pending := []string{}
 	for _, entry := range login {
-		if entry == "" || seen[entry] {
+		if inLaunch[entry] {
+			before[entry] = append(before[entry], pending...)
+			pending = nil
 			continue
 		}
-		seen[entry] = true
-		parts = append(parts, entry)
-		added = true
+		if !filepath.IsAbs(entry) || slices.Contains(added, entry) {
+			continue
+		}
+		pending = append(pending, entry)
+		added = append(added, entry)
 	}
-	return strings.Join(parts, separator), added
+	parts := make([]string, 0, len(launchEntries)+len(added))
+	for _, entry := range launchEntries {
+		parts = append(parts, before[entry]...)
+		delete(before, entry)
+		parts = append(parts, entry)
+	}
+	return strings.Join(append(parts, pending...), separator), added
 }

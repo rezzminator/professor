@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -15,30 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/loginshell"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
-
-// resetLoginPATH empties the process's login PATH cache for the test and again after it.
-func resetLoginPATH(t *testing.T) {
-	t.Helper()
-	reset := func() {
-		loginPATHCache.Lock()
-		loginPATHCache.byShell = map[string]loginPATHResult{}
-		loginPATHCache.Unlock()
-	}
-	reset()
-	t.Cleanup(reset)
-}
-
-// pinLoginPATH points SHELL at a shell whose login PATH is already known to
-// add nothing, so a test of something else neither runs a shell nor warns.
-func pinLoginPATH(t *testing.T) {
-	t.Helper()
-	resetLoginPATH(t)
-	const shell = "/pinned/bin/zsh"
-	t.Setenv("SHELL", shell)
-	loginPATHCache.Lock()
-	loginPATHCache.byShell[shell] = loginPATHResult{}
-	loginPATHCache.Unlock()
-}
 
 // envLookup is a lookup over fixed values.
 func envLookup(values map[string]string) func(string) (string, bool) {
@@ -69,11 +46,53 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 		warning string
 	}{
 		{
-			name:   "missing shim dir appended",
+			name:   "missing shim dir kept ahead of the launch folder it precedes",
 			shell:  shell,
 			launch: new("/usr/bin:/bin"),
 			answer: answer(printed("/opt/mise/shims:/usr/bin"), nil),
-			want:   []string{"PATH=/usr/bin:/bin:/opt/mise/shims"},
+			want:   []string{"PATH=/opt/mise/shims:/usr/bin:/bin"},
+		},
+		{
+			name:   "login-only folders placed by the launch folder they precede, else appended",
+			shell:  shell,
+			launch: new("/u/.local/bin:/usr/bin:/bin"),
+			answer: answer(printed("/shims:/u/.local/bin:/usr/bin:/opt/x"), nil),
+			want:   []string{"PATH=/shims:/u/.local/bin:/usr/bin:/bin:/opt/x"},
+		},
+		{
+			name:   "login folder before a later launch folder stays between",
+			shell:  shell,
+			launch: new("/a:/b:/c"),
+			answer: answer(printed("/c:/x:/b:/y"), nil),
+			want:   []string{"PATH=/a:/x:/b:/c:/y"},
+		},
+		{
+			name:   "relative login entries dropped",
+			shell:  shell,
+			launch: new("/usr/bin"),
+			answer: answer(printed(".:bin:node_modules/.bin:/opt/x:/usr/bin"), nil),
+			want:   []string{"PATH=/opt/x:/usr/bin"},
+		},
+		{
+			name:   "only relative login entries missing",
+			shell:  shell,
+			launch: new("/usr/bin"),
+			answer: answer(printed(".:bin:/usr/bin"), nil),
+		},
+		{
+			name:   "stdout held past the wait delay, PATH printed",
+			shell:  shell,
+			launch: new("/usr/bin:/bin"),
+			answer: answer(withExit(printed("/opt/mise/shims:/usr/bin"), -1), waitDelayed(shell)),
+			want:   []string{"PATH=/opt/mise/shims:/usr/bin:/bin"},
+		},
+		{
+			name:   "stdout held past the wait delay, no PATH printed",
+			shell:  shell,
+			launch: new("/a"),
+			answer: answer(deps.RunResult{Stdout: []byte("rc noise\n"), ExitCode: -1}, waitDelayed(shell)),
+			warning: shell + ` -l -i exited -1 with no PATH between its markers (stdout "rc noise\n"): ` +
+				"the launch PATH is kept as it is",
 		},
 		{
 			name:   "every entry already present",
@@ -86,14 +105,14 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 			shell:  shell,
 			launch: new("/b:/a"),
 			answer: answer(printed("/a:/c:/b"), nil),
-			want:   []string{"PATH=/b:/a:/c"},
+			want:   []string{"PATH=/c:/b:/a"},
 		},
 		{
 			name:   "duplicates and empty entries dropped",
 			shell:  shell,
 			launch: new("/a"),
 			answer: answer(printed(":/c::/c:/d:/a:"), nil),
-			want:   []string{"PATH=/a:/c:/d"},
+			want:   []string{"PATH=/c:/d:/a"},
 		},
 		{
 			name:   "launch PATH unset",
@@ -137,7 +156,7 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 			env:    new("/usr/bin/bash"),
 			launch: new("/usr/bin:/bin"),
 			answer: answer(printed("/opt/mise/shims:/usr/bin"), nil),
-			want:   []string{"PATH=/usr/bin:/bin:/opt/mise/shims"},
+			want:   []string{"PATH=/opt/mise/shims:/usr/bin:/bin"},
 		},
 		{
 			name:   "account lookup failed, SHELL probed",
@@ -145,7 +164,7 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 			lookup: errors.New("account database: not found"),
 			launch: new("/usr/bin:/bin"),
 			answer: answer(printed("/opt/mise/shims:/usr/bin"), nil),
-			want:   []string{"PATH=/usr/bin:/bin:/opt/mise/shims"},
+			want:   []string{"PATH=/opt/mise/shims:/usr/bin:/bin"},
 			warning: "login shell lookup: lookup login shell via " + via +
 				": account database: not found; stderr: ; using SHELL",
 		},
@@ -168,7 +187,6 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			resetLoginPATH(t)
 			t.Setenv("HOME", "/srv/planted")
 			t.Setenv("LC_ALL", "C.UTF-8")
 			t.Setenv("XDG_CONFIG_HOME", "/srv/planted/.config")
@@ -201,12 +219,9 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 			if test.lookup != nil {
 				wantShell = values["SHELL"]
 			}
-			loginPATH(context.Background(), fake, values["SHELL"], runner)
-			got := pathEnvThrough(envLookup(values), runner)
-			got = append(got, pathEnvThrough(envLookup(values), runner)...)
-			want := append(slices.Clone(test.want), test.want...)
-			if !slices.Equal(got, want) {
-				t.Fatalf("PATH env over two launches = %q, want %q", got, want)
+			got, _ := pathEnvThrough(envLookup(values), fake, runner)
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("PATH env = %q, want %q", got, test.want)
 			}
 			calls := []deps.RunCall{}
 			lookups := 0
@@ -222,10 +237,10 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 				wantCalls = 0
 			}
 			if lookups != wantLookups {
-				t.Fatalf("account lookups = %d, want %d: asked once per process", lookups, wantLookups)
+				t.Fatalf("account lookups = %d, want %d: asked once per launch", lookups, wantLookups)
 			}
 			if len(calls) != wantCalls {
-				t.Fatalf("login shell runs = %d (%v), want %d: asked once per process",
+				t.Fatalf("login shell runs = %d (%v), want %d: asked once per launch",
 					len(calls), calls, wantCalls)
 			}
 			wantArgv := []string{wantShell, "-l", "-i", "-c", loginPATHScript}
@@ -272,6 +287,15 @@ func TestPathEnvMergesTheLoginShellPATH(t *testing.T) {
 	}
 }
 
+// withExit is result exiting code.
+func withExit(result deps.RunResult, code int) deps.RunResult {
+	result.ExitCode = code
+	return result
+}
+
+// waitDelayed is the error RealRunner returns for shell when its stdout is still held once the wait delay expires.
+func waitDelayed(shell string) error { return fmt.Errorf("run %q: %w", shell, exec.ErrWaitDelay) }
+
 // answer is a fake login shell's fixed reply.
 func answer(result deps.RunResult, err error) func(context.Context, deps.RunCall) (deps.RunResult, error) {
 	return func(context.Context, deps.RunCall) (deps.RunResult, error) { return result, err }
@@ -281,13 +305,13 @@ func answer(result deps.RunResult, err error) func(context.Context, deps.RunCall
 // with no runner of the test's own, asks no login shell, so this host's startup
 // files add no folder to it; the probe's tests pass their runner.
 func TestLoginPATHInATestProcessRunsNoShell(t *testing.T) {
-	resetLoginPATH(t)
 	_, recorder := obs.Test(t)
 	got := loginPATH(context.Background(), clock.NewFake(time.Unix(0, 0)), "/bin/sh", nil)
 	if got.problem != "" || got.lookupNote != "" || got.entries != nil {
 		t.Fatalf("loginPATH in a test process = %+v, want the empty answer that adds nothing", got)
 	}
-	if path := pathEnvThrough(envLookup(map[string]string{"SHELL": "/bin/sh", "PATH": "/usr/bin"}), nil); path != nil {
+	lookup := envLookup(map[string]string{"SHELL": "/bin/sh", "PATH": "/usr/bin"})
+	if path, _ := pathEnvThrough(lookup, clock.NewFake(time.Unix(0, 0)), nil); path != nil {
 		t.Fatalf("pathEnvThrough in a test process = %q, want no PATH assignment", path)
 	}
 	if records := recorder.Records(); len(records) != 0 {

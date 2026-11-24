@@ -3,6 +3,10 @@ package claudelaunch
 import (
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestSessionEnv(t *testing.T) {
@@ -50,6 +54,22 @@ func TestSessionEnv(t *testing.T) {
 		if got := SessionEnv(entry.claude); !reflect.DeepEqual(got, entry.want) {
 			t.Errorf("SessionEnv(%v) = %q, want %q", entry.claude, got, entry.want)
 		}
+	}
+	// The launch shell and PATH follow the plugin values: the login shell's
+	// folders merged into the session's own PATH, its order kept.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(0, 0)))
+	runner := loginRunner("/login/bin/zsh", "/opt/mise/shims", "/usr/bin", "/opt/x")
+	runner.ScriptLookPath("bash", "/scripted/bin/bash", nil)
+	lookup := envLookup(map[string]string{"PATH": "/usr/bin:/bin", "SHELL": "/login/bin/zsh"})
+	want := []string{
+		"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1",
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000",
+		"ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-5-5",
+		"CLAUDE_CODE_SHELL=/scripted/bin/bash",
+		"PATH=/opt/mise/shims:/usr/bin:/bin:/opt/x",
+	}
+	if got := sessionEnvThrough(nil, lookup, runner); !reflect.DeepEqual(got, want) {
+		t.Errorf("SessionEnv with a login PATH = %q, want %q", got, want)
 	}
 }
 

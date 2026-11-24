@@ -42,7 +42,8 @@ type Request struct {
 	// Envs are the layered envs, machine then project (workbench.Persona.Envs).
 	Envs     map[string]string
 	Settings map[string]any // the layered claude.settings, machine then project (workbench.Persona.ClaudeSettings)
-	// Runner resolves bash for CLAUDE_CODE_SHELL; nil is the real runner.
+	// Runner resolves bash for CLAUDE_CODE_SHELL and runs the login shell; nil is the real runner
+	// behind the process's login PATH cache, a non-nil one (a test's) bypasses that cache.
 	Runner deps.Runner
 }
 
@@ -56,6 +57,9 @@ type Launch struct {
 	Argv      []string
 	Cache1H   bool
 	SessionID string
+	// LoginPATH is the login-shell folders Env's PATH adds to pfm's own PATH (none under a persona
+	// PATH): a pane shell's command adds them to that shell's own PATH (PaneEnv).
+	LoginPATH []string
 }
 
 // CheckConfigDir refuses an account dir Claude would create itself or one
@@ -141,14 +145,8 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		return Launch{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
 	}
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
-	// A persona's env is the base the shell and PATH assignments build on: its value is read first.
-	launchEnv := func(name string) (string, bool) {
-		if value, ok := request.Envs[name]; ok {
-			return value, true
-		}
-		return paths.OSEnv{}.Lookup(name)
-	}
-	result.Env = append(result.Env, shellEnvThrough(launchEnv, request.Runner)...)
+	shellEnv, loginPATH := requestShellEnv(request)
+	result.Env, result.LoginPATH = append(result.Env, shellEnv...), loginPATH
 	costLedgerPlan(request, prefs.CostLedger, &result)
 	result.Argv = append(result.Argv, SessionArgs(request.SessionID, request.Resume, request.Fork)...)
 	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) && !resumesInPlace(request) {

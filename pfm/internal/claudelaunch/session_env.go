@@ -2,9 +2,12 @@ package claudelaunch
 
 import (
 	"maps"
+	"os"
 	"slices"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -50,6 +53,26 @@ func RunEnvironment(environ []string, launch Launch) []string {
 	return append(result, launch.Env...)
 }
 
+// PaneEnv is Env as the command a pane shell runs carries it, and the PATH word
+// that follows it, space-led: with LoginPATH set, Env's PATH (pfm's own merged)
+// is left out and the word adds only those folders after the pane shell's own
+// "$PATH", so the pane's order stays first; else Env whole and no word. The word
+// is POSIX shell, read by sh, bash and zsh alike (fish joins a quoted path
+// variable with colons too).
+func (launch Launch) PaneEnv() (env []string, pathWord string) {
+	if launch.LoginPATH == nil {
+		return launch.Env, ""
+	}
+	for _, assignment := range launch.Env {
+		if !strings.HasPrefix(assignment, envPATH+"=") {
+			env = append(env, assignment)
+		}
+	}
+	separator := string(os.PathListSeparator)
+	added := cmdparse.Quote(separator + strings.Join(launch.LoginPATH, separator))
+	return env, ` ` + envPATH + `="$` + envPATH + `"` + added
+}
+
 // sessionEnvNames are the variables a passthrough Claude session carries in its process
 // environment, the plugins reading them there.
 var sessionEnvNames = []string{envFunctionHooks, envAutoCompactWindow, envAnthropicSmallFastModel}
@@ -58,6 +81,11 @@ var sessionEnvNames = []string{envFunctionHooks, envAutoCompactWindow, envAnthro
 // laid over the shipped defaults, EffectiveSettings), and the launch shell and PATH (ShellEnv) for a
 // passthrough Claude session. A variable claude sets to null is left out.
 func SessionEnv(claude map[string]any) []string {
+	return sessionEnvThrough(claude, paths.OSEnv{}.Lookup, nil)
+}
+
+// sessionEnvThrough is SessionEnv over the environment lookup reads, the shell and PATH through runner.
+func sessionEnvThrough(claude map[string]any, lookup func(string) (string, bool), runner deps.Runner) []string {
 	env := EffectiveEnv(claude)
 	result := make([]string, 0, len(sessionEnvNames))
 	for _, name := range sessionEnvNames {
@@ -65,5 +93,5 @@ func SessionEnv(claude map[string]any) []string {
 			result = append(result, name+"="+value)
 		}
 	}
-	return append(result, ShellEnv(paths.OSEnv{}.Lookup)...)
+	return append(result, ShellEnvThrough(lookup, runner)...)
 }

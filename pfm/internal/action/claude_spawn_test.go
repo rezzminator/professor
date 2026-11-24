@@ -8,15 +8,22 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"mvdan.cc/sh/v3/expand"
+	"mvdan.cc/sh/v3/syntax"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/loginshell"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	seatspawn "github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 // installCostLauncher stands a fake pfm where the launch registry looks for the cost launcher.
@@ -319,5 +326,99 @@ func TestClaudeSpawnCommandNamesAMissingClaudeBinary(t *testing.T) {
 		`: no such file or directory`
 	if err == nil || err.Error() != want {
 		t.Fatalf("Command with the binary missing: error = %v, want %q", err, want)
+	}
+}
+
+// A pane shell runs ShellCommand: a PATH whose base is pfm's own adds only the
+// login shell's folders to the pane shell's PATH, whose order stays first; a
+// persona's PATH is written as merged. SeatRun execs with no shell between, so
+// its PATH is pfm's own with the login folders placed as the login PATH orders them.
+func TestClaudeSpawnShellCommandKeepsThePaneShellPATH(t *testing.T) {
+	const loginShell, panePATH = "/login/bin/zsh", "/pane/shims:/usr/bin:/bin"
+	t.Setenv("SHELL", loginShell)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	for _, test := range []struct {
+		name               string
+		envs               map[string]string
+		wantPane, wantSeat string
+	}{
+		{
+			name:     "pfm PATH",
+			wantPane: "/pane/shims:/usr/bin:/bin:/shims:/opt/x",
+			wantSeat: "/shims:/usr/bin:/bin:/opt/x",
+		},
+		{
+			name:     "persona PATH",
+			envs:     map[string]string{"PATH": "/persona/bin"},
+			wantPane: "/persona/bin:/shims:/usr/bin:/opt/x",
+			wantSeat: "/persona/bin:/shims:/usr/bin:/opt/x",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &deps.FakeRunner{}
+			runner.ScriptLookPath("bash", "/scripted/bin/bash", nil)
+			loginshell.ScriptAccount(runner, os.Getuid(), loginShell, nil)
+			// The markers claudelaunch's probe prints around the login shell's PATH.
+			runner.Script([]string{loginShell}, deps.RunResult{
+				Stdout: []byte("__PFM_LOGIN_PATH_START__/shims:/usr/bin:/opt/x__PFM_LOGIN_PATH_END__"),
+			}, nil)
+			spawn := ClaudeSpawn{
+				Purpose: PurposeInteractive, Home: t.TempDir(), Envs: test.envs,
+				launchRunner: runner,
+			}
+			testwait.ProcessClock(t, clock.NewFake(time.Unix(0, 0)))
+			command, err := spawn.ShellCommand()
+			if err != nil {
+				t.Fatal(err)
+			}
+			file, err := syntax.NewParser().Parse(strings.NewReader(command), "pane")
+			if err != nil {
+				t.Fatalf("parse %q: %v", command, err)
+			}
+			config := &expand.Config{Env: expand.ListEnviron("PATH=" + panePATH)}
+			panePaths := []string{}
+			syntax.Walk(file, func(node syntax.Node) bool {
+				call, ok := node.(*syntax.CallExpr)
+				if !ok {
+					return true
+				}
+				for _, word := range call.Args {
+					value, err := expand.Literal(config, word)
+					if err != nil {
+						t.Fatalf("expand %q under PATH=%s: %v", command, panePATH, err)
+					}
+					if path, found := strings.CutPrefix(value, "PATH="); found {
+						panePaths = append(panePaths, path)
+					}
+				}
+				return false
+			})
+			if !slices.Equal(panePaths, []string{test.wantPane}) {
+				t.Fatalf("pane PATH under PATH=%s = %q, want [%s]; command %q",
+					panePATH, panePaths, test.wantPane, command)
+			}
+			seat, err := spawn.SeatRun("/work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := lastEnvironmentValue(seat.Env, "PATH"); got != test.wantSeat {
+				t.Fatalf("SeatRun PATH = %q, want %q", got, test.wantSeat)
+			}
+			// A caller's own Runner (a picker's, a resume's: the real one in
+			// production) never runs the login shell, so the process's cache holds.
+			callerRunner := &deps.FakeRunner{}
+			callerSpawn := ClaudeSpawn{
+				Purpose: PurposeInteractive, Home: t.TempDir(), Envs: test.envs,
+				Runner: callerRunner,
+			}
+			if _, err := callerSpawn.ShellCommand(); err != nil {
+				t.Fatal(err)
+			}
+			for _, call := range callerRunner.Calls() {
+				if call.Argv[0] == loginShell {
+					t.Fatalf("ShellCommand ran the login shell through the spawn's Runner: %q", call.Argv)
+				}
+			}
+		})
 	}
 }

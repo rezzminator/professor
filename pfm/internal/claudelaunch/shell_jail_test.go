@@ -17,7 +17,8 @@ import (
 // TestRenderShellUnsetTakesBashFromPATH also runs that real bash as the
 // account's login shell (the account lookup answers it, whatever the host's
 // passwd says): the directory its ~/.profile prepends reaches a launch whose PATH
-// lacks it, first among the login PATH's entries the launch lacks.
+// lacks it, ahead of the launch's folder when the login PATH holds that folder
+// after it, else right after the launch's PATH.
 func TestRenderShellUnsetTakesBashFromPATH(t *testing.T) {
 	realBash, err := deps.RealRunner{}.LookPath("bash")
 	if err != nil {
@@ -41,14 +42,13 @@ func TestRenderShellUnsetTakesBashFromPATH(t *testing.T) {
 		t.Fatalf("write .profile: %v", err)
 	}
 	t.Setenv("HOME", home)
-	resetLoginPATH(t)
 	launch := filepath.Dir(realBash)
 	account := &deps.FakeRunner{}
 	loginshell.ScriptAccount(account, os.Getuid(), realBash, nil)
 	account.Handle([]string{realBash}, func(ctx context.Context, call deps.RunCall) (deps.RunResult, error) {
 		return deps.RealRunner{}.Run(ctx, call.Argv, call.Opts)
 	})
-	env := shellEnvThrough(
+	env := ShellEnvThrough(
 		envLookup(map[string]string{"SHELL": realBash, "PATH": launch, "CLAUDE_CODE_SHELL": realBash}), account,
 	)
 	var entries []string
@@ -57,9 +57,13 @@ func TestRenderShellUnsetTakesBashFromPATH(t *testing.T) {
 			entries = strings.Split(value, ":")
 		}
 	}
-	if len(entries) < 2 || entries[0] != launch || entries[1] != shims ||
+	first, second := launch, shims
+	if slices.Contains(strings.Split(loginBasePATH, ":"), launch) {
+		first, second = shims, launch
+	}
+	if len(entries) < 2 || entries[0] != first || entries[1] != second ||
 		slices.Index(entries[2:], shims) != -1 || slices.Index(entries[2:], launch) != -1 {
 		t.Fatalf("ShellEnv = %q, want one PATH=%s:%s, then the login PATH's other entries the launch lacks (HOME %s)",
-			env, launch, shims, home)
+			env, first, second, home)
 	}
 }

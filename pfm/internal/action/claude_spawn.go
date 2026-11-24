@@ -50,6 +50,7 @@ type ClaudeSpawn struct {
 
 	binary            string
 	explicitConfigDir string
+	launchRunner      deps.Runner // Render's runner, never Runner: non-nil bypasses the login PATH cache
 }
 
 func (spawn ClaudeSpawn) request() claudelaunch.Request {
@@ -58,7 +59,7 @@ func (spawn ClaudeSpawn) request() claudelaunch.Request {
 		SessionID: spawn.SessionID, Resume: spawn.Resume, Fork: spawn.Fork,
 		Name: spawn.Name, RemoteControlName: spawn.RemoteControlName, Model: spawn.Model, Effort: spawn.Effort,
 		PromptFile: spawn.PromptFile, Envs: spawn.Envs, Settings: spawn.ClaudeSettings, Args: spawn.Args,
-		Home: spawn.Home, Binary: spawn.binary, ConfigDir: spawn.explicitConfigDir,
+		Home: spawn.Home, Binary: spawn.binary, ConfigDir: spawn.explicitConfigDir, Runner: spawn.launchRunner,
 	}
 }
 
@@ -101,16 +102,13 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	}
 	var command strings.Builder
 	command.WriteString(envStripWords(launch.Unset))
-	writeAssignments(&command, launch.Env)
-	for _, word := range launch.Wrapper {
+	env, pathWord := launch.PaneEnv()
+	writeAssignments(&command, env)
+	command.WriteString(pathWord)
+	words := append(append(append([]string(nil), launch.Wrapper...), launch.Binary), launch.Argv...)
+	for _, word := range words {
 		command.WriteByte(' ')
 		command.WriteString(cmdparse.Quote(word))
-	}
-	command.WriteByte(' ')
-	command.WriteString(cmdparse.Quote(launch.Binary))
-	for _, argument := range launch.Argv {
-		command.WriteByte(' ')
-		command.WriteString(cmdparse.Quote(argument))
 	}
 	return command.String(), nil
 }

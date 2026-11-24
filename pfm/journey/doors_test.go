@@ -39,7 +39,7 @@ type answer struct {
 // mark of the chat's tab, and returns what each of its tool calls answered, in order.
 func play(c *harness.Ctx, term *harness.Terminal, s *State, steps ...map[string]any) []answer {
 	return played(c, s, steps, func(turn, reply string) {
-		term.Type(turn + "\r")
+		term.TypeDrawn(turn+"\r", composerEnds)
 		term.WaitFor("⏺ " + reply)
 	})
 }
@@ -259,7 +259,8 @@ func matches(code int, pattern string) func(answer) string {
 }
 
 // jsonIs is a check that the answer's code is code and its text is a JSON value equal to want followed
-// by tail; a want map holding idleSeconds for a field asks only that the field is a number.
+// by tail; a want map holding idleSeconds for a field asks only that the field is a number, and one holding
+// fleetCount that the field is a number or absent.
 func jsonIs(code int, tail string, want any) func(answer) string {
 	return func(got answer) string {
 		body, found := strings.CutSuffix(got.Text, tail)
@@ -277,8 +278,10 @@ func jsonIs(code int, tail string, want any) func(answer) string {
 		wantedFields, isMap := wanted.(map[string]any)
 		if fields, ok := decoded.(map[string]any); ok && isMap {
 			for key, value := range wantedFields {
-				if _, number := fields[key].(float64); number && value == idleSeconds {
-					fields[key] = idleSeconds
+				_, present := fields[key]
+				_, number := fields[key].(float64)
+				if (number && value == idleSeconds) || (value == fleetCount && (number || !present)) {
+					fields[key] = value
 				}
 			}
 		}
@@ -290,8 +293,13 @@ func jsonIs(code int, tail string, want any) func(answer) string {
 }
 
 // idleSeconds stands in a wanted value for a number a clock or the rest of the fleet decides: the
-// idle_seconds of a status, the counts of chats elsewhere and killed in a listing.
+// idle_seconds of a status, the count of killed chats in a listing.
 const idleSeconds = "a number"
+
+// fleetCount stands in a wanted value for a count the rest of the fleet decides and the answer leaves out
+// at zero: the chats elsewhere in an MCP listing (mcpserv.LSOutput.Elsewhere is omitempty), absent when a
+// step runs alone and no sibling branch holds a chat in another repository.
+const fleetCount = "a number or absent"
 
 // notFound is the CLI door's answer for a name no chat holds.
 func notFound(name string) string {

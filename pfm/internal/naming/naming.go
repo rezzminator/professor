@@ -46,9 +46,15 @@ func ValidateLabel(label string) error {
 	return nil
 }
 
-// LabelKilled reports whether a display name carries KillPrefix.
+// KillPrefixes lists every label prefix LabelKilled honours, KillPrefix
+// first: the one list the store's SQL copy of the test is built from.
+func KillPrefixes() []string {
+	return []string{KillPrefix, legacyKillPrefix}
+}
+
+// LabelKilled reports whether a display name carries any of KillPrefixes.
 func LabelKilled(name string) bool {
-	for _, prefix := range []string{KillPrefix, legacyKillPrefix} {
+	for _, prefix := range KillPrefixes() {
 		if len(name) >= len(prefix) && strings.EqualFold(name[:len(prefix)], prefix) {
 			return true
 		}

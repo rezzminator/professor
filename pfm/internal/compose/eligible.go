@@ -1,5 +1,27 @@
 package compose
 
+// The default view's resume caps; fleet.LoadDefaultData reads with the same two.
+const (
+	ClaudeResumeCap   = 30
+	CodexResumeCap    = 15
+	openCodeResumeCap = 10
+)
+
+// resumeCounters returns the counters the Claude and Codex resume candidates
+// count their killed and omitted rows into. Capped candidates
+// (Input.CachedCounts) are not every resumable Claude and Codex chat: the
+// store's totals stand in for counting them, added to output here, and the
+// candidates count into discarded scratch, so a capped frame's counts equal
+// the full frame's.
+func resumeCounters(input Input, output *Output) (killed, suppressed *int) {
+	if input.CachedCounts == nil {
+		return &output.KilledCount, &output.SuppressedCount
+	}
+	output.KilledCount += input.CachedCounts.Killed
+	output.SuppressedCount += input.CachedCounts.Suppressed
+	return new(int), new(int)
+}
+
 // defaultEligible answers whether a row belongs in the default listing.
 //
 // THE KILL IS TESTED FIRST, before any liveness short-circuit: killed is dead,

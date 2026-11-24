@@ -189,6 +189,11 @@ type Input struct {
 	OpenCodeSessions []store.OpenCodeSession
 	CxNames          map[string]string
 	Killed           []store.Killed
+	// CachedCounts is set when Transcripts and Rollouts are
+	// store.DefaultCandidates' capped candidates: the killed and suppressed
+	// totals of every Claude and Codex chat no live row claims, added in
+	// place of counting the resume candidates given.
+	CachedCounts *store.CachedCounts
 	// Spaces is each chat's recorded space (fleetdb chat_space) by chat id.
 	Spaces      map[string]string
 	ClaudeSeats []ClaudeSeat

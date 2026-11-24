@@ -22,7 +22,7 @@ func TestComposeStress(t *testing.T) {
 	_ = Compose(input)
 
 	allOutput := Compose(input)
-	const expectedRows = 60 + claudeResumeCap + 1
+	const expectedRows = 60 + ClaudeResumeCap + 1
 	if len(allOutput.Rows) != expectedRows {
 		t.Fatalf("50k compose rows = %d, want %d", len(allOutput.Rows), expectedRows)
 	}
@@ -85,8 +85,8 @@ func TestCodexLineageStress(t *testing.T) {
 	input := codexLineageStressInput()
 	rollouts := input.Rollouts
 	output := Compose(input)
-	if len(output.Rows) != codexResumeCap {
-		t.Fatalf("lineage stress rows = %d, want %d", len(output.Rows), codexResumeCap)
+	if len(output.Rows) != CodexResumeCap {
+		t.Fatalf("lineage stress rows = %d, want %d", len(output.Rows), CodexResumeCap)
 	}
 	seen := make(map[string]struct{})
 	for _, row := range output.Rows {
@@ -101,8 +101,8 @@ func TestCodexLineageStress(t *testing.T) {
 			t.Fatalf("lineage %q prompts = %d", row.ID, row.PromptCount)
 		}
 	}
-	if len(seen) != codexResumeCap {
-		t.Fatalf("lineage stress Codex rows = %d, want %d", len(seen), codexResumeCap)
+	if len(seen) != CodexResumeCap {
+		t.Fatalf("lineage stress Codex rows = %d, want %d", len(seen), CodexResumeCap)
 	}
 	t.Logf(
 		"STRESS lineage files=%d roots=%d rows=%d",

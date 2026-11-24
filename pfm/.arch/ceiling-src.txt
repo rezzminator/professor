@@ -55,9 +55,9 @@ internal/cmdparse/words.go 461
 internal/codexappendix/trust.go 550
 internal/codexmeta/header.go 252
 internal/codexmeta/rollouts.go 321
-internal/compose/compose.go 1270
+internal/compose/compose.go 1269
 internal/compose/cosmos.go 541
-internal/compose/types.go 313
+internal/compose/types.go 308
 internal/config/claude_prefs.go 295
 internal/config/config.go 1430
 internal/config/runtime.go 382
@@ -80,7 +80,7 @@ internal/doctor/spawn_audit.go 563
 internal/enginesync/calls.go 359
 internal/fleet/codexpanes.go 415
 internal/fleet/reconcile.go 579
-internal/fleet/scan.go 392
+internal/fleet/scan.go 390
 internal/fleetdb/clearname.go 264
 internal/fleetdb/fleetdb.go 567
 internal/fleetdb/migrate.go 537
@@ -245,7 +245,7 @@ internal/statusline/subagents_spend.go 394
 internal/store/codexstate.go 472
 internal/store/killed.go 511
 internal/store/lineage.go 371
-internal/store/queries.go 781
+internal/store/queries.go 601
 internal/testjail/profile.go 488
 internal/testjail/testjail.go 772
 internal/themecmd/themecmd.go 468

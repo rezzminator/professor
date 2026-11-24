@@ -2,10 +2,13 @@ package fleet
 
 import (
 	"context"
+	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -45,6 +48,197 @@ func TestEnrichLiveLeavesCompleteDataUntouched(t *testing.T) {
 	}
 	if len(got.Transcripts) != 1 || len(got.Rollouts) != 1 {
 		t.Fatalf("EnrichLive() = %+v, want the data unchanged", got)
+	}
+}
+
+// TestCappedLoadListsTheResumableChatsOfAFullLoad pins the picker's two
+// frames of one pass to the same rows: the capped default load (each pass's
+// first frame, and ScanCached's) must list every resumable chat and the same
+// omitted counts the full load lists. A live agent still zero bytes long, a
+// live Codex pane and one native seat per engine sit among the newest chats,
+// the Codex seat on a fork, which makes its whole lineage live as a live
+// Codex process does; none may take a resume slot or be counted as omitted,
+// so the capped read reaches past them to the oldest chats the caps still
+// hold, and never further. A Codex process no pane holds is no live row, so
+// its chat stays resumable; an empty OpenCode session is counted in both
+// frames.
+func TestCappedLoadListsTheResumableChatsOfAFullLoad(t *testing.T) {
+	database, err := store.OpenMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	ctx := context.Background()
+	cwd := testjail.Place("/jail/work/orchard")
+	rolloutPath := func(index int) string {
+		return fmt.Sprintf("/jail/codex/rollout-2026-01-02T03-04-05-cx-%02d.jsonl", index)
+	}
+	for index := range 34 {
+		transcript := store.Transcript{
+			UUID:        fmt.Sprintf("cc-%02d", index),
+			Path:        fmt.Sprintf("/jail/claude/cc-%02d.jsonl", index),
+			Size:        100,
+			PromptCount: 1,
+			MTimeNS:     int64(index + 1),
+			ActivityNS:  int64(index + 1),
+			CWD:         cwd,
+		}
+		if index == 33 {
+			transcript.Size, transcript.PromptCount = 0, 0
+		}
+		if err := database.UpsertTranscript(ctx, transcript); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Two label-killed chats, the newest of all: one under the legacy "_HIDE"
+	// prefix, one under "_KILL" lowercased. Both are hidden in both frames,
+	// never a resumable candidate nor an eligible chat past the cap.
+	for index, title := range []string{"_HIDE worker 1", "_kill worker 2"} {
+		uuid := fmt.Sprintf("cc-%02d", 34+index)
+		if err := database.UpsertTranscript(ctx, store.Transcript{
+			UUID:        uuid,
+			Path:        "/jail/claude/" + uuid + ".jsonl",
+			Size:        100,
+			PromptCount: 1,
+			MTimeNS:     int64(35 + index),
+			ActivityNS:  int64(35 + index),
+			CWD:         cwd,
+			CustomTitle: title,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := range 19 {
+		if err := database.UpsertRollout(ctx, store.Rollout{
+			ID:          fmt.Sprintf("cx-%02d", index),
+			Path:        rolloutPath(index),
+			Size:        100,
+			PromptCount: 1,
+			MTimeNS:     int64(index + 1),
+			CWD:         cwd,
+			UserThread:  true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The native Codex seat holds cx-19, a fork of cx-10: the newest thread
+	// of the cx-10 lineage is live, though the lineage's root is not.
+	if err := database.UpsertRollout(ctx, store.Rollout{
+		ID:           "cx-19",
+		Path:         rolloutPath(19),
+		Size:         100,
+		PromptCount:  1,
+		MTimeNS:      20,
+		CWD:          cwd,
+		UserThread:   true,
+		ParentThread: "cx-10",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ReplaceOpenCodeSessions(
+		ctx,
+		[]store.OpenCodeSession{{ID: "oc-empty", Directory: cwd}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	live := gather.Snapshot{
+		Panes:  []gather.ProbePane{{Socket: "cx-1-2-3", PaneID: "%1", CurrentPath: cwd}},
+		Agents: []gather.Agent{{PID: 33, SessionID: "cc-33"}},
+		Codex: []gather.LiveCodex{
+			{PID: 16, Socket: "cx-1-2-3", PaneID: "%1", RolloutPath: rolloutPath(16)},
+			{PID: 17, RolloutPath: rolloutPath(5)},
+		},
+	}
+	native := []gather.HerdrSeat{
+		{Seat: fleetdb.Seat{SeatID: "seat-cc", SessionID: "cc-20", Engine: "cc", Backend: "herdr", State: "live"}},
+		{Seat: fleetdb.Seat{SeatID: "seat-cx", SessionID: "cx-19", Engine: "cx", Backend: "herdr", State: "live"}},
+	}
+	var wantClaude, wantCodex []string
+	for index := 2; index <= 32; index++ {
+		if index != 20 {
+			wantClaude = append(wantClaude, fmt.Sprintf("cc-%02d", index))
+		}
+	}
+	for index := 2; index <= 18; index++ {
+		if index != 10 && index != 16 {
+			wantCodex = append(wantCodex, fmt.Sprintf("cx-%02d", index))
+		}
+	}
+	wantClaims := store.LiveClaims{
+		Transcripts: map[string]struct{}{"cc-20": {}, "cc-33": {}},
+		Rollouts:    map[string]struct{}{"cx-10": {}, "cx-16": {}},
+	}
+	for _, loader := range []struct {
+		name string
+		load func(context.Context, *store.Store) (Data, error)
+	}{
+		{name: "full", load: LoadData},
+		{name: "capped", load: LoadDefaultData},
+	} {
+		t.Run(loader.name, func(t *testing.T) {
+			output := composeLoaded(t, database, loader.load, compose.DefaultView, live, native...)
+			var claude, codex []string
+			for index := range output.Rows {
+				row := &output.Rows[index]
+				switch row.Kind {
+				case compose.ResumeClaude:
+					claude = append(claude, row.ID)
+				case compose.ResumeCodex:
+					codex = append(codex, row.ID)
+				}
+			}
+			slices.Sort(claude)
+			slices.Sort(codex)
+			if !reflect.DeepEqual(claude, wantClaude) {
+				t.Errorf("resumable Claude chats =\n%v\nwant\n%v", claude, wantClaude)
+			}
+			if !reflect.DeepEqual(codex, wantCodex) {
+				t.Errorf("resumable Codex chats =\n%v\nwant\n%v", codex, wantCodex)
+			}
+			if output.KilledCount != 2 || output.SuppressedCount != 5 {
+				t.Errorf(
+					"killed, suppressed = %d, %d, want 2, 5 (cc-34 _HIDE, cc-35 _kill; cc-00, cc-01, cx-00, cx-01 past the caps, oc-empty)",
+					output.KilledCount,
+					output.SuppressedCount,
+				)
+			}
+			if claims := output.LiveClaims(); !reflect.DeepEqual(claims, wantClaims) {
+				t.Errorf("live claims = %v, want %v", claims, wantClaims)
+			}
+		})
+	}
+	// The re-read around the claims stays inside the caps: the two oldest
+	// chats of each engine are never read.
+	data, err := LoadDefaultData(ctx, database)
+	if err != nil {
+		t.Fatalf("LoadDefaultData() = %v", err)
+	}
+	data, err = EnrichLive(ctx, database, data, live)
+	if err != nil {
+		t.Fatalf("EnrichLive() = %v", err)
+	}
+	data, err = refillDefault(ctx, database, data, wantClaims)
+	if err != nil {
+		t.Fatalf("refillDefault() = %v", err)
+	}
+	var read, wantRead []string
+	for index := range data.Transcripts {
+		read = append(read, data.Transcripts[index].UUID)
+	}
+	for index := range data.Rollouts {
+		read = append(read, data.Rollouts[index].ID)
+	}
+	for index := 2; index <= 33; index++ {
+		wantRead = append(wantRead, fmt.Sprintf("cc-%02d", index))
+	}
+	for index := 2; index <= 19; index++ {
+		if index != 10 {
+			wantRead = append(wantRead, fmt.Sprintf("cx-%02d", index))
+		}
+	}
+	slices.Sort(read)
+	if !slices.Equal(read, wantRead) {
+		t.Errorf("refilled candidates =\n%v\nwant\n%v", read, wantRead)
 	}
 }
 

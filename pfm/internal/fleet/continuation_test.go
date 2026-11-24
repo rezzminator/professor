@@ -119,14 +119,26 @@ func composeParked(
 	native ...gather.HerdrSeat,
 ) compose.Output {
 	t.Helper()
-	ctx := context.Background()
-	var data Data
-	var err error
+	load := LoadData
 	if view == compose.DefaultView {
-		data, err = LoadDefaultData(ctx, database)
-	} else {
-		data, err = LoadData(ctx, database)
+		load = LoadDefaultData
 	}
+	return composeLoaded(t, database, load, view, live, native...)
+}
+
+// composeLoaded runs one load, enriched with the live snapshot and native
+// seats the way the picker and ScanCached do, and composes it in view.
+func composeLoaded(
+	t *testing.T,
+	database *store.Store,
+	load func(context.Context, *store.Store) (Data, error),
+	view compose.View,
+	live gather.Snapshot,
+	native ...gather.HerdrSeat,
+) compose.Output {
+	t.Helper()
+	ctx := context.Background()
+	data, err := load(ctx, database)
 	if err != nil {
 		t.Fatalf("load data: %v", err)
 	}
@@ -134,17 +146,19 @@ func composeParked(
 	if err != nil {
 		t.Fatalf("EnrichLive() = %v", err)
 	}
-	data, err = EnrichNative(ctx, database, data, native)
-	if err != nil {
-		t.Fatalf("EnrichNative() = %v", err)
-	}
-	return ComposeFleet(
+	output, err := ComposeNative(
+		ctx,
+		database,
 		Env{Config: pfmconfig.Defaults(t.TempDir(), nil)},
 		view,
 		data,
 		live,
-		native...,
+		native,
 	)
+	if err != nil {
+		t.Fatalf("ComposeNative() = %v", err)
+	}
+	return output
 }
 
 // chatRows are the rows of the parked conversation, found by either id or

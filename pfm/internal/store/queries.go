@@ -30,176 +30,21 @@ const rolloutColumns = `
 id, path, size, mtime_ns, parsed_offset, cwd, user_thread, session_id,
 parent_thread, lineage_root, first_prompt, prompt_count, is_bg`
 
-// transcriptLabelSQL is naming.DisplayName's precedence in SQL, and
-// labelKilledSQL is naming.LabelKilled over it. Both are built from the
-// naming constants rather than spelled out, so the cached frame cannot drift
-// from compose's applyKill when the prefix changes. upper() is ASCII-only in
-// SQLite, which is exactly the case-folding LabelKilled does.
+// transcriptLabelSQL is naming.DisplayName's precedence in SQL; labelKilledSQL is
+// naming.LabelKilled over it, a parenthesized OR of one test per naming.KillPrefixes
+// entry, so it never drifts from compose's applyKill. upper() folds ASCII, as LabelKilled does.
 const transcriptLabelSQL = `COALESCE(NULLIF(t.custom_title,''), NULLIF(t.ai_title,''), t.first_prompt)`
 
-var labelKilledSQL = fmt.Sprintf(
-	`upper(substr(%s, 1, %d))=%s`,
-	transcriptLabelSQL,
-	len(naming.KillPrefix),
-	"'"+strings.ToUpper(naming.KillPrefix)+"'",
-)
+var labelKilledSQL = func() (sql string) {
+	for _, prefix := range naming.KillPrefixes() {
+		folded := strings.ToUpper(prefix)
+		sql += fmt.Sprintf(` OR upper(substr(%s, 1, %d))='%s'`, transcriptLabelSQL, len(folded), folded)
+	}
+	return "(" + strings.TrimPrefix(sql, " OR ") + ")"
+}()
 
 type rowScanner interface {
 	Scan(...any) error
-}
-
-// CachedCounts separates explicit kills from rows omitted because
-// they are empty, background, or beyond the default resume caps.
-type CachedCounts struct {
-	Killed     int
-	Suppressed int
-}
-
-// DefaultCandidates reads only the rows capable of appearing in the default
-// cached first frame. SQL applies the same kill and empty/background
-// predicates as compose, avoiding a full corpus decode before the TUI opens.
-func (s *Store) DefaultCandidates(
-	ctx context.Context,
-	transcriptLimit, rolloutLimit int,
-) ([]Transcript, []Rollout, CachedCounts, error) {
-	// One refill for all three queries below: they run back to back on the
-	// same connection, and re-reading the shared store between them could only
-	// make the frame disagree with itself.
-	if err := s.syncEffectiveKilled(ctx); err != nil {
-		return nil, nil, CachedCounts{}, err
-	}
-	transcripts, err := s.defaultTranscripts(ctx, transcriptLimit)
-	if err != nil {
-		return nil, nil, CachedCounts{}, err
-	}
-	rollouts, err := s.defaultRollouts(ctx, rolloutLimit)
-	if err != nil {
-		return nil, nil, CachedCounts{}, err
-	}
-	counts, err := s.defaultCounts(ctx, transcriptLimit, rolloutLimit)
-	if err != nil {
-		return nil, nil, CachedCounts{}, err
-	}
-	return transcripts, rollouts, counts, nil
-}
-
-func (s *Store) defaultTranscripts(
-	ctx context.Context,
-	limit int,
-) (transcripts []Transcript, returnErr error) {
-	rows, err := s.logged().QueryContext(ctx, `
-SELECT `+transcriptColumns+`
-FROM transcripts AS t
-LEFT JOIN `+effectiveKilled+` AS h ON h.uuid=t.uuid
-WHERE t.is_bg=0 AND t.size>0 AND t.prompt_count>0 AND h.uuid IS NULL
-  AND NOT `+labelKilledSQL+`
-  AND NOT `+transcriptSupersededSQL+`
-ORDER BY CASE WHEN t.activity_ns>0 THEN t.activity_ns ELSE t.mtime_ns END DESC, t.uuid
-LIMIT ?`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query cached transcript candidates: %w", err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close cached transcript rows: %w", err))
-		}
-	}()
-	transcripts = make([]Transcript, 0, limit)
-	for rows.Next() {
-		transcript, err := scanTranscript(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan cached transcript: %w", err)
-		}
-		transcripts = append(transcripts, transcript)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate cached transcripts: %w", err)
-	}
-	return s.clearNames(ctx, transcripts), nil
-}
-
-func (s *Store) defaultRollouts(
-	ctx context.Context,
-	limit int,
-) ([]Rollout, error) {
-	lineages, killedByID, cxNames, err := s.codexLineageRows(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rollouts := make([]Rollout, 0, min(limit, len(lineages)))
-	for index := range lineages {
-		lineage := &lineages[index]
-		if codexLineageKilled(*lineage, killedByID) ||
-			codexLineageLabelKilled(*lineage, cxNames) {
-			continue
-		}
-		if codexLineageSuppressed(*lineage) {
-			continue
-		}
-		rollouts = append(rollouts, lineage.Newest)
-		if len(rollouts) == limit {
-			break
-		}
-	}
-	return rollouts, nil
-}
-
-func (s *Store) defaultCounts(
-	ctx context.Context,
-	transcriptLimit, rolloutLimit int,
-) (CachedCounts, error) {
-	var counts CachedCounts
-	var claudeEligible, codexEligible int
-	// A label-killed row counts as HIDDEN, not suppressed, and never as
-	// eligible — compose's countOmitted tests row.Killed first for the same
-	// reason: killed is dead, empty or not.
-	err := s.logged().QueryRowContext(ctx, `
-SELECT
-  COALESCE(SUM(CASE
-    WHEN `+transcriptSupersededSQL+` THEN 0
-    WHEN h.uuid IS NOT NULL OR `+labelKilledSQL+`
-    THEN 1 ELSE 0 END), 0),
-  COALESCE(SUM(CASE
-    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+` AND NOT `+transcriptSupersededSQL+`
-      AND (t.is_bg!=0 OR t.size<=0 OR t.prompt_count<=0)
-    THEN 1 ELSE 0 END), 0),
-  COALESCE(SUM(CASE
-    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+` AND NOT `+transcriptSupersededSQL+`
-      AND t.is_bg=0 AND t.size>0 AND t.prompt_count>0
-    THEN 1 ELSE 0 END), 0)
-FROM transcripts AS t
-LEFT JOIN `+effectiveKilled+` AS h ON h.uuid=t.uuid`,
-	).Scan(&counts.Killed, &counts.Suppressed, &claudeEligible)
-	if err != nil {
-		return CachedCounts{}, fmt.Errorf("count cached transcripts: %w", err)
-	}
-	lineages, killedByID, cxNames, err := s.codexLineageRows(ctx)
-	if err != nil {
-		return CachedCounts{}, err
-	}
-	var codexKilled, codexSuppressed int
-	for index := range lineages {
-		lineage := &lineages[index]
-		if codexLineageKilled(*lineage, killedByID) ||
-			codexLineageLabelKilled(*lineage, cxNames) {
-			codexKilled++
-			continue
-		}
-		if codexLineageSuppressed(*lineage) {
-			codexSuppressed++
-			continue
-		}
-		codexEligible++
-	}
-	counts.Killed += codexKilled
-	counts.Suppressed += codexSuppressed
-	if claudeEligible > transcriptLimit {
-		counts.Suppressed += claudeEligible - transcriptLimit
-	}
-	if codexEligible > rolloutLimit {
-		counts.Suppressed += codexEligible - rolloutLimit
-	}
-	return counts, nil
 }
 
 // codexLineageSuppressed is the cached frame's copy of compose's

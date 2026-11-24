@@ -44,7 +44,7 @@ func TestLabelKilledCandidatesNeverSpendAFrameSlot(t *testing.T) {
 		}
 	}
 
-	transcripts, _, counts, err := database.DefaultCandidates(ctx, 1, 15)
+	transcripts, _, counts, err := database.DefaultCandidates(ctx, 1, 15, LiveClaims{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestLabelKilledCodexLineageLeavesTheCachedFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, rollouts, counts, err := database.DefaultCandidates(ctx, 30, 1)
+	_, rollouts, counts, err := database.DefaultCandidates(ctx, 30, 1, LiveClaims{})
 	if err != nil {
 		t.Fatal(err)
 	}

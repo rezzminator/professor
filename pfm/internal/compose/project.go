@@ -2,6 +2,7 @@ package compose
 
 import (
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
@@ -79,4 +80,12 @@ type Output struct {
 	primaryOpenCode    int
 	fallbackDir        string
 	projects           projectNames
+	liveClaims         store.LiveClaims
+}
+
+// LiveClaims names the Claude sessions and Codex lineage roots this output
+// draws as live rows, which it never draws as resumable: the claims
+// store.DefaultCandidates reads the capped resume candidates around.
+func (output Output) LiveClaims() store.LiveClaims {
+	return output.liveClaims
 }

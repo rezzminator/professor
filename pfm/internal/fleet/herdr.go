@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -49,12 +50,42 @@ func NativeSeats(
 	return seats, failures, nil
 }
 
-// EnrichNative adds only native identities omitted by the capped default load.
-// Kills and OpenCode sessions are already complete; cached totals remain valid.
-// A seat whose store read fails stays unenriched and is named in the joined
-// error and marked TranscriptUnread in native, in place; the returned data
-// always carries every other seat's enrichment.
-func EnrichNative(ctx context.Context, database *store.Store, data Data, native []gather.HerdrSeat) (Data, error) {
+// ComposeNative composes view's rows from loaded data, the live snapshot and
+// the native seats: the one door every scan and picker pass composes native
+// seats through. It enriches the seats (enrichNative) and composes; over
+// capped data (LoadDefaultData) whose live rows claim a chat, it re-reads the
+// capped candidates and totals around those claims (refillDefault) and
+// composes again, so a capped frame lists the rows and counts a full frame
+// does. Every read failure is joined in the error beside an output still
+// composed: a failed refill keeps the first composition.
+func ComposeNative(
+	ctx context.Context,
+	database *store.Store,
+	environment Env,
+	view compose.View,
+	data Data,
+	live gather.Snapshot,
+	native []gather.HerdrSeat,
+) (compose.Output, error) {
+	data, enrichErr := enrichNative(ctx, database, data, native)
+	output := ComposeFleet(environment, view, data, live, native...)
+	claims := output.LiveClaims()
+	if data.CachedCounts == nil || len(claims.Transcripts)+len(claims.Rollouts) == 0 {
+		return output, enrichErr
+	}
+	refilled, err := refillDefault(ctx, database, data, claims)
+	if err != nil {
+		return output, errors.Join(enrichErr, err)
+	}
+	return ComposeFleet(environment, view, refilled, live, native...), enrichErr
+}
+
+// enrichNative adds only native identities omitted by the capped default load.
+// Kills and OpenCode sessions are already complete. A seat whose store read
+// fails stays unenriched and is named in the joined error and marked
+// TranscriptUnread in native, in place; the returned data always carries
+// every other seat's enrichment.
+func enrichNative(ctx context.Context, database *store.Store, data Data, native []gather.HerdrSeat) (Data, error) {
 	if data.CachedCounts == nil || len(native) == 0 {
 		return data, nil
 	}
@@ -98,6 +129,46 @@ func EnrichNative(ctx context.Context, database *store.Store, data Data, native 
 	return data, errors.Join(failures...)
 }
 
+// refillDefault re-reads the capped default candidates and totals around
+// claims and adds the candidates data lacks: data's first capped read, taken
+// before any chat was known live, let each live chat among the newest take a
+// resume slot, dropping that many of the oldest resumable chats a full frame
+// lists. Every unclaimed candidate of the first read is one of the re-read's,
+// so the merge stays inside the caps.
+func refillDefault(ctx context.Context, database *store.Store, data Data, claims store.LiveClaims) (Data, error) {
+	transcripts, rollouts, counts, err := database.DefaultCandidates(
+		ctx,
+		compose.ClaudeResumeCap,
+		compose.CodexResumeCap,
+		claims,
+	)
+	if err != nil {
+		return data, fmt.Errorf("refill default candidates: %w", err)
+	}
+	loadedTranscripts := make(map[string]struct{}, len(data.Transcripts))
+	for index := range data.Transcripts {
+		loadedTranscripts[data.Transcripts[index].UUID] = struct{}{}
+	}
+	data.Transcripts = slices.Clip(data.Transcripts)
+	for index := range transcripts {
+		if _, found := loadedTranscripts[transcripts[index].UUID]; !found {
+			data.Transcripts = append(data.Transcripts, transcripts[index])
+		}
+	}
+	loadedRollouts := make(map[string]struct{}, len(data.Rollouts))
+	for index := range data.Rollouts {
+		loadedRollouts[data.Rollouts[index].ID] = struct{}{}
+	}
+	data.Rollouts = slices.Clip(data.Rollouts)
+	for index := range rollouts {
+		if _, found := loadedRollouts[rollouts[index].ID]; !found {
+			data.Rollouts = append(data.Rollouts, rollouts[index])
+		}
+	}
+	data.CachedCounts = &counts
+	return data, nil
+}
+
 // composeNativeFleet is the shared native-read policy after a scan has loaded
 // indexed data and, for a full scan, gathered its tmux snapshot, in request's
 // view. Native database failure must never discard that healthy snapshot.
@@ -115,9 +186,9 @@ func composeNativeFleet(
 	}
 	// An unreadable continued-in chain or rollout leaves only its seat
 	// unenriched: the scan error names it and every other row still composes.
-	data, err = EnrichNative(ctx, database, data, native)
+	output, err := ComposeNative(ctx, database, environment, request.View, data, live, native)
 	if err != nil {
 		failures = append(failures, err.Error())
 	}
-	return ComposeFleet(environment, request.View, data, live, native...), failures
+	return output, failures
 }

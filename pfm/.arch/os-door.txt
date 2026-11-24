@@ -5,13 +5,13 @@ internal/doctor/herdr_lifetime_linux.go 1
 internal/headless/run/process_unix.go 1
 internal/hookentry/seathost_darwin.go 1
 internal/hookentry/seathost_linux.go 1
-internal/installer/login_shell.go 2
-internal/installer/login_shell_darwin.go 1
-internal/installer/login_shell_linux.go 1
 internal/installer/managed_install_darwin.go 1
 internal/installer/managed_install_linux.go 1
 internal/installer/vscode_darwin.go 1
 internal/installer/vscode_linux.go 1
+internal/loginshell/loginshell_darwin.go 1
+internal/loginshell/loginshell_dscl.go 2
+internal/loginshell/loginshell_linux.go 1
 internal/stats/resources_darwin.go 1
 internal/stats/resources_linux.go 1
 internal/testjail/profile_darwin.go 1

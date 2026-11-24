@@ -474,7 +474,7 @@ func reindex(t *testing.T, database *store.Store) {
 func listedByDefault(t *testing.T, database *store.Store, id string) bool {
 	t.Helper()
 	ctx := context.Background()
-	candidates, _, _, err := database.DefaultCandidates(ctx, 50, 50)
+	candidates, _, _, err := database.DefaultCandidates(ctx, 50, 50, store.LiveClaims{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 func listedCodexByDefault(t *testing.T, database *store.Store, rootID string) bool {
 	t.Helper()
 	ctx := context.Background()
-	_, candidates, _, err := database.DefaultCandidates(ctx, 50, 50)
+	_, candidates, _, err := database.DefaultCandidates(ctx, 50, 50, store.LiveClaims{})
 	if err != nil {
 		t.Fatal(err)
 	}

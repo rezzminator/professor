@@ -344,8 +344,9 @@ func ResolveEnv(request Request) (Env, error) {
 	return env, nil
 }
 
-// Compose classifies, merges and sorts one view's rows from the loaded data
-// and the live snapshot. It never writes.
+// ComposeFleet classifies, merges and sorts one view's rows from the loaded
+// data and the live snapshot. It never writes. Capped data whose live rows
+// claim a chat composes through ComposeNative, which re-reads around them.
 func ComposeFleet(
 	env Env,
 	view compose.View,
@@ -358,7 +359,7 @@ func ComposeFleet(
 	if launches != nil {
 		defer func() { _ = launches.Close() }()
 	}
-	output := compose.Compose(compose.Input{
+	return compose.Compose(compose.Input{
 		Workbenches:      env.Workbenches,
 		WorkbenchErrors:  env.WorkbenchErrors,
 		Snapshot:         live,
@@ -368,6 +369,7 @@ func ComposeFleet(
 		OpenCodeSessions: data.OpenCodeSessions,
 		CxNames:          data.CxNames,
 		Killed:           data.Killed,
+		CachedCounts:     data.CachedCounts,
 		Spaces:           data.Spaces,
 		ClaudeSeats:      claudeSeats(env.Config.Accounts),
 		CodexHomes:       codexAccountRoots(env.Config.CodexAccounts),
@@ -385,9 +387,4 @@ func ComposeFleet(
 			NowNS:               env.NowNS,
 		},
 	})
-	if data.CachedCounts != nil {
-		output.KilledCount = data.CachedCounts.Killed
-		output.SuppressedCount = data.CachedCounts.Suppressed
-	}
-	return output
 }

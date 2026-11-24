@@ -3,6 +3,10 @@ package claudelaunch
 import (
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testwait"
 )
 
 func TestSessionEnv(t *testing.T) {
@@ -50,6 +54,49 @@ func TestSessionEnv(t *testing.T) {
 		if got := SessionEnv(entry.claude); !reflect.DeepEqual(got, entry.want) {
 			t.Errorf("SessionEnv(%v) = %q, want %q", entry.claude, got, entry.want)
 		}
+	}
+	// The launch shell and PATH follow the plugin values: the login shell's
+	// folders merged into the session's own PATH, its order kept.
+	testwait.ProcessClock(t, clock.NewFake(time.Unix(0, 0)))
+	runner := loginRunner("/login/bin/zsh", "/opt/mise/shims", "/usr/bin", "/opt/x")
+	runner.ScriptLookPath("bash", "/scripted/bin/bash", nil)
+	lookup := envLookup(map[string]string{"PATH": "/usr/bin:/bin", "SHELL": "/login/bin/zsh"})
+	want := []string{
+		"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1",
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000",
+		"ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-5-5",
+		"CLAUDE_CODE_SHELL=/scripted/bin/bash",
+		"PATH=/opt/mise/shims:/usr/bin:/bin:/opt/x",
+	}
+	if got := sessionEnvThrough(nil, lookup, runner); !reflect.DeepEqual(got, want) {
+		t.Errorf("SessionEnv with a login PATH = %q, want %q", got, want)
+	}
+}
+
+// A pane command keeps the launch's PATH out and runs the login folders through
+// /bin/sh after the pane shell's own PATH; with no login folders Env is whole.
+func TestLaunchPaneEnv(t *testing.T) {
+	env := []string{"A=1", "PATH=/pfm/bin:/shims", "B=2"}
+	for _, test := range []struct {
+		name      string
+		login     []string
+		wantEnv   []string
+		wantWords string
+	}{
+		{name: "no login folders", wantEnv: env},
+		{
+			name:      "login folders",
+			login:     []string{"/shims", "/opt/x y"},
+			wantEnv:   []string{"A=1", "B=2"},
+			wantWords: ` /bin/sh -c 'PATH="${PATH:+$PATH:}$1"; export PATH; shift; exec "$@"' sh '/shims:/opt/x y'`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gotEnv, gotWords := Launch{Env: env, LoginPATH: test.login}.PaneEnv()
+			if !reflect.DeepEqual(gotEnv, test.wantEnv) || gotWords != test.wantWords {
+				t.Fatalf("PaneEnv = (%q, %q), want (%q, %q)", gotEnv, gotWords, test.wantEnv, test.wantWords)
+			}
+		})
 	}
 }
 

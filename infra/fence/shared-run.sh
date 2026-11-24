@@ -4,7 +4,8 @@
 #
 #   shared-run.sh run <id> <private|shared|tty> <tree> <engine-sync|-> <worktree> -- <command>...
 #   shared-run.sh kill <id>
-#   shared-run.sh inner …            (the run's pid 1; never called by hand)
+#   shared-run.sh inner …            (the run's pid 1; never called by hand; it execs docker-init, else
+#                                     stays init itself, the command its child, signals forwarded)
 #
 # run: registers /var/fence/live/<id> (this supervisor's pid; the container's daemon kills and
 # removes the run of a dead supervisor), refuses with exit 75 when the container is closing, writes
@@ -209,7 +210,26 @@ cmd_inner() {
   export HOME=/root
   cd /worktree || die "/worktree cannot be entered"
   if [[ -x /sbin/docker-init ]]; then exec /sbin/docker-init -- "$@"; fi
-  exec "$@"
+  inner_init "$@"
+}
+
+inner_init() { # inner_init <command>...: this shell stays the namespace's init, as docker-init would
+  # Without docker-init (a host outside the fence container, a CI runner) a command exec'd here would be
+  # the pid namespace's init, and the kernel drops every signal an init sets no handler for: a SIGTERM
+  # from outside left the run alive until its heartbeat monitor killed it. The command runs as this
+  # shell's child instead; the shell forwards each signal below to it and exits with its status.
+  local child sig
+  exec 3<&0 # an async command's stdin is /dev/null in a non-interactive shell; tty mode keeps the terminal
+  env --default-signal=INT,QUIT "$@" <&3 3<&- &
+  child=$!
+  exec 3<&-
+  for sig in TERM INT HUP QUIT USR1 USR2; do
+    # shellcheck disable=SC2064 # the child's pid and the signal are fixed when the trap is set
+    trap "kill -$sig $child 2>/dev/null" "$sig"
+  done
+  # A trapped signal ends a wait early; the loop waits again until the child is reaped, then reads its status.
+  while kill -0 "$child" 2>/dev/null; do wait "$child"; done
+  wait "$child"
 }
 
 case "${1:-}" in

@@ -31,6 +31,8 @@ type RunOptions struct {
 	// and cancellation or the deadline of the context SIGKILLs the whole
 	// group, descendants included, instead of the direct child alone.
 	ProcessGroup bool
+	// Setsid runs the child as a session leader with no controlling terminal, killed as a group like ProcessGroup.
+	Setsid bool
 }
 
 // RunResult is one command's completed run: stdout and stderr split (never
@@ -141,8 +143,8 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 	command.Env = opts.Env
 	command.Dir = opts.Dir
 	command.WaitDelay = opts.WaitDelay
-	if opts.ProcessGroup {
-		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if opts.ProcessGroup || opts.Setsid {
+		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: !opts.Setsid, Setsid: opts.Setsid}
 		command.Cancel = func() error {
 			if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil {
 				if GroupGone(command.Process.Pid, err) {

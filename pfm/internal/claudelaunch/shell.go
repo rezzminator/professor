@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -80,27 +81,54 @@ func shellProblem(value string) string {
 	return ""
 }
 
-// ShellEnv is the CLAUDE_CODE_SHELL assignment a Claude launch adds to the
-// environment lookup reads, so the Bash tool of the chat and, through
+// ShellEnv is the CLAUDE_CODE_SHELL and PATH assignments a Claude launch adds
+// to the environment lookup reads: the shell so the Bash tool of the chat and, through
 // inheritance, of its sub-agents runs under bash rather than the user's login
 // shell: zsh does not word-split an unquoted $VAR the way the bash idioms
 // agents write expect. A usable inherited value yields no assignment and is
 // kept; every refused value and a missing bash is warned to the activity log
-// and shown by `pfm config claude`, and never fails the launch.
+// and shown by `pfm config claude`, and never fails the launch. The PATH is
+// the launch's own with the login shell's missing entries merged in
+// (pathEnvThrough), since that bash reads no startup file.
 func ShellEnv(lookup func(string) (string, bool)) []string {
-	return shellEnvThrough(lookup, nil)
+	return ShellEnvThrough(lookup, nil)
 }
 
-// shellEnvThrough is ShellEnv resolving bash through runner; nil is the real one.
-func shellEnvThrough(lookup func(string) (string, bool), runner deps.Runner) []string {
+// ShellEnvThrough is ShellEnv resolving bash and running the login shell
+// through runner; nil is the real one.
+func ShellEnvThrough(lookup func(string) (string, bool), runner deps.Runner) []string {
+	env, _ := launchShellEnv(lookup, runner)
+	return env
+}
+
+// launchShellEnv is ShellEnvThrough, with the login entries its PATH adds (pathEnvThrough).
+func launchShellEnv(lookup func(string) (string, bool), runner deps.Runner) (env, loginAdded []string) {
 	resolved := resolveShell(lookup, runner)
 	for _, problem := range resolved.problems {
 		obs.Logger(context.Background()).Warn("claudelaunch: launch shell", obs.FieldErr, problem)
 	}
+	path, loginAdded := pathEnvThrough(lookup, clock.Real, runner)
 	if resolved.path == "" || resolved.preset {
-		return nil
+		return path, loginAdded
 	}
-	return []string{envShell + "=" + resolved.path}
+	return append([]string{envShell + "=" + resolved.path}, path...), loginAdded
+}
+
+// requestShellEnv is the shell and PATH assignments of request's launch, a
+// persona's env the base they build on (its value read first), and the login
+// entries its PATH adds when no persona PATH is that base (Launch.LoginPATH).
+func requestShellEnv(request Request) (env, loginPATH []string) {
+	launchEnv := func(name string) (string, bool) {
+		if value, ok := request.Envs[name]; ok {
+			return value, true
+		}
+		return paths.OSEnv{}.Lookup(name)
+	}
+	env, loginPATH = launchShellEnv(launchEnv, request.Runner)
+	if _, persona := request.Envs[envPATH]; persona {
+		return env, nil
+	}
+	return env, loginPATH
 }
 
 // shellValue is the `pfm config` view of the shell knob: the shell a launch

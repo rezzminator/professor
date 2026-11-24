@@ -1,4 +1,4 @@
-package installer
+package loginshell
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func TestLookupLoginShellLinux(t *testing.T) {
 			runner.Script([]string{"getent", "passwd", "123"}, deps.RunResult{
 				Stdout: []byte(tc.output), Stderr: []byte("lookup diagnostic"), ExitCode: tc.exitCode,
 			}, tc.err)
-			got, err := lookupLoginShell(context.Background(), runner, 123)
+			got, err := Lookup(context.Background(), runner, 123)
 			if tc.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 					t.Fatalf("lookup = %q, %v; want error %q", got, err, tc.wantError)

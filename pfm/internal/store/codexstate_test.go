@@ -247,7 +247,7 @@ func TestKillStoreOnlyCodexLineageIsPermanent(t *testing.T) {
 
 	assertStoreOnlyKilled := func(stage string) {
 		t.Helper()
-		_, rollouts, counts, err := database.DefaultCandidates(ctx, 30, 15)
+		_, rollouts, counts, err := database.DefaultCandidates(ctx, 30, 15, LiveClaims{})
 		if err != nil {
 			t.Fatalf("%s DefaultCandidates() error = %v", stage, err)
 		}

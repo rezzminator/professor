@@ -16,6 +16,7 @@ Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its secti
 
 ## Releases
 
+- [v0.91.0](releases/v0.91.0.md) — pfm restart brings back every Herdr chat and no longer loses one, typed /pfm:space and /pfm:reload run with no model turn, a /pfm:reload --then message is no longer lost, flights ships its own rules, the buddy plugin is retired, and no pfm test waits on wall-clock time
 - [v0.90.0](releases/v0.90.0.md) — the update chat asks which projects to update; Herdr and Claude defaults ship with pfm install; the empty-space picker no longer opens for a chat started in a new space
 - [v0.89.0](releases/v0.89.0.md) — one pfm.config.json at two scopes, Herdr keys and spaces from config, sub-agent rows drawn by the in-tree professor plugin, an anonymous install ping, and the install fixes from issues #62 and #63
 - [v0.88.1](releases/v0.88.1.md) — a chat pfm hosts in tmux no longer closes the terminal it was opened from: typing claude over ssh and leaving the chat gives the prompt back instead of dropping the connection

@@ -238,10 +238,9 @@ func (spawn ClaudeSpawn) SeatRun(cwd string) (fleetdb.SeatRun, error) {
 	return fleetdb.SeatRun{
 		Binary:     launch.Binary,
 		Args:       append([]string(nil), launch.Argv...),
-		Env:        claudelaunch.RunEnvironment(os.Environ(), launch),
 		CWD:        cwd,
 		CostLedger: spawn.Machine.EffectiveClaude(spawn.Account).CostLedger,
-	}, nil
+	}.WithEnvDelta(launch.Recipe(os.Environ())), nil
 }
 
 func hasNUL(values ...string) bool {

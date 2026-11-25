@@ -3,6 +3,7 @@ package paths
 import (
 	"os"
 	"os/user"
+	"strings"
 )
 
 // Env abstracts a host's environment and identity reads — os.Getenv/
@@ -180,3 +181,24 @@ const (
 	// name, which the plugin reads in place of an unset EnvAutoEffortStateFile.
 	EnvFormerAutoEffortStateFile = "AUTO_EFFORT_CONTROL_STATE_FILE"
 )
+
+// ApplyEnv is environ with every name in unset and every name an assignment
+// sets dropped, then assignments: an exec'd process reads the first of two
+// copies of a name, so an inherited copy never shadows an assignment.
+func ApplyEnv(environ, unset, assignments []string) []string {
+	dropped := make(map[string]bool, len(unset)+len(assignments))
+	for _, name := range unset {
+		dropped[name] = true
+	}
+	for _, assignment := range assignments {
+		name, _, _ := strings.Cut(assignment, "=")
+		dropped[name] = true
+	}
+	result := make([]string, 0, len(environ)+len(assignments))
+	for _, entry := range environ {
+		if name, _, _ := strings.Cut(entry, "="); !dropped[name] {
+			result = append(result, entry)
+		}
+	}
+	return append(result, assignments...)
+}

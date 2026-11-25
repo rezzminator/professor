@@ -34,6 +34,65 @@ func TestStartSeatEngineStartsThroughItsRunner(t *testing.T) {
 	}
 }
 
+// The seat host's door: a recipe over the host's own environment, the pane's
+// identity taken from the host whatever the recipe holds of it.
+func TestSeatRunEnvironment(t *testing.T) {
+	host := []string{
+		"HOME=/seat/home", "CLAUDE_PID=7", "CLAUDE_CONFIG_DIR=/store/1", "HERDR_ENV=1",
+		"HERDR_PANE_ID=w9:p2", "TERM=xterm-256color", "LC_CTYPE=C.UTF-8",
+	}
+	for _, tc := range []struct {
+		name string
+		run  fleetdb.SeatRun
+		host []string
+		want []string
+	}{
+		{
+			name: "delta-over-host",
+			run: fleetdb.SeatRun{
+				EnvDelta: true, Unset: []string{"CLAUDE_PID", "CLAUDE_CONFIG_DIR"},
+				Env: []string{"CLAUDE_CONFIG_DIR=/store/2", "HERDR_PANE_ID=w1:p1", "TERM=dumb"},
+			},
+			want: []string{
+				"HOME=/seat/home", "CLAUDE_CONFIG_DIR=/store/2",
+				"HERDR_ENV=1", "HERDR_PANE_ID=w9:p2", "TERM=xterm-256color", "LC_CTYPE=C.UTF-8",
+			},
+		},
+		{
+			name: "user-pager-kept-on-a-plain-host",
+			run:  fleetdb.SeatRun{EnvDelta: true, Env: []string{"CLAUDE_CONFIG_DIR=/store/2"}},
+			host: []string{"HOME=/seat/home", "NO_COLOR=1", "PAGER=less"},
+			want: []string{"HOME=/seat/home", "NO_COLOR=1", "PAGER=less", "CLAUDE_CONFIG_DIR=/store/2"},
+		},
+		{
+			name: "codex-tool-shell-host-stripped",
+			run:  fleetdb.SeatRun{EnvDelta: true, Env: []string{"CLAUDE_CONFIG_DIR=/store/2"}},
+			host: []string{"HOME=/seat/home", "CODEX_TOOL_CALL_ID=call-1", "NO_COLOR=1", "PAGER=cat"},
+			want: []string{"HOME=/seat/home", "CLAUDE_CONFIG_DIR=/store/2"},
+		},
+		{
+			name: "full-copy-as-stored",
+			run: fleetdb.SeatRun{Env: []string{
+				"AUTO_EFFORT_CONTROL_JUDGE=true", "CLAUDE_CONFIG_DIR=/store/1", "HERDR_PANE_ID=w1:p1", "LC_ALL=POSIX",
+			}},
+			want: []string{
+				"AUTO_EFFORT_CONTROL_JUDGE=true", "CLAUDE_CONFIG_DIR=/store/1",
+				"HERDR_ENV=1", "HERDR_PANE_ID=w9:p2", "TERM=xterm-256color", "LC_CTYPE=C.UTF-8",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := host
+			if tc.host != nil {
+				host = tc.host
+			}
+			if got := seatRunEnvironment(tc.run, host); !slices.Equal(got, tc.want) {
+				t.Fatalf("seatRunEnvironment(%+v, %q) = %q, want %q", tc.run, host, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSeatCommandRefreshesFullPaneContext(t *testing.T) {
 	for _, saved := range [][]string{
 		{"KEEP=engine"},

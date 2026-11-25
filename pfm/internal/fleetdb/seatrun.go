@@ -11,16 +11,39 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // SeatRun is the private launch recipe read by seat-host, not inherited shell state.
+// With EnvDelta, Env and Unset are pfm's part of the engine's environment, which
+// the seat host applies over its own (Environ); without it, a recipe an older pfm
+// wrote, Env is the engine's whole environment.
 type SeatRun struct {
 	CostLedger bool     `json:"cost_ledger"`
 	Binary     string   `json:"binary"`
 	Args       []string `json:"args"`
 	Env        []string `json:"env"`
+	Unset      []string `json:"unset,omitempty"`
+	EnvDelta   bool     `json:"env_delta,omitempty"`
 	CWD        string   `json:"cwd"`
+}
+
+// WithEnvDelta is run with env and unset as its environment in the delta form,
+// the one form every recipe pfm writes takes (claudelaunch.Launch.Recipe).
+func (run SeatRun) WithEnvDelta(env, unset []string) SeatRun {
+	run.Env, run.Unset, run.EnvDelta = env, unset, true
+	return run
+}
+
+// Environ is the engine's environment over host, the seat host's own: host
+// without Unset and every name Env assigns, then Env (paths.ApplyEnv); a recipe
+// with no EnvDelta is its stored Env, host unread.
+func (run SeatRun) Environ(host []string) []string {
+	if !run.EnvDelta {
+		return run.Env
+	}
+	return paths.ApplyEnv(host, run.Unset, run.Env)
 }
 
 var seatIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)

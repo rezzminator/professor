@@ -77,12 +77,8 @@ func codexSeatRun(
 		Unset: append(append([]string{}, hygieneNames...), "CODEX_HOME"),
 	}
 	arguments := append(codexAutonomyArgs(machine.EffectiveCodex(account).Yolo), args...)
-	return &fleetdb.SeatRun{
-		Binary: codexBinaryWord(machine, account),
-		Args:   arguments,
-		Env:    claudelaunch.RunEnvironment(os.Environ(), launch),
-		CWD:    cwd,
-	}
+	return new(fleetdb.SeatRun{Binary: codexBinaryWord(machine, account), Args: arguments, CWD: cwd}.
+		WithEnvDelta(launch.Recipe(os.Environ())))
 }
 
 func codexAutonomyArgs(yolo bool) []string {

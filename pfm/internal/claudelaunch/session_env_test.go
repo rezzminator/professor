@@ -138,3 +138,77 @@ func TestRunEnvironment(t *testing.T) {
 		t.Errorf("WithEnvs(nil, nil) = %#v, want nil", got)
 	}
 }
+
+// A recipe keeps the launch's own part and only the recipeKept names of the
+// writing environment; whatever else that environment holds stays out.
+func TestLaunchRecipe(t *testing.T) {
+	launch := Launch{
+		Unset: []string{"CLAUDE_PID", "CLAUDE_CONFIG_DIR"},
+		Env:   []string{"CLAUDE_CONFIG_DIR=/store/2", "AUTO_EFFORT_JUDGE=true"},
+	}
+	for _, test := range []struct {
+		name      string
+		environ   []string
+		launch    Launch
+		wantEnv   []string
+		wantUnset []string
+	}{
+		{
+			name: "dirty caller keeps only the search path",
+			environ: []string{
+				"HOME=/seat/home", "PATH=/caller/bin", "AUTO_EFFORT_CONTROL_JUDGE=true", "CLAUDE_PID=7",
+				"CLAUDE_CONFIG_DIR=/store/1",
+			},
+			launch:    launch,
+			wantEnv:   []string{"PATH=/caller/bin", "CLAUDE_CONFIG_DIR=/store/2", "AUTO_EFFORT_JUDGE=true"},
+			wantUnset: []string{"CLAUDE_PID", "CLAUDE_CONFIG_DIR"},
+		},
+		{
+			name:    "usable shell preset rides beside the search path",
+			environ: []string{"CLAUDE_CODE_SHELL=/bin/bash", "PATH=/caller/bin"},
+			launch:  launch,
+			wantEnv: []string{
+				"PATH=/caller/bin", "CLAUDE_CODE_SHELL=/bin/bash", "CLAUDE_CONFIG_DIR=/store/2", "AUTO_EFFORT_JUDGE=true",
+			},
+			wantUnset: []string{"CLAUDE_PID", "CLAUDE_CONFIG_DIR"},
+		},
+		{
+			name:    "a launch's own PATH and shell beat the caller's",
+			environ: []string{"PATH=/caller/bin", "CLAUDE_CODE_SHELL=/bin/zsh"},
+			launch: Launch{
+				Unset: []string{"CLAUDE_CODE_SHELL"},
+				Env:   []string{"PATH=/merged/bin:/caller/bin"},
+			},
+			wantEnv:   []string{"PATH=/merged/bin:/caller/bin"},
+			wantUnset: []string{"CLAUDE_CODE_SHELL"},
+		},
+		{
+			name:      "a Codex tool shell's markers stay with the writer",
+			environ:   []string{"PATH=/caller/bin", "CODEX_TOOL_CALL_ID=call-1", "NO_COLOR=1"},
+			launch:    launch,
+			wantEnv:   []string{"PATH=/caller/bin", "CLAUDE_CONFIG_DIR=/store/2", "AUTO_EFFORT_JUDGE=true"},
+			wantUnset: []string{"CLAUDE_PID", "CLAUDE_CONFIG_DIR"},
+		},
+		{
+			name:      "an empty caller PATH leaves the seat host's",
+			environ:   []string{"PATH=", "CLAUDE_CODE_SHELL="},
+			launch:    launch,
+			wantEnv:   []string{"CLAUDE_CONFIG_DIR=/store/2", "AUTO_EFFORT_JUDGE=true"},
+			wantUnset: []string{"CLAUDE_PID", "CLAUDE_CONFIG_DIR"},
+		},
+		{
+			name:      "empty environment is the launch alone",
+			launch:    launch,
+			wantEnv:   []string{"CLAUDE_CONFIG_DIR=/store/2", "AUTO_EFFORT_JUDGE=true"},
+			wantUnset: []string{"CLAUDE_PID", "CLAUDE_CONFIG_DIR"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env, unset := test.launch.Recipe(test.environ)
+			if !reflect.DeepEqual(env, test.wantEnv) || !reflect.DeepEqual(unset, test.wantUnset) {
+				t.Fatalf("Recipe(%q) = env %q unset %q, want env %q unset %q",
+					test.environ, env, unset, test.wantEnv, test.wantUnset)
+			}
+		})
+	}
+}

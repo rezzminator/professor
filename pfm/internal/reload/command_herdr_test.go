@@ -881,6 +881,7 @@ func TestRunHerdrCodex(t *testing.T) {
 		{name: "retained-account"},
 		{name: "unnamed-seat"},
 		{name: "new-session", fresh: true},
+		{name: "config-dropped-env"}, // the chat and its full-copy recipe hold a renamed variable
 		{name: "failed-start", mode: "failed-start", want: "permission denied"},
 		{name: "old-process-is-not-success", mode: "old-process", want: "new engine"},
 	} {
@@ -917,6 +918,10 @@ func TestRunHerdrCodex(t *testing.T) {
 				f.request.AccountGiven = false
 				wantAccount, wantHome = 1, f.request.Machine.CodexAccounts[0].Home
 			}
+			if tc.name == "config-dropped-env" {
+				f.configDroppedEnv()
+				f.old = f.fullCopy(f.old)
+			}
 			f.mode = tc.mode
 			f.text = f.composer()
 			if err := f.db.PutSeat(context.Background(), f.seat); err != nil {
@@ -951,6 +956,9 @@ func TestRunHerdrCodex(t *testing.T) {
 			}
 			if !tc.fresh && (!slices.Contains(run.Args, "resume") || !slices.Contains(run.Args, f.request.SessionID)) {
 				t.Fatalf("resume argv=%q", run.Args)
+			}
+			if tc.name == "config-dropped-env" {
+				assertDroppedEnv(t, run, "AUTO_EFFORT_JUDGE=true", "CODEX_HOME="+wantHome)
 			}
 			current, found, err := f.db.Seat(context.Background(), f.seat.SeatID)
 			if err != nil || !found || current.HerdrPane != f.request.Pane || current.ReloadPending ||

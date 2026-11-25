@@ -67,6 +67,13 @@ func TestClaudeSeatRunRetainsCanonicalArgsEnvironmentAndLedgerPolicy(t *testing.
 			t.Setenv("PATH", filepath.Dir(managed)+string(os.PathListSeparator)+filepath.Join(home, "engine"))
 			t.Setenv("ANTHROPIC_API_KEY", "fixture-inherited-key")
 			t.Setenv("CLAUDE_CONFIG_DIR", "inherited account must not win")
+			// A calling chat's settings env from a config that has since dropped it.
+			t.Setenv("AUTO_EFFORT_CONTROL_JUDGE", "true")
+			// The caller presets no shell, so the recipe carries none (a gate's own preset would ride).
+			t.Setenv("CLAUDE_CODE_SHELL", "")
+			if err := os.Unsetenv("CLAUDE_CODE_SHELL"); err != nil {
+				t.Fatalf("unset CLAUDE_CODE_SHELL: %v", err)
+			}
 			configDir := filepath.Join(home, "account's profile with spaces")
 			if err := os.MkdirAll(configDir, 0o700); err != nil {
 				t.Fatal(err)
@@ -150,8 +157,17 @@ func TestClaudeSeatRunRetainsCanonicalArgsEnvironmentAndLedgerPolicy(t *testing.
 				}
 			}
 			wantEnv = append(wantEnv, launch.Env...)
-			if !slices.Equal(run.Env, wantEnv) {
-				t.Fatalf("native env=%q; source env=%q", run.Env, wantEnv)
+			// The recipe holds pfm's part alone: the caller's search path and the launch's own
+			// assignments and unset names; the seat host applies it over its own environment.
+			wantRecipe := append([]string{"PATH=" + os.Getenv("PATH")}, launch.Env...)
+			if !slices.Equal(run.Env, wantRecipe) || !slices.Equal(run.Unset, launch.Unset) || !run.EnvDelta {
+				t.Fatalf("native recipe env=%q unset=%q delta=%t; want env %q unset %q delta",
+					run.Env, run.Unset, run.EnvDelta, wantRecipe, launch.Unset)
+			}
+			host := []string{"HOME=/herdr/home", "PATH=/herdr/bin", "CLAUDE_CONFIG_DIR=/herdr/stale"}
+			want := append([]string{"HOME=/herdr/home"}, wantRecipe...)
+			if got := run.Environ(host); !slices.Equal(got, want) {
+				t.Fatalf("engine env over the seat host %q = %q, want %q", host, got, want)
 			}
 			settingsIndex := slices.Index(run.Args, "--settings")
 			var settings map[string]any
@@ -222,7 +238,7 @@ func TestClaudeSeatRunRetainsCanonicalArgsEnvironmentAndLedgerPolicy(t *testing.
 				t.Fatal(err)
 			}
 			if stored.Binary != engineBinary || !slices.Equal(stored.Args, launch.Argv) ||
-				!slices.Equal(stored.Env, wantEnv) ||
+				!slices.Equal(stored.Env, run.Env) || !slices.Equal(stored.Unset, run.Unset) || !stored.EnvDelta ||
 				stored.CWD != cwd ||
 				stored.CostLedger != run.CostLedger {
 				t.Fatalf(

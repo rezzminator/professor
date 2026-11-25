@@ -251,10 +251,9 @@ func openCodeSeatRun(request Request, machine pfmconfig.Config, resume bool) (*f
 		args = append(args, "--prompt", request.Prompt)
 	}
 	launch := claudelaunch.Launch{Env: assignments, Unset: opencodeHygieneNames}
-	return &fleetdb.SeatRun{
+	return new(fleetdb.SeatRun{
 		Binary: binaryWord(machine.OpenCode.Binary, pfmengine.MustLookup(pfmengine.OpenCode).Binary, false),
 		Args:   args,
-		Env:    claudelaunch.RunEnvironment(os.Environ(), launch),
 		CWD:    request.Row.CWD,
-	}, nil
+	}.WithEnvDelta(launch.Recipe(os.Environ()))), nil
 }

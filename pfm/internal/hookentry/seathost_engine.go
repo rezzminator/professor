@@ -53,11 +53,21 @@ func seatCommand(run fleetdb.SeatRun, argv0 string, tty *os.File, _, _ io.Writer
 	}
 	options := deps.StartOptions{
 		Argv0: argv0, Dir: run.CWD,
-		Env:   seatEnvironment(run.Env, os.Environ(), seatPaneKeys(run.Env, os.Environ())),
+		Env:   seatRunEnvironment(run, os.Environ()),
 		Stdin: tty, Stdout: tty, Stderr: tty,
 		ProcessGroup: true, Foreground: true, Ctty: int(tty.Fd()),
 	}
 	return append([]string{run.Binary}, run.Args...), options, nil
+}
+
+// seatRunEnvironment is the environment run's engine starts with from a seat host
+// whose own is host: the recipe applied over host without a Codex tool shell's
+// markers (fleetdb.SeatRun.Environ, claudelaunch.WithoutCodexToolShell), then
+// the pane's identity (seatPaneKeys), whatever the recipe says of it.
+func seatRunEnvironment(run fleetdb.SeatRun, host []string) []string {
+	return seatEnvironment(
+		run.Environ(claudelaunch.WithoutCodexToolShell(host)), host, seatPaneKeys(run.Env, host),
+	)
 }
 
 // seatTerminalKeys is the terminal identity Herdr gives the pane seat-host runs

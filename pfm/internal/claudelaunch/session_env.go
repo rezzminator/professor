@@ -32,25 +32,50 @@ func WithEnvs(envs map[string]string, env []string) []string {
 }
 
 // RunEnvironment is environ as a launch runs it: a Codex tool shell's markers,
-// launch.Unset and every inherited name launch.Env assigns dropped (an exec'd
-// process reads the first of two copies), then launch.Env.
+// launch.Unset and every inherited name launch.Env assigns dropped, then
+// launch.Env (paths.ApplyEnv).
 func RunEnvironment(environ []string, launch Launch) []string {
-	dropped := make(map[string]bool, len(launch.Unset)+len(launch.Env))
+	return paths.ApplyEnv(WithoutCodexToolShell(environ), launch.Unset, launch.Env)
+}
+
+// recipeKept names what a seat recipe carries from its writer's environment
+// though the launch assigns none: PATH, the search path every engine's tools
+// resolve on, which the Herdr server a new-tab seat host inherits may lack;
+// CLAUDE_CODE_SHELL, a usable preset resolveShell keeps instead of assigning.
+var recipeKept = []string{envPATH, envShell}
+
+// Recipe is launch as a seat recipe stores it (fleetdb.SeatRun with EnvDelta),
+// which the seat host applies over its own environment: env is each
+// recipeKept name environ holds non-empty that launch neither assigns nor unsets, then
+// launch.Env; unset is launch.Unset. Nothing else of environ rides, so a
+// variable the writing chat's settings, a Codex tool shell or an older config
+// put there never reaches the engine; a Codex tool shell the seat host itself
+// runs in is the seat host's to strip (WithoutCodexToolShell).
+func (launch Launch) Recipe(environ []string) (env, unset []string) {
+	owned := make(map[string]bool, len(launch.Unset)+len(launch.Env))
 	for _, name := range launch.Unset {
-		dropped[name] = true
+		owned[name] = true
 	}
 	for _, assignment := range launch.Env {
 		name, _, _ := strings.Cut(assignment, "=")
-		dropped[name] = true
+		owned[name] = true
 	}
-	result := make([]string, 0, len(environ)+len(launch.Env))
-	for _, entry := range WithoutCodexToolShell(environ) {
-		name, _, _ := strings.Cut(entry, "=")
-		if !dropped[name] {
-			result = append(result, entry)
+	env = []string{}
+	for _, name := range recipeKept {
+		if owned[name] {
+			continue
+		}
+		for _, entry := range environ {
+			if value, found := strings.CutPrefix(entry, name+"="); found {
+				if value != "" {
+					env = append(env, name+"="+value)
+				}
+				break
+			}
 		}
 	}
-	return append(result, launch.Env...)
+	env = append(env, launch.Env...)
+	return env, append([]string{}, launch.Unset...)
 }
 
 // paneLoginPATHScript is the /bin/sh program PaneEnv's words run: it adds its

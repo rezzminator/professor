@@ -50,10 +50,10 @@ type LaunchOptions struct {
 func Prepare(opts LaunchOptions) ([]string, string) {
 	logf := func(format string, args ...any) { appendLog(opts.Home, "cost-launch", fmt.Sprintf(format, args...)) }
 	if !opts.Enabled {
-		return withEnv(
+		return paths.ApplyEnv(
 			opts.Environ,
 			claudelaunch.InheritedCostNames(opts.Environ),
-			claudelaunch.EnvCostLedger+"="+claudelaunch.CostLedgerOff,
+			[]string{claudelaunch.EnvCostLedger + "=" + claudelaunch.CostLedgerOff},
 		), claudelaunch.CostLedgerOff
 	}
 	settingsDir := claudelaunch.ConfigDirFromEnv(opts.Environ)
@@ -70,10 +70,10 @@ func Prepare(opts LaunchOptions) ([]string, string) {
 	}
 	if reason != "" {
 		logf("pre-empted, no cost ledger for pid %d: %s", opts.PID, reason)
-		return withEnv(
+		return paths.ApplyEnv(
 			opts.Environ,
 			claudelaunch.InheritedCostNames(opts.Environ),
-			claudelaunch.EnvCostLedger+"="+claudelaunch.CostLedgerPreempted,
+			[]string{claudelaunch.EnvCostLedger + "=" + claudelaunch.CostLedgerPreempted},
 		), claudelaunch.CostLedgerPreempted
 	}
 	if claudelaunch.CostArmedFor(opts.Environ, opts.PID) {
@@ -86,17 +86,17 @@ func Prepare(opts LaunchOptions) ([]string, string) {
 	armed, err := arm(ArmOptions{Self: opts.Self, PID: opts.PID, Home: opts.Home})
 	if err != nil {
 		logf("sink not armed for pid %d: %v", opts.PID, err)
-		return withEnv(
+		return paths.ApplyEnv(
 			opts.Environ,
 			claudelaunch.CostEnvNames(),
-			claudelaunch.EnvCostLedger+"="+claudelaunch.CostLedgerFailed,
+			[]string{claudelaunch.EnvCostLedger + "=" + claudelaunch.CostLedgerFailed},
 		), claudelaunch.CostLedgerFailed
 	}
 	logf("armed a sink on 127.0.0.1:%d for pid %d", armed.Port, opts.PID)
-	return withEnv(
+	return paths.ApplyEnv(
 		opts.Environ,
 		claudelaunch.CostEnvNames(),
-		claudelaunch.CostEnv(armed.Port, opts.PID)...), claudelaunch.CostLedgerOn
+		claudelaunch.CostEnv(armed.Port, opts.PID)), claudelaunch.CostLedgerOn
 }
 
 // Kept is environ for one more Claude start by process pid, whose own environment host still holds
@@ -109,34 +109,13 @@ func Kept(environ, host []string, pid int) []string {
 		return environ
 	}
 	names := claudelaunch.CostEnvNames()
-	kept := withEnv(environ, names)
+	kept := paths.ApplyEnv(environ, names, nil)
 	for _, entry := range host {
 		if name, _, _ := strings.Cut(entry, "="); slices.Contains(names, name) {
 			kept = append(kept, entry)
 		}
 	}
 	return kept
-}
-
-// withEnv returns environ without the entries named in drop or by an assignment, plus the
-// assignments.
-func withEnv(environ, drop []string, assignments ...string) []string {
-	remove := map[string]bool{}
-	for _, name := range drop {
-		remove[name] = true
-	}
-	for _, assignment := range assignments {
-		name, _, _ := strings.Cut(assignment, "=")
-		remove[name] = true
-	}
-	out := make([]string, 0, len(environ)+len(assignments))
-	for _, entry := range environ {
-		name, _, _ := strings.Cut(entry, "=")
-		if !remove[name] {
-			out = append(out, entry)
-		}
-	}
-	return append(out, assignments...)
 }
 
 // Main dispatches `pfm internal cost-launch` and `pfm internal cost-sink`; args[0] names the verb.
@@ -179,10 +158,10 @@ func PrepareCurrent(environ []string, env paths.Env, enabled bool, stderr io.Wri
 	home, err := paths.HomeFrom(env)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm: no cost ledger for this chat: %v\n", err)
-		return withEnv(
+		return paths.ApplyEnv(
 				environ,
 				claudelaunch.CostEnvNames(),
-				claudelaunch.EnvCostLedger+"="+claudelaunch.CostLedgerFailed,
+				[]string{claudelaunch.EnvCostLedger + "=" + claudelaunch.CostLedgerFailed},
 			),
 			claudelaunch.CostLedgerFailed
 	}

@@ -23,7 +23,10 @@ func TestSeatRunRecipe(t *testing.T) {
 	t.Cleanup(func() { _ = file.Close() })
 	memory := OpenSharedStateMemory(ctx)
 	t.Cleanup(func() { _ = memory.Close() })
-	run := SeatRun{Binary: "/fixture/engine", Args: []string{"--resume"}, Env: []string{"A=1"}, CWD: "/fixture"}
+	run := SeatRun{
+		Binary: "/fixture/engine", Args: []string{"--resume"}, Env: []string{"A=1"}, Unset: []string{"B"},
+		EnvDelta: true, CWD: "/fixture",
+	}
 	if err := file.WriteSeatRun("seat-1", run); err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +63,43 @@ func TestSeatRunRecipe(t *testing.T) {
 		}
 		if err := tc.state.DeleteSeatRun(tc.id); err == nil || err.Error() != tc.want {
 			t.Errorf("%s: DeleteSeatRun() = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+// TestSeatRunEnviron pins how a recipe becomes the engine's environment: a
+// delta recipe over the seat host's own, an older full copy as stored.
+func TestSeatRunEnviron(t *testing.T) {
+	t.Parallel()
+	host := []string{"HOME=/seat/home", "CLAUDE_PID=7", "CLAUDE_CONFIG_DIR=/store/1", "PATH=/herdr/bin"}
+	for _, tc := range []struct {
+		name string
+		run  SeatRun
+		host []string
+		want []string
+	}{
+		{
+			name: "delta unsets then assigns over the host",
+			run: SeatRun{}.WithEnvDelta(
+				[]string{"PATH=/caller/bin", "CLAUDE_CONFIG_DIR=/store/2"}, []string{"CLAUDE_PID", "CLAUDE_CONFIG_DIR"},
+			),
+			host: host,
+			want: []string{"HOME=/seat/home", "PATH=/caller/bin", "CLAUDE_CONFIG_DIR=/store/2"},
+		},
+		{
+			name: "delta over an empty host is its assignments",
+			run:  SeatRun{}.WithEnvDelta([]string{"CLAUDE_CONFIG_DIR=/store/2"}, []string{"CLAUDE_PID"}),
+			want: []string{"CLAUDE_CONFIG_DIR=/store/2"},
+		},
+		{
+			name: "full copy an older pfm wrote runs as stored",
+			run:  SeatRun{Env: []string{"AUTO_EFFORT_CONTROL_JUDGE=true", "CLAUDE_CONFIG_DIR=/store/1"}},
+			host: host,
+			want: []string{"AUTO_EFFORT_CONTROL_JUDGE=true", "CLAUDE_CONFIG_DIR=/store/1"},
+		},
+	} {
+		if got := tc.run.Environ(tc.host); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: Environ(%q) = %q, want %q", tc.name, tc.host, got, tc.want)
 		}
 	}
 }

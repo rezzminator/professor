@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/chat"
@@ -92,9 +91,8 @@ func launchNative(
 	if launch.SessionID != "" {
 		identity = launch.SessionID
 	}
-	environment := nativeLaunchEnvironment(launch)
 	// The supervisor, not a birth-door process, applies the saved ledger policy.
-	environment = append(environment, paths.EnvStateDB+"="+runtime.Paths.StateDB)
+	launch.Env = append(launch.Env, paths.EnvStateDB+"="+runtime.Paths.StateDB)
 	ctx := context.Background()
 	birth := spawn.HerdrRequest{
 		Choice: choice,
@@ -102,10 +100,9 @@ func launchNative(
 		Run: fleetdb.SeatRun{
 			Binary:     launch.Binary,
 			Args:       launch.Argv,
-			Env:        environment,
 			CWD:        cwd,
 			CostLedger: prefs.CostLedger,
-		},
+		}.WithEnvDelta(launch.Recipe(os.Environ())),
 		Seat:      fleetdb.Seat{SessionID: identity, Engine: string(pfmengine.Claude), Name: request.Name},
 		UserNamed: request.Name != "",
 	}
@@ -152,17 +149,6 @@ func launchNative(
 		return 1
 	}
 	return 0
-}
-
-func nativeLaunchEnvironment(launch claudelaunch.Launch) []string {
-	environment := seatEnvironment(os.Environ(), nil, launch.Unset)
-	// Unset names and assigned names can overlap: assignments always win.
-	keys := make([]string, 0, len(launch.Env))
-	for _, entry := range launch.Env {
-		key, _, _ := strings.Cut(entry, "=")
-		keys = append(keys, key)
-	}
-	return seatEnvironment(environment, launch.Env, keys)
 }
 
 func recordLauncherTmuxSeat(ctx context.Context, runtime config.Runtime, socket, identity, name string) error {

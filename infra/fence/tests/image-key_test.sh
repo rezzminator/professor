@@ -172,6 +172,26 @@ apt_out="$(export PFM_APT_MIRROR=https://apt.example.invalid/ubuntu; sh -ec "$ap
 if [ "$rc" = 0 ] && [ -z "$apt_out" ] && [ "$(cat "$T/apt/sources.list")" = "${legacy//http:\/\/archive.ubuntu.com\/ubuntu/https://apt.example.invalid/ubuntu/}" ]; then ok "apt mirror rewrites a legacy-only sources.list and succeeds"
 else bad "apt mirror legacy-only" "rc=$rc" "$apt_out" "$(cat "$T/apt/sources.list")"; fi
 
+# The extra-CA RUN writes one .crt per certificate in PFM_EXTRA_CA_PEM_B64 (text outside a certificate
+# dropped) and runs update-ca-certificates; empty writes nothing and runs nothing. A POSIX shell, as Docker runs it.
+ca_run="$(awk '/^RUN / { run=$0; while (run ~ /\\$/ && getline) run=run "\n" $0; if (run ~ /PFM_EXTRA_CA_PEM_B64/) { sub(/^RUN /, "", run); print run; exit } }' "$FENCE/pfm-dev.Dockerfile")"
+ca_run="${ca_run//\/usr\/local\/share\/ca-certificates\//$T/ca/}"
+mkdir -p "$T/ca-bin"
+printf '#!/bin/sh\necho update-ca-certificates ran\n' >"$T/ca-bin/update-ca-certificates"; chmod +x "$T/ca-bin/update-ca-certificates"
+ca_pem=$'# invented\n-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\nbetween\n-----BEGIN CERTIFICATE-----\nBBBB\n-----END CERTIFICATE-----'
+for b64 in '' "$(printf '%s\n' "$ca_pem" | base64 | tr -d '\n')"; do
+  rm -f "$T"/ca/*.crt; mkdir -p "$T/ca"
+  ca_out="$(export PFM_EXTRA_CA_PEM_B64="$b64" PATH="$T/ca-bin:$PATH"; sh -ec "$ca_run" 2>&1)"; rc=$?
+  if [ -z "$b64" ]; then
+    if [ "$rc" = 0 ] && [ -z "$ca_out" ] && [ -z "$(ls "$T/ca")" ]; then ok 'an empty extra CA adds no certificate'
+    else bad 'empty extra CA' "rc=$rc" "$ca_out" "$(ls "$T/ca")"; fi
+  elif [ "$rc" = 0 ] && [ "$ca_out" = 'update-ca-certificates ran' ] && [ "$(ls "$T/ca")" = $'pfm-extra-ca-1.crt\npfm-extra-ca-2.crt' ] &&
+    [ "$(cat "$T/ca/pfm-extra-ca-1.crt")" = $'-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----' ] &&
+    [ "$(cat "$T/ca/pfm-extra-ca-2.crt")" = $'-----BEGIN CERTIFICATE-----\nBBBB\n-----END CERTIFICATE-----' ]; then
+    ok 'an extra CA bundle lands as one .crt per certificate and updates the store'
+  else bad 'extra CA bundle' "rc=$rc" "$ca_out" "$(ls "$T/ca")"; fi
+done
+
 # Supplemental real Compose resolution is offline; callers supply a standalone binary.
 if [ -n "${PFM_TEST_COMPOSE_BIN:-}" ]; then
   unset -f docker

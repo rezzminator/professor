@@ -29,6 +29,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglib2.0-0 libxcb1 \
     gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
+# A network whose TLS interception proxy re-signs HTTPS with a private root CA
+# hands its CA certificates in PFM_EXTRA_CA_PEM_B64 (one line of base64 PEM,
+# infra/fence/local-env.sh from PFM_EXTRA_CA_CERTS); each certificate joins the
+# system store before the first HTTPS download, one .crt per certificate as
+# update-ca-certificates expects. Empty leaves the store unchanged.
+ARG PFM_EXTRA_CA_PEM_B64=
+RUN if [ -n "$PFM_EXTRA_CA_PEM_B64" ]; then \
+      printf '%s' "$PFM_EXTRA_CA_PEM_B64" | base64 -d \
+        | awk '/-----BEGIN CERTIFICATE-----/ { n++; f = 1 } f { print > ("/usr/local/share/ca-certificates/pfm-extra-ca-" n ".crt") } /-----END CERTIFICATE-----/ { f = 0 }' \
+      && ls /usr/local/share/ca-certificates/pfm-extra-ca-*.crt >/dev/null \
+      && update-ca-certificates; \
+    fi
+# Tools that keep their own CA list read the system store: Node (npm) through
+# NODE_EXTRA_CA_CERTS, uv and the harvester's standalone Python through
+# SSL_CERT_FILE; curl, git, Go and Ubuntu's python3 read it already.
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 # Go pinned to pfm/go.mod — bump both together or the fence tests a different compiler.
 ARG GO_VERSION=1.27.1
 ARG TARGETARCH

@@ -123,7 +123,7 @@ else bad 'relative harvester source' "rc=$rc" "$out"; fi
 local_env() { # local_env <worktree> [VAR=value…]: the two overrides, or the resolver's error and exit
   local root="$1"; shift
   (
-    unset PFM_GOPROXY PFM_NPM_REGISTRY PFM_APT_MIRROR ENGINE_SYNC_SRC HARVESTER_SRC
+    unset PFM_GOPROXY PFM_NPM_REGISTRY PFM_APT_MIRROR PFM_EXTRA_CA_CERTS PFM_EXTRA_CA_PEM_B64 ENGINE_SYNC_SRC HARVESTER_SRC
     [ $# -eq 0 ] || export "$@"
     ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
     printf 'GOPROXY=%s\nNPM=%s\nAPT=%s\n' "${PFM_GOPROXY-unset}" "${PFM_NPM_REGISTRY-unset}" "${PFM_APT_MIRROR-unset}"
@@ -143,7 +143,7 @@ if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'GOPROXY=\nNPM=https://npm.example.in
 else bad 'environment wins' "rc=$rc" "$out"; fi
 printf 'PFM_GOPROX=https://go.example.invalid\n' >"$MAIN/infra/fence/.env"
 out="$(local_env "$T/linked")"; rc=$?
-if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: infra/fence/.env line 1: unknown key PFM_GOPROX (known: PFM_GOPROXY, PFM_NPM_REGISTRY, PFM_APT_MIRROR): $MAIN/infra/fence/.env" ]; then
+if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: infra/fence/.env line 1: unknown key PFM_GOPROX (known: PFM_GOPROXY, PFM_NPM_REGISTRY, PFM_APT_MIRROR, PFM_EXTRA_CA_CERTS): $MAIN/infra/fence/.env" ]; then
   ok 'an unknown infra/fence/.env key is refused by name'
 else bad 'unknown local env key' "rc=$rc" "$out"; fi
 printf 'export PFM_GOPROXY\n' >"$MAIN/infra/fence/.env"
@@ -151,5 +151,48 @@ out="$(local_env "$T/linked")"; rc=$?
 if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: infra/fence/.env line 1 is not KEY=value: $MAIN/infra/fence/.env" ]; then
   ok 'a malformed infra/fence/.env line is refused by name'
 else bad 'malformed local env line' "rc=$rc" "$out"; fi
+
+# PFM_EXTRA_CA_CERTS: an absolute path to a PEM file of CA certificates; its content leaves as one
+# line of base64 in PFM_EXTRA_CA_PEM_B64 (the build arg the image key carries). A relative path, a
+# missing file or a file without a certificate is refused, naming infra/fence/.env's line or the
+# environment variable, whichever set it.
+ca_env() { # ca_env <worktree> [VAR=value…]: the CA path and its base64, or the resolver's error and exit
+  local root="$1"; shift
+  (
+    unset PFM_GOPROXY PFM_NPM_REGISTRY PFM_APT_MIRROR PFM_EXTRA_CA_CERTS PFM_EXTRA_CA_PEM_B64 ENGINE_SYNC_SRC HARVESTER_SRC
+    [ $# -eq 0 ] || export "$@"
+    ROOT="$root" FENCE_CALLER=fence-env-test . "$SUT"
+    printf 'CA=%s\nB64=%s\n' "${PFM_EXTRA_CA_CERTS-unset}" "${PFM_EXTRA_CA_PEM_B64-unset}"
+  ) 2>&1
+}
+printf '# two invented certificates\n-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nBBBB\n-----END CERTIFICATE-----\n' >"$T/ca.pem"
+printf 'not a certificate\n' >"$T/no-cert.pem"
+ca_b64="$(base64 <"$T/ca.pem" | tr -d '\n')"
+printf 'PFM_EXTRA_CA_CERTS=%s\n' "$T/ca.pem" >"$MAIN/infra/fence/.env"
+out="$(ca_env "$T/linked")"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'CA=%s\nB64=%s' "$T/ca.pem" "$ca_b64")" ] && [ "$(printf '%s' "$ca_b64" | base64 -d)" = "$(cat "$T/ca.pem")" ]; then
+  ok 'an infra/fence/.env CA file leaves as its one-line base64 content'
+else bad 'CA file accepted' "rc=$rc" "$out"; fi
+out="$(ca_env "$T/linked" PFM_EXTRA_CA_CERTS=)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'CA=\nB64=unset')" ]; then ok 'an empty PFM_EXTRA_CA_CERTS in the environment wins and adds no certificate'
+else bad 'CA environment wins' "rc=$rc" "$out"; fi
+for row in \
+  "relative|certs/ca.pem|must be an absolute path: certs/ca.pem" \
+  "missing|$T/absent.pem|is not a readable file: $T/absent.pem" \
+  "no certificate|$T/no-cert.pem|holds no -----BEGIN CERTIFICATE-----: $T/no-cert.pem"; do
+  IFS='|' read -r name value tail <<<"$row"
+  printf '# this machine\nPFM_EXTRA_CA_CERTS=%s\n' "$value" >"$MAIN/infra/fence/.env"
+  out="$(ca_env "$T/linked")"; rc=$?
+  if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: infra/fence/.env line 2 PFM_EXTRA_CA_CERTS $tail" ]; then
+    ok "a $name infra/fence/.env CA file is refused by line"
+  else bad "CA file $name" "rc=$rc" "$out"; fi
+  out="$(ca_env "$T/linked" "PFM_EXTRA_CA_CERTS=$value")"; rc=$?
+  if [ "$rc" -eq 1 ] && [ "$out" = "fence-env-test: PFM_EXTRA_CA_CERTS $tail" ]; then
+    ok "a $name CA file from the environment is refused by the variable's name"
+  else bad "CA environment $name" "rc=$rc" "$out"; fi
+done
 rm -f "$MAIN/infra/fence/.env"
+out="$(ca_env "$T/linked" "PFM_EXTRA_CA_CERTS=$T/ca.pem")"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "$(printf 'CA=%s\nB64=%s' "$T/ca.pem" "$ca_b64")" ]; then ok 'a CA file from the environment is read with no infra/fence/.env'
+else bad 'CA environment without file' "rc=$rc" "$out"; fi
 shtest_end

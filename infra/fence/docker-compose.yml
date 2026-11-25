@@ -15,11 +15,14 @@ services:
       labels:
         pfm.fence.inputs: ${PFM_DEV_INPUTS_KEY:-unkeyed}
       # Empty by default: the npm and apt mirrors for a network that blocks
-      # registry.npmjs.org or archive.ubuntu.com
+      # registry.npmjs.org or archive.ubuntu.com, and the extra CA certificates
+      # (base64 PEM content, so the image key carries them) for a network whose
+      # TLS interception proxy re-signs HTTPS with a private root CA
       # (infra/fence/local-env.sh loads them from the gitignored infra/fence/.env).
       args:
         PFM_NPM_REGISTRY: ${PFM_NPM_REGISTRY:-}
         PFM_APT_MIRROR: ${PFM_APT_MIRROR:-}
+        PFM_EXTRA_CA_PEM_B64: ${PFM_EXTRA_CA_PEM_B64:-}
     image: professor-pfm-dev
     # A real machine has an init that reaps orphans; a bare container does
     # not, so a double-forked descendant lingers as a zombie and the

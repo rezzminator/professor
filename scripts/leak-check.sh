@@ -170,9 +170,13 @@ fi
 #                                    while a real leak on the same line still does
 #   !ignore-path <git glob>          a path never scanned at all — reported on every
 #                                    run, because an unannounced blind spot is a leak path
+#   !identity <address regex>        an address commits may be pushed under, matched whole
+#                                    against every new commit's author and committer;
+#                                    --range refuses to pass without one
 terms=()
 ignore_tokens=()
 ignore_paths=()
+identities=()
 structural_only=0
 while IFS= read -r term || [[ -n "$term" ]]; do
   term="${term%$'\r'}"
@@ -182,6 +186,7 @@ while IFS= read -r term || [[ -n "$term" ]]; do
     '!structural-only') structural_only=1; continue ;;
     '!ignore-token '*) ignore_tokens+=("${term#!ignore-token }"); continue ;;
     '!ignore-path '*) ignore_paths+=("${term#!ignore-path }"); continue ;;
+    '!identity '*) identities+=("${term#!identity }"); continue ;;
     '!'*) echo "leak-check: FAILED — unknown directive in $terms_file: $term" >&2; exit 1 ;;
   esac
   terms+=("$term")
@@ -191,7 +196,7 @@ if (( ${#ignore_paths[@]} > 0 )); then
 fi
 
 if (( structural_only )); then
-  if (( ${#terms[@]} + ${#ignore_tokens[@]} + ${#ignore_paths[@]} > 0 )); then
+  if (( ${#terms[@]} + ${#ignore_tokens[@]} + ${#ignore_paths[@]} + ${#identities[@]} > 0 )); then
     echo "leak-check: FAILED — !structural-only cannot be mixed with private terms or ignores: $terms_file" >&2
     exit 1
   fi
@@ -254,6 +259,15 @@ match_grep -qiE "$PATTERN" < /dev/null && rc=0 || rc=$?
 if (( rc >= 2 )); then
   echo "leak-check: FAILED — the terms in $terms_file do not compile as one extended regex (grep rc=$rc); refusing to scan" >&2
   exit 1
+fi
+identities_alt=""
+if (( ${#identities[@]} > 0 )); then
+  identities_alt="$(IFS='|'; printf '%s' "${identities[*]}")"
+  match_grep -qixE "($identities_alt)" < /dev/null && rc=0 || rc=$?
+  if (( rc >= 2 )); then
+    echo "leak-check: FAILED — the !identity lines in $terms_file do not compile as one extended regex (grep rc=$rc); refusing to scan" >&2
+    exit 1
+  fi
 fi
 
 if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" || -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
@@ -542,6 +556,60 @@ range_diff_stream() {
   printf 'leak-check: commit enumeration completed — %d newly reachable commit(s), merges included\n' "$count" >&2
 }
 
+# scan_commit_metadata: every commit in $commits_file, beyond its diff. A diff carries only what a commit
+# changed; who wrote it and what its message says reach the remote too, so a commit made under a private
+# address once passed a clean diff scan. Each author and committer address must match one `!identity` regex
+# of the terms file (the addresses the owner publishes commits under), whole and case-insensitively; with no
+# `!identity` line the push is refused, never waved through. Each message line is judged against the
+# private terms, ignore tokens applied as in line_is_real_hit; the structural patterns stay out, as they
+# match every gmail identity's own trailers. Prints one `LEAK commit {sha12}: …` per hit; rc 1 when a
+# commit could not be read or judged, or no `!identity` is configured, never a pass.
+scan_commit_metadata() {
+  local commit meta line judged tok rc n count=0
+  (( structural_only )) && return 0
+  if (( ${#identities[@]} == 0 )); then
+    echo "leak-check: FAILED — no '!identity <address regex>' line in $terms_file names the addresses commits may be published under; refusing to push commit identities unjudged" >&2
+    return 1
+  fi
+  while IFS= read -r commit; do
+    [[ -n "$commit" ]] || continue
+    count=$((count + 1))
+    if ! meta="$(repo_git log -1 --no-show-signature --format='author %an <%ae>%n%ae%ncommitter %cn <%ce>%n%ce%n%B' "$commit" | mark_nul)"; then
+      echo "leak-check: FAILED — cannot read the author, committer and message of $commit" >&2
+      return 1
+    fi
+    n=0
+    while IFS= read -r line; do
+      n=$((n + 1))
+      case "$n" in
+        1|3) judged="$line"; continue ;;
+        2|4)
+          match_grep -qixE "($identities_alt)" <<<"$line" && rc=0 || rc=$?
+          (( rc == 0 )) && continue
+          if (( rc != 1 )); then
+            echo "leak-check: FAILED — the address $line of $commit could not be judged (rc=$rc)" >&2
+            return 1
+          fi
+          printf 'LEAK commit %s: %s — no !identity line names this address\n' "${commit:0:12}" "$judged"
+          continue
+          ;;
+      esac
+      judged="$line"
+      for tok in ${ignore_tokens[@]+"${ignore_tokens[@]}"}; do
+        judged="$(printf '%s' "$judged" | tr '[:upper:]' '[:lower:]' | sed -E "s#${tok}#<IGNORED>#g")" || return 1
+      done
+      clean_grep -qiE "($terms_alt)" <<<"$judged" && rc=0 || rc=$?
+      (( rc == 1 )) && continue
+      if (( rc != 0 )); then
+        echo "leak-check: FAILED — a message line of $commit could not be judged (rc=$rc)" >&2
+        return 1
+      fi
+      printf 'LEAK commit %s: %s\n' "${commit:0:12}" "$line"
+    done <<<"$meta"
+  done < "$commits_file"
+  printf 'leak-check: commit metadata judged — author and committer of %d commit(s) against %d !identity address(es), messages against %d private term(s)\n' "$count" "${#identities[@]}" "${#terms[@]}" >&2
+}
+
 case "$mode" in
   staged)
     repo_git diff --cached --text -U0 --no-color -- . "${diff_excludes[@]}" \
@@ -550,6 +618,11 @@ case "$mode" in
   range)
     if ! range_diff_stream | mark_nul | scan_diff_stream > "$hits_file"; then
       echo 'leak-check: FAILED — reachable-commit scan failed; refusing to report clean' >&2
+      exit 1
+    fi
+    if ! scan_commit_metadata >> "$hits_file"; then
+      cat "$hits_file"
+      echo 'leak-check: FAILED — commit metadata scan failed; refusing to report clean' >&2
       exit 1
     fi
     ;;

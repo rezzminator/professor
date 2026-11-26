@@ -10,6 +10,7 @@ cat > "$T/terms" <<'EOF'
 syntheticsecret
 !ignore-path fixtures/ignore/*
 !ignore-token syntheticsecret-public
+!identity t@t
 EOF
 cat > "$T/bin/git" <<'EOF'
 #!/usr/bin/env bash
@@ -22,6 +23,8 @@ elif [[ "${1:-}" == 'rev-list' ]]; then
   printf 'fixture-commit\n'
 elif [[ "${1:-}" == 'diff' || "${1:-}" == 'diff-tree' ]]; then
   cat "$GIT_DIFF_FILE"
+elif [[ "${1:-}" == 'log' ]]; then
+  printf 'author t <t@t>\nt@t\ncommitter t <t@t>\nt@t\nfixture message\n'
 else
   exit 3
 fi
@@ -280,7 +283,7 @@ for mode in files range; do
 done
 
 # A term anchored at the line's end still hits once the judge strips the benign tokens.
-printf 'syntheticsecret$\n' > "$T/terms-anchor"
+printf 'syntheticsecret$\n!identity t@t\n' > "$T/terms-anchor"
 printf 'x syntheticsecret\n' > "$T/repo/anchored.txt"
 printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+x syntheticsecret\n' > "$T/diff"
 for mode in files range; do
@@ -306,7 +309,7 @@ fi
 # ---- a term matches multibyte letters under a UTF-8 locale ---------------------
 # Every fixture is written as octal escapes so this suite stays ASCII: \303\251 is the lowercase
 # e-acute, \303\211 its capital, \303\266 the lowercase o-umlaut, \303\226 the capital one.
-printf 'syntheticsecret\njos\303\251\n\303\251t\303\251\n' > "$T/terms-utf8"
+printf 'syntheticsecret\njos\303\251\n\303\251t\303\251\n!identity t@t\n' > "$T/terms-utf8"
 
 printf 'JOS\303\211 here\n' > "$T/repo/upper.txt"
 printf 'head\0\nJOS\303\211 here\n' > "$T/repo/upper-nul.bin"
@@ -329,7 +332,7 @@ for form in upper-files upper-nul-files mixed-files upper-range; do
 done
 
 printf 'syntheticsecret\nkn.del\n' > "$T/terms-dot"
-printf 'syntheticsecret\nkn[\303\266o]del\n' > "$T/terms-bracket"
+printf 'syntheticsecret\nkn[\303\266o]del\n!identity t@t\n' > "$T/terms-bracket"
 printf 'Kn\303\226del here\n' > "$T/repo/kn.txt"
 kn_text="$(printf 'Kn\303\226del here')"
 
@@ -470,6 +473,39 @@ if [[ "$rc" -eq 1 && "$out" == *'LEAK .githooks/merged: syntheticsecret'* && "$o
   ok 'F7/F14: merge-only hooks are scanned while required public licenses and images stay excluded'
 else
   bad 'F7/F14: merge-only hooks are scanned while required public licenses and images stay excluded' "rc=$rc; out=$out; err=$err"
+fi
+
+# A commit's author, committer and message reach the remote beside its diff. An author or committer address no
+# !identity line names fails the push; a private term in a message fails it, a structural pattern there (a
+# mailbox) does not, and an ignore token strips a public string as it does in a diff line. With no !identity
+# line the push is refused. Addresses are assembled so this suite stays clean.
+meta_from="$(pgit rev-parse HEAD)"
+private_address="x.syntheticsecret@example.invalid"
+printf 'clean\n' > "$pushed/meta-1.txt"
+pgit add meta-1.txt
+git -C "$pushed" -c user.name=t -c user.email="$private_address" -c commit.gpgsign=false -c core.hooksPath=/dev/null \
+  commit -q -m 'authored under a private address'
+author_sha="$(pgit rev-parse --short=12 HEAD)"
+printf 'clean\n' > "$pushed/meta-2.txt"
+pgit add meta-2.txt && pgit commit -q -m 'mentions syntheticsecret in its message'
+message_sha="$(pgit rev-parse --short=12 HEAD)"
+printf 'clean\n' > "$pushed/meta-3.txt"
+pgit add meta-3.txt && pgit commit -q -m "reaches t@g""mail.com about syntheticsecret-public only"
+real_range "$meta_from" HEAD
+expected="LEAK commit $message_sha: mentions syntheticsecret in its message
+LEAK commit $author_sha: author t <$private_address> — no !identity line names this address
+LEAK commit $author_sha: committer t <$private_address> — no !identity line names this address"
+if [[ "$rc" -eq 1 && "$out" == "$expected" && "$err" == *'author and committer of 3 commit(s) against 1 !identity address(es)'* ]]; then
+  ok 'a pushed commit under an address no !identity names, or with a private term in its message, is blocked; a mailbox and an ignored token in a message are not'
+else
+  bad 'a pushed commit under an address no !identity names, or with a private term in its message, is blocked; a mailbox and an ignored token in a message are not' "rc=$rc; expected=$expected; out=$out; err=$err"
+fi
+grep -v '^!identity' "$T/terms" > "$T/terms-no-identity"
+TERMS="$T/terms-no-identity" real_range "$message_sha" HEAD
+if [[ "$rc" -eq 1 && -z "$out" && "$err" == *"FAILED — no '!identity <address regex>' line in $T/terms-no-identity"* && "$err" != *'leak-check: clean'* ]]; then
+  ok 'a range scan with no !identity line refuses to pass'
+else
+  bad 'a range scan with no !identity line refuses to pass' "rc=$rc; out=$out; err=$err"
 fi
 
 GIT_ENUM_FAIL=1 run_range

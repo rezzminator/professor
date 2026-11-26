@@ -49,8 +49,8 @@ func TestPrintLeakTermsDoctor(t *testing.T) {
 				fix + hint + "\n", 1,
 		},
 		{
-			"terms present", true, ptr("# names\nacme\r\nwidget-co\n!ignore-path docs/x.md\n"), false,
-			"doctor: leak_terms ok {terms} terms=2\n", 0,
+			"terms present", true, ptr("# names\nacme\r\nwidget-co\n!ignore-path docs/x.md\n!identity t@example\\.com\n"), false,
+			"doctor: leak_terms ok {terms} terms=2 identities=1\n", 0,
 		},
 		{
 			"structural only mixed with a term", true, ptr("!structural-only\nacme\n"), false,
@@ -63,8 +63,20 @@ func TestPrintLeakTermsDoctor(t *testing.T) {
 				"the pre-push leak gate refuses every push" + hint + "\n", 1,
 		},
 		{
-			"term without a trailing newline", true, ptr("acme"), false,
-			"doctor: leak_terms ok {terms} terms=1\n", 0,
+			"term without a trailing newline", true, ptr("!identity t@example\\.com\nacme"), false,
+			"doctor: leak_terms ok {terms} terms=1 identities=1\n", 0,
+		},
+		{
+			"no identity", true, ptr("acme\n"), false,
+			"doctor: leak_terms NO-IDENTITY {terms} names no address commits may be pushed under — " +
+				"the pre-push leak gate refuses every push — fix: add one line '!identity {address regex}' to {terms} " +
+				"per address this host commits under, matched whole against each new commit's author and committer" +
+				hint + "\n", 1,
+		},
+		{
+			"structural only mixed with an identity", true, ptr("!structural-only\n!identity t@example\\.com\n"), false,
+			"doctor: leak_terms BROKEN {terms}: !structural-only cannot be mixed with private terms or ignores — " +
+				"the pre-push leak gate refuses every push" + hint + "\n", 1,
 		},
 		{
 			"structural only", true, ptr("!structural-only\n"), false,

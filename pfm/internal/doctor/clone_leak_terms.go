@@ -14,9 +14,11 @@ import (
 // printLeakTermsDoctor reports the clone's private leak denylist, which the
 // pre-push leak gate (scripts/leak-check.sh) refuses every push without. The
 // count follows the gate's own reading: '#' comments and blank lines skip,
-// '!' lines are directives (an unknown one, or !structural-only beside a term
-// or an ignore, fails the gate), every other line is one term. Every warning
-// carries warnLeakTerms, since a host that never pushes needs none of them.
+// '!' lines are directives (an unknown one, or !structural-only beside a term,
+// an ignore or an identity, fails the gate), every other line is one term; a
+// file with no '!identity' line is NO-IDENTITY, since the gate refuses a push
+// no commit address may be matched against. Every warning carries
+// warnLeakTerms, since a host that never pushes needs none of them.
 func printLeakTermsDoctor(stdout io.Writer, clone string, filter warningFilter) int {
 	if _, err := os.Stat(filepath.Join(clone, "scripts", "leak-check.sh")); err != nil {
 		fmt.Fprintf(stdout, "doctor: leak_terms does not apply: %s has no scripts/leak-check.sh\n", clone)
@@ -48,7 +50,7 @@ func printLeakTermsDoctor(stdout io.Writer, clone string, filter warningFilter) 
 		)
 	}
 	defer func() { _ = file.Close() }()
-	terms, ignores, structuralOnly, unknown := 0, 0, false, ""
+	terms, ignores, identities, structuralOnly, unknown := 0, 0, 0, false, ""
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSuffix(scanner.Text(), "\r")
@@ -59,6 +61,8 @@ func printLeakTermsDoctor(stdout io.Writer, clone string, filter warningFilter) 
 			structuralOnly = true
 		case strings.HasPrefix(line, "!ignore-token ") || strings.HasPrefix(line, "!ignore-path "):
 			ignores++
+		case strings.HasPrefix(line, "!identity "):
+			identities++
 		case strings.HasPrefix(line, "!"):
 			if unknown == "" {
 				unknown = line
@@ -75,12 +79,14 @@ func printLeakTermsDoctor(stdout io.Writer, clone string, filter warningFilter) 
 			"",
 		)
 	}
+	identityFix := "fix: add one line '!identity {address regex}' to " + path +
+		" per address this host commits under, matched whole against each new commit's author and committer"
 	const refused = " — the pre-push leak gate refuses every push"
 	switch {
 	case unknown != "":
 		return filter.warn(stdout, warnLeakTerms,
 			"doctor: leak_terms BROKEN "+path+": unknown directive "+unknown+refused, "")
-	case structuralOnly && terms+ignores > 0:
+	case structuralOnly && terms+ignores+identities > 0:
 		return filter.warn(stdout, warnLeakTerms, "doctor: leak_terms BROKEN "+path+
 			": !structural-only cannot be mixed with private terms or ignores"+refused, "")
 	case structuralOnly:
@@ -88,8 +94,11 @@ func printLeakTermsDoctor(stdout io.Writer, clone string, filter warningFilter) 
 	case terms == 0:
 		return filter.warn(stdout, warnLeakTerms,
 			"doctor: leak_terms EMPTY "+path+" has zero usable terms"+refused, fix)
+	case identities == 0:
+		return filter.warn(stdout, warnLeakTerms,
+			"doctor: leak_terms NO-IDENTITY "+path+" names no address commits may be pushed under"+refused, identityFix)
 	default:
-		fmt.Fprintf(stdout, "doctor: leak_terms ok %s terms=%d\n", path, terms)
+		fmt.Fprintf(stdout, "doctor: leak_terms ok %s terms=%d identities=%d\n", path, terms, identities)
 	}
 	return 0
 }

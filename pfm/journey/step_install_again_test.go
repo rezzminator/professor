@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ func installAgain(c *harness.Ctx, s State) State {
 		c.Failf("claude on the owner's PATH is %q, want pfm's launcher %s, which the plugin step meets", got, launcher)
 	}
 	starts, definitions := serviceStarts(c), serviceDefinitions(c)
-	renamed := renameRule(c, s, term)
+	renamed, rule := renameRule(c, s, term)
 	var second time.Time
 	for i, label := range []string{"install-1", "install-2"} {
 		if i == 1 {
@@ -96,8 +97,8 @@ func installAgain(c *harness.Ctx, s State) State {
 		}
 	}
 	dir := filepath.Join(s.Home, ".claude", "rules")
-	link, target := filepath.Join(dir, "rm-rf-literal-path.md"),
-		filepath.Join(professorClone(s), "templates", "global", "rules", "rm-rf-literal-path.md")
+	link, target := filepath.Join(dir, rule),
+		filepath.Join(professorClone(s), "templates", "global", "rules", rule)
 	if got, dead := read(
 		c,
 		"readlink",
@@ -164,12 +165,25 @@ func expectInstallErrors(c *harness.Ctx) {
 	c.Expect(`"host":"platform.claude.com"`)
 }
 
-// renameRule: upstream renames a global rule in the clone, as a pull lands it (one commit), and the
-// owner previews `pfm install` (no --yes: a dry run), which passes with no FAIL row although the old rule's
-// link in ~/.claude/rules is dead. It returns the pattern of the install rows the rename may cause: the
-// two links and the global rules each engine reads.
-func renameRule(c *harness.Ctx, s State, term *harness.Terminal) *regexp.Regexp {
-	from, to := "rm-rf-absolute-path.md", "rm-rf-literal-path.md"
+// shipped lists the files named name exactly depth levels under the clone directory dir, sorted: the
+// members of a set the clone ships, read from where pfm reads them. None found fails the step.
+func shipped(c *harness.Ctx, dir, depth, name string) []string {
+	out := strings.TrimSpace(read(c, "find", dir, "-mindepth", depth, "-maxdepth", depth, "-type", "f", "-name", name))
+	if out == "" {
+		c.Failf("%s holds no %s %s levels down: the clone ships none, or the listing missed them", dir, name, depth)
+	}
+	files := strings.Split(out, "\n")
+	slices.Sort(files)
+	return files
+}
+
+// renameRule: upstream renames a global rule in the clone, the first one it ships, as a pull lands it
+// (one commit), and the owner previews `pfm install` (no --yes: a dry run), which passes with no FAIL row
+// although the old rule's link in ~/.claude/rules is dead. It returns the pattern of the install rows the
+// rename may cause, the two links and the global rules each engine reads, and the rule's new name.
+func renameRule(c *harness.Ctx, s State, term *harness.Terminal) (rows *regexp.Regexp, to string) {
+	from := filepath.Base(shipped(c, filepath.Join(professorClone(s), "templates", "global", "rules"), "1", "*.md")[0])
+	to = "journey-renamed-" + from
 	if r := c.Read("sh", "-c", `cd "$1" && git mv "templates/global/rules/$2" "templates/global/rules/$3" &&
 git -c user.name=upstream -c user.email=upstream@example.invalid commit -q -m "rename $2 to $3"`,
 		"sh", professorClone(s), from, to); r.Code != 0 {
@@ -181,8 +195,8 @@ git -c user.name=upstream -c user.email=upstream@example.invalid commit -q -m "r
 		c.Failf("pfm install (a dry run) after the rule's rename exited %d, FAIL rows %q, summary %q; stderr %q",
 			code, failed, summary, errs)
 	}
-	return regexp.MustCompile(regexp.QuoteMeta(from) + "|" + regexp.QuoteMeta(to) +
-		`|^write \S+/\.codex/AGENTS\.md \(global rules block\)$|^write \S+/global-always-on\.md \(global rules for OpenCode\)$`)
+	return regexp.MustCompile(regexp.QuoteMeta("/rules/"+from) + "|" + regexp.QuoteMeta("/rules/"+to) +
+		`|^write \S+/\.codex/AGENTS\.md \(global rules block\)$|^write \S+/global-always-on\.md \(global rules for OpenCode\)$`), to
 }
 
 // swapBinary replaces the installed pfm with a byte-identical copy at a new inode, as a rebuild's

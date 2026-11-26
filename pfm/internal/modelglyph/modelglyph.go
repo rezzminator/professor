@@ -70,6 +70,25 @@ func RowEffort(level string) string {
 	return EffortOther
 }
 
+// CacheLabel is a chat's prompt-cache marker in the picker and the reboot gate:
+// "⚡ 1h" for the one-hour cache, the five-minute one otherwise. Both glyphs are
+// Unicode 6.0, so a terminal with an older emoji font still draws them.
+func CacheLabel(cache1H bool) string {
+	if cache1H {
+		return "⚡ " + CacheName(cache1H)
+	}
+	return "⏳ " + CacheName(cache1H)
+}
+
+// CacheName is a prompt cache's bare name, "1h" or "5m", as the new-chat
+// wizard's cache chip and CacheLabel spell it.
+func CacheName(cache1H bool) string {
+	if cache1H {
+		return "1h"
+	}
+	return "5m"
+}
+
 // EffortBar normalises a level to lowercase and returns its filled-only bar:
 // medium → ("medium", "▰▰"). A level outside the five has no bar; no level
 // returns two empty strings.

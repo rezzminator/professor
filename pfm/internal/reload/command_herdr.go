@@ -260,6 +260,7 @@ func RunHerdr(
 	if err := n.wait(ctx, seat.SeatID, oldPID, run); err != nil {
 		return Result{}, err
 	}
+	n.claimSession(ctx, stderr)
 	if n.request.Then != "" {
 		if err := n.then(ctx); err != nil {
 			return Result{}, err

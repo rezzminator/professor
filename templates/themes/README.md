@@ -58,7 +58,7 @@ From `tokyo-night/`, the pink reference theme, `theme.json`:
   "panel_bg": "#23031e",
   "tabGlyphs": {
     "blocked": ["🚨", "🔴"],
-    "dead": "🪫",
+    "dead": "🔌",
     "done": "⭐",
     "error": ["👾", "💥"],
     "idle": "🌑",

@@ -12,6 +12,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 )
 
 // The new-chat wizard. ⏎ on a ✦ row walks the choices of a new chat inside that
@@ -574,16 +575,9 @@ func (model Model) rememberedLabels(engine pfmengine.ID) []string {
 		parts = append(parts, accountEmoji(engine, account))
 	}
 	if hasCacheChoice(engine) {
-		parts = append(parts, cacheLabel(model.defaultCache(account)))
+		parts = append(parts, modelglyph.CacheName(model.defaultCache(account)))
 	}
 	return []string{strings.Join(parts, " · "), short}
-}
-
-func cacheLabel(on bool) string {
-	if on {
-		return "1h"
-	}
-	return "5m"
 }
 
 // wizardSpans paints the open step: what is already chosen, dim, then the

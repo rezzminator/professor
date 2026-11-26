@@ -10,7 +10,8 @@
 // that makes a socket's blinker re-read its tabs is nudge.go's; which tabs a
 // tick reconciles from its tab observations is indicators_tab_observations.go's.
 // Which plugins Herdr's registry lists, and whether a command's text says no
-// server is up, is plugin_registry.go's.
+// server is up, is plugin_registry.go's. The requests publishing a pane's
+// agent state, session and release render in wire_report.go.
 package herdr
 
 import (

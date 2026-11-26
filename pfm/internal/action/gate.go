@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -69,8 +70,8 @@ func (gate ReaderGate) Confirm(
 		fmt.Fprintf(
 			gate.Writer,
 			"  cache    %s → %s\n",
-			cacheName(request.BirthCache1H),
-			cacheName(request.WantCache1H),
+			modelglyph.CacheLabel(request.BirthCache1H),
+			modelglyph.CacheLabel(request.WantCache1H),
 		)
 	}
 	fmt.Fprintln(gate.Writer, "Enter attaches as-is · s reboots to match")
@@ -139,11 +140,4 @@ func (gate DeviceGate) Confirm(
 		}
 	}()
 	return ReaderGate{Reader: terminal, Writer: terminal}.Confirm(ctx, request)
-}
-
-func cacheName(cache1H bool) string {
-	if cache1H {
-		return "⚡ 1h"
-	}
-	return "🪫 5m"
 }

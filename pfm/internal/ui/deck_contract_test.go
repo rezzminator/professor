@@ -82,7 +82,7 @@ func scrapedSelectionLine(model Model) string {
 func TestHeaderAccountAndCacheAreReadableByRegex(t *testing.T) {
 	line := strings.Join(frameLines(deckModel(100, 30)), "\n")
 	account := regexp.MustCompile(`account (\d+) ·`).FindStringSubmatch(line)
-	cache := regexp.MustCompile(`⚡ 1h|🪫 5m`).FindString(line)
+	cache := regexp.MustCompile(`⚡ 1h|⏳ 5m`).FindString(line)
 	if want := []string{"account 2 ·", "2"}; !slices.Equal(account, want) || cache != "⚡ 1h" {
 		t.Errorf("the scrapers read account %q and cache %q, want %q and %q", account, cache, want, "⚡ 1h")
 	}
@@ -108,7 +108,7 @@ func TestFrameKeepsTheGoldensShape(t *testing.T) {
 		t.Errorf("the masthead line is not the pinned shape: %q", lines[0])
 	}
 	context := regexp.MustCompile(
-		`^ Chats · .+ account [0-9]+ · (⚡ 1h|🪫 5m) · [0-9]+ rows · [0-9]+ hidden · [0-9]+ empty`)
+		`^ Chats · .+ account [0-9]+ · (⚡ 1h|⏳ 5m) · [0-9]+ rows · [0-9]+ hidden · [0-9]+ empty`)
 	if !context.MatchString(lines[2]) {
 		t.Errorf("the Chats context line is not the pinned shape: %q", lines[2])
 	}

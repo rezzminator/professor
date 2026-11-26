@@ -114,14 +114,17 @@ func launchNative(
 			return 1
 		}
 		birth.Seat.SessionID = id
-		if !resuming && !continuing { // a continued chat is no new one: it keeps the space it had
-			if _, err := spawn.BirthSpace(ctx, runtime.Paths, &birth.Choice, id, ""); err != nil {
-				fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
-			}
-		}
 	} else {
 		birth.Launch = &fleetdb.Launch{
 			SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: launch.Cache1H,
+		}
+	}
+	// A fresh launch arrives with the session id launch.go minted, so this asks for
+	// every new chat, whichever id it carries; a resumed or continued one keeps the
+	// space it had.
+	if !resuming && !continuing {
+		if _, err := spawn.BirthSpace(ctx, runtime.Paths, &birth.Choice, birth.Seat.SessionID, ""); err != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
 		}
 	}
 	if !choice.InPlace {

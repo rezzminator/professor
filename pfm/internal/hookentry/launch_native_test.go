@@ -157,15 +157,38 @@ func TestLaunchNativeNewTabRefusesBirthFailure(t *testing.T) {
 	}
 }
 
-func TestLaunchNativeNewTabPreservesContinuationsAndLaunchMetadata(t *testing.T) {
-	for _, args := range [][]string{{"--continue"}, {"--resume"}, {"--resume", "parent", "--fork-session"}, {"--session-id", "known-session"}} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
+// A new chat a chat in space "zz" launches is born in "zz": a fresh launch, whose
+// session id launch.go mints before the native birth, and a chosen --session-id;
+// a continuation keeps its own space, so none is recorded for it.
+func TestLaunchNativeNewTabBirthKeepsContinuationsLaunchMetadataAndSpace(t *testing.T) {
+	for _, row := range []struct {
+		name      string
+		args      []string
+		sessionID string
+		space     string
+	}{
+		{name: "fresh", sessionID: "fresh-session", space: "zz"},
+		{name: "continue", args: []string{"--continue"}},
+		{name: "resume picker", args: []string{"--resume"}},
+		{name: "fork", args: []string{"--resume", "parent", "--fork-session"}},
+		{name: "chosen session id", args: []string{"--session-id", "known-session"}, space: "zz"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
 			testjail.Fleet(t)
 			values, err := paths.Resolve()
 			if err != nil {
 				t.Fatal(err)
 			}
 			socket := filepath.Join(testjail.ShortRoot(t), "native.sock")
+			state := fleetdb.OpenSharedState(context.Background(), values)
+			defer func() { _ = state.Close() }()
+			launcher := fleetdb.Seat{
+				SeatID: "launcher", SessionID: "elder", Backend: "herdr", State: "live",
+				HerdrSocket: socket, HerdrPane: "w1:p1",
+			}
+			if err := state.PutSeat(context.Background(), launcher); err != nil {
+				t.Fatal(err)
+			}
 			listener, err := net.Listen("unix", socket)
 			if err != nil {
 				t.Fatal(err)
@@ -214,14 +237,17 @@ func TestLaunchNativeNewTabPreservesContinuationsAndLaunchMetadata(t *testing.T)
 			code := launchNative(
 				spawn.BackendChoice{
 					Backend: "herdr", HerdrSocket: socket, HerdrPane: "w1:p1", HerdrWorkspace: "w1",
-					Places: func(context.Context) (*place.Fleet, error) { return &place.Fleet{}, nil },
+					Places: func(context.Context) (*place.Fleet, error) {
+						return &place.Fleet{Spaces: map[string]string{"elder": "zz"}}, nil
+					},
 				},
 				claudelaunch.Request{
-					Binary:  "/bin/echo",
-					Home:    values.Home,
-					Args:    args,
-					Account: 2,
-					Cache1H: &cache,
+					Binary:    "/bin/echo",
+					Home:      values.Home,
+					Args:      row.args,
+					SessionID: row.sessionID,
+					Account:   2,
+					Cache1H:   &cache,
 				},
 				values.Home,
 				io.Discard,
@@ -229,15 +255,27 @@ func TestLaunchNativeNewTabPreservesContinuationsAndLaunchMetadata(t *testing.T)
 				config.Runtime{Paths: values},
 			)
 			if code != 0 {
-				t.Fatalf("continuation birth code=%d: %s", code, &stderr)
+				t.Fatalf("birth code=%d: %s", code, &stderr)
 			}
-			state := fleetdb.OpenSharedState(context.Background(), values)
-			defer func() { _ = state.Close() }()
 			seats, err := state.Seats(context.Background())
-			if err != nil || len(seats) != 1 || seats[0].SessionID == "" {
+			var born []fleetdb.Seat
+			for index := range seats {
+				if seats[index].SeatID != launcher.SeatID {
+					born = append(born, seats[index])
+				}
+			}
+			if err != nil || len(born) != 1 || born[0].SessionID == "" {
 				t.Fatalf("birth seats=%+v err=%v", seats, err)
 			}
-			if args[0] == "--session-id" {
+			spaces, err := state.Spaces(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := spaces[born[0].SessionID].Space; got != row.space {
+				t.Fatalf("space of born chat %s = %q, want %q (records %+v, stderr %q)",
+					born[0].SessionID, got, row.space, spaces, &stderr)
+			}
+			if row.name == "chosen session id" {
 				launches, err := fleetdb.OpenLaunches(context.Background(), values)
 				if err != nil {
 					t.Fatal(err)

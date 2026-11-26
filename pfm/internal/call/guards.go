@@ -358,73 +358,10 @@ func lastComposerRow(lines []string) int {
 		}
 		if strings.HasPrefix(visible, "❯") || strings.HasPrefix(visible, "›") {
 			last = index
-			if index > 0 {
-				top := strings.TrimSpace(ansi.Strip(lines[index-1]))
-				if ComposerBoxRule(top) {
-					boxWidth = utf8.RuneCountInString(top)
-				}
-			}
+			boxWidth = composerTopWidth(lines, index)
 		}
 	}
 	return last
-}
-
-// ComposerBoxEmpty reports whether the rows beneath the active composer row,
-// down to the input box's closing rule, hold no text: a draft led by a newline
-// leaves the marker row empty and its text a row lower, where ComposerEmpty
-// never looks. False with no closing rule — the box has no known end, so its
-// rows cannot be proven empty — and with no composer row at all. Claude Code
-// draws the box; Codex does not. A row there is empty only when it shows no
-// visible character at all: hasDraft's marker-row allowances (a lone spinner
-// frame, Codex's braille sparkle) are a typed "-" or text on these rows.
-func ComposerBoxEmpty(capture string) bool {
-	text, bounded := ComposerBoxText(capture)
-	return bounded && strings.IndexFunc(ansi.Strip(text), func(character rune) bool {
-		return unicode.IsGraphic(character) && !unicode.IsSpace(character)
-	}) < 0
-}
-
-// ComposerBoxText returns the styled continuation rows beneath the active
-// composer marker, and whether a closing rule established their boundary.
-// A marker typed inside a bounded draft is content, never a new composer.
-func ComposerBoxText(capture string) (string, bool) {
-	lines := strings.Split(capture, "\n")
-	row := lastComposerRow(lines)
-	if row < 0 {
-		return "", false
-	}
-	topWidth := 0
-	if row > 0 {
-		top := strings.TrimSpace(ansi.Strip(lines[row-1]))
-		if ComposerBoxRule(top) {
-			topWidth = utf8.RuneCountInString(top)
-		}
-	}
-	for end := row + 1; end < len(lines); end++ {
-		clean := ansi.Strip(strings.TrimSuffix(lines[end], "\r"))
-		if ComposerBoxRule(clean) && utf8.RuneCountInString(strings.TrimSpace(clean)) >= topWidth {
-			return strings.Join(lines[row+1:end], "\n"), true
-		}
-	}
-	return "", false
-}
-
-// ComposerBoxRule reports whether a captured line is one of the input box's
-// horizontal rules — visible content that is nothing but box-drawing glyphs.
-// Matching the CLASS (U+2500-U+257F) rather than one theme's glyph keeps a
-// restyled border from silently reopening the wrap bug.
-func ComposerBoxRule(line string) bool {
-	drawn := false
-	for _, character := range line {
-		switch {
-		case unicode.IsSpace(character):
-		case character >= 0x2500 && character <= 0x257F:
-			drawn = true
-		default:
-			return false
-		}
-	}
-	return drawn
 }
 
 func lastNonEmptyLines(capture string, limit int) string {

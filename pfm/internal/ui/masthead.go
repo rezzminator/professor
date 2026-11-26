@@ -8,6 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/sky"
 )
 
@@ -357,10 +358,7 @@ func (model Model) chatsHeaderLine(width int) string {
 			headerMedal = accountMedal(headerAccount)
 		}
 	}
-	cache := "🪫 5m"
-	if model.cache1H {
-		cache = "⚡ 1h"
-	}
+	cache := modelglyph.CacheLabel(model.cache1H)
 	dim := tone{fg: palette.Dim}
 	value := tone{fg: palette.Header, bold: true}
 	sep := span{text: " · ", paint: dim}

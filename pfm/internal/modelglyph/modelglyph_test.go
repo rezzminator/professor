@@ -73,3 +73,17 @@ func TestRowEffortIsWidthSafeForEveryLevel(t *testing.T) {
 		seen[emoji] = level
 	}
 }
+
+// ⏳ is Unicode 6.0: the 🪫 it replaced is Unicode 14.0 and drew as a box in a
+// terminal whose emoji font predates it. Each label stays two cells plus " 1h".
+func TestCacheLabelNamesBothCachesWidthSafe(t *testing.T) {
+	for cache1H, want := range map[bool]string{true: "⚡ 1h", false: "⏳ 5m"} {
+		label := CacheLabel(cache1H)
+		if label != want {
+			t.Errorf("CacheLabel(%t) = %q, want %q", cache1H, label, want)
+		}
+		if width, runes := ansi.StringWidth(label), len([]rune(label)); width != 5 || runes != 4 {
+			t.Errorf("CacheLabel(%t) = %q is %d cells and %d code points, want 5 and 4", cache1H, label, width, runes)
+		}
+	}
+}

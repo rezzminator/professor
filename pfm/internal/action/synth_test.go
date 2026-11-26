@@ -407,7 +407,7 @@ func TestReaderGateUsesInjectedTerminalChannel(t *testing.T) {
 		output.String() != `
 ⚠ birth env ≠ picker — Builder is live
   account  2 → 1
-  cache    🪫 5m → ⚡ 1h
+  cache    ⏳ 5m → ⚡ 1h
 Enter attaches as-is · s reboots to match
 ❯ 
 ` {

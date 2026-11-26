@@ -60,7 +60,7 @@ function assertWideEmojiFrames(label, glyphs) {
 test("tokyo-night colours carry status and only attention states move", () => {
   assert.deepEqual(tabGlyphs, {
     blocked: ["🚨", "🔴"],
-    dead: "🪫",
+    dead: "🔌",
     done: "⭐",
     error: ["👾", "💥"],
     idle: "🌑",

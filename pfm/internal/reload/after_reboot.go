@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmcall "github.com/rezzminator/professor/pfm/internal/call"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/herdr"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -112,6 +113,30 @@ func (n *nativeReload) then(ctx context.Context) error {
 // abandoned, when it carries a custom title: the reborn seat starts under the
 // same name, and two rows of one name sent every by-name verb to the dead one.
 // A title-less transcript is named from its prompts and has nothing to carry.
+// claimSession tells Herdr the pane now runs the reborn conversation. Herdr's
+// Claude hook reports a new chat's session with SessionStart source "startup",
+// which Herdr ignores on a pane it already tracks Claude in: the pane kept the
+// old session, and pfm's tab painter, finding a claim on a session it no
+// longer tracks, left the tab on its last paint. Herdr takes the session from
+// a "resume" report under its own Claude source. The chat runs either way, so
+// a failed claim is a warning.
+func (n *nativeReload) claimSession(ctx context.Context, stderr io.Writer) {
+	if n.request.Engine != pfmengine.Claude || n.request.SessionID == "" {
+		return
+	}
+	line, err := herdr.SessionReport{
+		Pane: n.target.Pane, Source: herdr.ClaudeSource, Agent: herdr.Label(pfmengine.Claude),
+		SessionID: n.request.SessionID, StartSource: "resume", Seq: uint64(n.options.Clock.Now().UnixNano()),
+	}.Line()
+	if err == nil {
+		err = herdr.Send(ctx, n.target.SocketPath, line)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: Herdr was not told pane %s now runs session %s, "+
+			"so its tab may keep the old chat's state: %v\n", n.target.Pane, n.request.SessionID, err)
+	}
+}
+
 func (n *nativeReload) labelLeftBehind(session string, stderr io.Writer) {
 	if !n.request.fresh || n.request.Engine != pfmengine.Claude || session == "" {
 		return

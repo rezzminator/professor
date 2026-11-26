@@ -26,7 +26,7 @@ internal/archive/sidecar.go 336
 internal/archive/transaction.go 394
 internal/call/body.go 278
 internal/call/engine.go 1535
-internal/call/guards.go 545
+internal/call/guards.go 475
 internal/call/herdr.go 432
 internal/call/herdr_delivery.go 472
 internal/call/settled.go 275
@@ -113,7 +113,7 @@ internal/herdr/presence.go 507
 internal/herdr/resolve.go 241
 internal/herdr/tab_label.go 304
 internal/herdr/tab_status.go 456
-internal/herdr/wire.go 698
+internal/herdr/wire.go 588
 internal/hookentry/engine_guard.go 741
 internal/hookentry/git_guard.go 699
 internal/hookentry/herdr_activity.go 439
@@ -291,8 +291,8 @@ internal/ui/cosmos.go 1549
 internal/ui/cosmoscanvas.go 297
 internal/ui/deckrow.go 414
 internal/ui/dossier.go 467
-internal/ui/launchwizard.go 642
-internal/ui/masthead.go 396
+internal/ui/launchwizard.go 636
+internal/ui/masthead.go 394
 internal/ui/model.go 1500
 internal/ui/omnibox.go 480
 internal/ui/places.go 293

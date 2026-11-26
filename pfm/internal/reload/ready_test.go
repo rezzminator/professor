@@ -76,6 +76,16 @@ func TestRunHerdrThenReadsOnlyTheRebornFrame(t *testing.T) {
 	}{
 		{name: "shell-line-then-empty-box", frames: []string{rebornShell, rebornShell, "❯ "}},
 		{
+			// Claude Code sets a named chat's name into the box's top rule.
+			name:   "named-chat-box-takes-the-message",
+			frames: []string{rebornShell, "──────── reborn-chat ─\n❯ \n──────────────────────"},
+		},
+		{
+			name: "table-row-is-no-box-top", frames: []string{"│ cell │\n❯ \n──────────────────────"},
+			want: "native reload --then: native reload: chat still busy or input box not ready; " +
+				"the --then message was not sent",
+		},
+		{
 			name: "bare-shell-prompt-never-counts", frames: []string{"~/work on develop\n❯ "},
 			want: "native reload --then: native reload: chat still busy or input box not ready; " +
 				"the --then message was not sent",

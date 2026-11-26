@@ -54,6 +54,7 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 	events := []string{
 		"start", "working", "idle", "attach", "detach", "sync",
 		"shell start", "shell idle", "shell invalid resume", "shell delayed working", "unread idle", "empty idle",
+		"resume start",
 	}
 	for _, event := range events {
 		t.Run(event, func(t *testing.T) {
@@ -101,13 +102,21 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			if err := db.PutSeat(context.Background(), seat); err != nil {
 				t.Fatal(err)
 			}
+			// The chat the seat was born with wears a space its next session keeps.
+			if err := db.SetSpace(context.Background(), "old-session", "glass", 1); err != nil {
+				t.Fatal(err)
+			}
 			var stderr bytes.Buffer
 			reportedSession := "new-session"
 			if name == "invalid resume" {
 				reportedSession = "bad'session"
 				reportEvent = "start"
 			}
-			payload, _ := json.Marshal(map[string]string{"session_id": reportedSession, "source": "startup"})
+			source := "startup"
+			if name == "resume start" {
+				source, reportEvent = "resume", "start"
+			}
+			payload, _ := json.Marshal(map[string]string{"session_id": reportedSession, "source": source})
 			deps := testHerdrDeps()
 			deps.spawn = nil // the transcript watch is herdr_watch_test.go's
 			if name == "delayed working" {
@@ -153,6 +162,14 @@ func TestHerdrNativeSeatReporter(t *testing.T) {
 			}
 			if got.SessionID != reportedSession {
 				t.Fatalf("native seat binding = %q, want %s", got.SessionID, reportedSession)
+			}
+			// A new session keeps the seat's space; a resumed one keeps its own (none).
+			wantSpace := map[string]fleetdb.ChatSpace{"old-session": {Space: "glass", UpdatedAt: 1}}
+			if name != "resume start" {
+				wantSpace[reportedSession] = fleetdb.ChatSpace{Space: "glass", UpdatedAt: got.UpdatedAt}
+			}
+			if spaces, err := db.Spaces(context.Background()); err != nil || !reflect.DeepEqual(spaces, wantSpace) {
+				t.Fatalf("spaces after the bind = %v, %v; want %v", spaces, err, wantSpace)
 			}
 			if !shellFront {
 				// Herdr detects Claude in the pane and owns it: its screen detection reads

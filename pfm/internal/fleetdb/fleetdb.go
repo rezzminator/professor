@@ -7,7 +7,7 @@
 // open.go: OpenSharedState and OpenSharedStateMemory, the shared database opened, created or in memory, and brought to schema; Store.UserVersion, its stamp.
 // immediate.go: withImmediate, the BEGIN IMMEDIATE transaction a write that reads first runs in.
 // seatrun.go: SeatRun and its recipe file beside the shared database.
-// space.go: SetSpace and Spaces, the space each chat was moved into, keyed by its session id.
+// space.go: SetSpace, CarrySpace and Spaces, the space each chat was moved into, keyed by its session id.
 // primary.go: ClaudePrimaryAccount and SetClaudePrimaryAccount, the primary Claude account row and its mirror file.
 // snapshot.go: SnapshotSharedState and RestoreSharedState, the copy an update takes and returns to.
 package fleetdb

@@ -32,34 +32,10 @@ func herdrSpace(ctx context.Context, home string, stderr io.Writer) string {
 	}
 	ctx, cancel := context.WithTimeout(ctx, herdr.ReportDeadline)
 	defer cancel()
-	panes, err := herdr.ListPanes(ctx, caller.HerdrSocket)
+	label, err := herdr.PaneWorkspaceLabel(ctx, caller.HerdrSocket, caller.HerdrPane)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm ls: herdr space of pane %s: %v\n", caller.HerdrPane, err)
+		fmt.Fprintf(stderr, "pfm ls: herdr space: %v\n", err)
 		return ""
 	}
-	// The live listing, not HERDR_WORKSPACE_ID: a tab moved to another space keeps its birth env.
-	workspace := ""
-	for index := range panes {
-		if panes[index].PaneID == caller.HerdrPane {
-			workspace = panes[index].WorkspaceID
-		}
-	}
-	if workspace == "" {
-		fmt.Fprintf(
-			stderr,
-			"pfm ls: herdr space: pane %s is not in %s's pane list\n",
-			caller.HerdrPane,
-			caller.HerdrSocket,
-		)
-		return ""
-	}
-	body, err := herdr.SeatRequest(ctx, caller.HerdrSocket, "workspace.list", struct{}{})
-	if err == nil {
-		var labels map[string]string
-		if labels, err = herdr.ParseWorkspaceList(body); err == nil {
-			return labels[workspace]
-		}
-	}
-	fmt.Fprintf(stderr, "pfm ls: herdr space %s: %v\n", workspace, err)
-	return ""
+	return label
 }

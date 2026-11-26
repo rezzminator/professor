@@ -206,7 +206,7 @@ func TestWorkbenchKilledView(t *testing.T) {
 		},
 	}
 	for _, row := range Compose(input).Rows {
-		if isNewChatKind(row.Kind) || row.Kind == WorkbenchInvalid {
+		if IsNewChatKind(row.Kind) || row.Kind == WorkbenchInvalid {
 			t.Fatalf("killed row = %#v", row)
 		}
 	}
@@ -368,7 +368,7 @@ func TestWorkbenchTwoClonesKeepOneGroupPerBench(t *testing.T) {
 	}
 	launchRows := make(map[string]int)
 	for _, row := range output.Rows {
-		if isNewChatKind(row.Kind) && row.Workbench != "" {
+		if IsNewChatKind(row.Kind) && row.Workbench != "" {
 			launchRows[row.Workbench]++
 		}
 	}

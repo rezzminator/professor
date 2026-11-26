@@ -114,6 +114,9 @@ func BirthHerdr(ctx context.Context, choice spawn.BackendChoice, plan action.Hea
 	if engineID == pfmengine.Codex && !plan.PromptOnCommandLine && prompt != "" {
 		recipe.Args = append(append([]string(nil), recipe.Args...), "--", prompt)
 	}
+	if _, err := spawn.BirthSpace(ctx, runtime.Paths, &choice, id, ""); err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+	}
 	result, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
 		Choice: choice,
 		Paths:  runtime.Paths,

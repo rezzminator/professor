@@ -35,6 +35,14 @@ func SpaceRoot(label string) string { return spaceRootPrefix + label }
 // IsSpaceRoot reports whether root is a SpaceRoot rather than a directory.
 func IsSpaceRoot(root string) bool { return strings.HasPrefix(root, spaceRootPrefix) }
 
+// SpaceName is the space a SpaceRoot files, "" for a directory's root.
+func SpaceName(root string) string {
+	if !IsSpaceRoot(root) {
+		return ""
+	}
+	return strings.TrimPrefix(root, spaceRootPrefix)
+}
+
 // Directory is the directory a chat started in this place runs in: the place's
 // own root, or for a space the folder its chats ran in ("" when none is known:
 // a space's root is a key, never a directory).

@@ -83,9 +83,9 @@ func (fleet Fleet) Wearing(label string) (Place, bool) {
 	return Place{}, false
 }
 
-// Landing is the place a new chat started from at lands in: at itself, or for
-// a space the place of the folder its chats run in, since a chat joins a space
-// only by `pfm chat space` (Of with no chat id).
+// Landing is the folder place a new chat started from at runs in: at itself,
+// or for a space the place of the folder its chats run in (Of with no chat
+// id); the chat itself files under the space it is born in (BirthSpace).
 func (fleet Fleet) Landing(at Place) Place {
 	if !IsSpaceRoot(at.Root) {
 		return at
@@ -101,4 +101,25 @@ func (index Index) PlaceOf(position int) Place {
 		}
 	}
 	return Place{}
+}
+
+// BirthSpace is the space a new chat is born in, the one inheritance decision
+// every birth door asks (spawn.BirthSpace): chosen, the space the user started
+// it under (the picker's new-chat row of a space's group); else the space of
+// parent, the chat that started it, none when parent has none; else, started
+// from no chat, workspace when that Herdr workspace's label is a space's. ""
+// is no space: the chat files under its folder's place.
+func (fleet Fleet) BirthSpace(chosen, parent, workspace string) string {
+	switch {
+	case chosen != "":
+		return chosen
+	case parent != "":
+		return fleet.Spaces[parent]
+	}
+	for _, space := range fleet.Spaces {
+		if space != "" && space == workspace {
+			return space
+		}
+	}
+	return ""
 }

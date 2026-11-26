@@ -15,10 +15,12 @@ import (
 // continued Claude chat resumes by and every segment before it, and every
 // thread of a Codex lineage with
 // the root its rows carry. Among a chat's records the newest wins under all of
-// them, a cleared one included; a cleared chat has no entry. A record of a chat the index no
-// longer holds is left out, never deleted: the index is a cache a rebuild
-// refills, so the record stands for the chat's return, and meanwhile it
-// reserves no label (place.Fleet.Labeled).
+// them, a cleared one included; a cleared chat has no entry. A live seat's chat
+// counts as held before the index does (an empty chat has no transcript yet),
+// so a space recorded at birth or before the first message places it. A record
+// of a chat neither the index nor a live seat holds is left out, never deleted:
+// the index is a cache a rebuild refills, so the record stands for the chat's
+// return, and meanwhile it reserves no label (place.Fleet.Labeled).
 func (s *Store) ChatSpaces(ctx context.Context) (map[string]string, error) {
 	records, err := s.state.Spaces(ctx)
 	if err != nil {
@@ -35,6 +37,16 @@ func (s *Store) ChatSpaces(ctx context.Context) (map[string]string, error) {
 	transcripts, err := s.Transcripts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read transcripts for chat spaces: %w", err)
+	}
+	seats, err := s.state.Seats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read seats for chat spaces: %w", err)
+	}
+	live := make(map[string]bool, len(seats))
+	for index := range seats {
+		if seats[index].State == "live" && seats[index].SessionID != "" {
+			live[seats[index].SessionID] = true
+		}
 	}
 	byUUID := make(map[string]Transcript, len(transcripts))
 	for i := range transcripts {
@@ -59,7 +71,7 @@ func (s *Store) ChatSpaces(ctx context.Context) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !held {
+		if !held && !live[id] {
 			continue
 		}
 		chat, err := walkContinuation(id, lookup)

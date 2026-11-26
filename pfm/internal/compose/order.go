@@ -21,7 +21,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 func withNewRows(output Output) Output {
 	chatRows := output.Rows
 	for len(chatRows) > 0 &&
-		isNewChatKind(chatRows[0].Kind) && chatRows[0].Workbench == "" {
+		IsNewChatKind(chatRows[0].Kind) && chatRows[0].Workbench == "" {
 		chatRows = chatRows[1:]
 	}
 	newCount := boolInt(output.includeNewClaude) + boolInt(output.includeNewCodex) + boolInt(output.includeNewOpenCode)
@@ -110,7 +110,7 @@ func leadWithCurrentProject(output Output, currentDir string) Output {
 	rowsByProject := make(map[string][]Row, len(order))
 	for index := range output.Rows {
 		row := output.Rows[index]
-		if isNewChatKind(row.Kind) {
+		if IsNewChatKind(row.Kind) {
 			continue
 		}
 		rowsByProject[row.Project] = append(rowsByProject[row.Project], row)
@@ -131,7 +131,9 @@ func leadWithCurrentProject(output Output, currentDir string) Output {
 	return output
 }
 
-func isNewChatKind(kind Kind) bool {
+// IsNewChatKind reports whether a row of kind starts a new chat rather than
+// resuming or reaching one.
+func IsNewChatKind(kind Kind) bool {
 	return kind == NewClaude || kind == NewCodex || kind == NewOpenCode
 }
 

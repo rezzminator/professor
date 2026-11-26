@@ -85,3 +85,41 @@ func TestSpaceTableReachesAnOlderFile(t *testing.T) {
 		t.Fatalf("spaces after the upgrade = %v, %v", got, err)
 	}
 }
+
+// A new session takes the space its seat's chat wears, never over a record of
+// its own and never a cleared one.
+func TestCarrySpaceKeepsTheSpaceOfTheSessionBefore(t *testing.T) {
+	t.Parallel()
+	state := openTestStore(t)
+	ctx := context.Background()
+	for _, record := range []struct {
+		id, space string
+	}{{"born", "glass"}, {"own", "epic two"}, {"cleared", ""}} {
+		if err := state.SetSpace(ctx, record.id, record.space, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		from, to string
+		carried  bool
+		want     ChatSpace
+		found    bool
+	}{
+		{from: "born", to: "engine", carried: true, want: ChatSpace{"glass", 9}, found: true},
+		{from: "born", to: "own", want: ChatSpace{"epic two", 1}, found: true},
+		{from: "cleared", to: "after-clear"},
+		{from: "none", to: "after-none"},
+	} {
+		carried, err := state.CarrySpace(ctx, test.from, test.to, 9)
+		spaces, readErr := state.Spaces(ctx)
+		got, found := spaces[test.to]
+		if err != nil || readErr != nil || carried != test.carried || found != test.found || got != test.want {
+			t.Fatalf("CarrySpace(%s, %s) = %v, %v; record %+v (found %v, %v); want %v, record %+v (found %v)",
+				test.from, test.to, carried, err, got, found, readErr, test.carried, test.want, test.found)
+		}
+	}
+	if _, err := state.CarrySpace(ctx, "", "engine", 9); err == nil ||
+		err.Error() != `carry chat space from "" to "engine": empty chat id` {
+		t.Fatalf("empty chat id: %v", err)
+	}
+}

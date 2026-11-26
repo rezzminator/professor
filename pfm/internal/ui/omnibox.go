@@ -187,7 +187,8 @@ func (model Model) commitGo() Model {
 // retargetLaunchRows points the fleet launch row at the place on screen, so
 // it groups under that place's header and Enter starts the chat there. A
 // workbench row keeps its own directory; the everywhere stop restores the
-// opening project compose chose (launchHome). It also resolves model.here, the
+// opening project compose chose (launchHome); on a space's chip the row names
+// the space, the one the new chat is born in (spawn.BirthSpace). It also resolves model.here, the
 // place the rest of the rebuildOrder pass files rows against.
 func (model *Model) retargetLaunchRows() {
 	current := model.effectivePlace()
@@ -207,6 +208,7 @@ func (model *Model) retargetLaunchRows() {
 				Landing(fleetplace.Place{Root: current.root, Label: current.label, Dir: current.dir})
 			row.Project, row.CWD = landing.Label, cmp.Or(current.dir, current.root)
 		}
+		row.Space = fleetplace.SpaceName(current.root) // a space's chip starts its chat in the space
 		if index < len(model.search) {
 			model.search[index] = searchText(*row) // a find matches the place it now names
 		}

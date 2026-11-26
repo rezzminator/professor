@@ -97,7 +97,7 @@ func TestPickerOpensOnThePlaceWearingItsHerdrSpaceLabel(t *testing.T) {
 		{space: "nowhere", place: "/src/app", launch: "/src/app"}, // no such place: compose's choice stands
 		{space: "", place: "/src/app", launch: "/src/app"},
 		// A picker in a space opens on the space's folder, where its new chat
-		// runs: a chat is in a space only by `pfm chat space`.
+		// runs; the chat is born in the space (spawn.BirthSpace).
 		{space: "glass", place: "/src/app", launch: "/src/app"},
 	} {
 		rows, dirs := placeFixtureRows()
@@ -114,14 +114,19 @@ func TestPickerOpensOnThePlaceWearingItsHerdrSpaceLabel(t *testing.T) {
 				test.space, model.place, launchRow(t, model).CWD, test.place, test.launch)
 		}
 		if test.space == "glass" {
-			// A new chat never joins a space: started from the space's
-			// workspace, the everywhere stop or the space's chip, it runs in
-			// the space's folder and its row sits under the folder's place.
-			for _, stop := range []string{allPlaceRoot, "space:glass"} {
-				model.place = stop
+			// A new chat runs in the space's folder from the everywhere stop
+			// and the space's chip; the chip's launch row names the space,
+			// so the chat is born in it and the row sits under its group.
+			for _, stop := range []struct{ root, space string }{{allPlaceRoot, ""}, {"space:glass", "glass"}} {
+				model.place = stop.root
 				model.retargetLaunchRows()
-				if row := launchRow(t, model); row.Project != "app" || row.CWD != "/src/app" {
-					t.Fatalf("launch row on %s = %s (%s), want app in /src/app", stop, row.CWD, row.Project)
+				if row := launchRow(
+					t,
+					model,
+				); row.Project != "app" || row.CWD != "/src/app" ||
+					row.Space != stop.space {
+					t.Fatalf("launch row on %s = %s (%s) in space %q, want app in /src/app in space %q",
+						stop.root, row.CWD, row.Project, row.Space, stop.space)
 				}
 			}
 			if root := model.effectivePlaceRootForPaths(); root != "/src/app" {

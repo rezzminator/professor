@@ -172,15 +172,9 @@ func (reporter *herdrReporter) nativeSeat(ctx context.Context, payload herdrPayl
 	// A bound state-only hook needs no schema work or durable heartbeat write.
 	if reporter.options.event == herdr.EventStart || reporter.options.event == herdr.EventEnd ||
 		seat.SessionID != before.SessionID || seat.LostNote != before.LostNote {
-		writable := fleetdb.OpenSharedState(ctx, *reporter.deps.seatPaths)
-		defer func() {
-			if err := writable.Close(); err != nil {
-				returnErr = errors.Join(returnErr, fmt.Errorf("close native seat binding: %w", err))
-			}
-		}()
 		seat.UpdatedAt = reporter.deps.now().Unix()
-		if err := writable.UpdateSeat(ctx, before, seat); err != nil {
-			return true, fmt.Errorf("bind native seat: %w", err)
+		if err := reporter.bindNativeSeat(ctx, before, seat, payload.Source); err != nil {
+			return true, err
 		}
 	}
 	seq := reporter.seq

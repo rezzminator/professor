@@ -569,6 +569,10 @@ func TestChatNewNativeRawEngineBirth(t *testing.T) {
 							layouts <- struct{}{}
 							result = `{"layout":{"workspace_id":"w6","root":{"type":"pane","pane_id":"w6:p9"}}}`
 						}
+						if req.Method == "pane.list" { // the caller's pane, in a workspace no space wears
+							result = `{"type":"pane_list","panes":[` +
+								`{"pane_id":"w6:p3","workspace_id":"w6","terminal_id":"fixture-w6:p3"}]}`
+						}
 						if placed, handled := testjail.HerdrWorkspaceReply(
 							req.Method,
 							req.Params.Label,

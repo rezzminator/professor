@@ -70,6 +70,9 @@ func BranchHerdr(
 		return fleetdb.Seat{}, errors.New("a Herdr branch needs a Claude fork with its session id fixed before birth")
 	}
 	choice.InPlace = false
+	if _, err := spawn.BirthSpace(ctx, runtime.Paths, &choice, plan.Record.SessionID, ""); err != nil {
+		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
+	}
 	result, err := spawn.SpawnHerdr(ctx, spawn.HerdrRequest{
 		Choice: choice,
 		Paths:  runtime.Paths,

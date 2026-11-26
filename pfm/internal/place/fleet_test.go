@@ -111,3 +111,24 @@ func TestFleetOfPlacesASpacedChatInItsSpace(t *testing.T) {
 		}
 	}
 }
+
+// A new chat is born in the space it was started under, else its parent
+// chat's, else the space whose workspace it was started from; a parent chat
+// with no space, or a folder place's workspace, gives none.
+func TestFleetBirthSpaceInheritsWhereTheChatWasStarted(t *testing.T) {
+	fleet := Fleet{Spaces: map[string]string{"in-glass": "glass", "in-wb": "lab.wb", "was-ops": ""}}
+	for _, test := range []struct{ name, chosen, parent, workspace, want string }{
+		{"the space the user started it under", "lab", "in-glass", "lab.wb", "lab"},
+		{"its parent chat's space", "", "in-glass", "lab.wb", "glass"},
+		{"a parent chat with no space, in a space's workspace", "", "plain", "lab.wb", ""},
+		{"a cleared parent chat", "", "was-ops", "", ""},
+		{"no parent chat, a space's workspace", "", "", "lab.wb", "lab.wb"},
+		{"no parent chat, a folder place's workspace", "", "", "orchard", ""},
+		{"no parent chat, no workspace", "", "", "", ""},
+	} {
+		if got := fleet.BirthSpace(test.chosen, test.parent, test.workspace); got != test.want {
+			t.Errorf("%s: BirthSpace(%q, %q, %q) = %q, want %q",
+				test.name, test.chosen, test.parent, test.workspace, got, test.want)
+		}
+	}
+}

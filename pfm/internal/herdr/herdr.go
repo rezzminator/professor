@@ -11,7 +11,8 @@
 // tick reconciles from its tab observations is indicators_tab_observations.go's.
 // Which plugins Herdr's registry lists, and whether a command's text says no
 // server is up, is plugin_registry.go's. The requests publishing a pane's
-// agent state, session and release render in wire_report.go.
+// agent state, session and release render in wire_report.go. The label of
+// the workspace a pane sits in now is pane_workspace.go's.
 package herdr
 
 import (

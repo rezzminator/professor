@@ -509,7 +509,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		reloadFront := func(ctx context.Context, args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
 			return runChatReloadWithRuntime(ctx, args, stdout, stderr, runtime, paths.OSEnv{})
 		}
-		return hookentry.CommandIntercept(os.Stdin, stdout, stderr, runtime, reloadFront, pfmchat.Space)
+		return hookentry.CommandIntercept(args[1:], os.Stdin, stdout, stderr, runtime, reloadFront, pfmchat.Space)
 	}
 	if len(args) != 0 && args[0] == "exit-intercept" {
 		return hookentry.ExitIntercept(os.Stdin, stdout, stderr, runtime, runKill)

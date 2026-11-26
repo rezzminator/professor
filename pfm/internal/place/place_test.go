@@ -162,4 +162,9 @@ func TestBuildFilesASpacedRowUnderItsSpaceLabel(t *testing.T) {
 	if got := (Place{Root: SpaceRoot("glass"), Label: "glass"}).Directory(); got != "" {
 		t.Fatalf("space with no known folder Directory = %q, want none: its root is a key", got)
 	}
+	for root, want := range map[string]string{index.Places[2].Root: "glass", atlas: "", "": ""} {
+		if got := SpaceName(root); got != want {
+			t.Fatalf("SpaceName(%q) = %q, want %q", root, got, want)
+		}
+	}
 }

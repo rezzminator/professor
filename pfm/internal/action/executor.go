@@ -235,12 +235,8 @@ func (executor *Executor) Open(
 
 // born reports a row kind whose open starts a new engine process.
 func born(kind compose.Kind) bool {
-	switch kind {
-	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode,
-		compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
-		return true
-	}
-	return false
+	return compose.IsNewChatKind(kind) ||
+		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpenCode
 }
 
 // openHerdr births the planned chat on the placement's Herdr host: a new
@@ -248,7 +244,8 @@ func born(kind compose.Kind) bool {
 // chat's place's: spawn.HerdrOpensInPlace) the caller's own pane, whose shell
 // then execs the seat host through the returned eval line. Asked from another
 // place's pane, the chat is born in a new tab of its place's workspace and
-// focus follows it there; the caller's pane stays as it was.
+// focus follows it there; the caller's pane stays as it was. A new chat first
+// takes the space it inherits (spawn.BirthSpace).
 func (executor *Executor) openHerdr(
 	ctx context.Context,
 	request Request,
@@ -268,6 +265,11 @@ func (executor *Executor) openHerdr(
 	} else if sessionID == "" {
 		if sessionID, err = newSessionID(); err != nil {
 			return OpenResult{}, err
+		}
+	}
+	if compose.IsNewChatKind(request.Row.Kind) {
+		if _, err := spawn.BirthSpace(ctx, values, &choice, sessionID, request.Row.Space); err != nil {
+			plan.Warnings = append(plan.Warnings, err.Error())
 		}
 	}
 	inPlace := choice.InPlace && !request.Detached

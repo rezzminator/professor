@@ -75,6 +75,7 @@ func TestRunCommandInterceptReload(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			cleared := recordPromptClears(t)
 			var calls [][]string
 			front := func(_ context.Context, args []string, stdout, _ io.Writer, _ config.Runtime) int {
 				if !test.frontWanted {
@@ -89,7 +90,7 @@ func TestRunCommandInterceptReload(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			code := CommandIntercept(bytes.NewReader(payload), &stdout, &stderr, config.Runtime{}, front, nil)
+			code := CommandIntercept(nil, bytes.NewReader(payload), &stdout, &stderr, config.Runtime{}, front, nil)
 			if code != 0 || stderr.Len() != 0 {
 				t.Fatalf("exit=%d stderr=%q, want exit 0 and no stderr", code, stderr.String())
 			}
@@ -115,6 +116,15 @@ func TestRunCommandInterceptReload(t *testing.T) {
 			if test.frontWanted && (len(calls) != 1 || !reflect.DeepEqual(calls[0], test.wantArgs)) {
 				t.Fatalf("front calls=%#v, want one %#v", calls, test.wantArgs)
 			}
+			// A refused reload leaves its command in the input box; a
+			// scheduled one is stashed by the reload itself.
+			var wantCleared []string
+			if strings.HasPrefix(test.wantReason, failed) {
+				wantCleared = []string{test.prompt}
+			}
+			if !reflect.DeepEqual(*cleared, wantCleared) {
+				t.Fatalf("input box clears = %q, want %q", *cleared, wantCleared)
+			}
 		})
 	}
 }
@@ -126,9 +136,18 @@ func TestRunCommandInterceptUnterminatedQuote(t *testing.T) {
 		t.Fatalf("front called on an unterminated quote: %v", args)
 		return 0
 	}
+	cleared := recordPromptClears(t)
 	payload := `{"prompt":"/pfm:reload --then \"go on"}`
 	var stdout, stderr bytes.Buffer
-	if code := CommandIntercept(strings.NewReader(payload), &stdout, &stderr, config.Runtime{}, front, nil); code != 0 {
+	if code := CommandIntercept(
+		nil,
+		strings.NewReader(payload),
+		&stdout,
+		&stderr,
+		config.Runtime{},
+		front,
+		nil,
+	); code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
 	var decision promptBlockDecision
@@ -144,6 +163,9 @@ func TestRunCommandInterceptUnterminatedQuote(t *testing.T) {
 		lines[3] != "\x1b[31m    "+wantErr.Error()+"\x1b[0m" {
 		t.Fatalf("reason lines=%q, want the typed text and the split error", lines)
 	}
+	if want := []string{`/pfm:reload --then "go on`}; !reflect.DeepEqual(*cleared, want) {
+		t.Fatalf("input box clears = %q, want %q", *cleared, want)
+	}
 }
 
 func TestRunCommandInterceptMalformedJSONNeverBlocks(t *testing.T) {
@@ -152,7 +174,15 @@ func TestRunCommandInterceptMalformedJSONNeverBlocks(t *testing.T) {
 		return 0
 	}
 	var stderr bytes.Buffer
-	code := CommandIntercept(strings.NewReader("{not valid json"), io.Discard, &stderr, config.Runtime{}, front, nil)
+	code := CommandIntercept(
+		nil,
+		strings.NewReader("{not valid json"),
+		io.Discard,
+		&stderr,
+		config.Runtime{},
+		front,
+		nil,
+	)
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -206,6 +236,7 @@ func TestRunCommandInterceptSpace(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			cleared := recordPromptClears(t)
 			var names []string
 			reload := func(_ context.Context, args []string, _, _ io.Writer, _ config.Runtime) int {
 				t.Fatalf("reload front called on a space prompt: %v", args)
@@ -223,7 +254,7 @@ func TestRunCommandInterceptSpace(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			code := CommandIntercept(bytes.NewReader(payload), &stdout, &stderr, config.Runtime{}, reload, space)
+			code := CommandIntercept(nil, bytes.NewReader(payload), &stdout, &stderr, config.Runtime{}, reload, space)
 			if code != 0 || stderr.Len() != 0 {
 				t.Fatalf("exit=%d stderr=%q, want exit 0 and no stderr", code, stderr.String())
 			}
@@ -247,6 +278,27 @@ func TestRunCommandInterceptSpace(t *testing.T) {
 			if test.frontWanted && (len(names) != 1 || names[0] != test.wantName) {
 				t.Fatalf("space front names=%q, want one %q", names, test.wantName)
 			}
+			var wantCleared []string // every /pfm:space taken, moved or refused, leaves the box clear
+			if test.wantReason != "" {
+				wantCleared = []string{strings.TrimSpace(test.prompt)}
+			}
+			if !reflect.DeepEqual(*cleared, wantCleared) {
+				t.Fatalf("input box clears = %q, want %q", *cleared, wantCleared)
+			}
 		})
 	}
+}
+
+// recordPromptClears swaps the input box clear for a recorder of the prompts
+// it was asked to clear.
+func recordPromptClears(t *testing.T) *[]string {
+	t.Helper()
+	var cleared []string
+	original := startPromptClear
+	startPromptClear = func(_ context.Context, prompt string) error {
+		cleared = append(cleared, prompt)
+		return nil
+	}
+	t.Cleanup(func() { startPromptClear = original })
+	return &cleared
 }

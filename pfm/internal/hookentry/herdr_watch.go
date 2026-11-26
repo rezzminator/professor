@@ -211,10 +211,11 @@ func engineIndex(ancestry []herdrHookProcess) int {
 	return slices.IndexFunc(ancestry, func(process herdrHookProcess) bool { return !isShellOrPfm(process.Command) })
 }
 
-// startHerdrWatch starts this binary detached with argv: its own session, so a
-// hook timeout that kills the hook's process group spares it, and no stdio, so
-// the engine waiting on the hook's output does not wait on the watch.
-func startHerdrWatch(argv []string) error {
+// startDetached starts this binary detached with argv (a Herdr watch or
+// settle, a prompt clear): its own session, so a hook timeout that kills the
+// hook's process group spares it, and no stdio, so the engine waiting on the
+// hook's output does not wait on it.
+func startDetached(argv []string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("find the pfm binary: %w", err)

@@ -161,6 +161,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 		return 0
 	}
 	if code := hookentry.CommandIntercept(
+		nil,
 		strings.NewReader(reload),
 		&blocked,
 		&blockErr,

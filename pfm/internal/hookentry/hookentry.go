@@ -5,9 +5,12 @@
 // herdr_activity_record.go keeps each Claude session's Herdr activity record and hands the
 // native Claude panes an older build reported under herdr:claude back to Herdr (pfm install's cutover).
 // herdr_shell_resume.go answers the shim's auto-open whether Herdr resumes the pane's agent itself.
+// herdr_seat_bind.go writes a native seat's new binding, a new session keeping the space its seat's chat wore.
 // herdr_settle_process.go is the detached settle process: the mode a hook hands it and its
 // bounded, backing-off retry of a Herdr state the host's load left undelivered.
 // herdr_state_clock.go gives a Herdr reporter its clock and the deadline context its hook runs under.
+// prompt_clear.go clears a typed command command-intercept blocked out of the input box Claude Code puts it back
+// into: pfm internal command-intercept clear, started detached.
 // herdr_tmux_seat.go binds and ends a tmux chat's seat on its engine's session start and end.
 // install_ping.go sends pfm install's install ping and the daily one, printing nothing.
 // pcm_guard_inline.go reads the inline code an interpreter call carries (python -c, node -e,

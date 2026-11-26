@@ -2,10 +2,10 @@
 //
 // arguments.go: the /pfm:reload flags, their cache-spelling normalization and the worker's parse.
 // owner_exit.go: the pane mutex, the exit mark and the yield to an owner's /exit.
-// after_reboot.go: once the reborn chat is up, Herdr's claim on its session, its native --then turn and the
-// "(before --new)" label;
-// the --then message stored before /exit, which the reborn chat's first prompt claims when it was not typed.
+// after_reboot.go: once the reborn chat is up, Herdr's claim on its session, its native --then turn and the "(before
+// --new)" label; the --then message stored before /exit, which the reborn chat's first prompt claims when not typed.
 // ready.go: the native chat's idle-and-empty-composer wait, before /exit and before --then.
+// space.go: a native --new reboot's new session keeps the space of the chat it leaves behind.
 package reload
 
 import (

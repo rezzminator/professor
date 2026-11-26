@@ -208,6 +208,9 @@ func RunHerdr(
 	if err := db.WriteSeatRun(seat.SeatID, run); err != nil {
 		return Result{}, fmt.Errorf("publish native reload recipe: %w", err)
 	}
+	if n.request.fresh && n.request.SessionID != "" && n.request.SessionID != seat.SessionID {
+		inheritSpace(ctx, values, seat.HerdrSocket, seat.HerdrPane, n.request.SessionID, stderr)
+	}
 	pending := seat
 	pending.ReloadPending = true
 	pending.SessionID = n.request.SessionID

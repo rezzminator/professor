@@ -22,6 +22,7 @@ import (
 // ignoring its context, still answers at the deadline — the timeout line on
 // stderr naming the step, nothing on stdout, and the hook's fail code.
 func TestPromptHooksAnswerWithinTheirDeadline(t *testing.T) {
+	recordPromptClears(t)
 	oldDeadline := promptHookDeadline
 	promptHookDeadline = 100 * time.Millisecond
 	t.Cleanup(func() { promptHookDeadline = oldDeadline })
@@ -50,6 +51,7 @@ func TestPromptHooksAnswerWithinTheirDeadline(t *testing.T) {
 			call: func(block func(), stdout, stderr io.Writer) int {
 				front := func(context.Context, []string, io.Writer, io.Writer, config.Runtime) int { block(); return 0 }
 				return CommandIntercept(
+					nil,
 					strings.NewReader(`{"prompt":"/pfm:reload"}`),
 					stdout,
 					stderr,
@@ -67,6 +69,7 @@ func TestPromptHooksAnswerWithinTheirDeadline(t *testing.T) {
 			call: func(block func(), stdout, stderr io.Writer) int {
 				space := func(context.Context, *config.Runtime, string) (string, error) { block(); return "", nil }
 				return CommandIntercept(
+					nil,
 					strings.NewReader(`{"prompt":"/pfm:space work"}`), stdout, stderr, config.Runtime{}, nil, space,
 				)
 			},
@@ -318,7 +321,7 @@ func TestPromptInterceptsHandTheirFrontTheCommitGate(t *testing.T) {
 		call func(front func(context.Context)) int
 	}{
 		{name: "reload", call: func(front func(context.Context)) int {
-			return CommandIntercept(strings.NewReader(`{"prompt":"/pfm:reload"}`), io.Discard, io.Discard, config.Runtime{},
+			return CommandIntercept(nil, strings.NewReader(`{"prompt":"/pfm:reload"}`), io.Discard, io.Discard, config.Runtime{},
 				func(ctx context.Context, _ []string, _, _ io.Writer, _ config.Runtime) int { front(ctx); return 0 }, nil)
 		}},
 		{name: "exit", call: func(front func(context.Context)) int {

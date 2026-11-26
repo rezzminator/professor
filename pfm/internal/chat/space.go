@@ -122,8 +122,8 @@ func spaceCaller(
 		return fmt.Sprintf("chat space cleared: the chat is back in its folder place, Herdr workspace %q%s",
 			filed.Label, view), nil
 	case filed.Root != place.SpaceRoot(name):
-		// The scan files a chat by its space only once the index holds the chat
-		// (store.Store.ChatSpaces): until then it stays in its folder's place.
+		// The scan files a chat by its space once the index or a live seat holds
+		// it (store.Store.ChatSpaces): a chat neither holds stays in its folder's place.
 		return "", fmt.Errorf("space %q is recorded, but the fleet scan does not hold chat %s yet, so it stays "+
 			"in Herdr workspace %q; the next placement of the chat moves it", name, id, filed.Label)
 	}

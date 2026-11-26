@@ -32,6 +32,31 @@ ON CONFLICT(session_id) DO UPDATE SET space=excluded.space, updated_at=excluded.
 	return nil
 }
 
+// CarrySpace records for to the space from wears, when from wears one and to
+// has no record of its own: a seat whose engine names a new session (a fresh
+// launch's provisional id replaced by the engine's, a /clear) keeps the space
+// it was born in. It reports whether it recorded one.
+func (s *Store) CarrySpace(ctx context.Context, from, to string, at int64) (bool, error) {
+	if from == "" || to == "" {
+		return false, fmt.Errorf("carry chat space from %q to %q: empty chat id", from, to)
+	}
+	if s.db == nil {
+		return false, fmt.Errorf("carry chat space from %q to %q: %w", from, to, s.degraded)
+	}
+	query := `INSERT INTO chat_space(session_id,space,updated_at)
+SELECT ?, space, ? FROM chat_space WHERE session_id=? AND space<>''
+ON CONFLICT(session_id) DO NOTHING`
+	result, err := s.exec(ctx, query, to, at, from)
+	if err != nil {
+		return false, fmt.Errorf("carry chat space from %q to %q: %w", from, to, err)
+	}
+	carried, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("carry chat space from %q to %q: count rows: %w", from, to, err)
+	}
+	return carried != 0, nil
+}
+
 // Spaces returns every chat's recorded space keyed by chat id, cleared ones
 // included, whether or not the chat still exists: store.Store.ChatSpaces is
 // the read placement files by.

@@ -1,13 +1,16 @@
 package hookentry
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // quietPromptBlock is blockPromptQuietly's fixed encoding — kept as a
@@ -88,4 +91,16 @@ func interceptedSubmit(engine pfmengine.ID, payload herdrPayload) bool {
 	return engine == pfmengine.Claude &&
 		payload.HookEventName == claudelaunch.HookEventUserPromptSubmit &&
 		interceptedPrompt(payload.Prompt)
+}
+
+// recordTypedCommand logs, under event, a typed command a prompt hook refused
+// or could not clear from the input box: the hook's output reaches only the
+// user's screen, and the detached clear has none, so this record is what a
+// reader finds.
+func recordTypedCommand(event, prompt, reason string) {
+	ctx := obs.Component(context.Background(), "hooks")
+	obs.Logger(ctx).LogAttrs(ctx, slog.LevelWarn, event,
+		slog.String("prompt", prompt),
+		slog.String(obs.FieldErr, reason),
+	)
 }

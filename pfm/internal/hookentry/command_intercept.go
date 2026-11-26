@@ -6,13 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"strings"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 	"github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	pfmreload "github.com/rezzminator/professor/pfm/internal/reload"
 )
 
@@ -33,13 +31,19 @@ type SpaceFront func(ctx context.Context, runtime *config.Runtime, name string) 
 
 // CommandIntercept runs a typed /pfm:reload or /pfm:space through its front
 // and blocks the prompt with the front's answer, so neither starts a turn.
+// With args `clear …` it is instead the detached clear of the input box the
+// hook starts (PromptClear).
 func CommandIntercept(
+	args []string,
 	stdin io.Reader,
 	stdout, stderr io.Writer,
 	runtime config.Runtime,
 	reload ReloadFront,
 	space SpaceFront,
 ) int {
+	if len(args) != 0 && args[0] == promptClearCommand {
+		return PromptClear(args[1:], stderr)
+	}
 	// A typed command must never reach the model as a prompt, so a step past
 	// promptHookDeadline blocks it (exit 2) with the timeout on stderr.
 	return RunPromptHook("pfm internal command-intercept", stdout, stderr, 2,
@@ -91,8 +95,8 @@ func reloadInterceptBody(
 ) int {
 	words, err := commandWords(trimmed, reloadCommand)
 	if err != nil {
-		recordCommandRefusal("reload.refused", trimmed, err.Error())
-		return blockPrompt(stdout, reloadFailedMessage(trimmed, err.Error()))
+		recordTypedCommand("reload.refused", trimmed, err.Error())
+		return blockTypedCommand(ctx, stdout, trimmed, reloadFailedMessage(trimmed, err.Error()))
 	}
 	// Past the deadline the reload may still have been scheduled, so the
 	// timeout line says so and names where its worker logs.
@@ -102,8 +106,8 @@ func reloadInterceptBody(
 	if reload(ctx, words, &captured, &captured, runtime) == 0 {
 		return blockPrompt(stdout, reloadScheduledMessage(words, strings.TrimSpace(captured.String())))
 	}
-	recordCommandRefusal("reload.refused", trimmed, strings.TrimSpace(captured.String()))
-	return blockPrompt(stdout, reloadFailedMessage(trimmed, captured.String()))
+	recordTypedCommand("reload.refused", trimmed, strings.TrimSpace(captured.String()))
+	return blockTypedCommand(ctx, stdout, trimmed, reloadFailedMessage(trimmed, captured.String()))
 }
 
 // spaceInterceptBody takes the words as `pfm chat space` does: none clears
@@ -123,18 +127,18 @@ func spaceInterceptBody(
 		err = fmt.Errorf("%s", pfmchat.SpaceUsage)
 	}
 	if err != nil {
-		recordCommandRefusal("space.refused", trimmed, err.Error())
-		return blockPrompt(stdout, spaceFailedMessage(trimmed, err.Error()))
+		recordTypedCommand("space.refused", trimmed, err.Error())
+		return blockTypedCommand(ctx, stdout, trimmed, spaceFailedMessage(trimmed, err.Error()))
 	}
 	name := strings.Join(words, "") // no word clears the space, one names it
 	// Past the deadline the space may still have been recorded.
 	step("set the chat's space (it may still be set: check `pfm chat ls`)")
 	line, err := space(ctx, &runtime, name)
 	if err != nil {
-		recordCommandRefusal("space.refused", trimmed, err.Error())
-		return blockPrompt(stdout, spaceFailedMessage(trimmed, err.Error()))
+		recordTypedCommand("space.refused", trimmed, err.Error())
+		return blockTypedCommand(ctx, stdout, trimmed, spaceFailedMessage(trimmed, err.Error()))
 	}
-	return blockPrompt(stdout, commandStyleScheduled+commandStyleBold+line+commandStyleReset)
+	return blockTypedCommand(ctx, stdout, trimmed, commandStyleScheduled+commandStyleBold+line+commandStyleReset)
 }
 
 // Claude Code shows a hook's block message under its own yellow "blocked by
@@ -226,14 +230,4 @@ func commandFailedMessage(header, prompt, reason, silent string) string {
 		lines = append(lines, commandStyleFailed+"    "+line+commandStyleReset)
 	}
 	return strings.Join(lines, "\n")
-}
-
-// recordCommandRefusal logs a refused typed command under event: the hook's
-// output reaches only the user's screen, so this record is what a reader finds.
-func recordCommandRefusal(event, prompt, reason string) {
-	ctx := obs.Component(context.Background(), "hooks")
-	obs.Logger(ctx).LogAttrs(ctx, slog.LevelWarn, event,
-		slog.String("prompt", prompt),
-		slog.String(obs.FieldErr, reason),
-	)
 }

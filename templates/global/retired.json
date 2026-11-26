@@ -30,6 +30,12 @@
       "match": "exact"
     },
     {
+      "name": "/dude",
+      "kind": "skill",
+      "successor": "/fuck",
+      "match": "exact"
+    },
+    {
       "name": "/flights:tracer-use",
       "kind": "command",
       "successor": "/flights:trace-guide",

@@ -46,9 +46,9 @@ func install(c *harness.Ctx, s State) State {
 		c.Failf("Herdr's shell wrapper %s names no line %q: an install from a bash tool shell must keep the "+
 			"account's login shell %s", wrapper, want, login)
 	}
-	skill := filepath.Join(s.Home, ".agents", "skills", "dude")
+	skill := filepath.Join(s.Home, ".agents", "skills", "fuck")
 	if got, want := strings.TrimSpace(read(c, "readlink", skill)),
-		filepath.Join(professorClone(s), "templates", "global", "skills", "dude"); got != want {
+		filepath.Join(professorClone(s), "templates", "global", "skills", "fuck"); got != want {
 		c.Failf("%s links to %q, want the clone's template skill %q, where Codex reads it", skill, got, want)
 	}
 	doctor := c.Read("sh", "-c", `cd "$HOME/.professor" && exec pfm doctor`)

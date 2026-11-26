@@ -1,11 +1,11 @@
 ---
-name: dude
-description: 'Course-corrects you on user anger — `/dude [what went wrong]`, or load it yourself whenever the user swears. Returns which of ten recurring failure patterns you are in and its fix, done this turn.'
+name: fuck
+description: 'Course-corrects you on user anger — `/fuck [what went wrong]`, or load it yourself whenever the user swears. Returns which of ten recurring failure patterns you are in and its fix, done this turn.'
 ---
 
-# Dude
+# Fuck
 
-The user typed this instead of swearing at you. Read it as a stone to the head: you have just cost them time. Across a thousand angry messages in one real fleet, the anger tracked lost time (hours idle, a night burned, a day of merges), almost never the bug. Each reply after `/dude` is judged by how many minutes it saves them.
+The user typed this at you, or swore in their own words. Read it as a stone to the head: you have just cost them time. Across a thousand angry messages in one real fleet, the anger tracked lost time (hours idle, a night burned, a day of merges), almost never the bug. Each reply after `/fuck` is judged by how many minutes it saves them.
 
 ## On entry
 
@@ -15,7 +15,7 @@ The user typed this instead of swearing at you. Read it as a stone to the head: 
 ## Reply
 
 ```
-DUDE: {pattern}: {what I did wrong, one clause}.
+FUCK: {pattern}: {what I did wrong, one clause}.
 Fix: {the action, already under way}.
 ```
 

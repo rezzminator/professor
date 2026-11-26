@@ -41,7 +41,7 @@ The name of a command or skill is read beside the description and is the first r
 
 - Namespace: the family, first, so typing it lists its members together — `law:` a rule set loaded before writing something (`/law:prompt`, `/law:agent`); `design:` a command returning a design document (`/design:test-suite`, `/design:codebase`); a product or plugin namespace groups that product's verbs (`/pfm:update`, `/flights:spec`).
 - Leaf: the subject as a noun, or a verb for an action — `/law:prompt`, `/design:codebase`, `/pfm:update`, `/improve:iterative`.
-- Bare name: only a one-of-a-kind command — `/imagine`, `/dude`, `/housekeeping`.
+- Bare name: only a one-of-a-kind command — `/imagine`, `/fuck`, `/housekeeping`.
 - Plugin command: lives in that plugin under its own namespace (`/flights:trace-guide`), never in Professor's templates.
 - `use` names nothing: no command or skill is named `{x}:use` or `use:{x}`.
 

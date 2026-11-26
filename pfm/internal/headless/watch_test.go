@@ -285,6 +285,15 @@ func TestTransitionsQuietMonitorReportsAnswerFailuresAndCapsText(t *testing.T) {
 		{"read failed", "", errors.New("read transcript: denied\nagain"), `answer_error="read transcript: denied again"`},
 		{"no answer", "  \n\t", nil, `answer_error="empty answer"`},
 		{"first line and cap", strings.Repeat("é", 205), nil, `answer="` + strings.Repeat("é", 199) + `…"`},
+		{
+			"lone waiting line", "Heading\n\nBody\n\n**Waiting:** foreman still building\n", nil,
+			`answer="**Waiting:** foreman still building"`,
+		},
+		{
+			"waiting line after section verdicts",
+			"First\n\n**Verdict:** first section\n\nSecond\n\n**Verdict:** second\n\n# Waiting: foreman still building\n",
+			nil, `answer="# Waiting: foreman still building"`,
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			seats := newFakeSeats(map[string][]fakeStep{"x": {working("before"), idleFor(2, "after"), gone()}})

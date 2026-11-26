@@ -531,10 +531,13 @@ func (run *fleetRun) answerSuffix(ctx context.Context, seat *watchedSeat) string
 		if first == "" {
 			first = line
 		}
-		// The reply's last verdict line concludes it: a sectioned reply ends on
-		// its Ultimate verdict, after the section verdicts.
-		if strings.HasPrefix(line, "**Verdict:**") || strings.HasPrefix(line, "# Ultimate verdict:") {
-			verdict = line
+		// The reply's last closing line concludes it: a sectioned reply ends on
+		// its Ultimate verdict, after the section verdicts, and a turn that waits
+		// on running work carries the Waiting label in that line's place.
+		for _, label := range []string{"**Verdict:**", "# Ultimate verdict:", "**Waiting:**", "# Waiting:"} {
+			if strings.HasPrefix(line, label) {
+				verdict = line
+			}
 		}
 	}
 	if verdict != "" {

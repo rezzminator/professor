@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
@@ -193,45 +191,6 @@ func sortMessages(messages []OpenCodeRow) {
 		}
 		return messages[left].ID < messages[right].ID
 	})
-}
-
-// queryOpenCodeStore runs one read-only statement over root's store, handing
-// each row to scan; every failure names the store.
-func queryOpenCodeStore(
-	ctx context.Context,
-	root, query string,
-	args []any,
-	scan func(*sql.Rows) error,
-) (returnErr error) {
-	db, err := openOpenCodeStore(root)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := db.Close(); closeErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close opencode store read-only: %w", closeErr))
-		}
-	}()
-	read := obs.SQL(ctx, pfmengine.MustLookup(pfmengine.OpenCode).LongName, query)
-	rows, err := db.QueryContext(ctx, query, args...)
-	read.End(-1, err)
-	if err != nil {
-		return fmt.Errorf("query opencode store %s: %w", OpenCodeStorePath(root), err)
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close opencode rows: %w", closeErr))
-		}
-	}()
-	for rows.Next() {
-		if err := scan(rows); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate opencode store %s: %w", OpenCodeStorePath(root), err)
-	}
-	return nil
 }
 
 // ReadOpenCodeTitles reads the titles of the sessions ids names from root's

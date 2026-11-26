@@ -16,7 +16,8 @@ import (
 )
 
 // The OpenCode mirror. OpenCode keeps its sessions in a SQLite database at
-// <root>/opencode.db (tables `session`, `project`, `message`, and `part`), which is
+// <root>/opencode.db (1.x tables `session`, `project`, `message` and `part`; 2.x `session_v2`,
+// `session_message` and `session_part`, read through openCodeSchemaRead), which is
 // LIVE while any OpenCode TUI runs. The reader opens it READ-ONLY and uses one
 // statement, so WAL concurrency gives it a consistent, non-blocking snapshot;
 // a bounded busy timeout turns a hot-writer moment into an error instead of a
@@ -228,7 +229,7 @@ func ReadOpenCodeSessions(ctx context.Context, root string) ([]store.OpenCodeSes
 	if errors.As(err, &partial) {
 		obs.Logger(ctx).Warn("opencode store is not ready: it holds some of the mirror's tables",
 			"path", OpenCodeStorePath(root),
-			"reason", fmt.Sprintf("holds tables %v, lacks %v", partial.held, partial.missing))
+			"reason", fmt.Sprintf("holds tables %v, lacks %s", partial.held, partial.lacks()))
 		return nil, nil
 	}
 	for _, problem := range malformed {
@@ -260,11 +261,13 @@ func readOpenCodeStore(ctx context.Context, root string) (
 			)
 		}
 	}()
-	if ready, err := openCodeSchemaReady(ctx, db); !ready {
+	schema, err := openCodeSchemaRead(ctx, db)
+	if schema == nil {
 		return nil, nil, err
 	}
-	read := obs.SQL(ctx, pfmengine.MustLookup(pfmengine.OpenCode).LongName, openCodeSessionsQuery)
-	rows, err := db.QueryContext(ctx, openCodeSessionsQuery)
+	query := schema.statement(openCodeSessionsQuery)
+	read := obs.SQL(ctx, pfmengine.MustLookup(pfmengine.OpenCode).LongName, query)
+	rows, err := db.QueryContext(ctx, query)
 	read.End(-1, err)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query opencode sessions: %w", err)

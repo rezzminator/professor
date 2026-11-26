@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,32 +20,36 @@ func rowIDs(rows []OpenCodeRow) string {
 }
 
 func TestReadOpenCodeSessionRowsReadsOneSessionInStoreOrder(t *testing.T) {
-	root := t.TempDir()
-	seedOpenCodeStore(t, root)
-	got, err := ReadOpenCodeSessionRows(context.Background(), root, "ses_root")
-	if err != nil {
-		t.Fatalf("ReadOpenCodeSessionRows: %v", err)
-	}
-	if got.ID != "ses_root" || got.Title != "Ramsey attack" || got.Directory != "/work/nuts/03-ramsey" ||
-		got.ParentID != "" || got.TimeCreatedMS != 10 || got.TimeUpdatedMS != 20 {
-		t.Errorf("session = %+v", got)
-	}
-	if ids := rowIDs(got.Messages); ids != "m1,a1,m2,a2" {
-		t.Errorf("messages = %s, want m1,a1,m2,a2 (time_created, then id)", ids)
-	}
-	if ids := rowIDs(got.Parts); ids != "i1,i2" {
-		t.Errorf("parts = %s, want i1,i2", ids)
-	}
-	if len(got.Parts) == 0 {
-		t.Fatal("no part read")
-	}
-	if part := got.Parts[0]; part.MessageID != "m1" || part.TimeCreatedMS != 100 ||
-		part.Data != `{"type":"text","text":"prove the bound"}` {
-		t.Errorf("first part = %+v", part)
-	}
-	child, err := ReadOpenCodeSessionRows(context.Background(), root, "ses_child")
-	if err != nil || child.ParentID != "ses_root" || rowIDs(child.Messages) != "m3" {
-		t.Errorf("child = %+v, err %v", child, err)
+	for _, fixture := range openCodeStoreFixtures {
+		t.Run(fixture.schema, func(t *testing.T) {
+			root := t.TempDir()
+			fixture.seed(t, root)
+			got, err := ReadOpenCodeSessionRows(context.Background(), root, "ses_root")
+			if err != nil {
+				t.Fatalf("ReadOpenCodeSessionRows: %v", err)
+			}
+			if got.ID != "ses_root" || got.Title != "Ramsey attack" || got.Directory != "/work/nuts/03-ramsey" ||
+				got.ParentID != "" || got.TimeCreatedMS != 10 || got.TimeUpdatedMS != 20 {
+				t.Errorf("session = %+v", got)
+			}
+			if ids := rowIDs(got.Messages); ids != "m1,a1,m2,a2" {
+				t.Errorf("messages = %s, want m1,a1,m2,a2 (time_created, then id)", ids)
+			}
+			if ids := rowIDs(got.Parts); ids != fixture.parts {
+				t.Errorf("parts = %s, want %s", ids, fixture.parts)
+			}
+			if len(got.Parts) == 0 {
+				t.Fatal("no part read")
+			}
+			if part := got.Parts[0]; part.MessageID != "m1" || part.TimeCreatedMS != 100 ||
+				part.Data != `{"type":"text","text":"prove the bound"}` {
+				t.Errorf("first part = %+v", part)
+			}
+			child, err := ReadOpenCodeSessionRows(context.Background(), root, "ses_child")
+			if err != nil || child.ParentID != "ses_root" || rowIDs(child.Messages) != "m3" {
+				t.Errorf("child = %+v, err %v", child, err)
+			}
+		})
 	}
 }
 
@@ -71,29 +76,59 @@ func TestReadOpenCodeSessionRowsNamesWhatIsMissing(t *testing.T) {
 }
 
 func TestReadOpenCodeUsageListsEverySessionAndTheWindowsMessages(t *testing.T) {
-	root := t.TempDir()
-	seedOpenCodeStore(t, root)
-	cases := []struct {
-		since int64
-		want  string
-	}{
-		{15, "ses_child[m3] ses_gone[] ses_root[m1,a1,m2,a2]"},
-		// a message created before the window is not the window's spend
-		{105, "ses_child[m3] ses_gone[] ses_root[a1,m2,a2]"},
-		{250, "ses_child[] ses_gone[] ses_root[]"},
-	}
-	for _, c := range cases {
-		sessions, err := ReadOpenCodeUsage(context.Background(), root, c.since)
-		if err != nil {
-			t.Fatalf("since %d: %v", c.since, err)
-		}
-		var got []string
-		for _, session := range sessions {
-			got = append(got, session.ID+"["+rowIDs(session.Messages)+"]")
-		}
-		if strings.Join(got, " ") != c.want {
-			t.Errorf("since %d: %s, want %s", c.since, strings.Join(got, " "), c.want)
-		}
+	for _, fixture := range openCodeStoreFixtures {
+		t.Run(fixture.schema, func(t *testing.T) {
+			root := t.TempDir()
+			fixture.seed(t, root)
+			cases := []struct {
+				since int64
+				want  string
+			}{
+				{15, "ses_child[m3] ses_gone[] ses_root[m1,a1,m2,a2]"},
+				// a message created before the window is not the window's spend
+				{105, "ses_child[m3] ses_gone[] ses_root[a1,m2,a2]"},
+				{250, "ses_child[] ses_gone[] ses_root[]"},
+			}
+			for _, c := range cases {
+				sessions, err := ReadOpenCodeUsage(context.Background(), root, c.since)
+				if err != nil {
+					t.Fatalf("since %d: %v", c.since, err)
+				}
+				var got []string
+				for _, session := range sessions {
+					got = append(got, session.ID+"["+rowIDs(session.Messages)+"]")
+				}
+				if strings.Join(got, " ") != c.want {
+					t.Errorf("since %d: %s, want %s", c.since, strings.Join(got, " "), c.want)
+				}
+			}
+			// the answers' spend reads the same from either schema
+			sessions, err := ReadOpenCodeUsage(context.Background(), root, 0)
+			if err != nil {
+				t.Fatalf("since 0: %v", err)
+			}
+			var spend []string
+			for _, session := range sessions {
+				for _, stored := range session.Messages {
+					message, err := DecodeOpenCodeMessage(stored.Data)
+					if err != nil {
+						t.Fatalf("decode %s: %v", stored.ID, err)
+					}
+					if message.Role != "assistant" || message.Tokens == nil || message.Cost == nil {
+						spend = append(spend, stored.ID+":"+message.Role)
+						continue
+					}
+					spend = append(spend, fmt.Sprintf("%s:%s %s/%s in=%d out=%d cost=%g",
+						stored.ID, message.Agent, message.ProviderID, message.ModelID,
+						message.Tokens.Input, message.Tokens.Output, *message.Cost))
+				}
+			}
+			wantSpend := "m3:user m1:user a1:build prov/m1 in=100 out=25 cost=1.234567 m2:user " +
+				"a2:build prov/m1 in=50 out=10 cost=0.265433"
+			if strings.Join(spend, " ") != wantSpend {
+				t.Errorf("spend = %s, want %s", strings.Join(spend, " "), wantSpend)
+			}
+		})
 	}
 	if _, err := ReadOpenCodeUsage(context.Background(), t.TempDir(), 0); !errors.Is(err, ErrNoOpenCodeStore) {
 		t.Errorf("missing store: err %v, want ErrNoOpenCodeStore", err)

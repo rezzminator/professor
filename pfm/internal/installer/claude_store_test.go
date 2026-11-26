@@ -97,6 +97,7 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"keybindings.json",
 		"hooks",
 		"engine-sync.json",
+		"workflows",
 	}
 	if !reflect.DeepEqual(IgnoredEntries, ignored) {
 		t.Fatalf("ignored=%v", IgnoredEntries)

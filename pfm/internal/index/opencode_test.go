@@ -164,72 +164,76 @@ CREATE INDEX part_session_idx ON part (session_id);`
 }
 
 func TestReadOpenCodeSessionsReadsTheFixtureStore(t *testing.T) {
-	root := t.TempDir()
-	seedOpenCodeStore(t, root)
+	for _, fixture := range openCodeStoreFixtures {
+		t.Run(fixture.schema, func(t *testing.T) {
+			root := t.TempDir()
+			fixture.seed(t, root)
 
-	sessions, err := ReadOpenCodeSessions(context.Background(), root)
-	if err != nil {
-		t.Fatalf("read sessions: %v", err)
-	}
-	byID := make(map[string]int, len(sessions))
-	for index, session := range sessions {
-		byID[session.ID] = index
-	}
-	rootSession, found := byID["ses_root"]
-	if !found {
-		t.Fatalf("root session missing from %#v", sessions)
-	}
-	got := sessions[rootSession]
-	want := struct {
-		title          string
-		projectDir     string
-		agent          string
-		model          string
-		firstPrompt    string
-		promptCount    int64
-		assistantCount int64
-		tokensInput    int64
-		tokensOutput   int64
-		costMilli      int64
-	}{"Ramsey attack", "/work/nuts", "plan", "openai/m2", "prove the bound", 2, 2, 150, 35, 150000}
-	switch {
-	case got.Title != want.title:
-		t.Errorf("title = %q, want %q", got.Title, want.title)
-	case got.ProjectDir != want.projectDir:
-		t.Errorf("project dir = %q, want %q", got.ProjectDir, want.projectDir)
-	case got.Agent != want.agent:
-		t.Errorf("agent = %q, want %q", got.Agent, want.agent)
-	case got.Model != want.model:
-		t.Errorf("model = %q, want %q", got.Model, want.model)
-	case got.FirstPrompt != want.firstPrompt:
-		t.Errorf("first prompt = %q, want %q", got.FirstPrompt, want.firstPrompt)
-	case got.PromptCount != want.promptCount:
-		t.Errorf("prompt count = %d, want %d", got.PromptCount, want.promptCount)
-	case got.AssistantCount != want.assistantCount:
-		t.Errorf("assistant count = %d, want %d", got.AssistantCount, want.assistantCount)
-	case got.TokensInput != want.tokensInput:
-		t.Errorf("tokens input = %d, want %d", got.TokensInput, want.tokensInput)
-	case got.TokensOutput != want.tokensOutput:
-		t.Errorf("tokens output = %d, want %d", got.TokensOutput, want.tokensOutput)
-	case got.CostMillicents != want.costMilli:
-		t.Errorf("cost millicents = %d, want %d", got.CostMillicents, want.costMilli)
-	}
-	// ses_child has one user prompt (m3) and zero assistant messages — a
-	// session opened and never answered, the exact shape defaultEligible
-	// must treat as empty.
-	child, found := byID["ses_child"]
-	if !found || sessions[child].ParentID != "ses_root" {
-		t.Errorf("child session lost or unparented: %#v", sessions)
-	} else if sessions[child].PromptCount != 1 || sessions[child].AssistantCount != 0 {
-		t.Errorf("unanswered child session = %#v, want prompt_count=1 assistant_count=0", sessions[child])
-	}
-	empty, found := byID["ses_gone"]
-	if !found {
-		t.Fatalf("empty session missing from %#v", sessions)
-	}
-	if got := sessions[empty]; got.Agent != "" || got.Model != "" || got.PromptCount != 0 ||
-		got.TokensInput != 0 || got.TokensOutput != 0 || got.CostMillicents != 0 {
-		t.Errorf("empty session acquired message-derived values: %#v", got)
+			sessions, err := ReadOpenCodeSessions(context.Background(), root)
+			if err != nil {
+				t.Fatalf("read sessions: %v", err)
+			}
+			byID := make(map[string]int, len(sessions))
+			for index, session := range sessions {
+				byID[session.ID] = index
+			}
+			rootSession, found := byID["ses_root"]
+			if !found {
+				t.Fatalf("root session missing from %#v", sessions)
+			}
+			got := sessions[rootSession]
+			want := struct {
+				title          string
+				projectDir     string
+				agent          string
+				model          string
+				firstPrompt    string
+				promptCount    int64
+				assistantCount int64
+				tokensInput    int64
+				tokensOutput   int64
+				costMilli      int64
+			}{"Ramsey attack", "/work/nuts", "plan", "openai/m2", "prove the bound", 2, 2, 150, 35, 150000}
+			switch {
+			case got.Title != want.title:
+				t.Errorf("title = %q, want %q", got.Title, want.title)
+			case got.ProjectDir != want.projectDir:
+				t.Errorf("project dir = %q, want %q", got.ProjectDir, want.projectDir)
+			case got.Agent != want.agent:
+				t.Errorf("agent = %q, want %q", got.Agent, want.agent)
+			case got.Model != want.model:
+				t.Errorf("model = %q, want %q", got.Model, want.model)
+			case got.FirstPrompt != want.firstPrompt:
+				t.Errorf("first prompt = %q, want %q", got.FirstPrompt, want.firstPrompt)
+			case got.PromptCount != want.promptCount:
+				t.Errorf("prompt count = %d, want %d", got.PromptCount, want.promptCount)
+			case got.AssistantCount != want.assistantCount:
+				t.Errorf("assistant count = %d, want %d", got.AssistantCount, want.assistantCount)
+			case got.TokensInput != want.tokensInput:
+				t.Errorf("tokens input = %d, want %d", got.TokensInput, want.tokensInput)
+			case got.TokensOutput != want.tokensOutput:
+				t.Errorf("tokens output = %d, want %d", got.TokensOutput, want.tokensOutput)
+			case got.CostMillicents != want.costMilli:
+				t.Errorf("cost millicents = %d, want %d", got.CostMillicents, want.costMilli)
+			}
+			// ses_child has one user prompt (m3) and zero assistant messages — a
+			// session opened and never answered, the exact shape defaultEligible
+			// must treat as empty.
+			child, found := byID["ses_child"]
+			if !found || sessions[child].ParentID != "ses_root" {
+				t.Errorf("child session lost or unparented: %#v", sessions)
+			} else if sessions[child].PromptCount != 1 || sessions[child].AssistantCount != 0 {
+				t.Errorf("unanswered child session = %#v, want prompt_count=1 assistant_count=0", sessions[child])
+			}
+			empty, found := byID["ses_gone"]
+			if !found {
+				t.Fatalf("empty session missing from %#v", sessions)
+			}
+			if got := sessions[empty]; got.Agent != "" || got.Model != "" || got.PromptCount != 0 ||
+				got.TokensInput != 0 || got.TokensOutput != 0 || got.CostMillicents != 0 {
+				t.Errorf("empty session acquired message-derived values: %#v", got)
+			}
+		})
 	}
 }
 

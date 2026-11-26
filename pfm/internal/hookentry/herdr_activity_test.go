@@ -105,6 +105,25 @@ func TestHerdrBackgroundAgents(t *testing.T) {
 		},
 		{"idle notification", []string{"prompt", "agent-start:a", "notification"}, "working", "1 agent running"},
 		{
+			"Stop with background work",
+			[]string{"prompt", "idle:shell,shell,monitor,monitor"},
+			"working",
+			"2 shells, 2 monitors running",
+		},
+		{
+			"an agent stopping to wait on its own work keeps the chat working",
+			[]string{"prompt", "agent-start:a", "idle:subagent,shell,shell,monitor,monitor", "agent-stop:a"},
+			"working",
+			"1 agent, 2 shells, 2 monitors running",
+		},
+		{"next Stop with none in flight", []string{"prompt", "idle:shell", "prompt", "idle"}, "idle", ""},
+		{
+			"clear resets background work",
+			[]string{"prompt", "idle:shell", "start:clear", "notification"},
+			"idle",
+			"",
+		},
+		{
 			"permission stays blocked",
 			[]string{"prompt", "agent-start:a", "blocked", "agent-stop:a"},
 			"blocked",
@@ -262,6 +281,16 @@ func activityTestEvent(t *testing.T, jail *herdrJail, server *fakeHerdr, now *in
 		if event == "agent-stop" {
 			payload["hook_event_name"] = "SubagentStop"
 		}
+	case "idle":
+		// A Stop hook's in-flight background work, as Claude Code 2.1.331 lists it.
+		tasks := []map[string]string{}
+		for index, kind := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' }) {
+			tasks = append(tasks, map[string]string{
+				"id": fmt.Sprintf("b%d", index), "type": kind, "status": "running", "description": "background work",
+			})
+		}
+		payload["hook_event_name"] = "Stop"
+		payload["background_tasks"] = tasks
 	case "start":
 		payload["source"] = value
 	case "notification":

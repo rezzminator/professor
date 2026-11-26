@@ -184,8 +184,8 @@ func readHerdrPayload(input io.Reader) (payload herdrPayload, skipped, returnErr
 		"hook_event_name": &payload.HookEventName, "session_id": &payload.SessionID,
 		"agent_id": &payload.AgentID, herdrSourceKey: &payload.Source, "reason": &payload.Reason,
 		"notification_type": &payload.NotificationType, "message": &payload.Message,
-		"tool_name": &payload.ToolName, "tool_input": &payload.ToolInput,
-		"is_interrupt": &payload.IsInterrupt, "title": &payload.Title, "prompt": &payload.Prompt,
+		"tool_name": &payload.ToolName, "tool_input": &payload.ToolInput, "title": &payload.Title,
+		"is_interrupt": &payload.IsInterrupt, "prompt": &payload.Prompt, "background_tasks": &payload.BackgroundTasks,
 	}
 	for decoder.More() {
 		key, err := decoder.Token()

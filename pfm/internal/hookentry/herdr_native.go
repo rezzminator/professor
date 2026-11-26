@@ -62,7 +62,7 @@ func (reporter *herdrReporter) retireNativeTargets(ctx context.Context, path str
 	}
 	state.Targets = kept
 	if len(kept) == 0 && state.TmuxSocket == "" {
-		state.Stored.Agents = nil
+		state.Stored.Agents, state.Stored.Background = nil, nil
 		state.Stored.MainStoppedAt = 0
 	}
 	if err := reporter.writeActivityFile(path, *state); err != nil {

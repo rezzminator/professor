@@ -2,6 +2,7 @@
 //
 // epic_inject_manifest.go finds the epic manifest a chat's window names and records it injected once per session.
 // epic_inject_then.go hands epic-inject the --then message a native reload stored and could not type.
+// herdr_background.go counts the background work a Claude Stop hook lists and names it for the pane.
 // herdr_activity_record.go keeps each Claude session's Herdr activity record and hands the
 // native Claude panes an older build reported under herdr:claude back to Herdr (pfm install's cutover).
 // herdr_shell_resume.go answers the shim's auto-open whether Herdr resumes the pane's agent itself.

@@ -14,8 +14,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/herdr"
 )
 
-// A missing SubagentStop cannot hold a pane forever. The lease starts at the
-// main Stop (not the agent's birth), and never extends on an idle notification.
+// A missing SubagentStop, or background work that ends unreported, cannot hold
+// a pane forever. The lease starts at the main Stop (not the agent's birth),
+// and never extends on an idle notification.
 const (
 	herdrAgentLease  = time.Hour
 	herdrAgentsWatch = "agents-watch"
@@ -122,7 +123,7 @@ func (reporter *herdrReporter) recordActivity(
 	if state.Stored.Seq >= reporter.seq {
 		reporter.seq = state.Stored.Seq + 1
 	}
-	wasWaiting := state.Stored.MainStoppedAt != 0 && len(state.Stored.Agents) > 0
+	wasWaiting := state.Stored.MainStoppedAt != 0 && herdrInFlight(state.Stored)
 	action, err := reporter.planActivity(payload, &state.Stored)
 	if err != nil {
 		return err
@@ -138,7 +139,7 @@ func (reporter *herdrReporter) recordActivity(
 	}
 	// planActivity updates the lifecycle fields, while preserving the pane result
 	// separately until all its hold rules have been evaluated.
-	action.stored.Agents = state.Stored.Agents
+	action.stored.Agents, action.stored.Background = state.Stored.Agents, state.Stored.Background
 	action.stored.MainStoppedAt = state.Stored.MainStoppedAt
 	action.stored.Seq = reporter.seq
 	action.stored.MainSeq = mainSeq
@@ -167,7 +168,7 @@ func (reporter *herdrReporter) finishActivity(session string, state herdrActivit
 	}
 	// An unproved native Claude (a bare launch) reported nowhere: nothing to settle.
 	settles := len(state.Targets) > 0 || state.TmuxSocket != ""
-	if state.Stored.MainStoppedAt != 0 && len(state.Stored.Agents) > 0 && reporter.deps.spawn != nil &&
+	if state.Stored.MainStoppedAt != 0 && herdrInFlight(state.Stored) && reporter.deps.spawn != nil &&
 		!wasWaiting && settles {
 		// The process reads the durable lease, not a timer owned by this short hook.
 		if err := reporter.deps.spawn(
@@ -193,10 +194,10 @@ func (reporter *herdrReporter) planActivity(payload herdrPayload, state *herdrSt
 		if action == nil {
 			return nil, nil
 		}
-		state.Agents = nil
+		state.Agents, state.Background = nil, nil
 		state.MainStoppedAt = 0
 	case herdr.EventEnd:
-		state.Agents = nil
+		state.Agents, state.Background = nil, nil
 		state.MainStoppedAt = 0
 	case herdr.EventAgentStart, herdr.EventAgentStop:
 		if payload.AgentID == "" {
@@ -236,6 +237,7 @@ func (reporter *herdrReporter) planActivity(payload herdrPayload, state *herdrSt
 		}
 		action = &herdrAction{stored: next}
 	case herdr.EventIdle:
+		state.Background = herdrBackgroundCounts(payload.BackgroundTasks)
 		if state.MainStoppedAt == 0 {
 			state.MainStoppedAt = reporter.deps.now().UnixNano()
 		}
@@ -258,18 +260,14 @@ func (reporter *herdrReporter) planActivity(payload herdrPayload, state *herdrSt
 		action.stored = *state
 	}
 	if state.MainStoppedAt != 0 && reporter.deps.now().Sub(time.Unix(0, state.MainStoppedAt)) >= herdrAgentLease {
-		state.Agents = nil
+		state.Agents, state.Background = nil, nil
 	}
 	if !action.release && state.MainStoppedAt != 0 && action.stored.State != string(herdr.StateBlocked) {
 		action.stored.State = string(herdr.StateIdle)
 		action.stored.Message = ""
-		if len(state.Agents) > 0 {
+		if message := herdrInFlightMessage(*state); message != "" {
 			action.stored.State = string(herdr.StateWorking)
-			action.stored.Message = fmt.Sprintf("%d agent", len(state.Agents))
-			if len(state.Agents) != 1 {
-				action.stored.Message += "s"
-			}
-			action.stored.Message += " running"
+			action.stored.Message = message
 		}
 	}
 	return action, nil
@@ -349,13 +347,13 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 		defer func() { returnErr = errors.Join(returnErr, err) }()
 	}
 	stopped := state.Stored.MainStoppedAt
-	if stopped == 0 || len(state.Stored.Agents) == 0 || (len(generation) > 0 && generation[0] != stopped) {
+	if stopped == 0 || !herdrInFlight(state.Stored) || (len(generation) > 0 && generation[0] != stopped) {
 		return true, nil
 	}
 	if reporter.deps.now().Sub(time.Unix(0, stopped)) < herdrAgentLease {
 		return false, nil
 	}
-	state.Stored.Agents = nil
+	state.Stored.Agents, state.Stored.Background = nil, nil
 	if state.Stored.State == string(herdr.StateBlocked) {
 		return true, reporter.writeActivity(session, state)
 	}
@@ -375,7 +373,7 @@ func (reporter *herdrReporter) expireAgents(session string, generation ...int64)
 		if stored.SessionID == session && stored.State == string(herdr.StateWorking) {
 			stored.State = state.Stored.State
 			stored.Message = ""
-			stored.Agents = nil
+			stored.Agents, stored.Background = nil, nil
 			stored.MainStoppedAt = stopped
 			stored.Seq++
 			if err := reporter.writeState(ctx, state.TmuxSession, stored); err != nil {

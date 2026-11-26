@@ -21,11 +21,15 @@ type Stored struct {
 	// bounded lease after Stop. Native transports persist this state on disk.
 	Agents        map[string]bool `json:"agents,omitempty"`
 	MainStoppedAt int64           `json:"main_stopped_at,omitempty"`
-	Engine        string          `json:"engine"`
-	SessionID     string          `json:"session_id"`
-	State         string          `json:"state"`
-	Message       string          `json:"message"`
-	Seq           uint64          `json:"seq"`
+	// Background counts, by Claude Code's own task type, the background work in
+	// flight at the main turn's last Stop (shells, monitors, agents waiting on
+	// their own work); it holds the pane working under the agents' lease.
+	Background map[string]int `json:"background,omitempty"`
+	Engine     string         `json:"engine"`
+	SessionID  string         `json:"session_id"`
+	State      string         `json:"state"`
+	Message    string         `json:"message"`
+	Seq        uint64         `json:"seq"`
 	// MainSeq is the seq of the newest main-turn event recorded (a main-thread
 	// hook, or the transcript watch's interrupt): main-turn events are ordered
 	// against each other alone, while a sub-agent's lifecycle, which commutes

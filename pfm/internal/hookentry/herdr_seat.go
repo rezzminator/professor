@@ -339,6 +339,8 @@ type herdrPayload struct {
 	Title            string          `json:"title"`
 	TranscriptPath   string          `json:"transcript_path"`
 	Prompt           string          `json:"prompt"`
+	// BackgroundTasks is a Stop hook's in-flight background work.
+	BackgroundTasks []herdrBackgroundTask `json:"background_tasks,omitempty"`
 }
 
 // taskNotificationPrompt opens the prompt Claude Code submits when a background

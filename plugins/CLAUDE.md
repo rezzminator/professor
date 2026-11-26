@@ -65,7 +65,7 @@ Professor tracks only each submodule plugin's commit: an edit under `{name}/` be
 - Level files `errors.jsonl`, `warnings.jsonl`, `info.jsonl`, `debug.jsonl`, directory 0700, files 0600.
 - Row: one JSON line, keys in order `ts`, `plugin`, `level`, `event`, `msg`, `where`, `session` when known, `detail`; at most 4096 bytes with its newline, shortened to fit.
 - A level file past 20971520 bytes (20 MiB) moves to `.1`, older generations shifting up to `.5`, and a `log-capped` row goes to `warnings.jsonl`.
-- The screen shows only errors and one line per failing streak saying the log is off or failing, re-armed by the next success; warning, info and debug rows go to their files, or nowhere when the log cannot be written.
+- The screen shows only errors and one line per failing streak saying the log is off or failing, re-armed by the next success; warning, info and debug rows go to their files, or nowhere when the log cannot be written. The one exception: forward-compaction's model switch says its begin, each end and a refused name on screen at info or warning level, as Claude Code's header keeps showing the earlier model.
 
 ## Git
 

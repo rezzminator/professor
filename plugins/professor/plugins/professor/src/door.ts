@@ -17,7 +17,12 @@ export type DoorSpend = {
   advisorUsd: number; advisorUnpriced: number; floor: boolean; ledger: boolean; apiEquivalent: boolean;
 };
 export type DoorNested = { total: number; working: number; unknown: number; error?: string };
-export type DoorText = { glyph: string; family: string; effortBar: string; context: string; in: string; out: string; usd: string };
+/** `label`: the model's name as the main status line writes it beside `glyph`, `Opus 5.5`. */
+export type DoorText = { glyph: string; label: string; effortBar: string; context: string; in: string; out: string; usd: string };
+/** What names an agent's model on its row: pfm's glyph and label, as `DoorText` carries them. */
+export type DoorModel = { glyph: string; label: string };
+/** One agent the door asks pfm for: its id, and the model the engine names it by, `''` when the engine names none. */
+export type DoorAsk = { id: string; model: string };
 /**
  * One agent's facts as pfm read them; with `error`, its counts, cache and activity are unknown, never zero.
  * `absent`: pfm found no transcript of it on disk (it has written none yet, or none any more).
@@ -62,9 +67,13 @@ export type DoorResult = { exitCode: number; stdout: string; stderr: string };
 /** What opens pfm's own line naming why the command failed. */
 const DOOR_CAUSE = 'pfm statusline --agents: ';
 
-/** The command that asks pfm for the agents `ids` of the session whose transcript is `transcript`, running or not. */
-export function doorArgv(transcript: string, ids: readonly string[]): string[] {
-  return ['pfm', 'statusline', '--agents', transcript, ...ids];
+/**
+ * The command that asks pfm for the agents `asks` of the session whose transcript is `transcript`, running or not:
+ * each as `id=model`, so pfm names the model of an agent whose transcript names none yet, or as its id alone when the
+ * engine names no model or one holding the `=` the argument splits at.
+ */
+export function doorArgv(transcript: string, asks: readonly DoorAsk[]): string[] {
+  return ['pfm', 'statusline', '--agents', transcript, ...asks.map(({ id, model }) => (model === '' || model.includes('=') ? id : `${id}=${model}`))];
 }
 
 type Json = Record<string, unknown>;
@@ -179,7 +188,7 @@ function facts(value: unknown, at: string): DoorFacts {
     },
     spend,
     text: {
-      glyph: text(words, 'glyph', `${at}.text`), family: text(words, 'family', `${at}.text`), effortBar: text(words, 'effortBar', `${at}.text`),
+      glyph: text(words, 'glyph', `${at}.text`), label: text(words, 'label', `${at}.text`), effortBar: text(words, 'effortBar', `${at}.text`),
       context: text(words, 'context', `${at}.text`), in: text(words, 'in', `${at}.text`), out: text(words, 'out', `${at}.text`), usd: text(words, 'usd', `${at}.text`),
     },
     ...(error === undefined ? {} : { error }),
@@ -232,7 +241,8 @@ export type DoorState = { state: 'waiting' } | { state: 'ok' } | { state: 'faile
 /**
  * What the door last said. An agent keeps the facts of the last answer that named it: pfm answers every agent asked
  * for, but a failed call or an agent it found no transcript of (`absent`) leaves the facts before standing, or none.
- * The look, once learnt, outlives a failed call.
+ * An agent's model, its glyph and label, is kept from every answer that names one, `absent` too. The look, once
+ * learnt, outlives a failed call.
  */
 export class Door {
   state: DoorState = { state: 'waiting' };
@@ -242,6 +252,7 @@ export class Door {
   private readonly known = new Map<string, DoorFacts>();
   /** When pfm read each agent's facts: the time of the answer that gave them. */
   private readonly readAt = new Map<string, number>();
+  private readonly models = new Map<string, DoorModel>();
   private asked: number | undefined;
   private flying = false;
 
@@ -259,6 +270,7 @@ export class Door {
     const read = answer.agents.filter((agent) => !agent.absent);
     this.named = new Set(read.map((agent) => agent.id));
     for (const agent of read) { this.known.set(agent.id, agent); this.readAt.set(agent.id, answer.at); }
+    for (const { id, text: { glyph, label } } of answer.agents) { if (glyph !== '' || label !== '') this.models.set(id, { glyph, label }); }
   }
   fail(cause: string): void {
     this.flying = false;
@@ -270,10 +282,13 @@ export class Door {
     this.asked = undefined;
   }
   facts(id: string): DoorFacts | undefined { return this.known.get(id); }
+  /** The glyph and label pfm last named `id`'s model by. */
+  model(id: string): DoorModel | undefined { return this.models.get(id); }
   /** When pfm read `id`'s facts, in milliseconds since the epoch. */
   read(id: string): number | undefined { return this.readAt.get(id); }
   /** Forgets every agent that has no row any more. */
   keep(ids: ReadonlySet<string>): void {
     for (const id of this.known.keys()) { if (!ids.has(id)) { this.known.delete(id); this.readAt.delete(id); } }
+    for (const id of this.models.keys()) { if (!ids.has(id)) this.models.delete(id); }
   }
 }

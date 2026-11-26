@@ -199,7 +199,7 @@ func factLinesFixture(t *testing.T, fixture agentsFixture, tasks ...string) (lin
 }
 
 // factLine writes one agent's facts as one line a test compares whole:
-// nesting│spend│family·effort│tool errors│cache hit│compactions, a segment
+// nesting│spend│label·effort│tool errors│cache hit│compactions, a segment
 // left out when it has nothing to say. Spend is Σ{usd}/{in}/{out}/{tools},
 // "Σ$?/?/?/?" when it is unknown; the cache is 💾! for a transcript that did
 // not read, 💾– before a first reply, 💾∅ for a model with no cache lifetime.
@@ -239,11 +239,11 @@ func factLine(facts AgentFacts) string {
 		}
 	}
 	parts = append(parts, spend)
-	if family := facts.Text.Family; family != "" {
+	if label := facts.Text.Label; label != "" {
 		if facts.Text.EffortBar != "" {
-			family += "·" + facts.Text.EffortBar + " " + facts.Effort
+			label += "·" + facts.Text.EffortBar + " " + facts.Effort
 		}
-		parts = append(parts, family)
+		parts = append(parts, label)
 	}
 	switch {
 	case facts.ToolErrors == 1:
@@ -297,17 +297,17 @@ func TestAgentFactsRowBodies(t *testing.T) {
 			name: "running agent: every segment, errors and compactions included",
 			task: task(`"id":"a1","name":"scout","label":"map the resolver",` +
 				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000`),
-			want: "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want: "Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name: "the model its calls went to wins over the alias it was spawned with",
 			task: task(`"id":"a1","label":"x","model":"haiku","contextWindowSize":1000000`),
-			want: "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want: "Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name: "no model turn yet: unknown context, zero tools, an empty cache, and idle since its prompt",
 			task: task(`"id":"fresh","label":"x","model":"haiku","contextWindowSize":200000`),
-			want: "Σ$0.00/0/0/0│haiku│💾–",
+			want: "Σ$0.00/0/0/0│Haiku│💾–",
 		},
 		{
 			name: "no model and no window: the row still renders, context unknown",
@@ -317,7 +317,7 @@ func TestAgentFactsRowBodies(t *testing.T) {
 		{
 			name: "the effort its newest request recorded, an entry without one leaving it standing",
 			task: `{"id":"e","model":"claude-opus-5-5"}`,
-			want: "Σ$0.00/0/0/0│opus·▰▰ medium│💾–",
+			want: "Σ$0.00/0/0/0│Opus 5.5·▰▰ medium│💾–",
 		},
 		{
 			name: "a gpt- agent renders its tier then its version",
@@ -352,7 +352,7 @@ func TestAgentFactsRowBodies(t *testing.T) {
 		{
 			name: "a gateway asset reference names its model's family",
 			task: `{"id":"gw","name":"bot","model":"gw:catalog/claude-opus-5-5[1m]"}`,
-			want: "Σ$0.00/0/0/0│opus│💾–",
+			want: "Σ$0.00/0/0/0│Opus 5.5│💾–",
 		},
 	}
 	for _, tc := range cases {
@@ -536,7 +536,7 @@ func TestAgentFactsClaudeCacheKeepsItsWindowBesideOpenAI(t *testing.T) {
 	got, _ := factsOfOne(t, session,
 		`{"id":"c1","status":"running","model":"claude-opus-5-5[1m]",`+
 			`"contextWindowSize":1000000}`)
-	if got != "Σ$0.00/1.0K/1/0│opus│💾90%" {
+	if got != "Σ$0.00/1.0K/1/0│Opus 5.5│💾90%" {
 		t.Fatalf("content = %q, want the Claude row's 5m window and 90%%", got)
 	}
 }

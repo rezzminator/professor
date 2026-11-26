@@ -15,8 +15,9 @@ function withValue(path: Array<string | number>, value: unknown): unknown {
 }
 
 describe('door command', () => {
-  it('asks pfm once for every agent the list names, in its order', () => {
-    expect(doorArgv(TRANSCRIPT, ['a2', 'a1'])).toEqual(['pfm', 'statusline', '--agents', TRANSCRIPT, 'a2', 'a1']);
+  it('asks pfm once for every agent the list names, in its order, each with the model the engine names it by', () => {
+    const asks = [{ id: 'a2', model: 'claude-opus-5-5' }, { id: 'a1', model: '' }, { id: 'a3', model: 'odd=model' }];
+    expect(doorArgv(TRANSCRIPT, asks)).toEqual(['pfm', 'statusline', '--agents', TRANSCRIPT, 'a2=claude-opus-5-5', 'a1', 'a3']);
   });
 });
 
@@ -31,7 +32,7 @@ describe('door answer', () => {
       id: 'a1', model: 'claude-opus-9', effort: 'medium', tools: 40, toolErrors: 2, compactions: 1, cacheHit: 94, cacheLifetime: true, context: 170_000, contextWindow: 0,
       lastActivity: NOW - 4_000, nested: { total: 3, working: 1, unknown: 0 },
       spend: { usd: 3.41, usdKnown: true, in: 2_000_000, out: 24_300, tools: 57, advisorUsd: 0, advisorUnpriced: 0, floor: false, ledger: true, apiEquivalent: false },
-      text: { glyph: '◆', family: 'opus', effortBar: '▰▰', context: '170.0K', in: '2.0M', out: '24.3K', usd: '$3.41' },
+      text: { glyph: '◆', label: 'Opus 9', effortBar: '▰▰', context: '170.0K', in: '2.0M', out: '24.3K', usd: '$3.41' },
     });
     expect(answer.agents[2]!.spend).toBe(null);
     expect(answer.agents[2]!.error).toBe('open agent-a3.jsonl: permission denied');
@@ -46,8 +47,8 @@ describe('door answer', () => {
   });
 
   it('takes escape sequences out of the words pfm sends', () => {
-    const answer = readDoorAnswer(ok(withValue(['agents', 0, 'text', 'family'], `op${ESC}]0;title${BELL}us${ESC}[31m`)));
-    expect(answer.agents[0]!.text.family).toBe('opus');
+    const answer = readDoorAnswer(ok(withValue(['agents', 0, 'text', 'label'], `Op${ESC}]0;title${BELL}us 9${ESC}[31m`)));
+    expect(answer.agents[0]!.text.label).toBe('Opus 9');
   });
 
   it.each<[string, { exitCode: number; stdout: string; stderr: string }, string]>([
@@ -124,7 +125,18 @@ describe('door state', () => {
     expect(door.facts('a2')!.cacheHit).toBe(31);
     door.keep(new Set(['a2']));
     expect([door.facts('a1'), door.read('a1')]).toEqual([undefined, undefined]);
+    expect([door.model('a1'), door.model('a2')]).toEqual([undefined, { glyph: '◇', label: 'Sonnet 9' }]);
     expect(door.facts('a2')!.id).toBe('a2');
+  });
+
+  it('keeps the model pfm names an agent by from every answer, an absent agent\'s too, and none it never named', () => {
+    const door = new Door();
+    const absent = { ...ANSWER.agents[3], text: { ...ANSWER.agents[3]!.text, glyph: '◆', label: 'Opus 5.5' } };
+    door.land(readDoorAnswer(ok({ ...ANSWER, agents: [ANSWER.agents[0], absent] })));
+    expect([door.facts('a4'), door.model('a4'), door.model('a1')]).toEqual([undefined, { glyph: '◆', label: 'Opus 5.5' }, { glyph: '◆', label: 'Opus 9' }]);
+    // An answer that names no model leaves the one before standing.
+    door.land(readDoorAnswer(ok({ ...ANSWER, agents: [ANSWER.agents[3]] })));
+    expect([door.model('a4'), door.model('a9')]).toEqual([{ glyph: '◆', label: 'Opus 5.5' }, undefined]);
   });
 
   it('asks again at once after a call that ended with no answer and no failure', () => {

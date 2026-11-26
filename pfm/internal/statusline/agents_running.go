@@ -3,6 +3,7 @@ package statusline
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"regexp"
@@ -131,22 +132,52 @@ func metaTask(dir, id string) (task subagentTask, meta transcript.SubagentMeta, 
 // element, so it never reaches outside the subagents directory.
 var agentIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
-// namedAgents are the agents ids names, in the order each is first named: a
+// agentModelPattern is a model id a caller may name an agent's model by: an id,
+// alias, gateway asset or Bedrock id, a window tag included, never a blank.
+var agentModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,127}$`)
+
+// agentAsk is one agent a caller names: its id, and the model its engine
+// knows it by, "" when the caller gave none.
+type agentAsk struct{ ID, Model string }
+
+// agentAsks reads the caller's agent arguments, each an id alone or
+// id=model, split at the last "=" (no model id holds one). A model outside
+// agentModelPattern is dropped with its cause on warn, the id still asked.
+func agentAsks(args []string, warn io.Writer) []agentAsk {
+	asks := make([]agentAsk, 0, len(args))
+	for _, arg := range args {
+		ask := agentAsk{ID: arg}
+		if cut := strings.LastIndexByte(arg, '='); cut >= 0 {
+			ask.ID, ask.Model = arg[:cut], arg[cut+1:]
+			if ask.Model != "" && !agentModelPattern.MatchString(ask.Model) {
+				fmt.Fprintf(warn, "%s: %s: engine model %q is no model id (letters, digits and ._:/@[]-); "+
+					"the agent is asked without it\n", agentsWho, ask.ID, ask.Model)
+				ask.Model = ""
+			}
+		}
+		asks = append(asks, ask)
+	}
+	return asks
+}
+
+// namedAgents are the agents asks names, in the order each is first named: a
 // running one as runningAgents found it, any other from its meta file
 // (metaTask), ended or never started alike, so a caller keeps an agent's facts
 // current after it stops. An id with no files on disk is still answered; its
 // facts say it is absent. An id that cannot name a file (a teammate in a pane
 // of its own goes by its name@team address) is answered too, with no look at
-// the disk: agentFacts marks it absent (unnamableAgentFacts).
-func namedAgents(sessionTranscript string, ids []string, running []subagentTask) []subagentTask {
+// the disk: agentFacts marks it absent (unnamableAgentFacts). Each task
+// carries the model its first naming gave as its EngineModel.
+func namedAgents(sessionTranscript string, asks []agentAsk, running []subagentTask) []subagentTask {
 	dir := transcript.SubagentsDir(sessionTranscript)
 	byID := make(map[string]subagentTask, len(running))
 	for _, task := range running {
 		byID[task.ID] = task
 	}
-	named := make([]subagentTask, 0, len(ids))
-	seen := make(map[string]bool, len(ids))
-	for _, id := range ids {
+	named := make([]subagentTask, 0, len(asks))
+	seen := make(map[string]bool, len(asks))
+	for _, ask := range asks {
+		id := ask.ID
 		if seen[id] {
 			continue
 		}
@@ -159,6 +190,7 @@ func namedAgents(sessionTranscript string, ids []string, running []subagentTask)
 		default:
 			task = subagentTask{ID: id}
 		}
+		task.EngineModel = ask.Model
 		named = append(named, task)
 	}
 	return named

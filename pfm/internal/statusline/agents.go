@@ -92,7 +92,8 @@ type AgentSpend struct {
 
 // Agents is the one door to a session's sub-agents, read from the session
 // transcript's path: with no ids every running agent, with ids exactly the
-// agents they name (namedAgents), each transcript folded from its scan
+// agents they name (namedAgents), each id alone or as id=model, the model the
+// caller's engine knows it by (agentAsks), each transcript folded from its scan
 // checkpoint, so a call per refresh costs one process for all rows. A path
 // that names no session, or a subagents directory that cannot be listed, is
 // the error; an id that cannot name an agent's file is answered absent; a
@@ -120,7 +121,7 @@ func Agents(sessionTranscript string, ids []string, runtime Runtime) (AgentsRepo
 		live[task.ID] = true
 	}
 	if len(ids) > 0 {
-		tasks = namedAgents(sessionTranscript, ids, tasks)
+		tasks = namedAgents(sessionTranscript, agentAsks(ids, runtime.Warn), tasks)
 	}
 	report.Agents = append(report.Agents, agentFacts(runtime, report.SessionID, sessionTranscript, tasks, live)...)
 	return report, nil
@@ -144,12 +145,15 @@ func agentFacts(
 	facts := make([]AgentFacts, 0, len(tasks))
 	for _, task := range tasks {
 		if !agentIDPattern.MatchString(task.ID) {
-			facts = append(facts, unnamableAgentFacts(task.ID))
+			facts = append(facts, unnamableAgentFacts(task))
 			continue
 		}
 		read := *tree.read(task.ID)
-		if read.model != "" { // the model its calls went to; the spawn model is an alias or absent
+		switch {
+		case read.model != "": // the model its calls went to; the spawn model is an alias or absent
 			task.Model = read.model
+		case task.EngineModel != "": // the engine's id names the version a spawn alias leaves out
+			task.Model = task.EngineModel
 		}
 		read.nest = tree.nesting(task.ID)
 		read.spend.add(tree.nestedSpend(task.ID))
@@ -174,11 +178,13 @@ func agentFacts(
 	return facts
 }
 
-// unnamableAgentFacts is the facts of an id that names no file of the
-// subagents directory: absent, its counts unknown, looked for nowhere.
-func unnamableAgentFacts(id string) AgentFacts {
+// unnamableAgentFacts is the facts of a task whose id names no file of the
+// subagents directory: absent, its counts unknown, looked for nowhere, its
+// model the one its engine named.
+func unnamableAgentFacts(task subagentTask) AgentFacts {
+	id := task.ID
 	facts := AgentFacts{
-		ID: id, CacheHit: -1, CacheLifetime: true, Absent: true,
+		ID: id, Model: task.EngineModel, CacheHit: -1, CacheLifetime: true, Absent: true,
 		Error: fmt.Sprintf("agent id %q names no sub-agent transcript (letters, digits, _ and -)", id),
 	}
 	facts.Text = newAgentText(&facts)

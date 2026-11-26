@@ -56,23 +56,23 @@ export const ANSWER = {
     {
       id: 'a1', model: 'claude-opus-9', effort: 'medium', tools: 40, toolErrors: 2, compactions: 1, cacheHit: 94, cacheLifetime: true, context: 170_000, contextWindow: 0,
       lastActivity: NOW - 4_000, nested: { total: 3, working: 1, unknown: 0 }, spend: SPEND,
-      text: { glyph: '◆', family: 'opus', effortBar: '▰▰', context: '170.0K', in: '2.0M', out: '24.3K', usd: '$3.41' },
+      text: { glyph: '◆', label: 'Opus 9', effortBar: '▰▰', context: '170.0K', in: '2.0M', out: '24.3K', usd: '$3.41' },
     },
     {
       id: 'a2', model: 'claude-sonnet-9', effort: 'high', tools: 1, toolErrors: 0, compactions: 0, cacheHit: 31, cacheLifetime: true, context: 172_000, contextWindow: 0,
       lastActivity: NOW - 200_000, nested: { total: 0, working: 0, unknown: 0 },
       spend: { ...SPEND, usd: 12.5, in: 812_000, out: 9_300, tools: 1, advisorUsd: 0.3, floor: true, ledger: false, apiEquivalent: true },
-      text: { glyph: '◇', family: 'sonnet', effortBar: '▰▰▰', context: '172.0K', in: '812.0K', out: '9.3K', usd: '$12.50' },
+      text: { glyph: '◇', label: 'Sonnet 9', effortBar: '▰▰▰', context: '172.0K', in: '812.0K', out: '9.3K', usd: '$12.50' },
     },
     {
       id: 'a3', model: 'claude-haiku-9', effort: '', tools: 0, toolErrors: 0, compactions: 0, cacheHit: -1, cacheLifetime: true, context: 0, contextWindow: 0,
       lastActivity: 0, nested: { total: 0, working: 0, unknown: 0 }, spend: null, error: 'open agent-a3.jsonl: permission denied',
-      text: { glyph: '○', family: 'haiku', effortBar: '', context: '0', in: '', out: '', usd: '' },
+      text: { glyph: '○', label: 'Haiku 9', effortBar: '', context: '0', in: '', out: '', usd: '' },
     },
     {
       id: 'a4', model: '', effort: '', tools: 0, toolErrors: 0, compactions: 0, cacheHit: -1, cacheLifetime: true, context: 0, contextWindow: 0,
       lastActivity: 0, nested: { total: 0, working: 0, unknown: 0 }, spend: null, error: 'open agent-a4.jsonl: no such file or directory', absent: true,
-      text: { glyph: '', family: '', effortBar: '', context: '0', in: '', out: '', usd: '' },
+      text: { glyph: '', label: '', effortBar: '', context: '0', in: '', out: '', usd: '' },
     },
   ],
   look: LOOK,

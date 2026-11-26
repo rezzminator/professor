@@ -9,13 +9,11 @@ import (
 	"os"
 	"slices"
 	"strconv"
-	"strings"
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
 // modelSegment is the main line's model block: the model's symbol and name,
@@ -298,39 +296,4 @@ func clipForWarn(text string) string {
 		return string(runes[:80]) + "…"
 	}
 	return text
-}
-
-// modelVersion is the model's id as the price table keys it (a gateway asset
-// path, Bedrock prefix and context-window tag dropped), without the vendor
-// prefix: claude-opus-5-5[1m] → opus-5-5, gw:catalog/claude-opus-5 → opus-5.
-func modelVersion(model string) string {
-	if id, ok := pricing.NormalizeID(model); ok {
-		model = id
-	}
-	model = strings.TrimPrefix(strings.TrimSpace(model), "claude-")
-	if cut := strings.IndexByte(model, '['); cut >= 0 {
-		model = model[:cut]
-	}
-	return model
-}
-
-// modelFamily is the model's family alone: claude-opus-5-5[1m] → opus. A gpt-
-// id names its tier last and its version first, so it renders tier-version:
-// gpt-6-sol → sol-6, gpt-5.6-terra → terra-5.6; one with no tier renders
-// whole, gpt-6 → gpt-6. The gateway's priority-tier suffix is no tier and
-// drops like the window tag: gpt-6-sol-fast → sol-6, gpt-5.5-fast → gpt-5.5.
-func modelFamily(model string) string {
-	model = modelVersion(model)
-	if strings.HasPrefix(model, "gpt-") {
-		model = strings.TrimSuffix(model, "-fast")
-		rest := strings.TrimPrefix(model, "gpt-")
-		if cut := strings.LastIndexByte(rest, '-'); cut > 0 && cut < len(rest)-1 {
-			return rest[cut+1:] + "-" + rest[:cut]
-		}
-		return model
-	}
-	if cut := strings.IndexByte(model, '-'); cut > 0 {
-		model = model[:cut]
-	}
-	return model
 }

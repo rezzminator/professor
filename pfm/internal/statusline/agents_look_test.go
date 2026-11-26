@@ -21,7 +21,7 @@ func TestNewAgentText(t *testing.T) {
 				Spend: &AgentSpend{USD: 1.235, USDKnown: true, In: 3_100_000, Out: 42_000},
 			},
 			want: AgentText{
-				Glyph: "◆", Family: "opus", EffortBar: "▰▰▰", Context: "69.1K",
+				Glyph: "◆", Label: "Opus 5.5", EffortBar: "▰▰▰", Context: "69.1K",
 				In: "3.1M", Out: "42.0K", USD: "$1.24",
 			},
 		},
@@ -33,7 +33,17 @@ func TestNewAgentText(t *testing.T) {
 		{
 			name:  "an effort outside the five has no bar; no spend leaves no counts",
 			facts: AgentFacts{Model: "claude-opus-5-5", Effort: "auto"},
-			want:  AgentText{Glyph: "◆", Family: "opus", Context: "0"},
+			want:  AgentText{Glyph: "◆", Label: "Opus 5.5", Context: "0"},
+		},
+		{
+			name:  "a fable agent's label carries its version, a window tag dropped",
+			facts: AgentFacts{Model: "claude-fable-5-2[1m]", Effort: "medium"},
+			want:  AgentText{Glyph: "✦", Label: "Fable 5.2", EffortBar: "▰▰", Context: "0"},
+		},
+		{
+			name:  "a spawn alias names its family alone",
+			facts: AgentFacts{Model: "sonnet"},
+			want:  AgentText{Glyph: "◇", Label: "Sonnet", Context: "0"},
 		},
 	}
 	for _, tc := range cases {

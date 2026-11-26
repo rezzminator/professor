@@ -14,13 +14,14 @@ const ESC = String.fromCharCode(0x1b);
 const door = (...ids: string[]) => ['pfm', 'statusline', '--agents', TRANSCRIPT, ...ids];
 const LOGS = '/u/.local/state/professor/logs';
 const IDS = AGENTS.map((agent) => agent.id);
-const DOOR = door(...IDS);
+/** Each agent of the list with the model its props name; the unstarted one names none. */
+const DOOR = door('a1=claude-opus-9', 'a2=claude-sonnet-9', 'a3=claude-haiku-9', 'a4');
 const ok = (answer: unknown): Run => ({ exitCode: 0, stdout: `${JSON.stringify(answer)}\n`, stderr: '' });
 
 // The planner's row alone, unbounded: before pfm answers, with its facts, and with the cause of their absence.
-const UNANSWERED = ' ▱▱▱▱▱▱▱▱ ······   +4.5K  17% 171.9K/1.0M │ planner │ claude-opus-9·medium │ running 12m04s │ Σ … │ 💾5m✓3m08s … │ Map the parser › Reading lexer.go';
-const ANSWERED = '1/3 ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆ opus·▰▰ medium │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools │ 💾5m✓3m08s 94% │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go';
-const refused = (cause: string) => ` ▱▱▱▱▱▱▱▱ ······   +4.5K  17% 171.9K/1.0M │ planner │ claude-opus-9·medium │ running 12m04s │ $0.46 own │ 💾5m✓3m08s ?% │ pfm ✗ ${cause} │ Map the parser › Reading lexer.go`;
+const UNANSWERED = ' ▱▱▱▱▱▱▱▱ ······   +4.5K  17% 171.9K/1.0M │ planner │ medium │ running 12m04s │ Σ … │ 💾5m✓3m08s … │ Map the parser › Reading lexer.go';
+const ANSWERED = '1/3 ▰▱▱▱▱▱▱▱ ••••••   +4.5K  17% 171.9K/1.0M │ planner │ ◆ Opus 9·▰▰ medium │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools │ 💾5m✓3m08s 94% │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go';
+const refused = (cause: string) => ` ▱▱▱▱▱▱▱▱ ······   +4.5K  17% 171.9K/1.0M │ planner │ medium │ running 12m04s │ $0.46 own │ 💾5m✓3m08s ?% │ pfm ✗ ${cause} │ Map the parser › Reading lexer.go`;
 
 async function until(what: string, met: () => boolean): Promise<void> {
   for (let turn = 0; turn < 200; turn += 1) {
@@ -160,7 +161,7 @@ describe('the agent list', () => {
     eng.clock.now = NOW + 8_000;
     await eng.draw(PLANNER, ['a1'], undefined);
     await until('the answer redraws the rows', () => eng.redraws.length === 3);
-    expect(eng.doorRuns).toEqual([door('a1'), door('a1'), door('a1')]);
+    expect(eng.doorRuns).toEqual([door('a1=claude-opus-9'), door('a1=claude-opus-9'), door('a1=claude-opus-9')]);
     expect(await eng.rows()).toEqual([
       { dir: LOGS, file: 'warnings.jsonl', row: { plugin: 'professor', level: 'warning', event: 'door-failed', msg: 'professor: pfm\'s agent facts failed: not on PATH; the rows show the engine\'s own fields and the cause', where: 'hooks/professor.ts#ask', session: 'sess-1', detail: { error: 'not on PATH' } } },
       { dir: LOGS, file: 'info.jsonl', row: { plugin: 'professor', level: 'info', event: 'door-answers', msg: 'professor: pfm answers again; the rows carry its facts', where: 'hooks/professor.ts#ask', session: 'sess-1' } },
@@ -177,7 +178,7 @@ describe('the agent list', () => {
     });
     expect(plain(await eng.draw(PLANNER, ['a1'], undefined))).toBe(UNANSWERED);
     expect(plain(await eng.draw(PLANNER, ['a1'], undefined))).toBe(ANSWERED);
-    expect(eng.doorRuns).toEqual([door('a1'), door('a1')]);
+    expect(eng.doorRuns).toEqual([door('a1=claude-opus-9'), door('a1=claude-opus-9')]);
     expect(await eng.rows()).toEqual([]);
   });
 
@@ -190,7 +191,7 @@ describe('the agent list', () => {
   it('asks pfm for the agent whose row is drawn though the list does not name it yet', async () => {
     const eng = engine();
     await eng.draw(PLANNER, ['a2'], undefined);
-    expect(eng.doorRuns).toEqual([door('a2', 'a1')]);
+    expect(eng.doorRuns).toEqual([door('a2', 'a1=claude-opus-9')]);
   });
 
   it('redraws the rows each second while an agent runs, and stops once no row is asked for', async () => {

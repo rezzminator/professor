@@ -17,9 +17,12 @@ import (
 // (runningAgents): its id, the model it was spawned with ("" when it runs on
 // its definition's or the session's) and its start.
 type subagentTask struct {
-	ID        string
-	Model     string
-	StartTime int64 // Unix milliseconds
+	ID    string
+	Model string
+	// EngineModel is the model the caller's engine names the agent by
+	// (agentAsks): its facts' model when its transcript names none.
+	EngineModel string
+	StartTime   int64 // Unix milliseconds
 }
 
 // agentActivity is what a sub-agent's own transcript, agent-<id>.jsonl, says. cacheHit is -1

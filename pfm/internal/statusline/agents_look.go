@@ -67,12 +67,13 @@ type AgentsTone struct {
 }
 
 // AgentText is one agent's facts in the main line's units and symbols:
-// Glyph the model family's one-cell symbol, Family its short name, EffortBar
+// Glyph the model family's one-cell symbol, Label its name as the main line
+// writes it (modelLabel: Opus 5.5), EffortBar
 // the effort's filled bar ("" for a level outside the five), Context, In and
 // Out token counts as the main line writes them (12.5K), USD two decimals.
 type AgentText struct {
 	Glyph     string `json:"glyph"`
-	Family    string `json:"family"`
+	Label     string `json:"label"`
 	EffortBar string `json:"effortBar"`
 	Context   string `json:"context"`
 	In        string `json:"in"`
@@ -112,7 +113,7 @@ func newAgentText(facts *AgentFacts) AgentText {
 	_, bar := modelglyph.EffortBar(facts.Effort)
 	text := AgentText{EffortBar: bar, Context: formatContextTokens(facts.Context)}
 	if facts.Model != "" {
-		text.Glyph, text.Family = modelglyph.Symbol(facts.Model), modelFamily(facts.Model)
+		text.Glyph, text.Label = modelglyph.Symbol(facts.Model), modelLabel(facts.Model)
 	}
 	if facts.Spend != nil {
 		text.In, text.Out = formatContextTokens(facts.Spend.In), formatContextTokens(facts.Spend.Out)

@@ -34,14 +34,14 @@ func runStatuslineWithRuntime(
 	env = defaultEnv(env)
 	flags := cli.NewFlagSet(
 		"statusline",
-		"usage: pfm statusline [--refresh-gpt | --agents TRANSCRIPT [AGENT-ID...]]",
+		"usage: pfm statusline [--refresh-gpt | --agents TRANSCRIPT [AGENT-ID[=MODEL]...]]",
 		stderr,
 	)
 	refreshCodex := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
 	agents := flags.String(
 		"agents",
 		"",
-		"print the sub-agents of the session TRANSCRIPT names, as JSON: the running ones, or each AGENT-ID named after it",
+		"print the session TRANSCRIPT's sub-agents as JSON: the running ones, or each AGENT-ID[=MODEL] named after it",
 	)
 	pacedKey := flags.String("paced", "", "internal: run the paced render worker of one chat key")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
@@ -107,7 +107,7 @@ func runStatuslineWithRuntime(
 	return 0
 }
 
-// runStatuslineAgents is `pfm statusline --agents TRANSCRIPT [AGENT-ID...]`,
+// runStatuslineAgents is `pfm statusline --agents TRANSCRIPT [AGENT-ID[=MODEL]...]`,
 // the door the professor plugin's sub-agent row reads, for the running agents
 // or exactly the ids named: one JSON line on stdout, exit 0; a
 // failure prints nothing on stdout, its cause on stderr, and exits 1, so it

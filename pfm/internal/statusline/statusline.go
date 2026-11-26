@@ -26,6 +26,7 @@
 //   - ledger_spend.go: a session's price from the cost ledger.
 //   - scan_checkpoint.go: checkpoints that resume the whole-transcript folds.
 //   - model_segment.go: the model and effort block.
+//   - model_label.go: a model's names from its id: modelLabel (the agent row's), modelFamily, modelVersion.
 //   - session_effort.go: RecordSession and ReadSession, the effort the main line last showed.
 //   - palette.go: the 256-colour palette the main line draws in, handed to the agent row through agents_look.go.
 //   - agents.go: Agents, every running sub-agent's facts in one read, the door of `pfm statusline --agents`.

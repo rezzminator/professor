@@ -65,7 +65,7 @@ func TestAgentFactsSpendCoversTheWholeTree(t *testing.T) {
 			name:        "a lone agent: its own two responses, the repeated one once",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": ""},
-			want:        "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want:        "Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name: "a streamed response counts its last line, the final output",
@@ -75,7 +75,7 @@ func TestAgentFactsSpendCoversTheWholeTree(t *testing.T) {
 				turnEnded,
 			}},
 			parents: map[string]string{"p": "", "c1": "p"},
-			want:    "0/1│Σ$0.01/3.0K/135/2│opus│1 error│💾94%│⟲1",
+			want:    "0/1│Σ$0.01/3.0K/135/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name: "a child and a grandchild add in",
@@ -83,19 +83,19 @@ func TestAgentFactsSpendCoversTheWholeTree(t *testing.T) {
 				"p": agentTranscriptLines, "c1": {childResponse, turnEnded}, "g1": {grandchildResponse, turnEnded},
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
-			want:    "0/2│Σ$8.01/1.0M/135/2│opus│1 error│💾94%│⟲1",
+			want:    "0/2│Σ$8.01/1.0M/135/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a model the table cannot price leaves a floor",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {unpricedResponse, turnEnded}},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "0/1│Σ$0.01/2.5K/85/2+?│opus│1 error│💾94%│⟲1",
+			want:        "0/1│Σ$0.01/2.5K/85/2+?│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a child transcript that cannot be read leaves a floor and its cause",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "0/1│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1",
+			want:        "0/1│Σ$0.01/2.0K/35/2+?│Opus 5.5│1 error│💾94%│⟲1",
 			warn:        "statusline: agents: p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory\n",
 		},
 		{
@@ -105,7 +105,7 @@ func TestAgentFactsSpendCoversTheWholeTree(t *testing.T) {
 			},
 			parents:  map[string]string{"p": "", "c1": "p", "c2": "p"},
 			tornMeta: []string{"c1"},
-			want:     "0/1 (1 unread)│Σ$0.01/3.0K/135/2+?│opus│1 error│💾94%│⟲1",
+			want:     "0/1 (1 unread)│Σ$0.01/3.0K/135/2+?│Opus 5.5│1 error│💾94%│⟲1",
 			warn:     "statusline: agents: p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n",
 		},
 	}
@@ -137,7 +137,7 @@ func TestAgentFactsSpendCoversTheWholeTree(t *testing.T) {
 func TestAgentFactsSpendWithoutPrices(t *testing.T) {
 	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""})
 	rows, _ := factLinesFixture(t, agentsFixture{session: session, noPrices: true}, parentTask)
-	if content := rows["p"]; content != "Σ$?/2.0K/35/2│opus│1 error│💾94%│⟲1" {
+	if content := rows["p"]; content != "Σ$?/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1" {
 		t.Fatalf("facts = %q, want the tokens counted and the dollars $?", content)
 	}
 }
@@ -390,9 +390,9 @@ func TestAgentFactsPricesRowsFromTheLedger(t *testing.T) {
 		ledgerAgentSecond,
 	)
 	for id, want := range map[string]string{
-		ledgerAgentRoot:   "1/1│Σ$0.95/740.0K/3.2K/4│opus│1 error│💾94%│⟲1",
-		ledgerAgentFirst:  "Σ$0.08/224.3K/1.3K/2│opus│1 error│💾94%│⟲1",
-		ledgerAgentSecond: "Σ$0.09/224.5K/1.4K/?│opus│💾!", // no transcript: its context is unknown
+		ledgerAgentRoot:   "1/1│Σ$0.95/740.0K/3.2K/4│Opus 5.5│1 error│💾94%│⟲1",
+		ledgerAgentFirst:  "Σ$0.08/224.3K/1.3K/2│Opus 5.5│1 error│💾94%│⟲1",
+		ledgerAgentSecond: "Σ$0.09/224.5K/1.4K/?│Opus 5.5│💾!", // no transcript: its context is unknown
 	} {
 		if rows[id] != want {
 			t.Errorf("row %s = %q, want %q", id, rows[id], want)
@@ -445,12 +445,12 @@ func TestAgentFactsLedgerRowFallsBackAndKeepsTheAdvisor(t *testing.T) {
 		map[string][]string{"fresh": agentTranscriptLines, "adv1": {advisorResponse("claude-opus-5-5")}},
 		map[string]string{"fresh": "", "adv1": ""})
 	rows := ledgerFactLines(t, dir, ledgerSampleSession, session, "fresh", "adv1")
-	if want := "Σ$0.01/2.0K/35/2"; rows["fresh"] != "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1" {
+	if want := "Σ$0.01/2.0K/35/2"; rows["fresh"] != "Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1" {
 		t.Errorf("row without ledger rows = %q, want transcript pricing %q", rows["fresh"], want)
 	}
 	// the gauge reads the transcript's call, not the payload's 1.0K:
 	// its last executor iteration (2 + 87829 + 890), never the top level's sum of both
-	if want := "Σ$1.00/10/20/0 adv $0.48"; rows["adv1"] != "Σ$1.00/10/20/0 adv $0.48│sonnet│💾99%" {
+	if want := "Σ$1.00/10/20/0 adv $0.48"; rows["adv1"] != "Σ$1.00/10/20/0 adv $0.48│Sonnet 5.5│💾99%" {
 		t.Errorf("ledger-priced row = %q, want %q", rows["adv1"], want)
 	}
 }
@@ -467,7 +467,7 @@ func TestAgentFactsLedgerRowsWithoutCostKeepTheTranscriptPrice(t *testing.T) {
 	}
 	session := nestedSession(t, map[string][]string{"fresh": agentTranscriptLines}, map[string]string{"fresh": ""})
 	got := ledgerFactLines(t, dir, ledgerSampleSession, session, "fresh")["fresh"]
-	if want := "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1"; got != want {
+	if want := "Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1"; got != want {
 		t.Errorf("row whose ledger rows carry no cost = %q, want %q", got, want)
 	}
 }
@@ -484,7 +484,7 @@ func TestAgentFactsCostlessLedgerRowsStandInForAnUnreadTranscript(t *testing.T) 
 	}
 	session := nestedSession(t, map[string][]string{"fresh": agentTranscriptLines}, map[string]string{"fresh": ""})
 	got := ledgerFactLines(t, dir, ledgerSampleSession, session, "ghost")["ghost"]
-	if want := "Σ$?/10/20/?"; got != "Σ$?/10/20/?│opus│💾!" {
+	if want := "Σ$?/10/20/?"; got != "Σ$?/10/20/?│Opus 5.5│💾!" {
 		t.Errorf("row with costless ledger rows and no transcript = %q, want %q", got, want)
 	}
 }
@@ -552,7 +552,7 @@ func TestAgentFactsReadsTheLedgerUnderTheInjectedEnv(t *testing.T) {
 		map[string][]string{ledgerAgentRoot: agentTranscriptLines},
 		map[string]string{ledgerAgentRoot: ""})
 	rows := ledgerFactLines(t, ledgerDir, ledgerSampleSession, session, ledgerAgentRoot)
-	if want := "$0.95/740.0K/3.2K/"; rows[ledgerAgentRoot] != "Σ$0.95/740.0K/3.2K/2│opus│1 error│💾94%│⟲1" {
+	if want := "$0.95/740.0K/3.2K/"; rows[ledgerAgentRoot] != "Σ$0.95/740.0K/3.2K/2│Opus 5.5│1 error│💾94%│⟲1" {
 		t.Fatalf("row = %q, want the injected ledger's %q", rows[ledgerAgentRoot], want)
 	}
 }
@@ -591,7 +591,7 @@ func TestRenderGatewayZeroLedgerWithNativeChild(t *testing.T) {
 	if rows["p"] != "1/1│Σ$0.31/151.0K/10.1K/1 API-eq│sol-6│💾∅ 33%" {
 		t.Fatalf("gateway parent lost price/native child: %q", rows["p"])
 	}
-	if rows["c"] != "Σ$0.00/1.0K/100/1│sonnet│💾–" {
+	if rows["c"] != "Σ$0.00/1.0K/100/1│Sonnet 5.5│💾–" {
 		t.Fatalf("native child changed: %q", rows["c"])
 	}
 }

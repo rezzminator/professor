@@ -78,7 +78,7 @@ func TestAgentFactsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "g1": "c3", "g2": "c1"},
 			running: []string{"c2", "g1"},
-			want:    "2/5│Σ$0.01/2.0K/35/3│opus│1 error│💾94%│⟲1",
+			want:    "2/5│Σ$0.01/2.0K/35/3│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name: "only a grandchild works: it counts",
@@ -87,7 +87,7 @@ func TestAgentFactsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
 			running: []string{"g1"},
-			want:    "1/2│Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want:    "1/2│Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name: "every agent below finished: none counts",
@@ -97,7 +97,7 @@ func TestAgentFactsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			running: []string{"c1", "c2"}, // listed a moment longer than their turns: the tails decide
-			want:    "0/2│Σ$0.01/2.0K/35/3│opus│1 error│💾94%│⟲1",
+			want:    "0/2│Σ$0.01/2.0K/35/3│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name: "a handback result ends the turn: the agents that handed back are finished",
@@ -107,7 +107,7 @@ func TestAgentFactsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "g1": "c1"},
 			running: []string{"c1", "c2", "g1"},
-			want:    "0/3│Σ$0.01/2.0K/35/5│opus│1 error│💾94%│⟲1",
+			want:    "0/3│Σ$0.01/2.0K/35/5│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name: "a result Claude Code does not mark as ending the turn is still working",
@@ -116,28 +116,28 @@ func TestAgentFactsNestedAgents(t *testing.T) {
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
 			running: []string{"c1", "c2"},
-			want:    "1/2│Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want:    "1/2│Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a reply still streaming is working",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {turnStreaming}},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			want:        "1/1│Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want:        "1/1│Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a child spawned but not yet writing is working",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {}},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			want:        "1/1│Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want:        "1/1│Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 		{
 			name:        "a child whose transcript cannot be read is unread, never finished",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
 			running:     []string{"c1"},
-			want:        "0/1 (1 unread)│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1",
+			want:        "0/1 (1 unread)│Σ$0.01/2.0K/35/2+?│Opus 5.5│1 error│💾94%│⟲1",
 			warn:        "statusline: agents: p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory",
 		},
 		{
@@ -146,14 +146,14 @@ func TestAgentFactsNestedAgents(t *testing.T) {
 			name:        "a child Claude Code no longer lists is finished, even when its transcript cannot be read",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			want:        "0/1│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1",
+			want:        "0/1│Σ$0.01/2.0K/35/2+?│Opus 5.5│1 error│💾94%│⟲1",
 			warn:        "statusline: agents: p: nested agents: open sub-agent transcript {dir}/session/subagents/agent-c1.jsonl: open {dir}/session/subagents/agent-c1.jsonl: no such file or directory",
 		},
 		{
 			name:        "an agent that spawned none has no nesting segment, the row opens on the gauge",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "other": {turnToolCall}},
 			parents:     map[string]string{"p": "", "other": ""},
-			want:        "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want:        "Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
 		},
 	}
 	for _, tc := range cases {
@@ -186,7 +186,7 @@ func TestAgentFactsNestedCycleTerminates(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := factsOfOne(t, session, parentTask)
-	if got != "Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1" {
+	if got != "Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1" {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
 	aRow, _ := factLineOf(t, session, "a", subagentNow,
@@ -204,7 +204,7 @@ func TestAgentFactsNestedLongTail(t *testing.T) {
 		"p": agentTranscriptLines, "c1": {turnToolCall, long, `{"type":"assist`},
 	}, map[string]string{"p": "", "c1": "p"})
 	got, warned := factLineOf(t, session, "p", subagentNow, parentTask, agentTask("c1", "running"))
-	if got != "0/1│Σ$0.01/2.0K/35/3│opus│1 error│💾94%│⟲1" ||
+	if got != "0/1│Σ$0.01/2.0K/35/3│Opus 5.5│1 error│💾94%│⟲1" ||
 		warned != "" {
 		t.Fatalf("content = %q warn = %q, want 0/1", got, warned)
 	}
@@ -220,12 +220,12 @@ func TestAgentFactsNestedTornMetaCostsOnlyItsOwnParent(t *testing.T) {
 		parents     map[string]string
 		want, warn  string
 	}{
-		{"alone", map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""}, "0/0 (1 unread)│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1", "statusline: agents: p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n"},
+		{"alone", map[string][]string{"p": agentTranscriptLines}, map[string]string{"p": ""}, "0/0 (1 unread)│Σ$0.01/2.0K/35/2+?│Opus 5.5│1 error│💾94%│⟲1", "statusline: agents: p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n"},
 		{
 			"beside a readable child",
 			map[string][]string{"p": agentTranscriptLines, "c2": {turnEnded}},
 			map[string]string{"p": "", "c2": "p"},
-			"0/1 (1 unread)│Σ$0.01/2.0K/35/2+?│opus│1 error│💾94%│⟲1",
+			"0/1 (1 unread)│Σ$0.01/2.0K/35/2+?│Opus 5.5│1 error│💾94%│⟲1",
 			"statusline: agents: p: nested agents: parse sub-agent meta {dir}/session/subagents/agent-c1.meta.json: unexpected end of JSON input\n",
 		},
 	} {
@@ -310,7 +310,7 @@ func TestAgentFactsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			parentTask, agentTask("c1", "running"), agentTask("c4", "killed"), killedAtSpawn,
 			agentTask("c2", "running"), agentTask("g1", "running"), agentTask("g2", "running"))
 		got := rows["p"]
-		if got != "4/7│Σ$0.01/54.4K/35/4+?│opus│1 error│💾94%│⟲1" {
+		if got != "4/7│Σ$0.01/54.4K/35/4+?│Opus 5.5│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 4/7 (c1, c2, g1 and g2 work; c3, c4, c5 do not)", got)
 		}
 	})
@@ -323,14 +323,14 @@ func TestAgentFactsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"p": agentTranscriptLines, "c1": {longSilent}, "g1": {longSilent, silentResult},
 		}, parents)
 		got := factLinesOf(t, session, subagentNow, parentTask, agentTask("c1", "running"), agentTask("g1", "running"))["p"]
-		if got != "2/2│Σ$0.01/54.4K/35/2+?│opus│1 error│💾94%│⟲1" {
+		if got != "2/2│Σ$0.01/54.4K/35/2+?│Opus 5.5│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 2/2: c1 and g1 still run", got)
 		}
 		done := nestedSession(t, map[string][]string{
 			"p": agentTranscriptLines, "c1": {longSilent, turnEnded}, "g1": {longSilent, silentResult},
 		}, parents)
 		got = factLinesOf(t, done, subagentNow, parentTask, agentTask("c1", "running"))["p"]
-		if got != "0/2│Σ$0.01/54.4K/35/2+?│opus│1 error│💾94%│⟲1" {
+		if got != "0/2│Σ$0.01/54.4K/35/2+?│Opus 5.5│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 0/2: c1 ended its turn, g1 no longer runs", got)
 		}
 	})
@@ -350,11 +350,11 @@ func TestAgentFactsNestedCountsOnlyAgentsThatWork(t *testing.T) {
 			"c2": {turnToolCall, turnToolResult}, // killed after a tool result nothing answered
 		}, map[string]string{"p": "", "c1": "p", "g1": "c1", "g2": "c1", "c2": "p"})
 		got := factLinesOf(t, session, subagentNow, parentTask)["p"]
-		if got != "0/4│Σ$0.01/2.2K/45/3+?│opus│1 error│💾94%│⟲1" {
+		if got != "0/4│Σ$0.01/2.2K/45/3+?│Opus 5.5│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 0/4: none of the agents below it runs", got)
 		}
 		listed := factLinesOf(t, session, subagentNow, parentTask, agentTask("g1", "running"))["p"]
-		if listed != "1/4│Σ$0.01/2.2K/45/3+?│opus│1 error│💾94%│⟲1" {
+		if listed != "1/4│Σ$0.01/2.2K/45/3+?│Opus 5.5│1 error│💾94%│⟲1" {
 			t.Fatalf("parent row = %q, want 1/4: g1 still runs", listed)
 		}
 	})

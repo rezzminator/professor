@@ -397,11 +397,12 @@ func TestStatuslineAgentsPrintsOneJSONLineOrFails(t *testing.T) {
 			wantStdout: `s1 []`, wantCode: 0,
 		},
 		{
-			name: "a named agent with no transcript on disk", path: filepath.Join(root, "s1.jsonl"), ids: []string{"a1"},
-			wantStdout: `s1 [{"id":"a1","model":"","effort":"","tools":0,"toolErrors":0,"compactions":0,"cacheHit":-1,` +
+			name: "a named agent with no transcript on disk wears the model its engine names", path: filepath.Join(root, "s1.jsonl"),
+			ids: []string{"a1=claude-opus-5-5"},
+			wantStdout: `s1 [{"id":"a1","model":"claude-opus-5-5","effort":"","tools":0,"toolErrors":0,"compactions":0,"cacheHit":-1,` +
 				`"cacheLifetime":true,"context":0,"contextWindow":0,"lastActivity":0,` +
 				`"nested":{"total":0,"working":0,"unknown":0,"error":"list {root}/s1/subagents: open {root}/s1/subagents: no such file or directory"},` +
-				`"spend":null,"text":{"glyph":"","family":"","effortBar":"","context":"0","in":"","out":"","usd":""},` +
+				`"spend":null,"text":{"glyph":"◆","label":"Opus 5.5","effortBar":"","context":"0","in":"","out":"","usd":""},` +
 				`"error":"open sub-agent transcript {root}/s1/subagents/agent-a1.jsonl: open {root}/s1/subagents/agent-a1.jsonl: no such file or directory",` +
 				`"absent":true}]`,
 			wantCode: 0, // its causes go to the runtime's warning stream, not this stderr
@@ -411,7 +412,7 @@ func TestStatuslineAgentsPrintsOneJSONLineOrFails(t *testing.T) {
 			wantStdout: `s1 [{"id":"lead@crew","model":"","effort":"","tools":0,"toolErrors":0,"compactions":0,"cacheHit":-1,` +
 				`"cacheLifetime":true,"context":0,"contextWindow":0,"lastActivity":0,` +
 				`"nested":{"total":0,"working":0,"unknown":0},` +
-				`"spend":null,"text":{"glyph":"","family":"","effortBar":"","context":"0","in":"","out":"","usd":""},` +
+				`"spend":null,"text":{"glyph":"","label":"","effortBar":"","context":"0","in":"","out":"","usd":""},` +
 				`"error":"agent id \"lead@crew\" names no sub-agent transcript (letters, digits, _ and -)",` +
 				`"absent":true}]`,
 			wantCode: 0,

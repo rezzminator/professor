@@ -29,6 +29,7 @@ func TestAgents(t *testing.T) {
 		session func(t *testing.T) string
 		ids     []string
 		want    string // sessionId, then each agent's id and factLine (and "absent"), or the error
+		warn    string // the warnings, compared whole when set
 	}{
 		{
 			name: "no agent running is an empty list",
@@ -45,7 +46,7 @@ func TestAgents(t *testing.T) {
 					"a1": {meta: backgroundMeta, metaAge: 2 * time.Minute, lines: agentTranscriptLines},
 				})
 			},
-			want: "session a1 Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1 a2 Σ$0.00/0/0/0│💾–",
+			want: "session a1 Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1 a2 Σ$0.00/0/0/0│💾–",
 		},
 		{
 			name: "named ids answer exactly those agents, ended or running, in their order, each once",
@@ -57,7 +58,44 @@ func TestAgents(t *testing.T) {
 				})
 			},
 			ids:  []string{"ended", "a1", "ended"},
-			want: "session ended Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1 a1 Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1",
+			want: "session ended Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1 a1 Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
+		},
+		{
+			name: "the engine's model names an agent whose transcript and meta name none, the transcript's wins over it",
+			session: func(t *testing.T) string {
+				return agentDir(t, subagentNow, nil, map[string]fixtureAgent{
+					"a1": {meta: backgroundMeta, metaAge: 2 * time.Minute, lines: agentTranscriptLines},
+					"a2": {meta: backgroundMeta, metaAge: time.Minute, lines: quiet},
+				})
+			},
+			ids:  []string{"a2=claude-opus-5-5", "a1=claude-sonnet-5-5", "a2=claude-haiku-4-5"},
+			want: "session a2 Σ$0.00/0/0/0│Opus 5.5│💾– a1 Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1",
+		},
+		{
+			name: "an engine model of no model id's shape is dropped, the agent still answered",
+			session: func(t *testing.T) string {
+				return agentDir(t, subagentNow, nil, map[string]fixtureAgent{
+					"a2": {meta: backgroundMeta, lines: quiet},
+				})
+			},
+			ids:  []string{"a2=opus 5;rm", "a2="},
+			want: "session a2 Σ$0.00/0/0/0│💾–",
+			warn: `statusline: agents: a2: engine model "opus 5;rm" is no model id (letters, digits and ._:/@[]-); ` +
+				"the agent is asked without it\n",
+		},
+		{
+			name: "an absent agent and an unnamable one wear the engine's model",
+			session: func(t *testing.T) string {
+				return agentDir(
+					t,
+					subagentNow,
+					nil,
+					map[string]fixtureAgent{"a1": {meta: backgroundMeta, lines: quiet}},
+				)
+			},
+			ids: []string{"gone=claude-fable-5-2", "lead@crew=claude-sonnet-5-5"},
+			want: "session gone Σ$?/?/?/?│Fable 5.2│💾! absent lead@crew Σ$?/?/?/?│Sonnet 5.5│💾! absent " +
+				`agent id "lead@crew" names no sub-agent transcript (letters, digits, _ and -)`,
 		},
 		{
 			name: "a named id with no transcript on disk is answered, absent",
@@ -82,7 +120,7 @@ func TestAgents(t *testing.T) {
 			ids: []string{"lead@crew", "a1", "../a1"},
 			want: "session lead@crew Σ$?/?/?/?│💾! absent " +
 				`agent id "lead@crew" names no sub-agent transcript (letters, digits, _ and -) ` +
-				"a1 Σ$0.01/2.0K/35/2│opus│1 error│💾94%│⟲1 ../a1 Σ$?/?/?/?│💾! absent " +
+				"a1 Σ$0.01/2.0K/35/2│Opus 5.5│1 error│💾94%│⟲1 ../a1 Σ$?/?/?/?│💾! absent " +
 				`agent id "../a1" names no sub-agent transcript (letters, digits, _ and -)`,
 		},
 		{
@@ -130,6 +168,9 @@ func TestAgents(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("Agents = %q, want %q (warn %q)", got, tc.want, warn.String())
+			}
+			if tc.warn != "" && warn.String() != tc.warn {
+				t.Fatalf("Agents warned %q, want %q", warn.String(), tc.warn)
 			}
 		})
 	}

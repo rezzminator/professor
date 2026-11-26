@@ -2,6 +2,7 @@ import type { EngineInterface, Register } from 'claude-code';
 import { Door, DOOR_TIMEOUT_MS, doorArgv, readDoorAnswer } from '../src/door';
 import { levelRow, PLUGIN_LOG_HOLD_ROWS, pluginLogDir, PluginLogQueue, runAborted, type PluginLogLevel } from '../src/plugin-log';
 import { drawRow, failureRow, layout, type Layout, type RowAgent } from '../src/row';
+import { clean } from '../src/text';
 
 // Thin adapter: every decision lives in src/. One hook draws the body of each
 // sub-agent's row. Drawing never waits on pfm: a row is drawn from the props
@@ -86,8 +87,8 @@ function doorCause(error: unknown): string {
   return said.startsWith(`${PLUGIN}: `) ? said.slice(PLUGIN.length + 2) : said;
 }
 
-// Starts the one door call for the whole list when one is due, for every agent of `ids`, running or not; its answer,
-// or its failure, redraws every row.
+// Starts the one door call for the whole list when one is due, for every agent of `ids`, running or not, each with the
+// model its last props name; its answer, or its failure, redraws every row.
 function ask($: EngineInterface, state: State, now: number, ids: readonly string[]): void {
   if (!state.door.begin(now)) return;
   state.asking = (async () => {
@@ -95,7 +96,11 @@ function ask($: EngineInterface, state: State, now: number, ids: readonly string
       const info = await $.session.info();
       state.sessionCwd = await $.session.cwd();
       const failed = state.door.state.state === 'failed';
-      state.door.land(readDoorAnswer(await $.process.run(doorArgv(info.transcriptPath, ids), { timeoutMs: DOOR_TIMEOUT_MS })));
+      const asks = ids.map((id) => {
+        const agent = state.rows.get(id);
+        return { id, model: clean(agent?.lastRequest?.model ?? agent?.model ?? '') };
+      });
+      state.door.land(readDoorAnswer(await $.process.run(doorArgv(info.transcriptPath, asks), { timeoutMs: DOOR_TIMEOUT_MS })));
       if (failed) { state.reported.clear(); plog($, state, 'info', 'door-answers', `${PLUGIN}: pfm answers again; the rows carry its facts`, 'ask'); }
     } catch (error) {
       const cause = doorCause(error);

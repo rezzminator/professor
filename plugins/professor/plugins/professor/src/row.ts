@@ -17,7 +17,7 @@
 // The count of the agents below opens the row, in a column as wide as the
 // list's widest count, none where no row has one: a row never gives it up.
 
-import type { DoorContextForm, DoorFacts, DoorGauge, DoorLook, DoorPulse, DoorState } from './door';
+import type { DoorContextForm, DoorFacts, DoorGauge, DoorLook, DoorModel, DoorPulse, DoorState } from './door';
 import { litCells, pulse, type PulseCell } from './pulse';
 import { cells, clean, cut, duration, fit, pad, share, tokens } from './text';
 
@@ -35,14 +35,14 @@ export type RowAgent = {
 /** What pfm's door last said, as the Door class holds it. */
 export type RowPfm = {
   state: DoorState; look: DoorLook | undefined; named: ReadonlySet<string>;
-  facts: (id: string) => DoorFacts | undefined; read: (id: string) => number | undefined;
+  facts: (id: string) => DoorFacts | undefined; read: (id: string) => number | undefined; model: (id: string) => DoorModel | undefined;
 };
 
 /** Everything one drawing reads: every agent that has a row (in the list's order), pfm's answer, the time, the row's width. */
 export type Scene = { agents: readonly RowAgent[]; pfm: RowPfm; now: number; columns: number | undefined; sessionCwd: string | undefined };
 
 type Rank = {
-  who: number; family: boolean; effortWord: boolean; model: boolean;
+  who: number; label: boolean; effortWord: boolean; model: boolean;
   spend: 'words' | 'slash' | 'usd' | 'none'; cache: 'full' | 'left' | 'none';
   /** `'short'`: the flags without their words, `2 err`. */
   flags: 'words' | 'short';
@@ -53,15 +53,15 @@ type Rank = {
   /** `true`: the bar between the parts without the blanks around it. */
   tight: boolean;
 };
-const FULL: Rank = { who: 36, family: true, effortWord: true, model: true, spend: 'words', cache: 'full', flags: 'words', task: 40, pad: true, tight: false };
+const FULL: Rank = { who: 36, label: true, effortWord: true, model: true, spend: 'words', cache: 'full', flags: 'words', task: 40, pad: true, tight: false };
 /**
  * What a list too wide for its rows gives up, one step at a time, in the order every line pfm draws shrinks in: first
  * a shorter spelling of the same facts (slashes for words, a name cut with `…`, the flags' and the effort's words, the
- * family's name beside its glyph), then the padding (the blanks around each bar, then the alignment pad), only then a fact,
+ * model's label beside its glyph), then the padding (the blanks around each bar, then the alignment pad), only then a fact,
  * least missed first. The gauge, who and the state are never given up.
  */
 const GIVE: ReadonlyArray<Partial<Rank>> = [
-  { spend: 'slash' }, { who: 24 }, { flags: 'short' }, { effortWord: false }, { family: false }, { task: 20 }, { who: 12 },
+  { spend: 'slash' }, { who: 24 }, { flags: 'short' }, { effortWord: false }, { label: false }, { task: 20 }, { who: 12 },
   { tight: true }, { pad: false },
   { spend: 'usd' }, { cache: 'left' }, { spend: 'none' }, { cache: 'none' }, { model: false }, { task: 0 },
 ];
@@ -234,16 +234,17 @@ function whoColumn(agent: RowAgent, rank: Rank, paint: Brush): string {
   return `${paint('tokens', named)}${paint('muted', '·')}${paint('label', cut(role, Math.max(1, rank.who - cells(named) - 1)))}`;
 }
 
-function modelColumn(agent: RowAgent, facts: DoorFacts | undefined, rank: Rank, paint: Brush): string {
+/**
+ * The model as pfm names it, its glyph and label, the effort joined: pfm alone names the model, so before its first
+ * answer naming one the column carries the effort alone, never the engine's raw id.
+ */
+function modelColumn(agent: RowAgent, facts: DoorFacts | undefined, named: DoorModel | undefined, rank: Rank, paint: Brush): string {
   if (!rank.model) return '';
-  const model = clean(agent.lastRequest?.model ?? agent.model ?? '');
-  const glyph = facts?.text.glyph ?? '';
-  const family = facts?.text.family || model;
-  let out = glyph !== '' && (!rank.family || family === '') ? paint('model', glyph) : paint('model', [glyph, family].filter((part) => part !== '').join(' '));
+  let out = paint('model', [named?.glyph ?? '', rank.label ? named?.label ?? '' : ''].filter((part) => part !== '').join(' '));
   const level = facts && facts.effort !== '' ? facts.effort : clean(String(agent.lastRequest?.effort ?? agent.effort ?? ''));
   const bar = facts && facts.effort !== '' ? facts.text.effortBar : '';
   const effort = [paint.effort(level, bar), rank.effortWord || bar === '' ? paint('effort', level) : ''].filter((part) => part !== '').join(' ');
-  // The main status line's joint: `◆ opus·▰▰ medium`.
+  // The main status line's joint: `◆ Opus 5.5·▰▰ medium`.
   if (effort !== '') out += `${out === '' ? '' : paint('muted', '·')}${effort}`;
   return out;
 }
@@ -384,7 +385,7 @@ function draw(agent: RowAgent, scene: Scene, rank: Rank, form: DoorContextForm, 
   const doing = clean(agent.label);
   return {
     columns: [
-      pad(nestedText(state.facts, paint), tree.below) + pulseColumn(agent, state.facts, form, 2 * Math.max(0, ...depths.values()) - indent, paint), whoColumn(agent, rank, paint), modelColumn(agent, state.facts, rank, paint),
+      pad(nestedText(state.facts, paint), tree.below) + pulseColumn(agent, state.facts, form, 2 * Math.max(0, ...depths.values()) - indent, paint), whoColumn(agent, rank, paint), modelColumn(agent, state.facts, scene.pfm.model(agent.id), rank, paint),
       stateColumn(agent, state.facts, scene.now, paint), spendColumn(agent, state, rank, paint), cacheColumn(agent, state, rank, scene.now, paint),
     ],
     tail: tail(agent, state, scene, rank, paint),

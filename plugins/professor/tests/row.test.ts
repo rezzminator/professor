@@ -34,17 +34,17 @@ const alone = (agent: Partial<RowAgent>, facts: Record<string, unknown>, bar = B
 describe('the list', () => {
   // A row's `columns` are the terminal's less six cells: the footer's padding each side and the engine's lead.
   it.each<[string, () => Door, number, string[]]>([
-    ['the terminal is wide', () => answered(), 252, [
-      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
-      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the door › Running go test ./internal/...',
-      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
-      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
+    ['the terminal is wide', () => answered(), 254, [
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ Opus 9·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ Sonnet 9·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the door › Running go test ./internal/...',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ Haiku 9           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                     │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
     ]],
     ['no row has agents below it', () => answered({ nested: { total: 0, working: 0, unknown: 0 } }), 252, [
-      ' ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
-      ' ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the door › Running go test ./internal/...',
-      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
-      ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
+      ' ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ Opus 9·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
+      ' ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ Sonnet 9·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ Build the door › Running go test ./internal/...',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ Haiku 9           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                     │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
     ]],
     ['the list spells the spend in slashes, the flags and the model short', () => answered(), 200, [
       '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆·▰▰  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 err │ ⟲1 │ Map the parser › Reading lexer.go',
@@ -101,10 +101,10 @@ describe('the list', () => {
       '    ▱▱▱▱▱▱▱▱     ?%│general-pur…│pending│Wait for the build',
     ]],
     ['pfm has not answered yet', () => new Door(), 200, [
-      ' ▱▱▱▱▱▱▱▱ ········   +4.5K  17% 171.9K/1.0M   │ planner              │ claude-opus-9·medium │ running 12m04s │ Σ … │ 💾5m✓3m08s … │ Map the parser › Reading lexer.go',
-      ' ▱▱▱▱▱▱▱▱ ········    +144  86% 173.0K/200.0K │ door·flights:foreman │ claude-sonnet-9·high │ running 1m01s  │ Σ … │ 💾5m✗1m40s … │ @door │ Build the door › Running go test ./internal/...',
-      ' ▱▱▱▱▱▱▱▱ ······  −22.0K   5%   9.0K/200.0K │ Explore              │ claude-haiku-9       │ done           │ Σ … │ 💾– …        │ Find the callers',
-      ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                      │ pending        │ Σ … │ 💾–          │ Wait for the build',
+      ' ▱▱▱▱▱▱▱▱ ········   +4.5K  17% 171.9K/1.0M   │ planner              │ medium │ running 12m04s │ Σ … │ 💾5m✓3m08s … │ Map the parser › Reading lexer.go',
+      ' ▱▱▱▱▱▱▱▱ ········    +144  86% 173.0K/200.0K │ door·flights:foreman │ high   │ running 1m01s  │ Σ … │ 💾5m✗1m40s … │ @door │ Build the door › Running go test ./internal/...',
+      ' ▱▱▱▱▱▱▱▱ ······  −22.0K   5%   9.0K/200.0K │ Explore              │        │ done           │ Σ … │ 💾– …        │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │        │ pending        │ Σ … │ 💾–          │ Wait for the build',
     ]],
     ['pfm has not answered yet and the terminal is narrow', () => new Door(), 80, [
       ' ▱▱▱▱▱▱▱▱ ········   +4.5K  17% 171.9K/1.0M│planner│running 12m04s',
@@ -113,16 +113,16 @@ describe('the list', () => {
       ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?│general-pur…│pending│Wait for th…',
     ]],
     ['pfm is not there', () => failed('not on PATH'), 200, [
-      ' ▱▱▱▱▱▱▱▱ ········   +4.5K  17% 171.9K/1.0M   │ planner              │ claude-opus-9·medium │ running 12m04s │ $0.46 own  │ 💾5m✓3m08s ?% │ pfm ✗ not on PATH │ Map the parser › Reading lexer.go',
-      ' ▱▱▱▱▱▱▱▱ ········    +144  86% 173.0K/200.0K │ door·flights:foreman │ claude-sonnet-9·high │ running 1m01s  │ $12.50 own │ 💾5m✗1m40s ?% │ pfm ✗ │ Build the door › Running go test ./internal/.…',
-      ' ▱▱▱▱▱▱▱▱ ······  −22.0K   5%   9.0K/200.0K │ Explore              │ claude-haiku-9       │ done           │ $0.02 own  │ 💾– ?%        │ pfm ✗ │ Find the callers',
-      ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                      │ pending        │ $? own     │ 💾–           │ pfm ✗ │ Wait for the build',
+      ' ▱▱▱▱▱▱▱▱ ········   +4.5K  17% 171.9K/1.0M   │ planner              │ medium │ running 12m04s │ $0.46 own  │ 💾5m✓3m08s ?% │ pfm ✗ not on PATH │ Map the parser › Reading lexer.go',
+      ' ▱▱▱▱▱▱▱▱ ········    +144  86% 173.0K/200.0K │ door·flights:foreman │ high   │ running 1m01s  │ $12.50 own │ 💾5m✗1m40s ?% │ @door │ pfm ✗ │ Build the door › Running go test ./internal/...',
+      ' ▱▱▱▱▱▱▱▱ ······  −22.0K   5%   9.0K/200.0K │ Explore              │        │ done           │ $0.02 own  │ 💾– ?%        │ pfm ✗ │ Find the callers',
+      ' ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │        │ pending        │ $? own     │ 💾–           │ pfm ✗ │ Wait for the build',
     ]],
     ['pfm fails after it answered', () => failed('list /c/subagents: permission denied', answered()), 252, [
-      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ pfm ✗ list /c/subagents: permissio… │ Map the parser › Reading lexer.go',
-      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ pfm ✗ │ Build the door › Running go test ./internal/.…',
-      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ │ Find the callers',
-      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ $? own                   │ 💾–                │ pfm ✗ │ Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ Opus 9·▰▰ medium  │ running 12m04s │ Σ $3.41/2.0M/24.3K/57    │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ pfm ✗ list /c/subagents: permiss… │ Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ Sonnet 9·▰▰▰ high │ running 1m01s  │ Σ $12.50+?/812.0K/9.3K/1 │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ pfm ✗ │ Build the door › Running go test ./internal…',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ Haiku 9           │ done           │ Σ $?                     │ 💾– ?%             │ pfm ✗ │ Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                     │ pending        │ $? own                   │ 💾–                │ pfm ✗ │ Wait for the build',
     ]],
   ])('draws every row to the same cells when %s', (_name, pfm, terminal, rows) => {
     const drawn = list(pfm(), terminal - 6);
@@ -146,10 +146,10 @@ describe('the list', () => {
 
   it('draws every row to the same cells when the surface measures no width', () => {
     expect(list(answered(), undefined)).toEqual([
-      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ opus·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
-      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ sonnet·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ Build the door › Running go test ./internal/...',
-      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ haiku           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
-      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                   │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
+      '1/3 ▰▱▱▱▱▱▱▱ ••••••••   +4.5K  17% 171.9K/1.0M   │ planner              │ ◆ Opus 9·▰▰ medium  │ running 12m04s │ Σ $3.41 · 2.0M in · 24.3K out · 57 tools   │ 💾5m✓3m08s 94%     │ 2 errors │ ⟲1 │ Map the parser › Reading lexer.go',
+      '    ▰▰▰▰▰▰▰▱ ●•●●●•••    +144  86% 173.0K/200.0K │ door·flights:foreman │ ◇ Sonnet 9·▰▰▰ high │ running 1m01s  │ Σ $12.50+? · 812.0K in · 9.3K out · 1 tool │ 💾5m✗1m40s was 31% │ idle 3m20s │ @door │ adv $0.30 │ API-eq │ Build the door › Running go test ./internal/...',
+      '    ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore              │ ○ Haiku 9           │ done           │ Σ $?                                       │ 💾– ?%             │ pfm ✗ open agent-a3.jsonl: permission denied │ Find the callers',
+      '    ▱▱▱▱▱▱▱▱ ·················· ?%      0/?      │ general-purpose      │                     │ pending        │ Σ …                                        │ 💾–                │ Wait for the build',
     ]);
   });
 
@@ -202,7 +202,8 @@ describe('one row', () => {
     ['has an advisor pfm could not price', {}, { spend: { ...SPEND, advisorUnpriced: 1 } }, 8, 'adv n/a'],
     ['works in another directory', { cwd: '/w/other/' }, {}, 8, '@other'],
     ['has a name', { name: 'lexer' }, {}, 1, 'lexer·planner'],
-    ['has an effort and no model', { model: undefined, lastRequest: undefined }, { text: { ...ANSWER.agents[0]!.text, glyph: '', family: '' } }, 2, '▰▰ medium'],
+    ['has an effort and no model', { model: undefined, lastRequest: undefined }, { text: { ...ANSWER.agents[0]!.text, glyph: '', label: '' } }, 2, '▰▰ medium'],
+    ['has no transcript yet and wears the label pfm gave the engine\'s model', {}, { absent: true, text: { ...ANSWER.agents[0]!.text, glyph: '◆', label: 'Opus 5.5' } }, 2, '◆ Opus 5.5·medium'],
     ['is named as its type', { name: 'planner' }, {}, 1, 'planner'],
     ['has a window only pfm knows', {}, { contextWindow: 200_000 }, 0, '1/3 ▰▰▰▰▰▰▰▱ ••••••   +4.5K  86% 171.9K/200.0K'],
     ['fills its window', { tokenCount: 1_000_000 }, {}, 0, '1/3 ▰▰▰▰▰▰▰▰ ••••••   +4.5K 100%   1.0M/1.0M'],
@@ -267,7 +268,7 @@ describe('one row', () => {
     expect(drawRow(scene([{ ...PLANNER, cost: { usd: 0.46, hasUnknownPrice: true } }], failed('not on PATH'), undefined), 'a1')).toBe([
       ` ${ESC}[2m▱▱▱▱▱▱▱▱${R} ${ESC}[2m······${R}   +4.5K  17% ${ESC}[1m171.9K${R}${ESC}[2m/${R}1.0M`,
       `${ESC}[1mplanner${R}`,
-      `claude-opus-9${ESC}[2m·${R}medium`,
+      'medium',
       'running 12m04s',
       `$0.46? ${ESC}[2mown${R}`,
       `💾5m✓3m08s ${ESC}[2m?%${R}`,
@@ -320,7 +321,7 @@ describe('one row', () => {
 
   it('shows the engine\'s own dollars for an ended agent pfm never named', () => {
     expect(plain(drawRow(scene([{ ...CHILD, id: 'a9', parentId: undefined }], answered(), undefined), 'a9'))).toBe(
-      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore │ claude-haiku-9 │ done │ $0.02 own │ 💾– ?% │ Find the callers',
+      ' ▰▱▱▱▱▱▱▱ ····•↓  −22.0K   5%   9.0K/200.0K │ Explore │ done │ $0.02 own │ 💾– ?% │ Find the callers',
     );
   });
 });
